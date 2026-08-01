@@ -122,7 +122,7 @@ def _ollama_up(host="http://localhost:11434") -> bool:
 def test_ollama_chat_smoke():
     from openwiki.llm import OllamaChat
 
-    chat = OllamaChat(model="qwen2.5:14b-instruct-q4_K_M")
+    chat = OllamaChat(model="qwen3:30b-a3b-instruct-2507-q4_K_M")
     try:
         reply = chat.chat([{"role": "user", "content": "Antworte mit genau dem Wort: OK"}])
     except RuntimeError as exc:  # model not pulled

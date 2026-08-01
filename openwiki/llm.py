@@ -30,7 +30,7 @@ class OllamaChat:
 
     def __init__(
         self,
-        model: str = "qwen2.5:14b-instruct-q4_K_M",
+        model: str = "qwen3:30b-a3b-instruct-2507-q4_K_M",
         host: str = "http://localhost:11434",
         temperature: float = 0.2,
         timeout: float = 300.0,

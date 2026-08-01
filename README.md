@@ -124,7 +124,7 @@ pluggable via the `Embedder` protocol in `openwiki/embeddings.py`.
 Pull a chat model first (any instruct model works; this is the default):
 
 ```bash
-ollama pull qwen2.5:14b-instruct-q4_K_M
+ollama pull qwen3:30b-a3b-instruct-2507-q4_K_M
 ```
 
 ```bash
@@ -142,7 +142,7 @@ Sources  (* = cited):
  *[3] Set Lists  ·  PDF p.119–119  ·  pages/022-set-lists.md  (0.631)
 ```
 
-Options: `--model` (default `qwen2.5:14b-instruct-q4_K_M`), `-k` (chunks to
+Options: `--model` (default `qwen3:30b-a3b-instruct-2507-q4_K_M`), `-k` (chunks to
 retrieve), `--temperature`, `--show-context` (print the excerpts too). The system
 prompt keeps the model **grounded** — it answers only from the retrieved excerpts
 and says so when the answer isn't there.

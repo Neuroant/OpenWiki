@@ -97,8 +97,8 @@ def _build_argparser() -> argparse.ArgumentParser:
     )
     ask_p.add_argument("-k", "--top-k", type=int, default=5, help="Chunks to retrieve (default: 5).")
     ask_p.add_argument(
-        "--model", default="qwen2.5:14b-instruct-q4_K_M",
-        help="Ollama chat model (default: qwen2.5:14b-instruct-q4_K_M).",
+        "--model", default="qwen3:30b-a3b-instruct-2507-q4_K_M",
+        help="Ollama chat model (default: qwen3:30b-a3b-instruct-2507-q4_K_M).",
     )
     ask_p.add_argument("--host", default="http://localhost:11434", help="Ollama host URL.")
     ask_p.add_argument("--temperature", type=float, default=0.2, help="Sampling temperature (default: 0.2).")
@@ -117,7 +117,7 @@ def _build_argparser() -> argparse.ArgumentParser:
         "-i", "--index", type=Path, default=Path("output") / "index",
         help="Search index directory (default: ./output/index).",
     )
-    chat_p.add_argument("--model", default="qwen2.5:14b-instruct-q4_K_M", help="Ollama chat model.")
+    chat_p.add_argument("--model", default="qwen3:30b-a3b-instruct-2507-q4_K_M", help="Ollama chat model.")
     chat_p.add_argument("--host", default="http://localhost:11434", help="Ollama host URL.")
     chat_p.add_argument("--temperature", type=float, default=0.2, help="Sampling temperature (default: 0.2).")
     chat_p.add_argument("--dry-run", action="store_true", help="Preview edits without writing files.")
@@ -134,7 +134,7 @@ def _build_argparser() -> argparse.ArgumentParser:
     )
     serve_p.add_argument("--bind", default="127.0.0.1", help="Address to bind (default: 127.0.0.1).")
     serve_p.add_argument("--port", type=int, default=8000, help="Port to listen on (default: 8000).")
-    serve_p.add_argument("--model", default="qwen2.5:14b-instruct-q4_K_M", help="Ollama chat model for the agent.")
+    serve_p.add_argument("--model", default="qwen3:30b-a3b-instruct-2507-q4_K_M", help="Ollama chat model for the agent.")
     serve_p.add_argument("--host", default="http://localhost:11434", help="Ollama host URL.")
     serve_p.add_argument("--temperature", type=float, default=0.2, help="Sampling temperature (default: 0.2).")
     serve_p.add_argument("--dry-run", action="store_true", help="Agent previews edits without writing files.")

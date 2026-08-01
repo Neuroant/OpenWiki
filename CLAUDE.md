@@ -71,7 +71,7 @@ the wiki pages:
 ```
 .venv\Scripts\python -m openwiki ask "Was ist Smooth Sound Transitions?"
 ```
-Options: `--model NAME` (default `qwen2.5:14b-instruct-q4_K_M`), `-k N`,
+Options: `--model NAME` (default `qwen3:30b-a3b-instruct-2507-q4_K_M`), `-k N`,
 `--temperature T`, `--show-context`, `--host URL`, `-i DIR`.
 
 **Chat + edit the wiki (multi-turn agent)** — searches, reads, and edits pages
@@ -184,7 +184,7 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   `http://localhost:11434`) with the model pulled. Default `bge-m3` (multilingual,
   1024-dim) is chosen because the corpus is German. Tests avoid the network with a
   `FakeEmbedder`; the one real Ollama test skips when the server/model is absent.
-- The RAG chat model defaults to `qwen2.5:14b-instruct-q4_K_M` (strong on German,
+- The RAG chat model defaults to `qwen3:30b-a3b-instruct-2507-q4_K_M` (strong on German,
   already pulled). The agent is deliberately grounded — the system prompt forbids
   answering beyond the excerpts — so answer quality tracks retrieval quality
   (`-k`, chunk size). Agent tests use a `FakeChat`, so they stay offline too.

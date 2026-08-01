@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+
+# Virtual environments
+.venv/
+venv/
+
+# OpenWiki generated artifacts
+output/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+
+# Local tooling / verification artifacts
+.claude/settings.local.json
+.playwright-mcp/
+/openwiki-*.png

@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "openwiki"
+version = "0.6.0"
+description = "Learning to build agentic wikis, starting with PDF ingestion."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "PyMuPDF>=1.24.0",
+    "numpy>=1.26",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+
+[project.scripts]
+openwiki = "openwiki.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["openwiki*"]
+
+[tool.setuptools.package-data]
+openwiki = ["web/static/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>OpenWiki</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header>
+    <div class="brand">Open<span>Wiki</span></div>
+    <div id="doc-title" class="doc-title"></div>
+  </header>
+
+  <div id="layout">
+    <aside id="sidebar">
+      <input id="search" type="search" placeholder="Semantische Suche…" autocomplete="off" />
+      <div id="search-results" class="search-results" hidden></div>
+      <nav id="nav" class="nav"></nav>
+    </aside>
+
+    <main id="content" class="content">
+      <p class="muted">Wird geladen…</p>
+    </main>
+
+    <aside id="chat">
+      <div class="chat-head">Agent <span class="muted" id="chat-model"></span></div>
+      <div id="chat-log" class="chat-log">
+        <div class="msg agent">
+          Frag mich etwas über das Handbuch — oder bitte mich, eine Seite zu bearbeiten.
+        </div>
+      </div>
+      <form id="chat-form" class="chat-form">
+        <textarea id="chat-input" rows="3" placeholder="Frage oder Änderungswunsch…"></textarea>
+        <button type="submit" id="chat-send">Senden</button>
+      </form>
+    </aside>
+  </div>
+
+  <script src="/static/marked.min.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>

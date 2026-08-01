@@ -15,7 +15,7 @@ from typing import Optional, Sequence
 
 from .agent import RAGAgent
 from .chat_agent import WikiAgent
-from .graph import GraphStore, build_graph
+from .graph import GraphStore, build_graph, extract_references
 from .embeddings import OllamaEmbedder
 from .llm import OllamaChat
 from .models import ParsedDocument
@@ -159,6 +159,8 @@ def _build_argparser() -> argparse.ArgumentParser:
         help="Outline depth for the wiki (must match the indexed wiki; default: 2).",
     )
     graph_p.add_argument("--similar-k", type=int, default=6, help="SIMILAR_TO edges per page (default: 6).")
+    graph_p.add_argument("--no-references", action="store_true",
+                         help="Skip 'siehe Seite N' cross-reference (REFERENCES) edges.")
     graph_p.add_argument("-v", "--verbose", action="store_true", help="Verbose progress logging.")
     return parser
 
@@ -381,11 +383,13 @@ def _cmd_graph_build(args: argparse.Namespace) -> int:
     doc = _load_parsed(args.source)
     wiki = WikiBuilder(split_level=args.split_level).build(doc)
     index = SemanticIndex.load(args.index)
-    stats = build_graph(wiki, index, args.out, similar_k=args.similar_k)
+    references = None if args.no_references else extract_references(doc, wiki)
+    stats = build_graph(wiki, index, args.out, similar_k=args.similar_k, references=references)
     print(f"Built graph from {args.source.name}")
     print(f"  pages         : {stats['pages']}")
     print(f"  chunks (dim {stats['dim']}): {stats['chunks']}")
     print(f"  SIMILAR_TO    : {stats['similar_edges']}")
+    print(f"  REFERENCES    : {stats['reference_edges']}")
     print(f"  graph -> {args.out}")
     return 0
 

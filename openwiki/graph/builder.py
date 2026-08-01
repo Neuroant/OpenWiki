@@ -45,7 +45,7 @@ class GraphBuilder:
         self.db_path = Path(db_path)
         self.similar_k = similar_k
 
-    def build(self, wiki: Wiki, index: SemanticIndex) -> dict:
+    def build(self, wiki: Wiki, index: SemanticIndex, references=None) -> dict:
         if not index.chunks:
             raise ValueError("The semantic index is empty; run `openwiki index` first.")
         dim = int(index.embeddings.shape[1])
@@ -66,6 +66,7 @@ class GraphBuilder:
                 f"CALL CREATE_VECTOR_INDEX('Chunk', '{CHUNK_VECTOR_INDEX}', 'emb');"
             )
             n_similar = self._insert_similarities(conn, wiki, index)
+            n_refs = self._insert_references(conn, references or [])
         finally:
             conn.close()
             db.close()
@@ -74,6 +75,7 @@ class GraphBuilder:
             "pages": len(wiki.pages),
             "chunks": len(index.chunks),
             "similar_edges": n_similar,
+            "reference_edges": n_refs,
             "dim": dim,
             "db": str(self.db_path),
         }
@@ -104,6 +106,7 @@ class GraphBuilder:
         conn.execute("CREATE REL TABLE NEXT(FROM Page TO Page);")
         conn.execute("CREATE REL TABLE PART_OF(FROM Chunk TO Page);")
         conn.execute("CREATE REL TABLE SIMILAR_TO(FROM Page TO Page, score DOUBLE);")
+        conn.execute("CREATE REL TABLE REFERENCES(FROM Page TO Page);")
 
     # -- nodes / structural edges --------------------------------------
 
@@ -181,6 +184,19 @@ class GraphBuilder:
                 count += 1
         return count
 
+    def _insert_references(self, conn, references) -> int:
+        """Materialize REFERENCES edges (from the 'siehe Seite N' cross-refs)."""
+        page_slugs = self._existing_page_slugs(conn)
+        count = 0
+        for src, dst in references:
+            if src in page_slugs and dst in page_slugs and src != dst:
+                conn.execute(
+                    "MATCH (a:Page {slug:$a}),(b:Page {slug:$b}) CREATE (a)-[:REFERENCES]->(b);",
+                    parameters={"a": src, "b": dst},
+                )
+                count += 1
+        return count
+
     def _page_embeddings(self, wiki: Wiki, index: SemanticIndex) -> dict:
         """Mean of each page's chunk vectors, L2-normalized."""
         by_page: dict[str, list[np.ndarray]] = {}
@@ -202,5 +218,6 @@ class GraphBuilder:
         return slugs
 
 
-def build_graph(wiki: Wiki, index: SemanticIndex, db_path, similar_k: int = 6) -> dict:
-    return GraphBuilder(db_path, similar_k=similar_k).build(wiki, index)
+def build_graph(wiki: Wiki, index: SemanticIndex, db_path,
+                similar_k: int = 6, references=None) -> dict:
+    return GraphBuilder(db_path, similar_k=similar_k).build(wiki, index, references=references)

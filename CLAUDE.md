@@ -26,7 +26,8 @@ stages are implemented:
 
 The sample input is `301357_NAUTILUS_OG_G1.pdf`, the German Korg NAUTILUS
 synthesizer manual (269 pages, 228 outline entries → a 51-page wiki → 815
-embedded chunks → a graph of 51 pages / 815 chunks / 306 SIMILAR_TO edges).
+embedded chunks → a graph of 51 pages / 815 chunks / 306 SIMILAR_TO + 122
+REFERENCES edges).
 
 ## Environment & commands
 
@@ -94,7 +95,7 @@ Options: `-m/--message TEXT` (repeatable; omit for the REPL), `--wiki DIR`,
 .venv\Scripts\python -m openwiki graph-build output\301357_NAUTILUS_OG_G1.json
 ```
 Options: `--out DIR`, `-i/--index DIR`, `--split-level N` (must match the indexed
-wiki), `--similar-k N`, `-v`.
+wiki), `--similar-k N`, `--no-references` (skip the "siehe Seite N" edges), `-v`.
 
 **Web UI** — browse + search + chat/edit + graph in the browser (stdlib server):
 ```
@@ -173,10 +174,12 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   (tool calling) rather than `chat()`.
 - **`openwiki/graph/`** — the Kuzu graph layer. `builder.py` (`GraphBuilder`)
   reads a `Wiki` + `SemanticIndex` and writes a property graph to `output/graph/`
-  (Page/Chunk nodes; CHILD_OF/NEXT/PART_OF/SIMILAR_TO edges; an HNSW index on
-  `Chunk.emb` — embeddings **mirrored** from the index, which stays untouched).
-  `store.py` (`GraphStore`) answers `neighborhood(slug)` (for the Graph tab) and
-  `hybrid_search(vec)` (vector→graph). Only these two modules import `kuzu`.
+  (Page/Chunk nodes; CHILD_OF/NEXT/PART_OF/SIMILAR_TO/REFERENCES edges; an HNSW
+  index on `Chunk.emb` — embeddings **mirrored** from the index, which stays
+  untouched). `references.py` extracts the manual's "siehe Seite N" cross-refs
+  (see the offset note below); `store.py` (`GraphStore`) answers
+  `neighborhood(slug)` (Graph tab) and `hybrid_search(vec)` (vector→graph). Only
+  `builder`/`store` import `kuzu`; `references` does not.
 - **`openwiki/web/`** — the web UI. `server.py` = `WikiWebApp` (state) + a
   `ThreadingHTTPServer` handler exposing a JSON API (`/api/wiki`,
   `/api/pages/{slug}`, `/api/search`, `/api/chat`, `/api/graph/{slug}`) plus
@@ -243,6 +246,15 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   extension is statically linked — no `INSTALL`/`LOAD`). No Windows 3.14 wheel, so
   the project runs on 3.13. The Graph tab (`app.js` `drawGraph`) is hand-rolled
   SVG; graph tests use a `FakeEmbedder` and `pytest.importorskip("kuzu")`.
+- **Cross-references:** the manual cites *printed* page numbers but nodes are keyed
+  by *physical* PDF pages. `references.detect_page_offset()` finds the constant
+  offset (the mode of `physical - printed` over every integer in the page text —
+  the true offset spikes because each page prints its own number; sample = 6),
+  and `extract_references()` resolves each "Seite N" to the page whose physical
+  span contains `N + offset`. `graph-build` computes these from the
+  `ParsedDocument` (not the `Wiki`, which lacks per-physical-page text) and passes
+  them to the builder. A page that is both a structural neighbor and a reference
+  target shows as the structural rel (dedup order in `GraphStore.neighborhood`).
 
 ## Output
 

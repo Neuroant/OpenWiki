@@ -12,7 +12,9 @@ from .agent import RAGAgent, RAGAnswer, Source, build_messages
 from .chat_agent import AgentTurn, ToolCall, WikiAgent
 from .chunking import Chunk, chunk_wiki
 from .embeddings import Embedder, OllamaEmbedder, get_embedder
-from .graph import GraphBuilder, GraphStore, build_graph
+from .graph import (
+    GraphBuilder, GraphStore, build_graph, detect_page_offset, extract_references,
+)
 from .llm import ChatModel, OllamaChat
 from .pdf_parser import PDFParser
 from .search import SearchResult, SemanticIndex
@@ -20,7 +22,7 @@ from .tools import WikiTools
 from .web import WikiWebApp, serve
 from .wiki import Wiki, WikiBuilder, WikiPage, slugify, write_wiki
 
-__version__ = "0.7.0"
+__version__ = "0.9.0"
 
 __all__ = [
     "PDFParser",
@@ -57,5 +59,7 @@ __all__ = [
     "GraphBuilder",
     "GraphStore",
     "build_graph",
+    "extract_references",
+    "detect_page_offset",
     "__version__",
 ]

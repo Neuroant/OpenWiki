@@ -12,7 +12,11 @@ import pytest
 
 pytest.importorskip("kuzu")  # skip the whole module if Kuzu is unavailable
 
-from openwiki.graph import GraphBuilder, GraphStore
+from openwiki.graph import (
+    GraphBuilder, GraphStore, detect_page_offset, extract_references,
+)
+from openwiki.models import DocumentMetadata, ParsedDocument
+from openwiki.models import Page as DocPage
 from openwiki.search import SemanticIndex
 from openwiki.wiki import Wiki, WikiPage
 
@@ -99,6 +103,65 @@ def test_hybrid_search(store):
     assert hits
     assert hits[0]["page_slug"] == "002-c"          # gamma chunk is closest
     assert {"chunk_id", "text", "page_slug", "distance"} <= set(hits[0])
+
+
+# -- cross-reference edges --------------------------------------------------
+
+def _ref_doc() -> ParsedDocument:
+    # offset 2: physical page p prints number (p - 2); front matter on 1-2.
+    pages = [
+        DocPage(number=1, text="Deckblatt"),
+        DocPage(number=2, text="Inhalt"),
+        DocPage(number=3, text="1 Einleitung. Siehe Seite 4 fuer Details. nautilus"),
+        DocPage(number=4, text="2 Fortsetzung. nautilus"),
+        DocPage(number=5, text="3 Kapitel B. nautilus beta"),
+        DocPage(number=6, text="4 Kapitel C. nautilus gamma"),
+    ]
+    return ParsedDocument(
+        metadata=DocumentMetadata(source_path="x.pdf", page_count=6), outline=[], pages=pages)
+
+
+def _ref_wiki() -> Wiki:
+    pages = [
+        WikiPage(slug="000-a", title="A", level=1, order=0, pdf_page_start=3,
+                 pdf_page_end=4, text="alpha nautilus"),
+        WikiPage(slug="001-b", title="B", level=1, order=1, pdf_page_start=5,
+                 pdf_page_end=5, text="beta nautilus"),
+        WikiPage(slug="002-c", title="C", level=1, order=2, pdf_page_start=6,
+                 pdf_page_end=6, text="gamma nautilus"),
+    ]
+    return Wiki(title="T", pages=pages, source="x.pdf", split_level=2)
+
+
+def test_detect_page_offset():
+    assert detect_page_offset(_ref_doc()) == 2
+
+
+def test_extract_references_resolves_printed_to_physical():
+    edges = extract_references(_ref_doc(), _ref_wiki())
+    assert ("000-a", "002-c") in edges         # "Seite 4" (printed) -> physical 6 -> C
+    assert all(src != dst for src, dst in edges)  # no self-references
+
+
+def test_extract_references_wrong_offset_does_not_resolve():
+    # printed 4 + offset 0 = physical 4, which is page A itself -> excluded
+    assert ("000-a", "002-c") not in extract_references(_ref_doc(), _ref_wiki(), offset=0)
+
+
+def test_graph_references_and_referenced_by(tmp_path):
+    wiki = _ref_wiki()
+    index = SemanticIndex.build(wiki, FakeEmbedder(), size_words=50, overlap_words=10)
+    refs = extract_references(_ref_doc(), wiki)
+    GraphBuilder(tmp_path / "graph").build(wiki, index, references=refs)
+    store = GraphStore(tmp_path / "graph")
+    try:
+        assert store.stats()["references"] >= 1
+        out = store.neighborhood("000-a")
+        assert any(n["rel"] == "references" and n["slug"] == "002-c" for n in out["nodes"])
+        incoming = store.neighborhood("002-c")
+        assert any(n["rel"] == "referenced_by" and n["slug"] == "000-a" for n in incoming["nodes"])
+    finally:
+        store.close()
 
 
 def test_build_is_idempotent(tmp_path):

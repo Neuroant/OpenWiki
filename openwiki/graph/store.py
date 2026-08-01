@@ -61,6 +61,7 @@ class GraphStore:
             "chunks": count("MATCH (c:Chunk) RETURN count(c);"),
             "child_of": count("MATCH ()-[r:CHILD_OF]->() RETURN count(r);"),
             "similar_to": count("MATCH ()-[r:SIMILAR_TO]->() RETURN count(r);"),
+            "references": count("MATCH ()-[r:REFERENCES]->() RETURN count(r);"),
         }
 
     def neighborhood(self, slug: str, similar_k: int = 6) -> dict:
@@ -80,6 +81,10 @@ class GraphStore:
                 f"MATCH (:Page {{slug:$s}})<-[:NEXT]-(p:Page) RETURN {self._P};", {"s": slug}),
             "next": self._rows(
                 f"MATCH (:Page {{slug:$s}})-[:NEXT]->(p:Page) RETURN {self._P};", {"s": slug}),
+            "references": self._rows(
+                f"MATCH (:Page {{slug:$s}})-[:REFERENCES]->(p:Page) RETURN {self._P} LIMIT 8;", {"s": slug}),
+            "referenced_by": self._rows(
+                f"MATCH (:Page {{slug:$s}})<-[:REFERENCES]-(p:Page) RETURN {self._P} LIMIT 6;", {"s": slug}),
             "similar": self._rows(
                 f"MATCH (:Page {{slug:$s}})-[r:SIMILAR_TO]->(p:Page) "
                 f"RETURN {self._P}, r.score ORDER BY r.score DESC LIMIT $k;",

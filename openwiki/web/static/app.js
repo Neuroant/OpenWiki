@@ -98,6 +98,8 @@ function renderActiveTab() {
       : `<p class="muted">Keine Seite ausgewählt.</p>`;
     interceptLinks();
     content.scrollTop = 0;
+  } else if (state.tab === "graph") {
+    renderGraph();
   } else {
     renderDoc(state.tab);
   }
@@ -136,6 +138,110 @@ function wireRunActions() {
     a.addEventListener("click", (e) => { e.preventDefault(); runAction(kind, arg); });
   });
 }
+// -- graph tab (interactive neighborhood exploration) ----------------------
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+const REL_COLOR = { center: "#3b5bdb", parent: "#7048e8", child: "#7048e8",
+                    prev: "#868e96", next: "#868e96", similar: "#2f9e44" };
+const REL_LABEL = { parent: "Übergeordnet", child: "Unterseite",
+                    prev: "Vorherige", next: "Nächste", similar: "Ähnlich" };
+
+function svgEl(tag, attrs) {
+  const el = document.createElementNS(SVG_NS, tag);
+  for (const k in attrs) el.setAttribute(k, attrs[k]);
+  return el;
+}
+
+async function renderGraph() {
+  const content = $("#content");
+  if (!state.currentSlug) {
+    content.innerHTML = `<p class="muted">Keine Seite ausgewählt.</p>`;
+    return;
+  }
+  content.innerHTML = `<p class="muted">Graph wird geladen…</p>`;
+  try {
+    const data = await getJSON("/api/graph/" + encodeURIComponent(state.currentSlug));
+    drawGraph(content, data);
+  } catch (e) {
+    content.innerHTML = `<p class="muted">Graph nicht verfügbar: ${escapeHtml(e.message)}` +
+      `<br><span class="muted">Erzeuge ihn mit <code>openwiki graph-build</code>.</span></p>`;
+  }
+}
+
+function drawGraph(content, data) {
+  content.innerHTML = "";
+  const center = data.nodes.find((n) => n.rel === "center") || { title: data.center };
+
+  const bar = document.createElement("div");
+  bar.className = "graph-bar";
+  const title = document.createElement("strong");
+  title.textContent = center.title;
+  const open = document.createElement("button");
+  open.className = "graph-open";
+  open.textContent = "Seite öffnen →";
+  open.addEventListener("click", () => loadPage(data.center));
+  bar.append(title, open);
+
+  const legend = document.createElement("div");
+  legend.className = "graph-legend";
+  for (const [rel, label] of Object.entries(REL_LABEL)) {
+    const s = document.createElement("span");
+    s.innerHTML = `<i style="background:${REL_COLOR[rel]}"></i>${label}`;
+    legend.appendChild(s);
+  }
+
+  const W = 820, H = 560, cx = W / 2, cy = H / 2, R = Math.min(cx, cy) - 90;
+  const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, class: "graph-svg" });
+  const others = data.nodes.filter((n) => n.rel !== "center");
+  const pos = { [data.center]: [cx, cy] };
+  others.forEach((n, i) => {
+    const a = (2 * Math.PI * i) / Math.max(1, others.length) - Math.PI / 2;
+    pos[n.slug] = [cx + R * Math.cos(a), cy + R * Math.sin(a)];
+  });
+
+  data.edges.forEach((e) => {
+    const [x1, y1] = pos[e.source] || [cx, cy];
+    const [x2, y2] = pos[e.target] || [cx, cy];
+    svg.appendChild(svgEl("line", {
+      x1, y1, x2, y2, stroke: REL_COLOR[e.type] || "#ccc",
+      "stroke-width": e.type === "similar" ? 1.5 : 2.5, "stroke-opacity": 0.45,
+    }));
+  });
+
+  data.nodes.forEach((n) => {
+    const [x, y] = pos[n.slug];
+    const isCenter = n.rel === "center";
+    const g = svgEl("g", { class: "graph-node", transform: `translate(${x},${y})` });
+    g.appendChild(svgEl("circle", {
+      r: isCenter ? 13 : 9, fill: REL_COLOR[n.rel] || "#adb5bd",
+      stroke: "#fff", "stroke-width": 2,
+    }));
+    const label = svgEl("text", { y: isCenter ? -19 : -15, "text-anchor": "middle", class: "graph-label" });
+    label.textContent = n.title.length > 26 ? n.title.slice(0, 26) + "…" : n.title;
+    g.appendChild(label);
+    const tip = svgEl("title", {});
+    tip.textContent = `${n.title} — ${isCenter ? "aktuell" : REL_LABEL[n.rel] || n.rel}`;
+    g.appendChild(tip);
+    g.addEventListener("click", () => (isCenter ? loadPage(n.slug) : recenterGraph(n.slug)));
+    svg.appendChild(g);
+  });
+
+  content.append(bar, legend, svg);
+  content.scrollTop = 0;
+}
+
+// Re-center the graph on a neighbor without leaving the Graph tab.
+async function recenterGraph(slug) {
+  state.currentSlug = slug;
+  setActive(slug);
+  history.replaceState(null, "", "#" + slug);
+  try {
+    const { markdown } = await getJSON("/api/pages/" + encodeURIComponent(slug));
+    state.wikiMarkdown = markdown;  // keep the Wiki tab in sync for when they open it
+  } catch (_) { /* non-fatal */ }
+  renderGraph();
+}
+
 function runAction(kind, arg) {
   if (kind === "page") {
     loadPage(arg);

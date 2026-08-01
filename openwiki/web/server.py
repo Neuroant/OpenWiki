@@ -34,11 +34,12 @@ _CONTENT_TYPES = {
 class WikiWebApp:
     def __init__(self, wiki_dir, index: Optional[SemanticIndex] = None,
                  agent: Optional[WikiAgent] = None, tools: Optional[WikiTools] = None,
-                 dry_run: bool = False) -> None:
+                 graph=None, dry_run: bool = False) -> None:
         self.wiki_dir = Path(wiki_dir)
         self.index = index
         self.tools = tools or WikiTools(wiki_dir, index=index, dry_run=dry_run)
         self.agent = agent
+        self.graph = graph  # optional GraphStore
         self._lock = threading.Lock()
 
     def manifest(self) -> dict:
@@ -67,6 +68,11 @@ class WikiWebApp:
              "text": r.text}
             for r in results
         ]}
+
+    def graph_neighborhood(self, slug: str) -> dict:
+        if self.graph is None:
+            raise RuntimeError("No graph is loaded. Run `openwiki graph-build` first.")
+        return self.graph.neighborhood(slug)
 
     def chat(self, message: str) -> dict:
         if self.agent is None:
@@ -138,6 +144,14 @@ def make_handler(app: WikiWebApp):
                         return self._json(app.get_page(slug))
                     except KeyError as exc:
                         return self._json({"error": str(exc)}, 404)
+                if path.startswith("/api/graph/"):
+                    slug = unquote(path[len("/api/graph/"):])
+                    try:
+                        return self._json(app.graph_neighborhood(slug))
+                    except KeyError as exc:
+                        return self._json({"error": str(exc)}, 404)
+                    except RuntimeError as exc:  # no graph loaded
+                        return self._json({"error": str(exc)}, 503)
                 return self._json({"error": "not found"}, 404)
             except Exception as exc:  # never let the handler thread crash
                 return self._json({"error": str(exc)}, 500)

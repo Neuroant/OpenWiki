@@ -22,15 +22,21 @@ to the wiki pages.
 Then `openwiki chat` is a **multi-turn agent** that can not only answer but also
 **edit** the wiki — searching, reading, and writing pages through tool calls.
 
+Then `openwiki graph-build` adds a **knowledge-graph layer** (Kuzu, an embedded
+graph + vector DB): pages, hierarchy, reading order, chunk provenance, and
+semantic-similarity edges — an additional level of abstraction over the wiki that
+never modifies it.
+
 Finally, `openwiki serve` puts it all in the browser: a **web UI** to browse
-pages, search, and chat with the agent (including its editing tools).
+pages, search, chat with the agent (including its editing tools), and **explore
+the graph** interactively.
 
 The sample document is `301357_NAUTILUS_OG_G1.pdf` — the German Korg NAUTILUS
 synthesizer manual (269 pages, 228 outline entries).
 
 ## Quickstart
 
-Requires Python 3.10+.
+Requires Python **3.10–3.13** (the Kuzu graph layer has no 3.14 wheel on Windows).
 
 ```bash
 py -m venv .venv
@@ -168,11 +174,35 @@ Tools: `search_wiki`, `list_pages`, `read_page`, `edit_page`, `append_section`,
 `create_page`. Edits are written into `output/wiki/pages/` — use `--dry-run` to
 preview them first. File access is confined to the pages directory.
 
+### Knowledge graph
+
+`graph-build` adds an **additive graph layer** in [Kuzu](https://kuzudb.com) (an
+embedded graph + vector database) — it reads the wiki and the existing index and
+writes a graph to `output/graph/`, **without modifying the wiki**. The NumPy
+index stays the source of truth; the chunk embeddings are *mirrored* into the
+graph so vector search and graph traversal work together.
+
+```bash
+openwiki graph-build output/301357_NAUTILUS_OG_G1.json
+```
+
+Graph model (all edges deterministic or vector-derived — no LLM):
+
+- `(Page)-[:CHILD_OF]->(Page)` — outline hierarchy
+- `(Page)-[:NEXT]->(Page)` — reading order
+- `(Chunk)-[:PART_OF]->(Page)` — provenance
+- `(Page)-[:SIMILAR_TO {score}]->(Page)` — top-k semantic neighbors
+- plus an HNSW vector index on `Chunk.emb` for hybrid vector→graph queries.
+
+Explore it in the browser via the **Graph** tab (below). Requires Python
+3.10–3.13 (`pip install kuzu`).
+
 ### Web UI
 
 `serve` starts a local web UI (stdlib `http.server`, no extra dependencies) that
-combines everything: browse the page tree, run semantic search, and chat with the
-agent — including asking it to edit pages, which updates the open page live.
+combines everything: browse the page tree, run semantic search, chat with the
+agent — including asking it to edit pages, which updates the open page live — and
+explore the knowledge graph.
 
 ```bash
 openwiki serve --port 8137
@@ -184,7 +214,7 @@ Left pane: search + nav tree. Center: the rendered page. Right: the agent chat
 agent preview edits without writing. Needs the wiki (`build-wiki`) and — for
 search/chat — the index (`index`) and a running Ollama.
 
-The center pane has three tabs:
+The center pane has four tabs:
 
 - **Wiki** — the rendered pages (the default view).
 - **Hilfe** — an extensive reference (interface, search, agent + its tools,
@@ -192,6 +222,9 @@ The center pane has three tabs:
 - **Tutorial** — a guided tour where each step has a **▶ Ausprobieren** button
   that runs the real action (open a page, run a search, ask the agent, create a
   page), so you learn by doing.
+- **Graph** — an interactive node-link view of the current page's neighborhood
+  (parent, children, prev/next, similar). Click a node to re-center the graph and
+  walk the relationships; "Seite öffnen" opens a page. Needs `graph-build`.
 
 The Help/Tutorial content lives in `openwiki/web/static/{help,tutorial}.md` and is
 rendered client-side; tutorial buttons are `run:<kind>:<arg>` links wired to the
@@ -230,7 +263,9 @@ PDF ──PDFParser──▶ ParsedDocument ──▶ JSON / Markdown
                         │
              WikiAgent + WikiTools ──▶ edits pages/*.md
                         │
-              WikiWebApp (http.server) ──▶ browser UI
+              GraphBuilder ──▶ Kuzu graph (output/graph/) ──▶ GraphStore
+                        │
+              WikiWebApp (http.server) ──▶ browser UI (Wiki · Hilfe · Tutorial · Graph)
 ```
 
 - `openwiki/models.py` — the structured document model shared by everything downstream
@@ -243,8 +278,9 @@ PDF ──PDFParser──▶ ParsedDocument ──▶ JSON / Markdown
 - `openwiki/agent.py` — the RAG agent (retrieve → grounded prompt → cited answer)
 - `openwiki/tools.py` — the read/write tools the editing agent calls
 - `openwiki/chat_agent.py` — the multi-turn editing agent (tool loop + history)
-- `openwiki/web/` — stdlib web server + vanilla-JS SPA (browse, search, chat/edit)
-- `openwiki/cli.py` — the `openwiki` command line (`ingest`, `build-wiki`, `index`, `search`, `ask`, `chat`, `serve`)
+- `openwiki/graph/` — the Kuzu graph layer (`builder.py` writes it, `store.py` queries it)
+- `openwiki/web/` — stdlib web server + vanilla-JS SPA (browse, search, chat/edit, graph)
+- `openwiki/cli.py` — the `openwiki` command line (`ingest`, `build-wiki`, `index`, `search`, `ask`, `chat`, `graph-build`, `serve`)
 
 ## Roadmap
 
@@ -254,3 +290,5 @@ PDF ──PDFParser──▶ ParsedDocument ──▶ JSON / Markdown
 - [x] **RAG agent** — grounded, cited answers via a local Ollama chat model
 - [x] **Editing agent** — multi-turn, tool-using agent that edits wiki pages (write-back)
 - [x] **Web UI** — browse, search, and chat/edit in the browser (`openwiki serve`)
+- [x] **Knowledge graph** — Kuzu graph + vector layer with an interactive Graph tab
+- [ ] Next: cross-reference edges (`REFERENCES` from the manual's "siehe Seite N") and graph-aware retrieval tools for the agent

@@ -15,6 +15,7 @@ from typing import Optional, Sequence
 
 from .agent import RAGAgent
 from .chat_agent import WikiAgent
+from .graph import GraphStore, build_graph
 from .embeddings import OllamaEmbedder
 from .llm import OllamaChat
 from .models import ParsedDocument
@@ -132,12 +133,33 @@ def _build_argparser() -> argparse.ArgumentParser:
         "-i", "--index", type=Path, default=Path("output") / "index",
         help="Search index directory (default: ./output/index).",
     )
+    serve_p.add_argument(
+        "--graph", type=Path, default=Path("output") / "graph",
+        help="Knowledge-graph directory to serve, if present (default: ./output/graph).",
+    )
     serve_p.add_argument("--bind", default="127.0.0.1", help="Address to bind (default: 127.0.0.1).")
     serve_p.add_argument("--port", type=int, default=8000, help="Port to listen on (default: 8000).")
     serve_p.add_argument("--model", default="qwen3:30b-a3b-instruct-2507-q4_K_M", help="Ollama chat model for the agent.")
     serve_p.add_argument("--host", default="http://localhost:11434", help="Ollama host URL.")
     serve_p.add_argument("--temperature", type=float, default=0.2, help="Sampling temperature (default: 0.2).")
     serve_p.add_argument("--dry-run", action="store_true", help="Agent previews edits without writing files.")
+
+    graph_p = sub.add_parser("graph-build", help="Build the Kuzu knowledge graph over the wiki.")
+    graph_p.add_argument("source", type=Path, help="A PDF, or a .json produced by `ingest`.")
+    graph_p.add_argument(
+        "-o", "--out", type=Path, default=Path("output") / "graph",
+        help="Graph database directory (default: ./output/graph).",
+    )
+    graph_p.add_argument(
+        "-i", "--index", type=Path, default=Path("output") / "index",
+        help="Semantic index directory to mirror (default: ./output/index).",
+    )
+    graph_p.add_argument(
+        "--split-level", type=int, default=2,
+        help="Outline depth for the wiki (must match the indexed wiki; default: 2).",
+    )
+    graph_p.add_argument("--similar-k", type=int, default=6, help="SIMILAR_TO edges per page (default: 6).")
+    graph_p.add_argument("-v", "--verbose", action="store_true", help="Verbose progress logging.")
     return parser
 
 
@@ -351,6 +373,23 @@ def _cmd_chat(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_graph_build(args: argparse.Namespace) -> int:
+    logging.basicConfig(
+        level=logging.INFO if args.verbose else logging.WARNING,
+        format="%(levelname)s %(message)s",
+    )
+    doc = _load_parsed(args.source)
+    wiki = WikiBuilder(split_level=args.split_level).build(doc)
+    index = SemanticIndex.load(args.index)
+    stats = build_graph(wiki, index, args.out, similar_k=args.similar_k)
+    print(f"Built graph from {args.source.name}")
+    print(f"  pages         : {stats['pages']}")
+    print(f"  chunks (dim {stats['dim']}): {stats['chunks']}")
+    print(f"  SIMILAR_TO    : {stats['similar_edges']}")
+    print(f"  graph -> {args.out}")
+    return 0
+
+
 def _cmd_serve(args: argparse.Namespace) -> int:
     index = None
     if (args.index / "index.json").is_file():
@@ -360,10 +399,17 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     tools = WikiTools(args.wiki, index=index, dry_run=args.dry_run)
     chat = OllamaChat(model=args.model, host=args.host, temperature=args.temperature)
     agent = WikiAgent(chat, tools)
-    app = WikiWebApp(args.wiki, index=index, agent=agent, tools=tools)
 
-    where = "search + chat enabled" if index is not None else "chat only (no index found)"
-    print(f"Serving wiki '{args.wiki}' — {where}.", file=sys.stderr)
+    graph = None
+    if args.graph.exists():
+        try:
+            graph = GraphStore(args.graph)
+        except Exception as exc:  # missing/corrupt graph shouldn't stop the server
+            print(f"(graph not loaded: {exc})", file=sys.stderr)
+    app = WikiWebApp(args.wiki, index=index, agent=agent, tools=tools, graph=graph)
+
+    features = ["search" if index else None, "chat", "graph" if graph else None]
+    print(f"Serving wiki '{args.wiki}' — {', '.join(f for f in features if f)}.", file=sys.stderr)
     serve(app, host=args.bind, port=args.port)
     return 0
 
@@ -391,6 +437,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return _cmd_chat(args)
     if args.command == "serve":
         return _cmd_serve(args)
+    if args.command == "graph-build":
+        return _cmd_graph_build(args)
     return 1
 
 

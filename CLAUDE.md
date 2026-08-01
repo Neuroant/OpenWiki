@@ -20,15 +20,19 @@ stages are implemented:
    edit wiki pages (write-back) through Ollama tool calls.
 6. **Web UI** — a zero-dependency browser UI (stdlib `http.server` + a vanilla-JS
    SPA) to browse, search, and chat/edit.
+7. **Knowledge graph** — an additive Kuzu (embedded graph + vector DB) layer over
+   the wiki, with an interactive Graph tab in the UI. Reads the wiki + index,
+   never mutates them.
 
 The sample input is `301357_NAUTILUS_OG_G1.pdf`, the German Korg NAUTILUS
 synthesizer manual (269 pages, 228 outline entries → a 51-page wiki → 815
-embedded chunks at the defaults).
+embedded chunks → a graph of 51 pages / 815 chunks / 306 SIMILAR_TO edges).
 
 ## Environment & commands
 
-Windows with a local virtualenv (`.venv`, Python 3.14 here; code targets 3.10+).
-Interpreter paths below are Windows; on macOS/Linux use `.venv/bin/python`.
+Windows with a local virtualenv (`.venv`, **Python 3.13** — kuzu has no 3.14
+Windows wheel; code targets 3.10–3.13). Interpreter paths below are Windows; on
+macOS/Linux use `.venv/bin/python`.
 
 **Setup** — editable install pulls in PyMuPDF + pytest and adds an `openwiki`
 console script:
@@ -84,13 +88,21 @@ Options: `-m/--message TEXT` (repeatable; omit for the REPL), `--wiki DIR`,
 `--dry-run` (preview edits without writing), `--show-tools`, `--model NAME`,
 `--host URL`, `-i DIR`.
 
-**Web UI** — browse + search + chat/edit in the browser (stdlib server, no extra
-dependencies):
+**Build the knowledge graph** — writes a Kuzu DB to `output/graph/` from a source
+(PDF or `ingest` JSON) + the existing index (mirrors embeddings):
+```
+.venv\Scripts\python -m openwiki graph-build output\301357_NAUTILUS_OG_G1.json
+```
+Options: `--out DIR`, `-i/--index DIR`, `--split-level N` (must match the indexed
+wiki), `--similar-k N`, `-v`.
+
+**Web UI** — browse + search + chat/edit + graph in the browser (stdlib server):
 ```
 .venv\Scripts\python -m openwiki serve --port 8137        # http://127.0.0.1:8137
 ```
-Options: `--wiki DIR`, `-i/--index DIR`, `--bind ADDR`, `--port N`, `--model NAME`,
-`--host URL`, `--temperature T`, `--dry-run`.
+Options: `--wiki DIR`, `-i/--index DIR`, `--graph DIR`, `--bind ADDR`, `--port N`,
+`--model NAME`, `--host URL`, `--temperature T`, `--dry-run`. The graph tab lights
+up automatically if `--graph` (default `output/graph`) exists.
 
 **Test** — the suite parses the first 5 pages of the sample PDF and skips
 cleanly if PyMuPDF or the PDF is absent:
@@ -114,6 +126,8 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
                                           RAGAgent + ChatModel ──▶ cited answer
                                                       │
                                   WikiAgent + WikiTools ⇄ ChatModel ──▶ edits pages/*.md
+                                                      │
+                            GraphBuilder ──▶ Kuzu graph (output/graph/) ──▶ GraphStore
                                                       │
                                         WikiWebApp (http.server) ──▶ browser UI (SPA)
 ```
@@ -157,10 +171,16 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
 - **`openwiki/chat_agent.py`** — `WikiAgent`: the multi-turn tool loop (model →
   tool calls → results → model …) with persistent history. Uses `chat_raw()`
   (tool calling) rather than `chat()`.
+- **`openwiki/graph/`** — the Kuzu graph layer. `builder.py` (`GraphBuilder`)
+  reads a `Wiki` + `SemanticIndex` and writes a property graph to `output/graph/`
+  (Page/Chunk nodes; CHILD_OF/NEXT/PART_OF/SIMILAR_TO edges; an HNSW index on
+  `Chunk.emb` — embeddings **mirrored** from the index, which stays untouched).
+  `store.py` (`GraphStore`) answers `neighborhood(slug)` (for the Graph tab) and
+  `hybrid_search(vec)` (vector→graph). Only these two modules import `kuzu`.
 - **`openwiki/web/`** — the web UI. `server.py` = `WikiWebApp` (state) + a
   `ThreadingHTTPServer` handler exposing a JSON API (`/api/wiki`,
-  `/api/pages/{slug}`, `/api/search`, `/api/chat`) plus static files; `serve()`
-  runs it. `static/` = a no-build vanilla-JS SPA with client-side Markdown via a
+  `/api/pages/{slug}`, `/api/search`, `/api/chat`, `/api/graph/{slug}`) plus
+  static files; `serve()` runs it. `static/` = a no-build vanilla-JS SPA with client-side Markdown via a
   vendored `marked.min.js`. The center pane has three tabs (**Wiki / Hilfe /
   Tutorial**); Help & Tutorial are Markdown docs (`static/help.md`,
   `static/tutorial.md`) served as static files and rendered client-side. Tutorial
@@ -168,8 +188,8 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   intercepts and drives against the live UI. Reuses
   `WikiTools`/`WikiAgent`/`SemanticIndex`.
 - **`openwiki/cli.py`** — argparse CLI with `ingest`, `build-wiki`, `index`,
-  `search`, `ask`, `chat`, and `serve` subcommands. Add new capabilities as new
-  subcommands, not as more flags.
+  `search`, `ask`, `chat`, `graph-build`, and `serve` subcommands. Add new
+  capabilities as new subcommands, not as more flags.
 
 ### Conventions & gotchas
 
@@ -210,13 +230,24 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   dispatching. To add a doc tab, drop a `.md` in `static/`, add a `.tab` button in
   `index.html`, and handle it in `renderActiveTab()`.
 - `index` rebuilds the `Wiki` in memory from the source at `--split-level`; it
-  does **not** read `output/wiki/`. Keep `--split-level` consistent if you want
-  result slugs to match your on-disk wiki.
+  does **not** read `output/wiki/`. `graph-build` does the same, so keep
+  `--split-level` consistent across `index` and `graph-build` or the graph's page
+  slugs won't match the index's chunk provenance.
 - `cli.main()` reconfigures stdout/stderr to UTF-8 so umlauts render on Windows.
+- **Kuzu:** the graph is a *mirror* — `SemanticIndex` stays the source of truth;
+  embeddings are copied into `Chunk` nodes so vector search + traversal work in
+  one Cypher query. Kuzu 0.11 stores the DB as a **single file** (+ `.wal`), not a
+  directory — `GraphBuilder._remove_existing()` handles both on rebuild. Vector
+  API: `CALL CREATE_VECTOR_INDEX(table, name, prop)` /
+  `CALL QUERY_VECTOR_INDEX(table, name, $vec, k) RETURN node.*, distance` (the
+  extension is statically linked — no `INSTALL`/`LOAD`). No Windows 3.14 wheel, so
+  the project runs on 3.13. The Graph tab (`app.js` `drawGraph`) is hand-rolled
+  SVG; graph tests use a `FakeEmbedder` and `pytest.importorskip("kuzu")`.
 
 ## Output
 
 `output/` is gitignored. `ingest` writes `*.json` (the canonical artifact for
 downstream features) and `*.md`; `build-wiki` writes `output/wiki/` (`index.md`,
 `wiki.json`, `pages/*.md`); `index` writes `output/index/` (`embeddings.npy` +
-`index.json`); `--images` additionally writes `output/images/`.
+`index.json`); `graph-build` writes `output/graph` (a single-file Kuzu DB);
+`--images` additionally writes `output/images/`.

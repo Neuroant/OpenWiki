@@ -12,6 +12,7 @@ from .agent import RAGAgent, RAGAnswer, Source, build_messages
 from .chat_agent import AgentTurn, ToolCall, WikiAgent
 from .chunking import Chunk, chunk_wiki
 from .embeddings import Embedder, OllamaEmbedder, get_embedder
+from .graph import GraphBuilder, GraphStore, build_graph
 from .llm import ChatModel, OllamaChat
 from .pdf_parser import PDFParser
 from .search import SearchResult, SemanticIndex
@@ -53,5 +54,8 @@ __all__ = [
     "ToolCall",
     "WikiWebApp",
     "serve",
+    "GraphBuilder",
+    "GraphStore",
+    "build_graph",
     "__version__",
 ]

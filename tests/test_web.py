@@ -103,6 +103,12 @@ def test_search_without_index(tmp_path):
         WikiWebApp(tmp_path / "wiki").search("x")
 
 
+def test_graph_neighborhood_without_graph(tmp_path):
+    (tmp_path / "wiki" / "pages").mkdir(parents=True)
+    with pytest.raises(RuntimeError):  # -> 503 in the HTTP layer
+        WikiWebApp(tmp_path / "wiki").graph_neighborhood("000-a")
+
+
 # -- HTTP round trip --------------------------------------------------------
 
 @pytest.fixture

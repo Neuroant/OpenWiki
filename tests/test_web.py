@@ -139,6 +139,23 @@ def test_http_static_js(base_url):
     assert status == 200 and "loadPage" in body
 
 
+def test_http_index_html_has_tabs(base_url):
+    status, body = _get(base_url + "/")
+    assert status == 200
+    for tab in ('data-tab="wiki"', 'data-tab="help"', 'data-tab="tutorial"'):
+        assert tab in body
+
+
+def test_http_static_help_doc(base_url):
+    status, body = _get(base_url + "/static/help.md")
+    assert status == 200 and "# Hilfe" in body
+
+
+def test_http_static_tutorial_doc(base_url):
+    status, body = _get(base_url + "/static/tutorial.md")
+    assert status == 200 and "run:" in body  # tutorial action links are present
+
+
 def test_http_404(base_url):
     with pytest.raises(urllib.error.HTTPError) as exc:
         _get(base_url + "/api/nope")

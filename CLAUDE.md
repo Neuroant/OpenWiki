@@ -161,7 +161,12 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   `ThreadingHTTPServer` handler exposing a JSON API (`/api/wiki`,
   `/api/pages/{slug}`, `/api/search`, `/api/chat`) plus static files; `serve()`
   runs it. `static/` = a no-build vanilla-JS SPA with client-side Markdown via a
-  vendored `marked.min.js`. Reuses `WikiTools`/`WikiAgent`/`SemanticIndex`.
+  vendored `marked.min.js`. The center pane has three tabs (**Wiki / Hilfe /
+  Tutorial**); Help & Tutorial are Markdown docs (`static/help.md`,
+  `static/tutorial.md`) served as static files and rendered client-side. Tutorial
+  actions are `run:<kind>:<arg>` links (`page`/`search`/`ask`) that `app.js`
+  intercepts and drives against the live UI. Reuses
+  `WikiTools`/`WikiAgent`/`SemanticIndex`.
 - **`openwiki/cli.py`** — argparse CLI with `ingest`, `build-wiki`, `index`,
   `search`, `ask`, `chat`, and `serve` subcommands. Add new capabilities as new
   subcommands, not as more flags.
@@ -200,6 +205,10 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   the open page + nav auto-refresh. The chat panel is hidden below a 1100px
   viewport (CSS breakpoint), and a `favicon.ico` 404 in the console is benign.
   `test_web.py` covers the app + a live-socket round-trip offline.
+- Tutorial `run:` links: `marked` URL-encodes the arg (spaces → `%20`, umlauts →
+  `%C3%A4`), so `wireRunActions()` in `app.js` `decodeURIComponent`s it before
+  dispatching. To add a doc tab, drop a `.md` in `static/`, add a `.tab` button in
+  `index.html`, and handle it in `renderActiveTab()`.
 - `index` rebuilds the `Wiki` in memory from the source at `--split-level`; it
   does **not** read `output/wiki/`. Keep `--split-level` consistent if you want
   result slugs to match your on-disk wiki.

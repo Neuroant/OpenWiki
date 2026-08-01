@@ -40,7 +40,26 @@ header {
 #sidebar, #chat { background: var(--panel); overflow-y: auto; }
 #sidebar { border-right: 1px solid var(--line); padding: 14px; }
 #chat { border-left: 1px solid var(--line); display: flex; flex-direction: column; }
-.content { overflow-y: auto; padding: 28px 40px; }
+
+#center { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.tabs { display: flex; gap: 2px; padding: 8px 12px 0; background: var(--panel); border-bottom: 1px solid var(--line); }
+.tab {
+  padding: 8px 16px; border: 0; background: transparent; cursor: pointer;
+  font: inherit; font-weight: 600; color: var(--muted);
+  border-bottom: 2px solid transparent; margin-bottom: -1px;
+}
+.tab:hover { color: var(--ink); }
+.tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.content { flex: 1; overflow-y: auto; padding: 28px 40px; }
+
+/* Tutorial "run" action buttons (rendered from run: links) */
+.content a.run-action {
+  display: inline-block; margin: 6px 0; padding: 7px 13px;
+  background: var(--accent-soft); color: var(--accent);
+  border: 1px solid var(--accent); border-radius: 8px;
+  font-weight: 600; text-decoration: none;
+}
+.content a.run-action:hover { background: var(--accent); color: #fff; }
 
 #search {
   width: 100%; padding: 9px 11px; border: 1px solid var(--line);

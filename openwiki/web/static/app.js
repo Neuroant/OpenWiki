@@ -1,7 +1,8 @@
 "use strict";
 
 const $ = (sel) => document.querySelector(sel);
-const state = { manifest: null, pages: {}, firstSlug: null, currentSlug: null };
+const state = { manifest: null, pages: {}, firstSlug: null, currentSlug: null,
+                tab: "wiki", wikiMarkdown: null, docs: {} };
 const WRITE_TOOLS = new Set(["create_page", "edit_page", "append_section"]);
 
 async function getJSON(url) {
@@ -72,14 +73,79 @@ function interceptLinks() {
 async function loadPage(slug) {
   try {
     const { markdown } = await getJSON("/api/pages/" + encodeURIComponent(slug));
-    $("#content").innerHTML = marked.parse(markdown);
-    interceptLinks();
     state.currentSlug = slug;
+    state.wikiMarkdown = markdown;
+    activateTab("wiki");            // renders the page and highlights the Wiki tab
     setActive(slug);
-    $("#content").scrollTop = 0;
     history.replaceState(null, "", "#" + slug);
   } catch (e) {
     $("#content").innerHTML = `<p class="muted">Fehler: ${escapeHtml(e.message)}</p>`;
+  }
+}
+
+// -- tabs: Wiki / Hilfe / Tutorial -----------------------------------------
+
+function activateTab(tab) {
+  state.tab = tab;
+  document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
+  renderActiveTab();
+}
+function renderActiveTab() {
+  const content = $("#content");
+  if (state.tab === "wiki") {
+    content.innerHTML = state.wikiMarkdown
+      ? marked.parse(state.wikiMarkdown)
+      : `<p class="muted">Keine Seite ausgewählt.</p>`;
+    interceptLinks();
+    content.scrollTop = 0;
+  } else {
+    renderDoc(state.tab);
+  }
+}
+async function loadDoc(name) {
+  if (state.docs[name]) return state.docs[name];
+  const res = await fetch("/static/" + name + ".md");
+  if (!res.ok) throw new Error(`${name}.md: ${res.status}`);
+  const md = await res.text();
+  state.docs[name] = md;
+  return md;
+}
+async function renderDoc(name) {
+  const content = $("#content");
+  content.innerHTML = `<p class="muted">Wird geladen…</p>`;
+  try {
+    content.innerHTML = marked.parse(await loadDoc(name));
+    wireRunActions();
+    content.scrollTop = 0;
+  } catch (e) {
+    content.innerHTML = `<p class="muted">Fehler: ${escapeHtml(e.message)}</p>`;
+  }
+}
+// Turn tutorial `run:<kind>:<arg>` links into buttons that drive the real UI.
+function wireRunActions() {
+  document.querySelectorAll("#content a").forEach((a) => {
+    const href = a.getAttribute("href") || "";
+    if (!href.startsWith("run:")) return;
+    const rest = href.slice(4);
+    const sep = rest.indexOf(":");
+    if (sep < 0) return;
+    const kind = rest.slice(0, sep);
+    let arg = rest.slice(sep + 1);
+    try { arg = decodeURIComponent(arg); } catch (_) { /* keep raw */ }
+    a.classList.add("run-action");
+    a.addEventListener("click", (e) => { e.preventDefault(); runAction(kind, arg); });
+  });
+}
+function runAction(kind, arg) {
+  if (kind === "page") {
+    loadPage(arg);
+  } else if (kind === "search") {
+    const box = $("#search");
+    box.value = arg;
+    runSearch(arg);          // results appear in the sidebar (always visible)
+    box.focus();
+  } else if (kind === "ask") {
+    sendChat(arg);           // reply/edits appear in the chat pane (always visible)
   }
 }
 
@@ -154,12 +220,9 @@ function renderToolCalls(container, calls) {
   container.appendChild(tools);
 }
 
-$("#chat-form").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const input = $("#chat-input");
-  const message = input.value.trim();
+async function sendChat(message) {
+  message = (message || "").trim();
   if (!message) return;
-  input.value = "";
   addMsg("user", message);
   const btn = $("#chat-send");
   btn.disabled = true;
@@ -183,11 +246,24 @@ $("#chat-form").addEventListener("submit", async (e) => {
     bubble.textContent = "Fehler: " + err.message;
   } finally {
     btn.disabled = false;
-    input.focus();
+    $("#chat-input").focus();
   }
+}
+
+$("#chat-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const input = $("#chat-input");
+  const message = input.value.trim();
+  if (!message) return;
+  input.value = "";
+  sendChat(message);
 });
 $("#chat-input").addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("#chat-form").requestSubmit(); }
+});
+
+document.querySelectorAll(".tab").forEach((b) => {
+  b.addEventListener("click", () => activateTab(b.dataset.tab));
 });
 
 async function refreshNav() {

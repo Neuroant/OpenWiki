@@ -184,6 +184,19 @@ Left pane: search + nav tree. Center: the rendered page. Right: the agent chat
 agent preview edits without writing. Needs the wiki (`build-wiki`) and — for
 search/chat — the index (`index`) and a running Ollama.
 
+The center pane has three tabs:
+
+- **Wiki** — the rendered pages (the default view).
+- **Hilfe** — an extensive reference (interface, search, agent + its tools,
+  privacy, troubleshooting).
+- **Tutorial** — a guided tour where each step has a **▶ Ausprobieren** button
+  that runs the real action (open a page, run a search, ask the agent, create a
+  page), so you learn by doing.
+
+The Help/Tutorial content lives in `openwiki/web/static/{help,tutorial}.md` and is
+rendered client-side; tutorial buttons are `run:<kind>:<arg>` links wired to the
+live UI.
+
 ## Use as a library
 
 ```python

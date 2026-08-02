@@ -87,7 +87,8 @@ via tool calls:
 ```
 Options: `-m/--message TEXT` (repeatable; omit for the REPL), `--wiki DIR`,
 `--dry-run` (preview edits without writing), `--show-tools`, `--model NAME`,
-`--host URL`, `-i DIR`.
+`--host URL`, `-i DIR`, `--graph DIR` (enables the `graph_neighbors`/`find_path`
+tools when the graph exists).
 
 **Build the knowledge graph** — writes a Kuzu DB to `output/graph/` from a source
 (PDF or `ingest` JSON) + the existing index (mirrors embeddings):
@@ -165,10 +166,12 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   excerpts → a grounded system prompt → `ChatModel` → `RAGAnswer` (answer +
   `Source`s). `<think>…</think>` is stripped; `cited_markers()` reports which
   excerpts the answer referenced.
-- **`openwiki/tools.py`** — `WikiTools`: the read/write tools the editing agent
-  calls (`search_wiki`, `list_pages`, `read_page`, `edit_page`, `append_section`,
+- **`openwiki/tools.py`** — `WikiTools`: the tools the editing agent calls
+  (`search_wiki`, `list_pages`, `read_page`, `edit_page`, `append_section`,
   `create_page`), each returning a string. File access is confined to `pages/`,
   slugs are validated, and writes go through a `dry_run`-aware writer + edit log.
+  When a `GraphStore` is passed (`graph=`), it also exposes **`graph_neighbors`**
+  and **`find_path`** — advertised in `schemas()` only when a graph is present.
 - **`openwiki/chat_agent.py`** — `WikiAgent`: the multi-turn tool loop (model →
   tool calls → results → model …) with persistent history. Uses `chat_raw()`
   (tool calling) rather than `chat()`.
@@ -178,8 +181,10 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   index on `Chunk.emb` — embeddings **mirrored** from the index, which stays
   untouched). `references.py` extracts the manual's "siehe Seite N" cross-refs
   (see the offset note below); `store.py` (`GraphStore`) answers
-  `neighborhood(slug)` (Graph tab) and `hybrid_search(vec)` (vector→graph). Only
-  `builder`/`store` import `kuzu`; `references` does not.
+  `neighborhood(slug)` (Graph tab), `find_path(a, b)` (shortest page-to-page path,
+  powering the agent's `find_path` tool), and `hybrid_search(vec)` (vector→graph).
+  Opened **read-only** and guarded by a lock (the threaded web server shares one
+  connection). Only `builder`/`store` import `kuzu`; `references` does not.
 - **`openwiki/web/`** — the web UI. `server.py` = `WikiWebApp` (state) + a
   `ThreadingHTTPServer` handler exposing a JSON API (`/api/wiki`,
   `/api/pages/{slug}`, `/api/search`, `/api/chat`, `/api/graph/{slug}`) plus
@@ -246,6 +251,12 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   extension is statically linked — no `INSTALL`/`LOAD`). No Windows 3.14 wheel, so
   the project runs on 3.13. The Graph tab (`app.js` `drawGraph`) is hand-rolled
   SVG; graph tests use a `FakeEmbedder` and `pytest.importorskip("kuzu")`.
+- `find_path` uses Kuzu's shortest-path syntax:
+  `p = (a)-[:CHILD_OF|NEXT|SIMILAR_TO|REFERENCES* SHORTEST 1..N]-(b)` (restricted to
+  Page↔Page rels so it never routes through `Chunk`), and reads results with
+  `list_transform(nodes(p), x -> x.slug)` / `... x.title` and
+  `list_transform(rels(p), x -> label(x))` — Kuzu has **no** `[n IN nodes(p) | ...]`
+  list-comprehension syntax.
 - **Cross-references:** the manual cites *printed* page numbers but nodes are keyed
   by *physical* PDF pages. `references.detect_page_offset()` finds the constant
   offset (the mode of `physical - printed` over every integer in the page text —

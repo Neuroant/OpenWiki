@@ -34,10 +34,12 @@ def _first_heading(path: Path) -> str:
 
 
 class WikiTools:
-    def __init__(self, wiki_dir, index: Optional[SemanticIndex] = None, dry_run: bool = False) -> None:
+    def __init__(self, wiki_dir, index: Optional[SemanticIndex] = None,
+                 graph=None, dry_run: bool = False) -> None:
         self.wiki_dir = Path(wiki_dir)
         self.pages_dir = self.wiki_dir / "pages"
         self.index = index
+        self.graph = graph  # optional GraphStore (enables the graph-aware tools)
         self.dry_run = dry_run
         self.edits: list[str] = []
 
@@ -55,7 +57,7 @@ class WikiTools:
             }
 
         slug = {"type": "string", "description": "Page slug, e.g. '025-smooth-sound-transitions-sst'."}
-        return [
+        tools = [
             fn("search_wiki", "Semantic search over the wiki; returns relevant page excerpts with slugs.",
                {"query": {"type": "string"}, "k": {"type": "integer", "description": "Max results (default 5)."}},
                ["query"]),
@@ -76,6 +78,19 @@ class WikiTools:
                 "title": {"type": "string"}, "body": {"type": "string"}},
                ["slug", "title", "body"]),
         ]
+        if self.graph is not None:
+            tools += [
+                fn("graph_neighbors",
+                   "List a page's related pages in the knowledge graph: parent/child (hierarchy), "
+                   "previous/next (reading order), references / referenced-by (the manual's cross-refs), "
+                   "and semantically similar pages. Use it to discover connected topics around a page.",
+                   {"slug": slug}, ["slug"]),
+                fn("find_path",
+                   "Find the shortest chain of related pages between two pages, to explain how two "
+                   "topics are connected. Returns the pages and the relationship between each step.",
+                   {"from_slug": slug, "to_slug": slug}, ["from_slug", "to_slug"]),
+            ]
+        return tools
 
     # -- read tools -----------------------------------------------------
 
@@ -102,6 +117,46 @@ class WikiTools:
         if not path.is_file():
             return f"ERROR: page '{slug}' does not exist."
         return path.read_text(encoding="utf-8")
+
+    # -- graph-aware tools ---------------------------------------------
+
+    _REL_LABEL = {
+        "parent": "parent", "child": "child", "prev": "previous", "next": "next",
+        "references": "references", "referenced_by": "referenced by", "similar": "similar",
+    }
+
+    def graph_neighbors(self, slug: str) -> str:
+        if self.graph is None:
+            return "Graph unavailable: no knowledge graph is loaded."
+        try:
+            data = self.graph.neighborhood(str(slug))
+        except KeyError:
+            return f"ERROR: page '{slug}' is not in the graph."
+        center = next((n for n in data["nodes"] if n["rel"] == "center"), None)
+        lines = [f"Neighbors of {slug} ({center['title'] if center else ''}):"]
+        others = [n for n in data["nodes"] if n["rel"] != "center"]
+        if not others:
+            lines.append("  (no related pages)")
+        for n in others:
+            lines.append(f"  [{self._REL_LABEL.get(n['rel'], n['rel'])}] {n['slug']} — {n['title']}")
+        return "\n".join(lines)
+
+    def find_path(self, from_slug: str, to_slug: str) -> str:
+        if self.graph is None:
+            return "Graph unavailable: no knowledge graph is loaded."
+        try:
+            path = self.graph.find_path(str(from_slug), str(to_slug))
+        except KeyError as exc:
+            return f"ERROR: {exc}"
+        if path is None:
+            return f"No path found between '{from_slug}' and '{to_slug}'."
+        if path["hops"] == 0:
+            return f"'{from_slug}' and '{to_slug}' are the same page."
+        parts = [path["titles"][0]]
+        for rel, title in zip(path["rels"], path["titles"][1:]):
+            parts.append(f" --{rel}--> {title}")
+        return (f"Path ({path['hops']} hop(s)): " + "".join(parts)
+                + "\n  slugs: " + " -> ".join(path["nodes"]))
 
     # -- write tools ----------------------------------------------------
 
@@ -152,6 +207,8 @@ class WikiTools:
             "edit_page": lambda: self.edit_page(args["slug"], args["old_text"], args["new_text"]),
             "append_section": lambda: self.append_section(args["slug"], args["heading"], args["body"]),
             "create_page": lambda: self.create_page(args["slug"], args["title"], args["body"]),
+            "graph_neighbors": lambda: self.graph_neighbors(args["slug"]),
+            "find_path": lambda: self.find_path(args["from_slug"], args["to_slug"]),
         }
         handler = handlers.get(name)
         if handler is None:

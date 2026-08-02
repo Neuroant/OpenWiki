@@ -62,6 +62,12 @@ Werkzeuge zur Verfügung:
 | `edit_page` | eine eindeutige Textstelle ersetzen |
 | `append_section` | einen Abschnitt anhängen |
 | `create_page` | eine neue Seite anlegen |
+| `graph_neighbors` | verwandte Seiten im Wissensgraphen auflisten |
+| `find_path` | den kürzesten Beziehungspfad zwischen zwei Seiten finden |
+
+Die letzten beiden Werkzeuge nutzen den **Wissensgraphen** (siehe unten) und sind
+nur verfügbar, wenn ein Graph geladen ist — so kann der Agent auch nach
+Zusammenhängen zwischen Themen fragen, nicht nur nach Textinhalten.
 
 Jeder Werkzeugaufruf erscheint unter der Antwort als Chip: **·** für lesende,
 **✎** für schreibende Werkzeuge. Nach einer Änderung wird die betroffene Seite

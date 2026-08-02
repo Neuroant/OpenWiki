@@ -174,6 +174,57 @@ def test_build_is_idempotent(tmp_path):
     GraphStore(tmp_path / "graph").close()
 
 
+# -- find_path --------------------------------------------------------------
+
+def test_find_path_between_pages(store):
+    path = store.find_path("000-a", "002-c")
+    assert path is not None
+    assert path["nodes"][0] == "000-a" and path["nodes"][-1] == "002-c"
+    assert path["hops"] >= 1
+    assert len(path["rels"]) == path["hops"]
+
+
+def test_find_path_same_page(store):
+    assert store.find_path("000-a", "000-a")["hops"] == 0
+
+
+def test_find_path_missing_page(store):
+    with pytest.raises(KeyError):
+        store.find_path("000-a", "999-nope")
+
+
+# -- graph-aware agent tools ------------------------------------------------
+
+def test_wikitools_graph_neighbors(tmp_path, store):
+    from openwiki.tools import WikiTools
+
+    out = WikiTools(tmp_path, graph=store).graph_neighbors("000-a")
+    assert "001-b" in out and "child" in out
+
+
+def test_wikitools_find_path(tmp_path, store):
+    from openwiki.tools import WikiTools
+
+    out = WikiTools(tmp_path, graph=store).find_path("000-a", "002-c")
+    assert out.startswith("Path") and "002-c" in out
+
+
+def test_wikitools_graph_tools_require_graph(tmp_path):
+    from openwiki.tools import WikiTools
+
+    tools = WikiTools(tmp_path)  # no graph
+    assert "unavailable" in tools.graph_neighbors("000-a")
+    names = {t["function"]["name"] for t in tools.schemas()}
+    assert "graph_neighbors" not in names and "find_path" not in names
+
+
+def test_wikitools_graph_tools_advertised_with_graph(tmp_path, store):
+    from openwiki.tools import WikiTools
+
+    names = {t["function"]["name"] for t in WikiTools(tmp_path, graph=store).schemas()}
+    assert {"graph_neighbors", "find_path"} <= names
+
+
 def test_webapp_serves_neighborhood(store):
     from openwiki.web.server import WikiWebApp
 

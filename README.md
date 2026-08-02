@@ -174,6 +174,11 @@ Tools: `search_wiki`, `list_pages`, `read_page`, `edit_page`, `append_section`,
 `create_page`. Edits are written into `output/wiki/pages/` — use `--dry-run` to
 preview them first. File access is confined to the pages directory.
 
+If a knowledge graph is present (`graph-build`), the agent also gets
+**`graph_neighbors`** (a page's related pages) and **`find_path`** (the shortest
+relationship chain between two pages) — so it can answer "what's related to X?"
+and "how are X and Y connected?" by traversing the graph, not just searching text.
+
 ### Knowledge graph
 
 `graph-build` adds an **additive graph layer** in [Kuzu](https://kuzudb.com) (an
@@ -298,4 +303,4 @@ PDF ──PDFParser──▶ ParsedDocument ──▶ JSON / Markdown
 - [x] **Web UI** — browse, search, and chat/edit in the browser (`openwiki serve`)
 - [x] **Knowledge graph** — Kuzu graph + vector layer with an interactive Graph tab
 - [x] **Cross-references** — `REFERENCES` edges from the manual's "siehe Seite N" (printed→physical offset detection)
-- [ ] Next: graph-aware retrieval tools for the agent (neighbors, paths, hybrid search)
+- [x] **Graph-aware agent tools** — `graph_neighbors` and `find_path` let the agent traverse the graph (multi-hop, "how are X and Y connected?")

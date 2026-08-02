@@ -121,6 +121,10 @@ def _build_argparser() -> argparse.ArgumentParser:
     chat_p.add_argument("--model", default="qwen3:30b-a3b-instruct-2507-q4_K_M", help="Ollama chat model.")
     chat_p.add_argument("--host", default="http://localhost:11434", help="Ollama host URL.")
     chat_p.add_argument("--temperature", type=float, default=0.2, help="Sampling temperature (default: 0.2).")
+    chat_p.add_argument(
+        "--graph", type=Path, default=Path("output") / "graph",
+        help="Knowledge-graph directory; enables graph_neighbors/find_path tools (default: ./output/graph).",
+    )
     chat_p.add_argument("--dry-run", action="store_true", help="Preview edits without writing files.")
     chat_p.add_argument("--show-tools", action="store_true", help="Print each tool call the agent makes.")
 
@@ -345,7 +349,13 @@ def _cmd_chat(args: argparse.Namespace) -> int:
         index = SemanticIndex.load(args.index)
         if isinstance(index.embedder, OllamaEmbedder):
             index.embedder.host = args.host.rstrip("/")
-    tools = WikiTools(args.wiki, index=index, dry_run=args.dry_run)
+    graph = None
+    if args.graph.exists():
+        try:
+            graph = GraphStore(args.graph)
+        except Exception as exc:
+            print(f"(graph not loaded: {exc})", file=sys.stderr)
+    tools = WikiTools(args.wiki, index=index, graph=graph, dry_run=args.dry_run)
     chat = OllamaChat(model=args.model, host=args.host, temperature=args.temperature)
     agent = WikiAgent(chat, tools)
 
@@ -400,9 +410,6 @@ def _cmd_serve(args: argparse.Namespace) -> int:
         index = SemanticIndex.load(args.index)
         if isinstance(index.embedder, OllamaEmbedder):
             index.embedder.host = args.host.rstrip("/")
-    tools = WikiTools(args.wiki, index=index, dry_run=args.dry_run)
-    chat = OllamaChat(model=args.model, host=args.host, temperature=args.temperature)
-    agent = WikiAgent(chat, tools)
 
     graph = None
     if args.graph.exists():
@@ -410,6 +417,10 @@ def _cmd_serve(args: argparse.Namespace) -> int:
             graph = GraphStore(args.graph)
         except Exception as exc:  # missing/corrupt graph shouldn't stop the server
             print(f"(graph not loaded: {exc})", file=sys.stderr)
+
+    tools = WikiTools(args.wiki, index=index, graph=graph, dry_run=args.dry_run)
+    chat = OllamaChat(model=args.model, host=args.host, temperature=args.temperature)
+    agent = WikiAgent(chat, tools)
     app = WikiWebApp(args.wiki, index=index, agent=agent, tools=tools, graph=graph)
 
     features = ["search" if index else None, "chat", "graph" if graph else None]

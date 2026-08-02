@@ -8,6 +8,7 @@ vector index and graph traversal working together.
 
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 from typing import Optional
 
@@ -36,6 +37,7 @@ class GraphStore:
         except TypeError:  # older kuzu without the kwarg
             self._db = kuzu.Database(str(self.db_path))
         self._conn = kuzu.Connection(self._db)
+        self._lock = threading.Lock()  # one Kuzu connection, possibly many web threads
 
     def close(self) -> None:
         self._conn.close()
@@ -44,10 +46,11 @@ class GraphStore:
     # -- helpers --------------------------------------------------------
 
     def _rows(self, query: str, params: Optional[dict] = None) -> list[list]:
-        res = self._conn.execute(query, parameters=params) if params else self._conn.execute(query)
-        out = []
-        while res.has_next():
-            out.append(res.get_next())
+        with self._lock:  # a Kuzu connection is not safe for concurrent execute
+            res = self._conn.execute(query, parameters=params) if params else self._conn.execute(query)
+            out = []
+            while res.has_next():
+                out.append(res.get_next())
         return out
 
     @staticmethod
@@ -109,6 +112,33 @@ class GraphStore:
                 edges.append(edge)
 
         return {"center": slug, "nodes": list(nodes.values()), "edges": edges}
+
+    # Page-to-page relationships only (never route through Chunk/PART_OF).
+    _PAGE_RELS = "CHILD_OF|NEXT|SIMILAR_TO|REFERENCES"
+
+    def find_path(self, from_slug: str, to_slug: str, max_hops: int = 5) -> Optional[dict]:
+        """Shortest path of related pages between two pages (or None if none)."""
+        for slug in (from_slug, to_slug):
+            if not self._rows("MATCH (p:Page {slug:$s}) RETURN p.slug;", {"s": slug}):
+                raise KeyError(f"page '{slug}' not in graph")
+        if from_slug == to_slug:
+            return {"from": from_slug, "to": to_slug, "hops": 0,
+                    "nodes": [from_slug], "titles": [], "rels": []}
+
+        rows = self._rows(
+            "MATCH (a:Page {slug:$a}), (b:Page {slug:$b}), "
+            f"p = (a)-[:{self._PAGE_RELS}* SHORTEST 1..{int(max_hops)}]-(b) "
+            "RETURN length(p), "
+            "list_transform(nodes(p), x -> x.slug), "
+            "list_transform(nodes(p), x -> x.title), "
+            "list_transform(rels(p), x -> label(x));",
+            {"a": from_slug, "b": to_slug},
+        )
+        if not rows:
+            return None
+        hops, slugs, titles, rels = rows[0]
+        return {"from": from_slug, "to": to_slug, "hops": hops,
+                "nodes": slugs, "titles": titles, "rels": rels}
 
     def hybrid_search(self, vector, k: int = 5) -> list[dict]:
         """Vector k-NN over chunks, then hop to the owning page (GraphRAG)."""

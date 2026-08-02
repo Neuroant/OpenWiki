@@ -360,3 +360,44 @@ def test_find_entity_not_advertised_without_entities(tmp_path, store):
     names = {t["function"]["name"] for t in WikiTools(tmp_path, graph=store).schemas()}
     assert "find_entity" not in names           # gated on entities existing
     assert "graph_neighbors" in names           # other graph tools still present
+
+
+# -- explorable subgraph (web Graph tab) ------------------------------------
+
+def _entity_key(store, name):
+    return store._rows("MATCH (e:Entity {name:$n}) RETURN e.key;", {"n": name})[0][0]
+
+
+def test_explore_includes_root_and_entities(entity_store):
+    g = entity_store.explore("001-b")
+    assert g["root"] == "001-b"
+    assert any(n.get("root") for n in g["nodes"])
+    kinds = {n["kind"] for n in g["nodes"]}
+    assert kinds == {"page", "entity"}                         # both node types
+    assert any(e["type"] == "mentions" for e in g["edges"])    # page->entity edge
+
+
+def test_expand_page_has_entity_nodes(entity_store):
+    sub = entity_store.expand_page("000-a")
+    ent = [n for n in sub["nodes"] if n["kind"] == "entity"]
+    assert any(n["label"] == "Arpeggiator" for n in ent)
+
+
+def test_expand_entity_returns_mentioning_pages(entity_store):
+    sub = entity_store.expand_entity(_entity_key(entity_store, "Arpeggiator"))
+    assert {n["id"] for n in sub["nodes"]} == {"000-a", "001-b"}
+    assert all(e["type"] == "mentions" for e in sub["edges"])
+
+
+def test_explore_missing_page_raises(entity_store):
+    with pytest.raises(KeyError):
+        entity_store.explore("999-nope")
+
+
+def test_webapp_graph_explore_and_expand(entity_store):
+    from openwiki.web.server import WikiWebApp
+
+    app = WikiWebApp(entity_store.db_path.parent, graph=entity_store)
+    assert app.graph_explore("001-b")["root"] == "001-b"
+    expanded = app.graph_expand("entity", _entity_key(entity_store, "Reverb"))
+    assert {n["id"] for n in expanded["nodes"]} == {"001-b", "002-c"}

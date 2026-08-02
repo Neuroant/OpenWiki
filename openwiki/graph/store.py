@@ -122,6 +122,57 @@ class GraphStore:
 
         return {"center": slug, "nodes": list(nodes.values()), "edges": edges}
 
+    # -- explorable subgraph (web Graph tab) ---------------------------
+    #
+    # Nodes carry a ``kind`` ("page" | "entity") and a stable ``id`` (page slug or
+    # entity key — the two never collide). Edges are typed. The frontend keeps an
+    # accumulating graph and expands nodes on click.
+
+    def _page_gnode(self, row) -> dict:
+        return {"id": row[0], "kind": "page", "label": row[1],
+                "pdf_start": row[3], "pdf_end": row[4]}
+
+    def _page_entities(self, slug: str, k: int) -> list[list]:
+        # A page's entities, most cross-cutting first (by how many pages mention them).
+        return self._rows(
+            "MATCH (:Page {slug:$s})-[:MENTIONS]->(e:Entity)<-[:MENTIONS]-(p:Page) "
+            "RETURN e.key, e.name, e.type, count(p) AS m ORDER BY m DESC, e.name LIMIT $k;",
+            {"s": slug, "k": k})
+
+    def expand_page(self, slug: str, entity_k: int = 8) -> dict:
+        """A page's page-neighbors (typed) plus its most salient entities."""
+        nb = self.neighborhood(slug)
+        nodes = [self._page_gnode([n["slug"], n["title"], n["level"], n["pdf_start"], n["pdf_end"]])
+                 for n in nb["nodes"] if n["rel"] != "center"]
+        edges = [{"source": e["source"], "target": e["target"], "type": e["type"]}
+                 for e in nb["edges"]]
+        for key, name, etype, _m in self._page_entities(slug, entity_k):
+            nodes.append({"id": key, "kind": "entity", "label": name, "etype": etype})
+            edges.append({"source": slug, "target": key, "type": "mentions"})
+        return {"nodes": nodes, "edges": edges}
+
+    def expand_entity(self, key: str, page_k: int = 15) -> dict:
+        """The pages that mention an entity (expanding an entity node)."""
+        rows = self._rows(
+            "MATCH (e:Entity {key:$k})<-[:MENTIONS]-(p:Page) "
+            "RETURN p.slug, p.title, p.level, p.pdf_start, p.pdf_end LIMIT $pk;",
+            {"k": key, "pk": page_k})
+        nodes = [self._page_gnode(r) for r in rows]
+        edges = [{"source": r[0], "target": key, "type": "mentions"} for r in rows]
+        return {"nodes": nodes, "edges": edges}
+
+    def explore(self, slug: str) -> dict:
+        """Initial explorer view: the page as root, its neighbors, and its entities."""
+        row = self._rows(f"MATCH (p:Page {{slug:$s}}) RETURN {self._P};", {"s": slug})
+        if not row:
+            raise KeyError(f"page '{slug}' not in graph")
+        root = {**self._page_gnode(row[0]), "root": True}
+        sub = self.expand_page(slug)
+        return {"root": slug, "nodes": [root] + sub["nodes"], "edges": sub["edges"]}
+
+    def expand(self, node_type: str, node_id: str) -> dict:
+        return self.expand_entity(node_id) if node_type == "entity" else self.expand_page(node_id)
+
     # -- entities -------------------------------------------------------
 
     def entities_for_page(self, slug: str) -> list[dict]:

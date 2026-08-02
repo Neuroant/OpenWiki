@@ -193,15 +193,18 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   untouched; plus opt-in `Entity` nodes + `MENTIONS`). `references.py` extracts
   the manual's "siehe Seite N" cross-refs (see the offset note below);
   `entities.py` LLM-extracts typed entities per page (opt-in); `store.py`
-  (`GraphStore`) answers `neighborhood(slug)` (Graph tab, incl. a `shared_entity`
-  group), `find_path(a, b)`, entity queries (`entities_for_page`,
-  `pages_for_entity`, `has_entities`), and `hybrid_search(vec)`. Opened
-  **read-only** and lock-guarded (the threaded web server shares one connection).
-  Only `builder`/`store` import `kuzu`; `references`/`entities` do not.
+  (`GraphStore`) answers `neighborhood(slug)` (agent's `graph_neighbors`, incl. a
+  `shared_entity` group), `find_path(a, b)`, entity queries (`entities_for_page`,
+  `pages_for_entity`, `has_entities`), `hybrid_search(vec)`, and the Graph‑tab
+  explorer API `explore(slug)` / `expand(type, id)` (typed page + entity nodes).
+  Opened **read-only** and lock-guarded (the threaded web server shares one
+  connection). Only `builder`/`store` import `kuzu`; `references`/`entities` do not.
 - **`openwiki/web/`** — the web UI. `server.py` = `WikiWebApp` (state) + a
   `ThreadingHTTPServer` handler exposing a JSON API (`/api/wiki`,
-  `/api/pages/{slug}`, `/api/search`, `/api/chat`, `/api/graph/{slug}`) plus
-  static files; `serve()` runs it. `static/` = a no-build vanilla-JS SPA with client-side Markdown via a
+  `/api/pages/{slug}`, `/api/search`, `/api/chat`, `/api/graph/{slug}` = explore,
+  `/api/graph/expand`) plus static files (served `no-cache`); `serve()` runs it.
+  The Graph tab is a hand-rolled **force-directed explorer** (`app.js`: `physicsTick`
+  spring/charge sim, click-to-expand, drag, edge-type filters) — no JS libraries. `static/` = a no-build vanilla-JS SPA with client-side Markdown via a
   vendored `marked.min.js`. The center pane has three tabs (**Wiki / Hilfe /
   Tutorial**); Help & Tutorial are Markdown docs (`static/help.md`,
   `static/tutorial.md`) served as static files and rendered client-side. Tutorial

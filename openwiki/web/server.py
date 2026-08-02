@@ -74,6 +74,16 @@ class WikiWebApp:
             raise RuntimeError("No graph is loaded. Run `openwiki graph-build` first.")
         return self.graph.neighborhood(slug)
 
+    def graph_explore(self, slug: str) -> dict:
+        if self.graph is None:
+            raise RuntimeError("No graph is loaded. Run `openwiki graph-build` first.")
+        return self.graph.explore(slug)
+
+    def graph_expand(self, node_type: str, node_id: str) -> dict:
+        if self.graph is None:
+            raise RuntimeError("No graph is loaded. Run `openwiki graph-build` first.")
+        return self.graph.expand(node_type, node_id)
+
     def chat(self, message: str) -> dict:
         if self.agent is None:
             raise RuntimeError("Chat is unavailable (no agent configured).")
@@ -109,6 +119,7 @@ def make_handler(app: WikiWebApp):
             self.send_response(status)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "no-cache")  # always serve fresh static assets
             self.end_headers()
             self.wfile.write(data)
 
@@ -147,7 +158,7 @@ def make_handler(app: WikiWebApp):
                 if path.startswith("/api/graph/"):
                     slug = unquote(path[len("/api/graph/"):])
                     try:
-                        return self._json(app.graph_neighborhood(slug))
+                        return self._json(app.graph_explore(slug))
                     except KeyError as exc:
                         return self._json({"error": str(exc)}, 404)
                     except RuntimeError as exc:  # no graph loaded
@@ -168,6 +179,14 @@ def make_handler(app: WikiWebApp):
                     if not message:
                         return self._json({"error": "empty message"}, 400)
                     return self._json(app.chat(message))
+                if path == "/api/graph/expand":
+                    node_id = (data.get("id") or "").strip()
+                    if not node_id:
+                        return self._json({"error": "missing id"}, 400)
+                    try:
+                        return self._json(app.graph_expand(data.get("type", "page"), node_id))
+                    except KeyError as exc:
+                        return self._json({"error": str(exc)}, 404)
                 return self._json({"error": "not found"}, 404)
             except RuntimeError as exc:  # service not configured (no index/agent)
                 return self._json({"error": str(exc)}, 503)

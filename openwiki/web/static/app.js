@@ -92,6 +92,7 @@ function activateTab(tab) {
 }
 function renderActiveTab() {
   const content = $("#content");
+  stopSim();  // pause any running graph layout when switching tabs
   if (state.tab === "wiki") {
     content.innerHTML = state.wikiMarkdown
       ? marked.parse(state.wikiMarkdown)
@@ -141,14 +142,26 @@ function wireRunActions() {
 // -- graph tab (interactive neighborhood exploration) ----------------------
 
 const SVG_NS = "http://www.w3.org/2000/svg";
-const REL_COLOR = { center: "#3b5bdb", parent: "#7048e8", child: "#7048e8",
-                    prev: "#868e96", next: "#868e96", similar: "#2f9e44",
-                    references: "#e8590c", referenced_by: "#e8590c",
-                    shared_entity: "#0c8599" };
-const REL_LABEL = { parent: "Übergeordnet", child: "Unterseite",
-                    prev: "Vorherige", next: "Nächste",
-                    references: "Verweist auf", referenced_by: "Verwiesen von",
-                    shared_entity: "Gemeinsame Begriffe", similar: "Ähnlich" };
+const EDGE_COLOR = { parent: "#7048e8", child: "#7048e8", prev: "#868e96", next: "#868e96",
+                     similar: "#2f9e44", references: "#e8590c", referenced_by: "#e8590c",
+                     shared_entity: "#0c8599", mentions: "#f08c00" };
+// Legend/filter groups (a click toggles a whole relationship kind on/off).
+const FILTERS = [
+  { key: "hier",    label: "Hierarchie",          types: ["parent", "child"],          color: "#7048e8" },
+  { key: "seq",     label: "Reihenfolge",         types: ["prev", "next"],             color: "#868e96" },
+  { key: "similar", label: "Ähnlich",             types: ["similar"],                  color: "#2f9e44" },
+  { key: "ref",     label: "Verweise",            types: ["references", "referenced_by"], color: "#e8590c" },
+  { key: "shared",  label: "Gemeinsame Begriffe", types: ["shared_entity"],            color: "#0c8599" },
+  { key: "entity",  label: "Begriffe (Entitäten)", types: ["mentions"],                color: "#f08c00" },
+];
+const TYPE_FILTER = {};
+FILTERS.forEach((f) => f.types.forEach((t) => (TYPE_FILTER[t] = f.key)));
+
+const GW = 900, GH = 600;   // SVG viewBox
+// The live explorer graph (accumulates as you expand nodes).
+const graph = { nodes: new Map(), edges: [], root: null, selected: null,
+                hidden: new Set(), svg: null, raf: 0, alpha: 0,
+                _nodeEls: new Map(), _edgeEls: [] };
 
 function svgEl(tag, attrs) {
   const el = document.createElementNS(SVG_NS, tag);
@@ -165,85 +178,228 @@ async function renderGraph() {
   content.innerHTML = `<p class="muted">Graph wird geladen…</p>`;
   try {
     const data = await getJSON("/api/graph/" + encodeURIComponent(state.currentSlug));
-    drawGraph(content, data);
+    initGraph(content, data);
   } catch (e) {
     content.innerHTML = `<p class="muted">Graph nicht verfügbar: ${escapeHtml(e.message)}` +
-      `<br><span class="muted">Erzeuge ihn mit <code>openwiki graph-build</code>.</span></p>`;
+      `<br><span class="muted">Erzeuge ihn mit <code>openwiki graph-build</code> ` +
+      `(Entitäten mit <code>--entities</code>).</span></p>`;
   }
 }
 
-function drawGraph(content, data) {
+function initGraph(content, data) {
+  stopSim();
+  graph.nodes = new Map();
+  graph.edges = [];
+  graph.root = data.root;
+  graph.selected = data.root;
+  mergeGraph(data, GW / 2, GH / 2);
+  const root = graph.nodes.get(data.root);
+  if (root) { root.x = GW / 2; root.y = GH / 2; }
+  buildGraphDom(content);
+  startSim();
+}
+
+function mergeGraph(data, ox, oy) {
+  (data.nodes || []).forEach((n) => {
+    if (!graph.nodes.has(n.id)) {
+      graph.nodes.set(n.id, { ...n, x: ox + (Math.random() - 0.5) * 320,
+        y: oy + (Math.random() - 0.5) * 320, vx: 0, vy: 0, fixed: false, expanded: false });
+    }
+  });
+  const seen = new Set(graph.edges.map((e) => e.source + "|" + e.target + "|" + e.type));
+  (data.edges || []).forEach((e) => {
+    const k = e.source + "|" + e.target + "|" + e.type;
+    if (!seen.has(k) && graph.nodes.has(e.source) && graph.nodes.has(e.target)) {
+      seen.add(k);
+      graph.edges.push({ source: e.source, target: e.target, type: e.type });
+    }
+  });
+}
+
+const isNodeHidden = (n) => n && n.kind === "entity" && graph.hidden.has("entity");
+function isEdgeHidden(e) {
+  const fk = TYPE_FILTER[e.type];
+  if (fk && graph.hidden.has(fk)) return true;
+  return isNodeHidden(graph.nodes.get(e.source)) || isNodeHidden(graph.nodes.get(e.target));
+}
+
+function buildGraphDom(content) {
   content.innerHTML = "";
-  const center = data.nodes.find((n) => n.rel === "center") || { title: data.center };
 
   const bar = document.createElement("div");
   bar.className = "graph-bar";
+  const sel = graph.nodes.get(graph.selected) || graph.nodes.get(graph.root);
   const title = document.createElement("strong");
-  title.textContent = center.title;
+  title.textContent = sel ? sel.label : graph.root;
+  const hint = document.createElement("span");
+  hint.className = "graph-hint muted";
+  hint.textContent = "Klick = erweitern · ziehen zum Anordnen";
+  const reset = document.createElement("button");
+  reset.className = "graph-reset";
+  reset.textContent = "Zurücksetzen";
+  reset.addEventListener("click", () => renderGraph());
   const open = document.createElement("button");
   open.className = "graph-open";
   open.textContent = "Seite öffnen →";
-  open.addEventListener("click", () => loadPage(data.center));
-  bar.append(title, open);
+  open.addEventListener("click", () => loadPage(graph.selected || graph.root));
+  bar.append(title, hint, reset, open);
 
-  const legend = document.createElement("div");
-  legend.className = "graph-legend";
-  for (const [rel, label] of Object.entries(REL_LABEL)) {
-    const s = document.createElement("span");
-    s.innerHTML = `<i style="background:${REL_COLOR[rel]}"></i>${label}`;
-    legend.appendChild(s);
-  }
-
-  const W = 820, H = 560, cx = W / 2, cy = H / 2, R = Math.min(cx, cy) - 90;
-  const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, class: "graph-svg" });
-  const others = data.nodes.filter((n) => n.rel !== "center");
-  const pos = { [data.center]: [cx, cy] };
-  others.forEach((n, i) => {
-    const a = (2 * Math.PI * i) / Math.max(1, others.length) - Math.PI / 2;
-    pos[n.slug] = [cx + R * Math.cos(a), cy + R * Math.sin(a)];
+  const filters = document.createElement("div");
+  filters.className = "graph-filters";
+  FILTERS.forEach((f) => {
+    const chip = document.createElement("button");
+    chip.className = "graph-filter" + (graph.hidden.has(f.key) ? " off" : "");
+    chip.innerHTML = `<i style="background:${f.color}"></i>${f.label}`;
+    chip.addEventListener("click", () => {
+      graph.hidden.has(f.key) ? graph.hidden.delete(f.key) : graph.hidden.add(f.key);
+      buildGraphDom(content);
+      bumpSim();
+    });
+    filters.appendChild(chip);
   });
 
-  data.edges.forEach((e) => {
-    const [x1, y1] = pos[e.source] || [cx, cy];
-    const [x2, y2] = pos[e.target] || [cx, cy];
-    svg.appendChild(svgEl("line", {
-      x1, y1, x2, y2, stroke: REL_COLOR[e.type] || "#ccc",
-      "stroke-width": e.type === "similar" ? 1.5 : 2.5, "stroke-opacity": 0.45,
-    }));
+  const svg = svgEl("svg", { viewBox: `0 0 ${GW} ${GH}`, class: "graph-svg" });
+  const edgeG = svgEl("g", {});
+  const nodeG = svgEl("g", {});
+  svg.append(edgeG, nodeG);
+  graph.svg = svg;
+  graph._edgeEls = [];
+  graph._nodeEls = new Map();
+
+  graph.edges.forEach((e) => {
+    if (isEdgeHidden(e)) return;
+    const line = svgEl("line", { stroke: EDGE_COLOR[e.type] || "#ccc",
+      "stroke-width": e.type === "similar" ? 1.3 : 2, "stroke-opacity": 0.4 });
+    edgeG.appendChild(line);
+    graph._edgeEls.push({ e, line });
   });
 
-  data.nodes.forEach((n) => {
-    const [x, y] = pos[n.slug];
-    const isCenter = n.rel === "center";
-    const g = svgEl("g", { class: "graph-node", transform: `translate(${x},${y})` });
-    g.appendChild(svgEl("circle", {
-      r: isCenter ? 13 : 9, fill: REL_COLOR[n.rel] || "#adb5bd",
-      stroke: "#fff", "stroke-width": 2,
-    }));
-    const label = svgEl("text", { y: isCenter ? -19 : -15, "text-anchor": "middle", class: "graph-label" });
-    label.textContent = n.title.length > 26 ? n.title.slice(0, 26) + "…" : n.title;
+  graph.nodes.forEach((n) => {
+    if (isNodeHidden(n)) return;
+    const g = svgEl("g", { class: "gnode" });
+    if (n.kind === "entity") {
+      g.appendChild(svgEl("rect", { x: -7, y: -7, width: 14, height: 14,
+        transform: "rotate(45)", fill: "#f08c00", stroke: "#fff", "stroke-width": 2 }));
+    } else {
+      g.appendChild(svgEl("circle", { r: n.root ? 13 : 9,
+        fill: n.root ? "#3b5bdb" : "#4dabf7", stroke: "#fff", "stroke-width": 2 }));
+    }
+    const label = svgEl("text", { y: -14, "text-anchor": "middle", class: "graph-label" });
+    label.textContent = n.label.length > 24 ? n.label.slice(0, 24) + "…" : n.label;
     g.appendChild(label);
     const tip = svgEl("title", {});
-    tip.textContent = `${n.title} — ${isCenter ? "aktuell" : REL_LABEL[n.rel] || n.rel}`;
+    tip.textContent = n.kind === "entity" ? `${n.label} [${n.etype}]` : n.label;
     g.appendChild(tip);
-    g.addEventListener("click", () => (isCenter ? loadPage(n.slug) : recenterGraph(n.slug)));
-    svg.appendChild(g);
+    attachNodeEvents(g, n);
+    nodeG.appendChild(g);
+    graph._nodeEls.set(n.id, g);
   });
 
-  content.append(bar, legend, svg);
+  content.append(bar, filters, svg);
   content.scrollTop = 0;
 }
 
-// Re-center the graph on a neighbor without leaving the Graph tab.
-async function recenterGraph(slug) {
-  state.currentSlug = slug;
-  setActive(slug);
-  history.replaceState(null, "", "#" + slug);
-  try {
-    const { markdown } = await getJSON("/api/pages/" + encodeURIComponent(slug));
-    state.wikiMarkdown = markdown;  // keep the Wiki tab in sync for when they open it
-  } catch (_) { /* non-fatal */ }
-  renderGraph();
+function attachNodeEvents(g, n) {
+  let sx = 0, sy = 0, moved = false, down = false;
+  g.addEventListener("pointerdown", (ev) => {
+    down = true; moved = false; sx = ev.clientX; sy = ev.clientY;
+    n.fixed = true;
+    g.setPointerCapture(ev.pointerId);
+  });
+  g.addEventListener("pointermove", (ev) => {
+    if (!down) return;
+    if (!moved && Math.hypot(ev.clientX - sx, ev.clientY - sy) > 4) moved = true;
+    if (moved) {
+      const p = clientToSvg(ev.clientX, ev.clientY);
+      n.x = p.x; n.y = p.y;
+      bumpSim();
+      drawPositions();
+    }
+  });
+  g.addEventListener("pointerup", (ev) => {
+    down = false;
+    try { g.releasePointerCapture(ev.pointerId); } catch (_) {}
+    if (moved) { n.fixed = false; }   // was a drag → unpin
+    else { onNodeClick(n); }          // was a click → select + expand
+  });
+}
+
+async function onNodeClick(n) {
+  if (n.kind === "page") graph.selected = n.id;
+  if (!n.expanded) {
+    n.expanded = true;
+    try {
+      const data = await postJSON("/api/graph/expand", { type: n.kind, id: n.id });
+      mergeGraph(data, n.x, n.y);
+    } catch (_) { /* ignore */ }
+  }
+  buildGraphDom($("#content"));   // reflects new nodes + updated selection
+  bumpSim();
+}
+
+// -- force simulation -------------------------------------------------------
+
+function startSim() { graph.alpha = 0.9; ensureSim(); }
+function bumpSim() { graph.alpha = Math.max(graph.alpha, 0.5); ensureSim(); }
+function ensureSim() { if (!graph.raf) graph.raf = requestAnimationFrame(simStep); }
+function stopSim() { if (graph.raf) cancelAnimationFrame(graph.raf); graph.raf = 0; }
+
+function simStep() {
+  physicsTick();
+  drawPositions();
+  graph.alpha *= 0.97;
+  graph.raf = graph.alpha > 0.02 ? requestAnimationFrame(simStep) : 0;
+}
+
+function physicsTick() {
+  const ns = [...graph.nodes.values()].filter((n) => !isNodeHidden(n));
+  const cx = GW / 2, cy = GH / 2;
+  ns.forEach((n) => { n.fx = 0; n.fy = 0; });
+  for (let i = 0; i < ns.length; i++) {
+    for (let j = i + 1; j < ns.length; j++) {
+      const a = ns[i], b = ns[j];
+      let dx = a.x - b.x, dy = a.y - b.y, d2 = dx * dx + dy * dy || 1;
+      const d = Math.sqrt(d2), f = 11000 / d2, ux = dx / d, uy = dy / d;
+      a.fx += ux * f; a.fy += uy * f; b.fx -= ux * f; b.fy -= uy * f;
+    }
+  }
+  graph.edges.forEach((e) => {
+    if (isEdgeHidden(e)) return;
+    const a = graph.nodes.get(e.source), b = graph.nodes.get(e.target);
+    if (!a || !b) return;
+    let dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy) || 1;
+    const rest = e.type === "mentions" ? 95 : 135;
+    const f = (d - rest) * 0.03, ux = dx / d, uy = dy / d;
+    a.fx += ux * f; a.fy += uy * f; b.fx -= ux * f; b.fy -= uy * f;
+  });
+  ns.forEach((n) => {
+    if (n.fixed) return;
+    n.fx += (cx - n.x) * 0.007; n.fy += (cy - n.y) * 0.007;
+    n.vx = (n.vx + n.fx) * 0.85; n.vy = (n.vy + n.fy) * 0.85;
+    n.x += n.vx * graph.alpha; n.y += n.vy * graph.alpha;
+    n.x = Math.max(24, Math.min(GW - 24, n.x));
+    n.y = Math.max(24, Math.min(GH - 24, n.y));
+  });
+}
+
+function drawPositions() {
+  graph._edgeEls.forEach(({ e, line }) => {
+    const a = graph.nodes.get(e.source), b = graph.nodes.get(e.target);
+    if (!a || !b) return;
+    line.setAttribute("x1", a.x); line.setAttribute("y1", a.y);
+    line.setAttribute("x2", b.x); line.setAttribute("y2", b.y);
+  });
+  graph._nodeEls.forEach((g, id) => {
+    const n = graph.nodes.get(id);
+    if (n) g.setAttribute("transform", `translate(${n.x},${n.y})`);
+  });
+}
+
+function clientToSvg(clientX, clientY) {
+  const pt = graph.svg.createSVGPoint();
+  pt.x = clientX; pt.y = clientY;
+  const p = pt.matrixTransform(graph.svg.getScreenCTM().inverse());
+  return { x: p.x, y: p.y };
 }
 
 function runAction(kind, arg) {

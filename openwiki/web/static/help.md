@@ -77,10 +77,14 @@ automatisch neu geladen.
 
 ## Wissensgraph (Reiter „Graph")
 
-Der Reiter **Graph** zeigt die aktuelle Seite als Mittelpunkt eines
-**Beziehungsgraphen** — eine zusätzliche Abstraktionsebene über dem Wiki, die die
-Zusammenhänge im Handbuch sichtbar macht. Er wird von einer lokalen, eingebetteten
-Graph-Datenbank (**Kuzu**) gespeist und ändert das Wiki selbst nicht.
+Der Reiter **Graph** ist ein interaktiver **Graph-Explorer** rund um die aktuelle
+Seite — eine zusätzliche Abstraktionsebene über dem Wiki, die die Zusammenhänge im
+Handbuch sichtbar macht. Er wird von einer lokalen, eingebetteten Graph-Datenbank
+(**Kuzu**) gespeist und ändert das Wiki selbst nicht.
+
+Es gibt zwei Knotentypen: **Seiten** (Kreise) und — falls mit `--entities` gebaut —
+**Begriffe/Entitäten** (Rauten, z. B. Modi, Effekte, Parameter). Das Layout ordnet
+sich per Kräftesimulation selbst an.
 
 Die Kanten (mit farbiger Legende) sind:
 
@@ -95,13 +99,17 @@ Die Kanten (mit farbiger Legende) sind:
 
 Bedienung:
 
-- **Klick auf einen Nachbarknoten** rückt den Graphen auf diese Seite — so „gehen"
-  Sie an den Beziehungen entlang durch das Handbuch.
-- **„Seite öffnen →"** (oder Klick auf den Mittelpunkt) öffnet die Seite im Reiter
-  **Wiki**.
+- **Klick auf einen Knoten** *erweitert* ihn: seine Nachbarn (bzw. bei einem
+  Begriff die Seiten, die ihn erwähnen) werden in den Graphen geholt — so bauen Sie
+  Schritt für Schritt ein größeres Beziehungsnetz auf.
+- **Knoten ziehen**, um den Graphen von Hand anzuordnen.
+- **Legenden-Chips** ein-/ausschalten, um Kantenarten (oder die Begriffe) ein- und
+  auszublenden und dichte Ansichten zu entzerren.
+- **„Seite öffnen →"** öffnet die zuletzt gewählte Seite im Reiter **Wiki**;
+  **„Zurücksetzen"** kehrt zur Nachbarschaft der aktuellen Seite zurück.
 
 Den Graphen erzeugt man einmalig über die Kommandozeile mit
-`openwiki graph-build`; fehlt er, ist der Reiter leer.
+`openwiki graph-build` (Begriffe mit `--entities`); fehlt er, ist der Reiter leer.
 
 ## Tipps
 

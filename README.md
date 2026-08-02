@@ -257,10 +257,12 @@ The center pane has four tabs:
 - **Tutorial** — a guided tour where each step has a **▶ Ausprobieren** button
   that runs the real action (open a page, run a search, ask the agent, create a
   page), so you learn by doing.
-- **Graph** — an interactive node-link view of the current page's neighborhood
-  (parent, children, prev/next, similar, cross-references, and — with `--entities`
-  — shared-concept edges). Click a node to re-center the graph and walk the
-  relationships; "Seite öffnen" opens a page. Needs `graph-build`.
+- **Graph** — an interactive **force-directed explorer** around the current page.
+  Two node types (pages as circles, entities as diamonds) with colour-coded edges
+  (hierarchy, sequence, similar, cross-references, shared concepts, mentions).
+  **Click a node to expand it** (pull in its neighbours / an entity's pages) and
+  build up a subgraph, **drag** nodes to arrange, toggle **edge-type filters**, and
+  "Seite öffnen" opens a page. Needs `graph-build` (entities with `--entities`).
 
 The Help/Tutorial content lives in `openwiki/web/static/{help,tutorial}.md` and is
 rendered client-side; tutorial buttons are `run:<kind>:<arg>` links wired to the

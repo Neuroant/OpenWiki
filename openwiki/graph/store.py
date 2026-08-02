@@ -28,7 +28,13 @@ class GraphStore:
             raise FileNotFoundError(
                 f"No graph at {self.db_path}. Build it with `openwiki graph-build`."
             )
-        self._db = kuzu.Database(str(self.db_path))
+        # Read-only: the store never writes, and this avoids taking Kuzu's
+        # exclusive write lock (so a serving process won't block, e.g., a rebuild
+        # or a second reader).
+        try:
+            self._db = kuzu.Database(str(self.db_path), read_only=True)
+        except TypeError:  # older kuzu without the kwarg
+            self._db = kuzu.Database(str(self.db_path))
         self._conn = kuzu.Connection(self._db)
 
     def close(self) -> None:

@@ -255,6 +255,11 @@ function runAction(kind, arg) {
     box.focus();
   } else if (kind === "ask") {
     sendChat(arg);           // reply/edits appear in the chat pane (always visible)
+  } else if (kind === "graph") {
+    state.currentSlug = arg;
+    setActive(arg);
+    history.replaceState(null, "", "#" + arg);
+    activateTab("graph");    // opens the Graph tab centered on this page
   }
 }
 

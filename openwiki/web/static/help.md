@@ -10,8 +10,8 @@ Die Oberfläche hat drei Bereiche:
 
 - **Links — Suche & Navigation:** ein Feld für die semantische Suche und der
   Navigationsbaum aller Wiki-Seiten (aus der Kapitelstruktur des Handbuchs).
-- **Mitte — Inhalt:** die gerenderte Seite. Über die Reiter **Wiki**, **Hilfe**
-  und **Tutorial** wechseln Sie die Ansicht.
+- **Mitte — Inhalt:** die gerenderte Seite. Über die Reiter **Wiki**, **Hilfe**,
+  **Tutorial** und **Graph** wechseln Sie die Ansicht.
 - **Rechts — Agent:** ein Chat mit dem KI-Agenten, der Fragen beantwortet *und*
   Seiten bearbeiten kann.
 
@@ -67,6 +67,31 @@ Jeder Werkzeugaufruf erscheint unter der Antwort als Chip: **·** für lesende,
 **✎** für schreibende Werkzeuge. Nach einer Änderung wird die betroffene Seite
 automatisch neu geladen.
 
+## Wissensgraph (Reiter „Graph")
+
+Der Reiter **Graph** zeigt die aktuelle Seite als Mittelpunkt eines
+**Beziehungsgraphen** — eine zusätzliche Abstraktionsebene über dem Wiki, die die
+Zusammenhänge im Handbuch sichtbar macht. Er wird von einer lokalen, eingebetteten
+Graph-Datenbank (**Kuzu**) gespeist und ändert das Wiki selbst nicht.
+
+Die Kanten (mit farbiger Legende) sind:
+
+- **Übergeordnet / Unterseite** — die Kapitel-Hierarchie.
+- **Vorherige / Nächste** — die Lesereihenfolge.
+- **Ähnlich** — inhaltlich verwandte Seiten (aus den Vektor-Einbettungen).
+- **Verweist auf / Verwiesen von** — die „siehe Seite N"-Querverweise des
+  Handbuchs, aufgelöst auf die passende Wiki-Seite.
+
+Bedienung:
+
+- **Klick auf einen Nachbarknoten** rückt den Graphen auf diese Seite — so „gehen"
+  Sie an den Beziehungen entlang durch das Handbuch.
+- **„Seite öffnen →"** (oder Klick auf den Mittelpunkt) öffnet die Seite im Reiter
+  **Wiki**.
+
+Den Graphen erzeugt man einmalig über die Kommandozeile mit
+`openwiki graph-build`; fehlt er, ist der Reiter leer.
+
 ## Tipps
 
 - **Enter** sendet die Chat-Nachricht, **Umschalt+Enter** fügt eine neue Zeile ein.
@@ -88,4 +113,6 @@ Suche und Chat laufen vollständig auf Ihrem Rechner über Ollama (Standard:
   `ollama pull qwen3:30b-a3b-instruct-2507-q4_K_M`)?
 - **Keine Suchergebnisse / Suche deaktiviert:** Der Index fehlt. Erzeugen Sie ihn
   mit `openwiki index …` und starten Sie den Server neu.
+- **Graph-Reiter leer / „nicht verfügbar":** Der Graph fehlt. Erzeugen Sie ihn mit
+  `openwiki graph-build …` und starten Sie den Server neu.
 - Gestartet wird der Server über die Kommandozeile: `openwiki serve --port 8137`.

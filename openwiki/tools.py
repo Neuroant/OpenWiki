@@ -42,6 +42,17 @@ class WikiTools:
         self.graph = graph  # optional GraphStore (enables the graph-aware tools)
         self.dry_run = dry_run
         self.edits: list[str] = []
+        self._has_entities: Optional[bool] = None  # cached graph.has_entities()
+
+    def _graph_has_entities(self) -> bool:
+        if self.graph is None:
+            return False
+        if self._has_entities is None:
+            try:
+                self._has_entities = self.graph.has_entities()
+            except Exception:
+                self._has_entities = False
+        return self._has_entities
 
     # -- schema advertised to the model --------------------------------
 
@@ -90,6 +101,13 @@ class WikiTools:
                    "topics are connected. Returns the pages and the relationship between each step.",
                    {"from_slug": slug, "to_slug": slug}, ["from_slug", "to_slug"]),
             ]
+            if self._graph_has_entities():
+                tools.append(fn(
+                    "find_entity",
+                    "Find wiki pages that mention a named concept/entity (a Mode, Effect, Feature, "
+                    "Parameter, Hardware control, …) — useful to gather every page discussing a topic.",
+                    {"name": {"type": "string", "description": "Entity name or substring, e.g. 'Arpeggiator'."}},
+                    ["name"]))
         return tools
 
     # -- read tools -----------------------------------------------------
@@ -158,6 +176,20 @@ class WikiTools:
         return (f"Path ({path['hops']} hop(s)): " + "".join(parts)
                 + "\n  slugs: " + " -> ".join(path["nodes"]))
 
+    def find_entity(self, name: str) -> str:
+        if self.graph is None:
+            return "Graph unavailable: no knowledge graph is loaded."
+        hits = self.graph.pages_for_entity(str(name))
+        if not hits:
+            return f"No entity matching '{name}' found in the graph."
+        grouped: dict = {}
+        for h in hits:
+            grouped.setdefault((h["entity"], h["type"]), []).append(f"{h['slug']} ({h['title']})")
+        return "\n".join(
+            f"{ent} [{etype}] is mentioned on: " + ", ".join(pages)
+            for (ent, etype), pages in grouped.items()
+        )
+
     # -- write tools ----------------------------------------------------
 
     def edit_page(self, slug: str, old_text: str, new_text: str) -> str:
@@ -209,6 +241,7 @@ class WikiTools:
             "create_page": lambda: self.create_page(args["slug"], args["title"], args["body"]),
             "graph_neighbors": lambda: self.graph_neighbors(args["slug"]),
             "find_path": lambda: self.find_path(args["from_slug"], args["to_slug"]),
+            "find_entity": lambda: self.find_entity(args["name"]),
         }
         handler = handlers.get(name)
         if handler is None:

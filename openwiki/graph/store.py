@@ -71,7 +71,12 @@ class GraphStore:
             "child_of": count("MATCH ()-[r:CHILD_OF]->() RETURN count(r);"),
             "similar_to": count("MATCH ()-[r:SIMILAR_TO]->() RETURN count(r);"),
             "references": count("MATCH ()-[r:REFERENCES]->() RETURN count(r);"),
+            "entities": count("MATCH (e:Entity) RETURN count(e);"),
+            "mentions": count("MATCH ()-[r:MENTIONS]->() RETURN count(r);"),
         }
+
+    def has_entities(self) -> bool:
+        return self._rows("MATCH (e:Entity) RETURN count(e);")[0][0] > 0
 
     def neighborhood(self, slug: str, similar_k: int = 6) -> dict:
         """Return the center page and its parent/children/prev/next/similar."""
@@ -94,6 +99,10 @@ class GraphStore:
                 f"MATCH (:Page {{slug:$s}})-[:REFERENCES]->(p:Page) RETURN {self._P} LIMIT 8;", {"s": slug}),
             "referenced_by": self._rows(
                 f"MATCH (:Page {{slug:$s}})<-[:REFERENCES]-(p:Page) RETURN {self._P} LIMIT 6;", {"s": slug}),
+            "shared_entity": self._rows(
+                f"MATCH (:Page {{slug:$s}})-[:MENTIONS]->(e:Entity)<-[:MENTIONS]-(p:Page) "
+                f"WHERE p.slug <> $s RETURN {self._P}, count(e) AS shared "
+                f"ORDER BY shared DESC LIMIT 6;", {"s": slug}),
             "similar": self._rows(
                 f"MATCH (:Page {{slug:$s}})-[r:SIMILAR_TO]->(p:Page) "
                 f"RETURN {self._P}, r.score ORDER BY r.score DESC LIMIT $k;",
@@ -112,6 +121,23 @@ class GraphStore:
                 edges.append(edge)
 
         return {"center": slug, "nodes": list(nodes.values()), "edges": edges}
+
+    # -- entities -------------------------------------------------------
+
+    def entities_for_page(self, slug: str) -> list[dict]:
+        rows = self._rows(
+            "MATCH (:Page {slug:$s})-[:MENTIONS]->(e:Entity) "
+            "RETURN e.name, e.type ORDER BY e.type, e.name;", {"s": slug})
+        return [{"name": r[0], "type": r[1]} for r in rows]
+
+    def pages_for_entity(self, query: str, limit: int = 20) -> list[dict]:
+        """Pages that mention an entity whose name contains ``query`` (case-insensitive)."""
+        rows = self._rows(
+            "MATCH (e:Entity)<-[:MENTIONS]-(p:Page) "
+            "WHERE contains(lower(e.name), lower($q)) "
+            "RETURN e.name, e.type, p.slug, p.title ORDER BY e.name LIMIT $k;",
+            {"q": str(query), "k": limit})
+        return [{"entity": r[0], "type": r[1], "slug": r[2], "title": r[3]} for r in rows]
 
     # Page-to-page relationships only (never route through Chunk/PART_OF).
     _PAGE_RELS = "CHILD_OF|NEXT|SIMILAR_TO|REFERENCES"

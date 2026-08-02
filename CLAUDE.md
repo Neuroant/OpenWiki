@@ -22,12 +22,13 @@ stages are implemented:
    SPA) to browse, search, and chat/edit.
 7. **Knowledge graph** — an additive Kuzu (embedded graph + vector DB) layer over
    the wiki, with an interactive Graph tab in the UI. Reads the wiki + index,
-   never mutates them.
+   never mutates them. Structural + vector + cross-reference edges, plus an opt-in
+   LLM-extracted **entity layer** (`Entity` nodes + `MENTIONS`).
 
 The sample input is `301357_NAUTILUS_OG_G1.pdf`, the German Korg NAUTILUS
 synthesizer manual (269 pages, 228 outline entries → a 51-page wiki → 815
 embedded chunks → a graph of 51 pages / 815 chunks / 306 SIMILAR_TO + 122
-REFERENCES edges).
+REFERENCES edges, plus 801 entities / 1431 MENTIONS with `--entities`).
 
 ## Environment & commands
 
@@ -99,7 +100,9 @@ tools when the graph exists).
 .venv\Scripts\python -m openwiki graph-build output\301357_NAUTILUS_OG_G1.json
 ```
 Options: `--out DIR`, `-i/--index DIR`, `--split-level N` (must match the indexed
-wiki), `--similar-k N`, `--no-references` (skip the "siehe Seite N" edges), `-v`.
+wiki), `--similar-k N`, `--no-references` (skip the "siehe Seite N" edges),
+`--entities` (LLM-extract typed entities → `Entity` + `MENTIONS`; **slow**, one
+call/page), `--entity-model NAME`, `-v`.
 
 **Web UI** — browse + search + chat/edit + graph in the browser (stdlib server):
 ```
@@ -178,7 +181,8 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   `create_page`), each returning a string. File access is confined to `pages/`,
   slugs are validated, and writes go through a `dry_run`-aware writer + edit log.
   When a `GraphStore` is passed (`graph=`), it also exposes **`graph_neighbors`**
-  and **`find_path`** — advertised in `schemas()` only when a graph is present.
+  and **`find_path`** (advertised only when a graph is present), and
+  **`find_entity`** (only when the graph has entities — `_graph_has_entities()`).
 - **`openwiki/chat_agent.py`** — `WikiAgent`: the multi-turn tool loop (model →
   tool calls → results → model …) with persistent history. Uses `chat_raw()`
   (tool calling) rather than `chat()`.
@@ -186,12 +190,14 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   reads a `Wiki` + `SemanticIndex` and writes a property graph to `output/graph/`
   (Page/Chunk nodes; CHILD_OF/NEXT/PART_OF/SIMILAR_TO/REFERENCES edges; an HNSW
   index on `Chunk.emb` — embeddings **mirrored** from the index, which stays
-  untouched). `references.py` extracts the manual's "siehe Seite N" cross-refs
-  (see the offset note below); `store.py` (`GraphStore`) answers
-  `neighborhood(slug)` (Graph tab), `find_path(a, b)` (shortest page-to-page path,
-  powering the agent's `find_path` tool), and `hybrid_search(vec)` (vector→graph).
-  Opened **read-only** and guarded by a lock (the threaded web server shares one
-  connection). Only `builder`/`store` import `kuzu`; `references` does not.
+  untouched; plus opt-in `Entity` nodes + `MENTIONS`). `references.py` extracts
+  the manual's "siehe Seite N" cross-refs (see the offset note below);
+  `entities.py` LLM-extracts typed entities per page (opt-in); `store.py`
+  (`GraphStore`) answers `neighborhood(slug)` (Graph tab, incl. a `shared_entity`
+  group), `find_path(a, b)`, entity queries (`entities_for_page`,
+  `pages_for_entity`, `has_entities`), and `hybrid_search(vec)`. Opened
+  **read-only** and lock-guarded (the threaded web server shares one connection).
+  Only `builder`/`store` import `kuzu`; `references`/`entities` do not.
 - **`openwiki/web/`** — the web UI. `server.py` = `WikiWebApp` (state) + a
   `ThreadingHTTPServer` handler exposing a JSON API (`/api/wiki`,
   `/api/pages/{slug}`, `/api/search`, `/api/chat`, `/api/graph/{slug}`) plus
@@ -263,7 +269,15 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   Page↔Page rels so it never routes through `Chunk`), and reads results with
   `list_transform(nodes(p), x -> x.slug)` / `... x.title` and
   `list_transform(rels(p), x -> label(x))` — Kuzu has **no** `[n IN nodes(p) | ...]`
-  list-comprehension syntax.
+  list-comprehension syntax. String matching uses `contains(lower(x), lower($q))`.
+- **Entities** (opt-in): `entities.py` does one LLM call per page with a typed
+  ontology (`ENTITY_TYPES`), parses a JSON array, and resolves by normalized
+  name-within-type (`_normalize`: lowercase + strip German articles) so surface
+  variants merge. `Entity`/`MENTIONS` tables are **always created** (empty without
+  `--entities`), so store/agent code degrades gracefully; `has_entities()` gates
+  the `shared_entity` edges, the `find_entity` tool, and the entity term in RAG
+  expansion (`agent._EXPAND_RELS`). Extraction is slow (~1 call/page) — run it in
+  the background; tests use a deterministic fake chat.
 - **Cross-references:** the manual cites *printed* page numbers but nodes are keyed
   by *physical* PDF pages. `references.detect_page_offset()` finds the constant
   offset (the mode of `physical - printed` over every integer in the page text —

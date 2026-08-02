@@ -12,8 +12,10 @@ import pytest
 
 pytest.importorskip("kuzu")  # skip the whole module if Kuzu is unavailable
 
+import json
+
 from openwiki.graph import (
-    GraphBuilder, GraphStore, detect_page_offset, extract_references,
+    GraphBuilder, GraphStore, detect_page_offset, extract_entities, extract_references,
 )
 from openwiki.models import DocumentMetadata, ParsedDocument
 from openwiki.models import Page as DocPage
@@ -266,3 +268,95 @@ def test_rag_expand_k_zero_disables(store):
     index = SemanticIndex.build(_wiki(), FakeEmbedder(), size_words=50, overlap_words=10)
     agent = RAGAgent(index, _FakeChat(), top_k=1, graph=store, expand_k=0)
     assert all(s.kind == "seed" for s in agent.retrieve("alpha nautilus"))
+
+
+# -- entity extraction + MENTIONS -------------------------------------------
+
+class _EntityChat:
+    """Deterministic 'extractor': returns known entities found in the page text."""
+
+    name = "fake:entities"
+    KEYWORDS = {"arpeggiator": ("Arpeggiator", "Feature"), "reverb": ("Reverb", "Effect")}
+
+    def chat(self, messages):
+        text = messages[-1]["content"].lower()
+        found = [{"name": n, "type": t} for k, (n, t) in self.KEYWORDS.items() if k in text]
+        return json.dumps(found)
+
+
+def _entity_wiki() -> Wiki:
+    pages = [
+        WikiPage(slug="000-a", title="A", level=1, order=0, pdf_page_start=1,
+                 pdf_page_end=1, text="der Arpeggiator ist nuetzlich. nautilus"),
+        WikiPage(slug="001-b", title="B", level=1, order=1, pdf_page_start=2,
+                 pdf_page_end=2, text="Arpeggiator und Reverb zusammen. nautilus"),
+        WikiPage(slug="002-c", title="C", level=1, order=2, pdf_page_start=3,
+                 pdf_page_end=3, text="Reverb Hall Programm. nautilus"),
+    ]
+    return Wiki(title="T", pages=pages, source="x.pdf", split_level=2)
+
+
+def test_extract_entities_resolves_and_links():
+    entities = extract_entities(_entity_wiki(), _EntityChat())
+    by_name = {e.name: e for e in entities}
+    assert set(by_name) == {"Arpeggiator", "Reverb"}
+    assert set(by_name["Arpeggiator"].pages) == {"000-a", "001-b"}  # merged across pages
+    assert by_name["Reverb"].type == "Effect"
+
+
+@pytest.fixture
+def entity_store(tmp_path):
+    wiki = _entity_wiki()
+    index = SemanticIndex.build(wiki, FakeEmbedder(), size_words=50, overlap_words=10)
+    entities = extract_entities(wiki, _EntityChat())
+    GraphBuilder(tmp_path / "graph").build(wiki, index, entities=entities)
+    s = GraphStore(tmp_path / "graph")
+    yield s
+    s.close()
+
+
+def test_entity_graph_stats(entity_store):
+    assert entity_store.has_entities()
+    assert entity_store.stats()["entities"] == 2
+    assert entity_store.stats()["mentions"] >= 3
+
+
+def test_entities_for_page(entity_store):
+    names = {e["name"] for e in entity_store.entities_for_page("001-b")}
+    assert names == {"Arpeggiator", "Reverb"}
+
+
+def test_pages_for_entity_substring(entity_store):
+    hits = entity_store.pages_for_entity("arp")  # case-insensitive substring
+    slugs = {h["slug"] for h in hits}
+    assert slugs == {"000-a", "001-b"}
+
+
+def test_neighborhood_shared_entity(entity_store):
+    # A and B share "Arpeggiator". B is also A's NEXT page, so its node dedups to
+    # the structural rel — but the shared_entity edge is still emitted.
+    edges = entity_store.neighborhood("000-a")["edges"]
+    shared = [e["target"] for e in edges if e["type"] == "shared_entity"]
+    assert "001-b" in shared
+
+
+def test_store_without_entities_is_empty(store):
+    assert not store.has_entities()
+    assert store.stats()["entities"] == 0
+
+
+def test_wikitools_find_entity(tmp_path, entity_store):
+    from openwiki.tools import WikiTools
+
+    tools = WikiTools(tmp_path, graph=entity_store)
+    assert "find_entity" in {t["function"]["name"] for t in tools.schemas()}
+    out = tools.find_entity("Arpeggiator")
+    assert "000-a" in out and "001-b" in out
+
+
+def test_find_entity_not_advertised_without_entities(tmp_path, store):
+    from openwiki.tools import WikiTools
+
+    names = {t["function"]["name"] for t in WikiTools(tmp_path, graph=store).schemas()}
+    assert "find_entity" not in names           # gated on entities existing
+    assert "graph_neighbors" in names           # other graph tools still present

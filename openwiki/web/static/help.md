@@ -64,10 +64,12 @@ Werkzeuge zur Verfügung:
 | `create_page` | eine neue Seite anlegen |
 | `graph_neighbors` | verwandte Seiten im Wissensgraphen auflisten |
 | `find_path` | den kürzesten Beziehungspfad zwischen zwei Seiten finden |
+| `find_entity` | alle Seiten finden, die ein benanntes Konzept erwähnen |
 
-Die letzten beiden Werkzeuge nutzen den **Wissensgraphen** (siehe unten) und sind
-nur verfügbar, wenn ein Graph geladen ist — so kann der Agent auch nach
-Zusammenhängen zwischen Themen fragen, nicht nur nach Textinhalten.
+Diese Werkzeuge nutzen den **Wissensgraphen** (siehe unten) und sind nur
+verfügbar, wenn ein Graph geladen ist (`find_entity` zusätzlich nur mit
+Entitäten) — so kann der Agent auch nach Zusammenhängen zwischen Themen fragen,
+nicht nur nach Textinhalten.
 
 Jeder Werkzeugaufruf erscheint unter der Antwort als Chip: **·** für lesende,
 **✎** für schreibende Werkzeuge. Nach einer Änderung wird die betroffene Seite
@@ -87,6 +89,9 @@ Die Kanten (mit farbiger Legende) sind:
 - **Ähnlich** — inhaltlich verwandte Seiten (aus den Vektor-Einbettungen).
 - **Verweist auf / Verwiesen von** — die „siehe Seite N"-Querverweise des
   Handbuchs, aufgelöst auf die passende Wiki-Seite.
+- **Gemeinsame Begriffe** — Seiten, die dieselben benannten Konzepte (Modi,
+  Effekte, Funktionen, Parameter …) erwähnen. Nur vorhanden, wenn der Graph mit
+  Entitäten gebaut wurde (`graph-build --entities`).
 
 Bedienung:
 

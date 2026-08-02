@@ -69,8 +69,8 @@ def build_messages(question: str, sources: list[Source]) -> list[Message]:
     ]
 
 
-# Edges worth expanding along: explicit cross-refs + semantic neighbors.
-_EXPAND_RELS = ("references", "referenced_by", "similar")
+# Edges worth expanding along: cross-refs, semantic neighbors, shared concepts.
+_EXPAND_RELS = ("references", "referenced_by", "similar", "shared_entity")
 
 
 class RAGAgent:

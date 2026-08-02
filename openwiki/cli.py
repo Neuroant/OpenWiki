@@ -15,7 +15,7 @@ from typing import Optional, Sequence
 
 from .agent import RAGAgent
 from .chat_agent import WikiAgent
-from .graph import GraphStore, build_graph, extract_references
+from .graph import GraphStore, build_graph, extract_entities, extract_references
 from .embeddings import OllamaEmbedder
 from .llm import OllamaChat
 from .models import ParsedDocument
@@ -172,6 +172,11 @@ def _build_argparser() -> argparse.ArgumentParser:
     graph_p.add_argument("--similar-k", type=int, default=6, help="SIMILAR_TO edges per page (default: 6).")
     graph_p.add_argument("--no-references", action="store_true",
                          help="Skip 'siehe Seite N' cross-reference (REFERENCES) edges.")
+    graph_p.add_argument("--entities", action="store_true",
+                         help="Extract typed entities via an LLM (one call/page; slow). Adds Entity + MENTIONS.")
+    graph_p.add_argument("--entity-model", default="qwen3:30b-a3b-instruct-2507-q4_K_M",
+                         help="Ollama model for entity extraction.")
+    graph_p.add_argument("--host", default="http://localhost:11434", help="Ollama host URL (for --entities).")
     graph_p.add_argument("-v", "--verbose", action="store_true", help="Verbose progress logging.")
     return parser
 
@@ -411,12 +416,26 @@ def _cmd_graph_build(args: argparse.Namespace) -> int:
     wiki = WikiBuilder(split_level=args.split_level).build(doc)
     index = SemanticIndex.load(args.index)
     references = None if args.no_references else extract_references(doc, wiki)
-    stats = build_graph(wiki, index, args.out, similar_k=args.similar_k, references=references)
+
+    entities = None
+    if args.entities:
+        chat = OllamaChat(model=args.entity_model, host=args.host)
+        print(f"Extracting entities with {chat.name} (one call per page) …", file=sys.stderr)
+
+        def _progress(done, total, found):
+            print(f"  page {done}/{total} — {found} entities so far", file=sys.stderr)
+
+        entities = extract_entities(wiki, chat, on_progress=_progress if args.verbose else None)
+
+    stats = build_graph(wiki, index, args.out, similar_k=args.similar_k,
+                        references=references, entities=entities)
     print(f"Built graph from {args.source.name}")
     print(f"  pages         : {stats['pages']}")
     print(f"  chunks (dim {stats['dim']}): {stats['chunks']}")
     print(f"  SIMILAR_TO    : {stats['similar_edges']}")
     print(f"  REFERENCES    : {stats['reference_edges']}")
+    if args.entities:
+        print(f"  entities      : {stats['entities']}  (MENTIONS: {stats['mention_edges']})")
     print(f"  graph -> {args.out}")
     return 0
 

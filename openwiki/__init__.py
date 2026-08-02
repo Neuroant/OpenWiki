@@ -13,7 +13,8 @@ from .chat_agent import AgentTurn, ToolCall, WikiAgent
 from .chunking import Chunk, chunk_wiki
 from .embeddings import Embedder, OllamaEmbedder, get_embedder
 from .graph import (
-    GraphBuilder, GraphStore, build_graph, detect_page_offset, extract_references,
+    Entity, GraphBuilder, GraphStore, build_graph, detect_page_offset,
+    extract_entities, extract_references,
 )
 from .llm import ChatModel, OllamaChat
 from .pdf_parser import PDFParser
@@ -22,7 +23,7 @@ from .tools import WikiTools
 from .web import WikiWebApp, serve
 from .wiki import Wiki, WikiBuilder, WikiPage, slugify, write_wiki
 
-__version__ = "0.11.0"
+__version__ = "0.12.0"
 
 __all__ = [
     "PDFParser",
@@ -61,5 +62,7 @@ __all__ = [
     "build_graph",
     "extract_references",
     "detect_page_offset",
+    "extract_entities",
+    "Entity",
     "__version__",
 ]

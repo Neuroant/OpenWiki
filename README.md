@@ -184,6 +184,8 @@ If a knowledge graph is present (`graph-build`), the agent also gets
 **`graph_neighbors`** (a page's related pages) and **`find_path`** (the shortest
 relationship chain between two pages) — so it can answer "what's related to X?"
 and "how are X and Y connected?" by traversing the graph, not just searching text.
+When the graph includes the entity layer (`--entities`), it additionally gets
+**`find_entity`** — every page that mentions a named concept.
 
 ### Knowledge graph
 
@@ -204,6 +206,7 @@ Graph model (all edges deterministic or vector-derived — no LLM):
 - `(Chunk)-[:PART_OF]->(Page)` — provenance
 - `(Page)-[:SIMILAR_TO {score}]->(Page)` — top-k semantic neighbors
 - `(Page)-[:REFERENCES]->(Page)` — the manual's *"siehe Seite N"* cross-references
+- `(Page)-[:MENTIONS]->(Entity)` — typed entities (opt-in; see below)
 - plus an HNSW vector index on `Chunk.emb` for hybrid vector→graph queries.
 
 The `REFERENCES` edges resolve the manual's **printed** page numbers to the
@@ -212,6 +215,21 @@ The `REFERENCES` edges resolve the manual's **printed** page numbers to the
 
 Explore it in the browser via the **Graph** tab (below). Requires Python
 3.10–3.13 (`pip install kuzu`).
+
+**Entity layer (semantic graph, opt-in).** `graph-build --entities` runs one
+local LLM call per page to extract typed entities — `Mode`, `SoundObject`,
+`Effect`, `Feature`, `Parameter`, `Hardware` — and links them with
+`(Page)-[:MENTIONS]->(Entity)`. This connects pages that discuss the same concept
+even when they neither cross-reference nor are cosine-similar. It's slow (~one
+call per page), so it's off by default:
+
+```bash
+openwiki graph-build output/301357_NAUTILUS_OG_G1.json --entities -v
+```
+
+With entities present, the Graph tab shows **"Gemeinsame Begriffe"** (shared-
+concept) edges, the agent gains a **`find_entity`** tool, and graph-augmented
+`ask` also expands along shared concepts.
 
 ### Web UI
 
@@ -239,9 +257,9 @@ The center pane has four tabs:
   that runs the real action (open a page, run a search, ask the agent, create a
   page), so you learn by doing.
 - **Graph** — an interactive node-link view of the current page's neighborhood
-  (parent, children, prev/next, similar, and cross-references). Click a node to
-  re-center the graph and walk the relationships; "Seite öffnen" opens a page.
-  Needs `graph-build`.
+  (parent, children, prev/next, similar, cross-references, and — with `--entities`
+  — shared-concept edges). Click a node to re-center the graph and walk the
+  relationships; "Seite öffnen" opens a page. Needs `graph-build`.
 
 The Help/Tutorial content lives in `openwiki/web/static/{help,tutorial}.md` and is
 rendered client-side; tutorial buttons are `run:<kind>:<arg>` links wired to the
@@ -295,7 +313,7 @@ PDF ──PDFParser──▶ ParsedDocument ──▶ JSON / Markdown
 - `openwiki/agent.py` — the RAG agent (retrieve → grounded prompt → cited answer)
 - `openwiki/tools.py` — the read/write tools the editing agent calls
 - `openwiki/chat_agent.py` — the multi-turn editing agent (tool loop + history)
-- `openwiki/graph/` — the Kuzu graph layer (`builder.py` writes it, `store.py` queries it, `references.py` extracts cross-references)
+- `openwiki/graph/` — the Kuzu graph layer (`builder.py` writes it, `store.py` queries it, `references.py` extracts cross-references, `entities.py` extracts typed entities via an LLM)
 - `openwiki/web/` — stdlib web server + vanilla-JS SPA (browse, search, chat/edit, graph)
 - `openwiki/cli.py` — the `openwiki` command line (`ingest`, `build-wiki`, `index`, `search`, `ask`, `chat`, `graph-build`, `serve`)
 
@@ -311,3 +329,4 @@ PDF ──PDFParser──▶ ParsedDocument ──▶ JSON / Markdown
 - [x] **Cross-references** — `REFERENCES` edges from the manual's "siehe Seite N" (printed→physical offset detection)
 - [x] **Graph-aware agent tools** — `graph_neighbors` and `find_path` let the agent traverse the graph (multi-hop, "how are X and Y connected?")
 - [x] **Graph-augmented `ask`** — RAG retrieval expands along graph edges (GraphRAG): semantic seeds + query-re-ranked connected pages
+- [x] **Entity layer** — LLM-extracted typed entities + `MENTIONS` edges (`--entities`), a `find_entity` tool, and shared-concept edges/expansion

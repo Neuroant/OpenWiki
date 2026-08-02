@@ -45,7 +45,7 @@ class GraphBuilder:
         self.db_path = Path(db_path)
         self.similar_k = similar_k
 
-    def build(self, wiki: Wiki, index: SemanticIndex, references=None) -> dict:
+    def build(self, wiki: Wiki, index: SemanticIndex, references=None, entities=None) -> dict:
         if not index.chunks:
             raise ValueError("The semantic index is empty; run `openwiki index` first.")
         dim = int(index.embeddings.shape[1])
@@ -67,6 +67,7 @@ class GraphBuilder:
             )
             n_similar = self._insert_similarities(conn, wiki, index)
             n_refs = self._insert_references(conn, references or [])
+            n_entities, n_mentions = self._insert_entities(conn, entities or [])
         finally:
             conn.close()
             db.close()
@@ -76,6 +77,8 @@ class GraphBuilder:
             "chunks": len(index.chunks),
             "similar_edges": n_similar,
             "reference_edges": n_refs,
+            "entities": n_entities,
+            "mention_edges": n_mentions,
             "dim": dim,
             "db": str(self.db_path),
         }
@@ -107,6 +110,8 @@ class GraphBuilder:
         conn.execute("CREATE REL TABLE PART_OF(FROM Chunk TO Page);")
         conn.execute("CREATE REL TABLE SIMILAR_TO(FROM Page TO Page, score DOUBLE);")
         conn.execute("CREATE REL TABLE REFERENCES(FROM Page TO Page);")
+        conn.execute("CREATE NODE TABLE Entity(key STRING, name STRING, type STRING, PRIMARY KEY(key));")
+        conn.execute("CREATE REL TABLE MENTIONS(FROM Page TO Entity);")
 
     # -- nodes / structural edges --------------------------------------
 
@@ -197,6 +202,26 @@ class GraphBuilder:
                 count += 1
         return count
 
+    def _insert_entities(self, conn, entities) -> tuple:
+        """Insert Entity nodes + MENTIONS (Page->Entity) edges."""
+        if not entities:
+            return 0, 0
+        page_slugs = self._existing_page_slugs(conn)
+        n_mentions = 0
+        for entity in entities:
+            conn.execute(
+                "CREATE (:Entity {key:$k, name:$n, type:$t});",
+                parameters={"k": entity.key, "n": entity.name, "t": entity.type},
+            )
+            for slug in entity.pages:
+                if slug in page_slugs:
+                    conn.execute(
+                        "MATCH (p:Page {slug:$s}),(e:Entity {key:$k}) CREATE (p)-[:MENTIONS]->(e);",
+                        parameters={"s": slug, "k": entity.key},
+                    )
+                    n_mentions += 1
+        return len(entities), n_mentions
+
     def _page_embeddings(self, wiki: Wiki, index: SemanticIndex) -> dict:
         """Mean of each page's chunk vectors, L2-normalized."""
         by_page: dict[str, list[np.ndarray]] = {}
@@ -219,5 +244,6 @@ class GraphBuilder:
 
 
 def build_graph(wiki: Wiki, index: SemanticIndex, db_path,
-                similar_k: int = 6, references=None) -> dict:
-    return GraphBuilder(db_path, similar_k=similar_k).build(wiki, index, references=references)
+                similar_k: int = 6, references=None, entities=None) -> dict:
+    return GraphBuilder(db_path, similar_k=similar_k).build(
+        wiki, index, references=references, entities=entities)

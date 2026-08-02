@@ -143,11 +143,12 @@ function wireRunActions() {
 const SVG_NS = "http://www.w3.org/2000/svg";
 const REL_COLOR = { center: "#3b5bdb", parent: "#7048e8", child: "#7048e8",
                     prev: "#868e96", next: "#868e96", similar: "#2f9e44",
-                    references: "#e8590c", referenced_by: "#e8590c" };
+                    references: "#e8590c", referenced_by: "#e8590c",
+                    shared_entity: "#0c8599" };
 const REL_LABEL = { parent: "Übergeordnet", child: "Unterseite",
                     prev: "Vorherige", next: "Nächste",
                     references: "Verweist auf", referenced_by: "Verwiesen von",
-                    similar: "Ähnlich" };
+                    shared_entity: "Gemeinsame Begriffe", similar: "Ähnlich" };
 
 function svgEl(tag, attrs) {
   const el = document.createElementNS(SVG_NS, tag);

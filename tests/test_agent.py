@@ -74,6 +74,11 @@ def test_retrieve_orders_by_relevance(agent):
     assert sources[0].marker == 1
 
 
+def test_retrieve_without_graph_all_seeds(agent):
+    sources = agent.retrieve("lautstarke")
+    assert sources and all(s.kind == "seed" for s in sources)
+
+
 def test_build_messages_contains_context_and_question():
     from openwiki.agent import Source
 

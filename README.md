@@ -153,6 +153,12 @@ retrieve), `--temperature`, `--show-context` (print the excerpts too). The syste
 prompt keeps the model **grounded** — it answers only from the retrieved excerpts
 and says so when the answer isn't there.
 
+**Graph-augmented retrieval:** if a knowledge graph is present (`graph-build`),
+`ask` expands the semantic seeds along graph edges (references + similar), adds
+the most query-relevant *connected* pages, and marks them `+` in the sources —
+surfacing context that pure top-k cosine misses. Control with `--expand-k N`
+(default 3; `0` or `--no-graph` disables).
+
 ### Chat + edit the wiki (agent)
 
 `chat` is a multi-turn agent that can search, read, and **edit** wiki pages via
@@ -304,3 +310,4 @@ PDF ──PDFParser──▶ ParsedDocument ──▶ JSON / Markdown
 - [x] **Knowledge graph** — Kuzu graph + vector layer with an interactive Graph tab
 - [x] **Cross-references** — `REFERENCES` edges from the manual's "siehe Seite N" (printed→physical offset detection)
 - [x] **Graph-aware agent tools** — `graph_neighbors` and `find_path` let the agent traverse the graph (multi-hop, "how are X and Y connected?")
+- [x] **Graph-augmented `ask`** — RAG retrieval expands along graph edges (GraphRAG): semantic seeds + query-re-ranked connected pages

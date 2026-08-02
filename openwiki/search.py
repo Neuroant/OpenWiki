@@ -94,18 +94,38 @@ class SemanticIndex:
         scores = self.embeddings @ q
         k = min(k, len(scores))
         top = np.argsort(-scores)[:k]
-        results = []
-        for i in top:
-            chunk = self.chunks[int(i)]
-            results.append(
-                SearchResult(
-                    score=float(scores[i]),
-                    page_slug=chunk.page_slug,
-                    page_title=chunk.page_title,
-                    pdf_page_start=chunk.pdf_page_start,
-                    pdf_page_end=chunk.pdf_page_end,
-                    chunk_id=chunk.id,
-                    text=chunk.text,
-                )
-            )
+        return [self._result(int(i), float(scores[i])) for i in top]
+
+    def best_chunk_per_page(self, query: str, page_slugs) -> list[SearchResult]:
+        """Best-matching chunk within each of ``page_slugs`` for the query.
+
+        Used for graph-augmented retrieval: the graph proposes related pages, and
+        this re-ranks each by the query so the added context stays relevant.
+        Returned highest-score first.
+        """
+        wanted = set(page_slugs)
+        if not wanted or not self.chunks:
+            return []
+        q = self.embedder.embed_query(query).astype(np.float32)
+        q = q / (np.linalg.norm(q) or 1.0)
+        scores = self.embeddings @ q
+        best: dict[str, int] = {}  # page_slug -> chunk index of its best chunk
+        for i, chunk in enumerate(self.chunks):
+            if chunk.page_slug in wanted:
+                if chunk.page_slug not in best or scores[i] > scores[best[chunk.page_slug]]:
+                    best[chunk.page_slug] = i
+        results = [self._result(i, float(scores[i])) for i in best.values()]
+        results.sort(key=lambda r: r.score, reverse=True)
         return results
+
+    def _result(self, i: int, score: float) -> SearchResult:
+        chunk = self.chunks[i]
+        return SearchResult(
+            score=score,
+            page_slug=chunk.page_slug,
+            page_title=chunk.page_title,
+            pdf_page_start=chunk.pdf_page_start,
+            pdf_page_end=chunk.pdf_page_end,
+            chunk_id=chunk.id,
+            text=chunk.text,
+        )

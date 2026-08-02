@@ -98,6 +98,16 @@ def test_embeddings_are_normalized(index):
     assert np.allclose(norms, 1.0, atol=1e-5)
 
 
+def test_best_chunk_per_page(index):
+    results = index.best_chunk_per_page("effekt presets", ["001-midi", "002-fx"])
+    assert {r.page_slug for r in results} == {"001-midi", "002-fx"}  # one per page
+    assert results[0].page_slug == "002-fx"                          # best match first
+
+
+def test_best_chunk_per_page_empty(index):
+    assert index.best_chunk_per_page("anything", []) == []
+
+
 def test_save_and_load_round_trip(tmp_path, index):
     index.save(tmp_path)
     assert (tmp_path / "embeddings.npy").is_file()

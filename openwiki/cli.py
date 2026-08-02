@@ -98,6 +98,13 @@ def _build_argparser() -> argparse.ArgumentParser:
     )
     ask_p.add_argument("-k", "--top-k", type=int, default=5, help="Chunks to retrieve (default: 5).")
     ask_p.add_argument(
+        "--graph", type=Path, default=Path("output") / "graph",
+        help="Knowledge-graph dir; if present, retrieval is graph-augmented (default: ./output/graph).",
+    )
+    ask_p.add_argument("--expand-k", type=int, default=3,
+                       help="Related pages to add via graph expansion (default: 3; 0 disables).")
+    ask_p.add_argument("--no-graph", action="store_true", help="Disable graph-augmented retrieval.")
+    ask_p.add_argument(
         "--model", default="qwen3:30b-a3b-instruct-2507-q4_K_M",
         help="Ollama chat model (default: qwen3:30b-a3b-instruct-2507-q4_K_M).",
     )
@@ -292,20 +299,30 @@ def _cmd_ask(args: argparse.Namespace) -> int:
     index = SemanticIndex.load(args.index)
     if isinstance(index.embedder, OllamaEmbedder):
         index.embedder.host = args.host.rstrip("/")
-    chat = OllamaChat(model=args.model, host=args.host, temperature=args.temperature)
-    agent = RAGAgent(index, chat, top_k=args.top_k)
 
-    print(f"Retrieving {args.top_k} excerpt(s) and asking {chat.name} …", file=sys.stderr)
+    graph = None
+    if not args.no_graph and args.graph.exists():
+        try:
+            graph = GraphStore(args.graph)
+        except Exception as exc:
+            print(f"(graph not loaded: {exc})", file=sys.stderr)
+
+    chat = OllamaChat(model=args.model, host=args.host, temperature=args.temperature)
+    agent = RAGAgent(index, chat, top_k=args.top_k, graph=graph, expand_k=args.expand_k)
+
+    mode = "graph-augmented " if graph else ""
+    print(f"{mode}retrieving and asking {chat.name} …", file=sys.stderr)
     result = agent.answer(args.question)
 
     print(result.answer)
     if result.sources:
         cited = result.cited_markers()
-        print("\nSources  (* = cited):")
+        print("\nSources  (* = cited, + = related via graph):")
         for s in result.sources:
-            mark = "*" if s.marker in cited else " "
+            cite = "*" if s.marker in cited else " "
+            rel = "+" if s.kind == "related" else " "
             print(
-                f" {mark}[{s.marker}] {s.page_title}  ·  PDF p.{s.pdf_page_start}–{s.pdf_page_end}"
+                f" {cite}{rel}[{s.marker}] {s.page_title}  ·  PDF p.{s.pdf_page_start}–{s.pdf_page_end}"
                 f"  ·  pages/{s.page_slug}.md  ({s.score:.3f})"
             )
         if args.show_context:

@@ -39,6 +39,7 @@ class Source:
     chunk_id: str
     score: float
     text: str
+    kind: str = "seed"  # "seed" (semantic hit) or "related" (graph-expanded)
 
 
 @dataclass
@@ -55,10 +56,12 @@ class RAGAnswer:
 
 
 def build_messages(question: str, sources: list[Source]) -> list[Message]:
-    excerpts = "\n\n".join(
-        f"[{s.marker}] ({s.page_title}, PDF p.{s.pdf_page_start}–{s.pdf_page_end})\n{s.text}"
-        for s in sources
-    )
+    def fmt(s: Source) -> str:
+        tag = " · related via graph" if s.kind == "related" else ""
+        return (f"[{s.marker}] ({s.page_title}, PDF p.{s.pdf_page_start}–{s.pdf_page_end}{tag})\n"
+                f"{s.text}")
+
+    excerpts = "\n\n".join(fmt(s) for s in sources)
     user = f"Excerpts:\n{excerpts}\n\nQuestion: {question}"
     return [
         {"role": "system", "content": SYSTEM_PROMPT},
@@ -66,27 +69,57 @@ def build_messages(question: str, sources: list[Source]) -> list[Message]:
     ]
 
 
+# Edges worth expanding along: explicit cross-refs + semantic neighbors.
+_EXPAND_RELS = ("references", "referenced_by", "similar")
+
+
 class RAGAgent:
-    def __init__(self, index: SemanticIndex, chat: ChatModel, top_k: int = 5) -> None:
+    def __init__(self, index: SemanticIndex, chat: ChatModel, top_k: int = 5,
+                 graph=None, expand_k: int = 3) -> None:
         self.index = index
         self.chat = chat
         self.top_k = top_k
+        self.graph = graph        # optional GraphStore -> graph-augmented retrieval
+        self.expand_k = expand_k  # how many related pages to add
+
+    @staticmethod
+    def _source(result, marker: int, kind: str) -> Source:
+        return Source(
+            marker=marker, page_slug=result.page_slug, page_title=result.page_title,
+            pdf_page_start=result.pdf_page_start, pdf_page_end=result.pdf_page_end,
+            chunk_id=result.chunk_id, score=result.score, text=result.text, kind=kind,
+        )
 
     def retrieve(self, question: str, top_k: int | None = None) -> list[Source]:
-        results = self.index.search(question, k=top_k or self.top_k)
-        return [
-            Source(
-                marker=i + 1,
-                page_slug=r.page_slug,
-                page_title=r.page_title,
-                pdf_page_start=r.pdf_page_start,
-                pdf_page_end=r.pdf_page_end,
-                chunk_id=r.chunk_id,
-                score=r.score,
-                text=r.text,
-            )
-            for i, r in enumerate(results)
-        ]
+        seeds = self.index.search(question, k=top_k or self.top_k)
+        sources = [self._source(r, i + 1, "seed") for i, r in enumerate(seeds)]
+        if self.graph is None or self.expand_k <= 0 or not sources:
+            return sources
+        sources += self._expand(question, sources)
+        return sources
+
+    def _expand(self, question: str, seeds: list[Source]) -> list[Source]:
+        """Pull in graph-connected pages (references/similar), re-ranked by query."""
+        seed_slugs = []
+        for s in seeds:
+            if s.page_slug not in seed_slugs:
+                seed_slugs.append(s.page_slug)
+
+        candidates = set()
+        for slug in seed_slugs:
+            try:
+                neighborhood = self.graph.neighborhood(slug)
+            except KeyError:
+                continue
+            for node in neighborhood["nodes"]:
+                if node["rel"] in _EXPAND_RELS and node["slug"] not in seed_slugs:
+                    candidates.add(node["slug"])
+        if not candidates:
+            return []
+
+        related = self.index.best_chunk_per_page(question, candidates)[: self.expand_k]
+        base = len(seeds)
+        return [self._source(r, base + i + 1, "related") for i, r in enumerate(related)]
 
     def answer(self, question: str, top_k: int | None = None) -> RAGAnswer:
         sources = self.retrieve(question, top_k)

@@ -77,7 +77,10 @@ the wiki pages:
 .venv\Scripts\python -m openwiki ask "Was ist Smooth Sound Transitions?"
 ```
 Options: `--model NAME` (default `qwen3:30b-a3b-instruct-2507-q4_K_M`), `-k N`,
-`--temperature T`, `--show-context`, `--host URL`, `-i DIR`.
+`--temperature T`, `--show-context`, `--host URL`, `-i DIR`, and (when a graph
+exists) `--graph DIR` / `--expand-k N` / `--no-graph` for **graph-augmented
+retrieval** — seeds are expanded along references + similar edges (sources marked
+`+`).
 
 **Chat + edit the wiki (multi-turn agent)** — searches, reads, and edits pages
 via tool calls:
@@ -159,13 +162,17 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
 - **`openwiki/search.py`** — `SemanticIndex.build/save/load/search`. A normalized
   NumPy embedding matrix with brute-force cosine (a dot product); no vector DB
   because the corpus is small. Persists to `output/index/` (`embeddings.npy` +
-  `index.json`).
+  `index.json`). `best_chunk_per_page(query, slugs)` re-ranks specific pages by
+  the query — the query-relevance step of graph-augmented retrieval.
 - **`openwiki/llm.py`** — the `ChatModel` protocol + `OllamaChat` (`/api/chat`,
   stdlib urllib). Parallels `embeddings.py`.
 - **`openwiki/agent.py`** — `RAGAgent`: retrieve top chunks → number them as
   excerpts → a grounded system prompt → `ChatModel` → `RAGAnswer` (answer +
   `Source`s). `<think>…</think>` is stripped; `cited_markers()` reports which
-  excerpts the answer referenced.
+  excerpts the answer referenced. With a `GraphStore` (`graph=`), `retrieve()`
+  also **expands** the semantic seeds along references/similar edges (`_expand`)
+  and re-ranks the added pages by the query — GraphRAG; those `Source`s have
+  `kind="related"`.
 - **`openwiki/tools.py`** — `WikiTools`: the tools the editing agent calls
   (`search_wiki`, `list_pages`, `read_page`, `edit_page`, `append_section`,
   `create_page`), each returning a string. File access is confined to `pages/`,

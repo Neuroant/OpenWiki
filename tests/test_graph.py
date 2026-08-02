@@ -232,3 +232,37 @@ def test_webapp_serves_neighborhood(store):
     result = app.graph_neighborhood("000-a")
     assert result["center"] == "000-a"
     assert any(n["rel"] == "child" for n in result["nodes"])
+
+
+# -- graph-augmented RAG (edge expansion) -----------------------------------
+
+class _FakeChat:
+    name = "fake:chat"
+
+    def chat(self, messages):
+        return "Antwort [1]."
+
+
+def test_rag_expands_along_graph_edges(store):
+    from openwiki.agent import RAGAgent
+
+    # Rebuild the same wiki/index the store fixture was built from.
+    index = SemanticIndex.build(_wiki(), FakeEmbedder(), size_words=50, overlap_words=10)
+    agent = RAGAgent(index, _FakeChat(), top_k=1, graph=store, expand_k=2)
+
+    sources = agent.retrieve("alpha nautilus")   # top seed = 000-a
+    kinds = [s.kind for s in sources]
+    assert "seed" in kinds and "related" in kinds        # expansion happened
+    # 000-a's similar neighbor (002-c) is pulled in; its child (001-b) is not a
+    # semantic/reference edge, so it must not appear as a related source.
+    related = [s.page_slug for s in sources if s.kind == "related"]
+    assert "002-c" in related
+    assert [s.marker for s in sources] == list(range(1, len(sources) + 1))  # contiguous
+
+
+def test_rag_expand_k_zero_disables(store):
+    from openwiki.agent import RAGAgent
+
+    index = SemanticIndex.build(_wiki(), FakeEmbedder(), size_words=50, overlap_words=10)
+    agent = RAGAgent(index, _FakeChat(), top_k=1, graph=store, expand_k=0)
+    assert all(s.kind == "seed" for s in agent.retrieve("alpha nautilus"))

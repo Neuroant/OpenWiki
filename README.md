@@ -23,9 +23,9 @@ Then `openwiki chat` is a **multi-turn agent** that can not only answer but also
 **edit** the wiki — searching, reading, and writing pages through tool calls.
 
 Then `openwiki graph-build` adds a **knowledge-graph layer** (Kuzu, an embedded
-graph + vector DB): pages, hierarchy, reading order, chunk provenance, and
-semantic-similarity edges — an additional level of abstraction over the wiki that
-never modifies it.
+graph + vector DB): pages, hierarchy, reading order, provenance, semantic-
+similarity and cross-reference edges, plus an opt-in LLM-extracted **entity
+layer** — an additional level of abstraction over the wiki that never modifies it.
 
 Finally, `openwiki serve` puts it all in the browser: a **web UI** to browse
 pages, search, chat with the agent (including its editing tools), and **explore
@@ -154,10 +154,11 @@ prompt keeps the model **grounded** — it answers only from the retrieved excer
 and says so when the answer isn't there.
 
 **Graph-augmented retrieval:** if a knowledge graph is present (`graph-build`),
-`ask` expands the semantic seeds along graph edges (references + similar), adds
-the most query-relevant *connected* pages, and marks them `+` in the sources —
-surfacing context that pure top-k cosine misses. Control with `--expand-k N`
-(default 3; `0` or `--no-graph` disables).
+`ask` expands the semantic seeds along graph edges (references, similar, and —
+with `--entities` — shared concepts), adds the most query-relevant *connected*
+pages, and marks them `+` in the sources — surfacing context that pure top-k
+cosine misses. Control with `--expand-k N` (default 3; `0` or `--no-graph`
+disables).
 
 ### Chat + edit the wiki (agent)
 

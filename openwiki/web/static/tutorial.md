@@ -38,9 +38,10 @@ anschließend direkt in der Mitte.
 ## 5. Beziehungen im Graph erkunden
 
 Der Reiter **Graph** zeigt die aktuelle Seite als Mittelpunkt eines
-Beziehungsgraphen: Hierarchie, Lesereihenfolge, **ähnliche** Seiten und die
-**„siehe Seite N"-Querverweise** des Handbuchs (farbige Legende). Klicken Sie
-einen Nachbarknoten an, um den Graphen dorthin zu verschieben und den
+Beziehungsgraphen: Hierarchie, Lesereihenfolge, **ähnliche** Seiten, die
+**„siehe Seite N"-Querverweise** des Handbuchs und — falls der Graph mit
+Entitäten gebaut wurde — Seiten mit **gemeinsamen Begriffen** (farbige Legende).
+Klicken Sie einen Nachbarknoten an, um den Graphen dorthin zu verschieben und den
 Beziehungen entlang zu wandern; **„Seite öffnen →"** öffnet die Seite.
 
 [▶ Graph für „Smooth Sound Transitions“ öffnen](<run:graph:025-smooth-sound-transitions-sst>)

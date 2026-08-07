@@ -77,8 +77,13 @@ header {
 .graph-svg { width: 100%; height: auto; border: 1px solid var(--line);
   border-radius: 10px; background: #fbfcfd; touch-action: none; }
 .gnode { cursor: pointer; }
-.gnode text.graph-label { font-size: 11.5px; fill: var(--ink); pointer-events: none; }
+.gnode text.graph-label {
+  font-size: 11.5px; fill: var(--ink); pointer-events: none;
+  paint-order: stroke; stroke: #fbfcfd; stroke-width: 3px; stroke-linejoin: round;
+}
 .gnode:hover circle, .gnode:hover rect { stroke: var(--accent); }
+/* keep a decluttered (hidden) label reachable: show it while hovering its node */
+.gnode:hover text.graph-label { opacity: 1 !important; }
 
 /* Tutorial "run" action buttons (rendered from run: links) */
 .content a.run-action {

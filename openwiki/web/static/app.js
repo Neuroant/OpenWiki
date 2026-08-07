@@ -265,13 +265,18 @@ function buildGraphDom(content) {
   graph.svg = svg;
   graph._edgeEls = [];
   graph._nodeEls = new Map();
+  graph._labelEls = new Map();
 
+  // Node degree over currently-visible edges — drives label priority.
+  const deg = {};
   graph.edges.forEach((e) => {
     if (isEdgeHidden(e)) return;
     const line = svgEl("line", { stroke: EDGE_COLOR[e.type] || "#ccc",
       "stroke-width": e.type === "similar" ? 1.3 : 2, "stroke-opacity": 0.4 });
     edgeG.appendChild(line);
     graph._edgeEls.push({ e, line });
+    deg[e.source] = (deg[e.source] || 0) + 1;
+    deg[e.target] = (deg[e.target] || 0) + 1;
   });
 
   graph.nodes.forEach((n) => {
@@ -293,6 +298,9 @@ function buildGraphDom(content) {
     attachNodeEvents(g, n);
     nodeG.appendChild(g);
     graph._nodeEls.set(n.id, g);
+    graph._labelEls.set(n.id, label);
+    n._deg = deg[n.id] || 0;
+    n._lw = undefined;  // real width measured lazily via getBBox() once rendered
   });
 
   content.append(bar, filters, svg);
@@ -393,6 +401,36 @@ function drawPositions() {
     const n = graph.nodes.get(id);
     if (n) g.setAttribute("transform", `translate(${n.x},${n.y})`);
   });
+  if (graph.alpha < 0.25) declutterLabels();  // only once the layout is calming down
+}
+
+// Greedy, priority-based label culling: hide labels whose box overlaps a
+// higher-priority label already placed. Hidden labels still show on hover.
+function labelPriority(n) {
+  if (n.root) return 1e6;
+  let p = (n.expanded ? 400 : 0) + (n._deg || 0) * 10;
+  if (n.id === graph.selected) p += 800;
+  if (n.kind === "entity") p += 5;
+  return p;
+}
+
+function declutterLabels() {
+  if (!graph._labelEls || !graph._labelEls.size) return;
+  const nodes = [...graph.nodes.values()]
+    .filter((n) => !isNodeHidden(n) && graph._labelEls.has(n.id))
+    .sort((a, b) => labelPriority(b) - labelPriority(a));
+  const placed = [];
+  for (const n of nodes) {
+    if (n._lw === undefined) {           // measure the real rendered width once
+      try { n._lw = graph._labelEls.get(n.id).getBBox().width + 8; }
+      catch (_) { n._lw = n.label.length * 7; }
+    }
+    const w = n._lw, cx = n.x, cy = n.y - 14;
+    const box = { x0: cx - w / 2, x1: cx + w / 2, y0: cy - 10, y1: cy + 6 };
+    const hit = placed.some((p) => box.x0 < p.x1 && box.x1 > p.x0 && box.y0 < p.y1 && box.y1 > p.y0);
+    graph._labelEls.get(n.id).style.opacity = hit ? "0" : "1";
+    if (!hit) placed.push(box);
+  }
 }
 
 function clientToSvg(clientX, clientY) {

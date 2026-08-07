@@ -262,7 +262,8 @@ The center pane has four tabs:
   (hierarchy, sequence, similar, cross-references, shared concepts, mentions).
   **Click a node to expand it** (pull in its neighbours / an entity's pages) and
   build up a subgraph, **drag** nodes to arrange, toggle **edge-type filters**, and
-  "Seite öffnen" opens a page. Needs `graph-build` (entities with `--entities`).
+  "Seite öffnen" opens a page. Labels auto-declutter (culled names appear on
+  hover). Needs `graph-build` (entities with `--entities`).
 
 The Help/Tutorial content lives in `openwiki/web/static/{help,tutorial}.md` and is
 rendered client-side; tutorial buttons are `run:<kind>:<arg>` links wired to the

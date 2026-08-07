@@ -107,6 +107,8 @@ Bedienung:
   auszublenden und dichte Ansichten zu entzerren.
 - **„Seite öffnen →"** öffnet die zuletzt gewählte Seite im Reiter **Wiki**;
   **„Zurücksetzen"** kehrt zur Nachbarschaft der aktuellen Seite zurück.
+- **Beschriftungen** werden in dichten Ansichten automatisch entzerrt — fahren Sie
+  mit der Maus über einen Knoten, um seinen (ggf. ausgeblendeten) Namen zu sehen.
 
 Den Graphen erzeugt man einmalig über die Kommandozeile mit
 `openwiki graph-build` (Begriffe mit `--entities`); fehlt er, ist der Reiter leer.

@@ -260,8 +260,9 @@ The center pane has four tabs:
 - **Graph** — an interactive **force-directed explorer** around the current page.
   Two node types (pages as circles, entities as diamonds) with colour-coded edges
   (hierarchy, sequence, similar, cross-references, shared concepts, mentions).
-  **Click a node to expand it** (pull in its neighbours / an entity's pages) and
-  build up a subgraph, **drag** nodes to arrange, toggle **edge-type filters**, and
+  **Click a node to expand** it (pull in its neighbours / an entity's pages) and
+  **double-click to collapse** the subtree it opened — so you build up *and* tear
+  down the graph. **Drag** nodes to arrange, toggle **edge-type filters**, and
   "Seite öffnen" opens a page. Labels auto-declutter (culled names appear on
   hover). Needs `graph-build` (entities with `--entities`).
 

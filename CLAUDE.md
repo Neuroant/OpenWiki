@@ -204,7 +204,8 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   `/api/pages/{slug}`, `/api/search`, `/api/chat`, `/api/graph/{slug}` = explore,
   `/api/graph/expand`) plus static files (served `no-cache`); `serve()` runs it.
   The Graph tab is a hand-rolled **force-directed explorer** (`app.js`: `physicsTick`
-  spring/charge sim, click-to-expand, drag, edge-type filters, greedy
+  spring/charge sim, click-to-expand / double-click-to-collapse via a `parent`
+  (introducer) pointer + `descendantsOf`, drag, edge-type filters, greedy
   `declutterLabels` collision culling using real `getBBox` widths) — no JS libraries. `static/` = a no-build vanilla-JS SPA with client-side Markdown via a
   vendored `marked.min.js`. The center pane has three tabs (**Wiki / Hilfe /
   Tutorial**); Help & Tutorial are Markdown docs (`static/help.md`,

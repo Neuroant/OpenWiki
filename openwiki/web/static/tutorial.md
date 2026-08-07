@@ -40,9 +40,10 @@ anschließend direkt in der Mitte.
 Der Reiter **Graph** ist ein interaktiver Explorer rund um die aktuelle Seite:
 **Seiten** (Kreise) und **Begriffe** (Rauten) mit farbig kodierten Beziehungen
 (Hierarchie, Lesereihenfolge, ähnliche Seiten, „siehe Seite N"-Querverweise und
-gemeinsame Begriffe). **Klicken Sie einen Knoten an, um ihn zu erweitern** und das
-Netz aufzubauen, **ziehen** Sie Knoten zum Anordnen, blenden Sie über die
-**Legenden-Chips** Kantenarten aus, und öffnen Sie eine Seite mit **„Seite öffnen →"**.
+gemeinsame Begriffe). **Klicken Sie einen Knoten an, um ihn zu erweitern** (und **doppelklicken**, um ihn
+wieder einzuklappen) und so das Netz auf- und abzubauen, **ziehen** Sie Knoten zum
+Anordnen, blenden Sie über die **Legenden-Chips** Kantenarten aus, und öffnen Sie
+eine Seite mit **„Seite öffnen →"**.
 
 [▶ Graph für „Smooth Sound Transitions“ öffnen](<run:graph:025-smooth-sound-transitions-sst>)
 

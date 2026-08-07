@@ -192,18 +192,21 @@ function initGraph(content, data) {
   graph.edges = [];
   graph.root = data.root;
   graph.selected = data.root;
-  mergeGraph(data, GW / 2, GH / 2);
+  mergeGraph(data, GW / 2, GH / 2, data.root);
   const root = graph.nodes.get(data.root);
-  if (root) { root.x = GW / 2; root.y = GH / 2; }
+  if (root) { root.x = GW / 2; root.y = GH / 2; root.expanded = true; }
   buildGraphDom(content);
   startSim();
 }
 
-function mergeGraph(data, ox, oy) {
+function mergeGraph(data, ox, oy, parentId) {
   (data.nodes || []).forEach((n) => {
     if (!graph.nodes.has(n.id)) {
-      graph.nodes.set(n.id, { ...n, x: ox + (Math.random() - 0.5) * 320,
-        y: oy + (Math.random() - 0.5) * 320, vx: 0, vy: 0, fixed: false, expanded: false });
+      // `parent` = the node that first pulled this one in (null for the root),
+      // so collapsing a node can remove exactly the subtree it introduced.
+      graph.nodes.set(n.id, { ...n, parent: n.id === graph.root ? null : parentId,
+        x: ox + (Math.random() - 0.5) * 320, y: oy + (Math.random() - 0.5) * 320,
+        vx: 0, vy: 0, fixed: false, expanded: false });
     }
   });
   const seen = new Set(graph.edges.map((e) => e.source + "|" + e.target + "|" + e.type));
@@ -233,7 +236,7 @@ function buildGraphDom(content) {
   title.textContent = sel ? sel.label : graph.root;
   const hint = document.createElement("span");
   hint.className = "graph-hint muted";
-  hint.textContent = "Klick = erweitern · ziehen zum Anordnen";
+  hint.textContent = "Klick = erweitern · Doppelklick = einklappen · ziehen zum Anordnen";
   const reset = document.createElement("button");
   reset.className = "graph-reset";
   reset.textContent = "Zurücksetzen";
@@ -281,7 +284,12 @@ function buildGraphDom(content) {
 
   graph.nodes.forEach((n) => {
     if (isNodeHidden(n)) return;
-    const g = svgEl("g", { class: "gnode" });
+    const g = svgEl("g", { class: "gnode" + (n.expanded ? " expanded" : "") });
+    const r = n.kind === "entity" ? 10 : (n.root ? 13 : 9);
+    if (n.expanded && !n.root) {   // outer ring marks an expanded node (double-click to collapse)
+      g.appendChild(svgEl("circle", { r: r + 5, fill: "none",
+        stroke: n.kind === "entity" ? "#f08c00" : "#4dabf7", "stroke-width": 1.5, "stroke-opacity": 0.5 }));
+    }
     if (n.kind === "entity") {
       g.appendChild(svgEl("rect", { x: -7, y: -7, width: 14, height: 14,
         transform: "rotate(45)", fill: "#f08c00", stroke: "#fff", "stroke-width": 2 }));
@@ -326,9 +334,19 @@ function attachNodeEvents(g, n) {
   });
   g.addEventListener("pointerup", (ev) => {
     down = false;
+    n.fixed = false;
     try { g.releasePointerCapture(ev.pointerId); } catch (_) {}
-    if (moved) { n.fixed = false; }   // was a drag → unpin
-    else { onNodeClick(n); }          // was a click → select + expand
+    if (moved) return;               // was a drag, not a click
+    // Disambiguate single click (expand) from double click (collapse).
+    if (n._clickTimer) {             // second click within the window → collapse
+      clearTimeout(n._clickTimer); n._clickTimer = null;
+      collapseNode(n);
+    } else {
+      n._clickTimer = setTimeout(() => {
+        n._clickTimer = null;
+        if (graph.nodes.has(n.id)) onNodeClick(n);
+      }, 260);
+    }
   });
 }
 
@@ -338,11 +356,38 @@ async function onNodeClick(n) {
     n.expanded = true;
     try {
       const data = await postJSON("/api/graph/expand", { type: n.kind, id: n.id });
-      mergeGraph(data, n.x, n.y);
-    } catch (_) { /* ignore */ }
+      mergeGraph(data, n.x, n.y, n.id);   // new nodes get this node as their parent
+    } catch (_) { n.expanded = false; }
   }
   buildGraphDom($("#content"));   // reflects new nodes + updated selection
   bumpSim();
+}
+
+// Double-click: collapse the subtree this node introduced (inverse of expand).
+function collapseNode(n) {
+  if (n.root) return;   // the root is the anchor — use "Zurücksetzen" to start over
+  const gone = descendantsOf(n.id);
+  if (!gone.size) { n.expanded = false; return; }  // nothing to collapse
+  gone.forEach((id) => graph.nodes.delete(id));
+  graph.edges = graph.edges.filter((e) => !gone.has(e.source) && !gone.has(e.target));
+  n.expanded = false;
+  if (gone.has(graph.selected)) graph.selected = graph.root;
+  buildGraphDom($("#content"));
+  bumpSim();
+}
+
+function descendantsOf(id) {
+  const children = {};
+  graph.nodes.forEach((nd) => { if (nd.parent) (children[nd.parent] ||= []).push(nd.id); });
+  const out = new Set();
+  const stack = [...(children[id] || [])];
+  while (stack.length) {
+    const cur = stack.pop();
+    if (out.has(cur)) continue;
+    out.add(cur);
+    (children[cur] || []).forEach((c) => stack.push(c));
+  }
+  return out;
 }
 
 // -- force simulation -------------------------------------------------------

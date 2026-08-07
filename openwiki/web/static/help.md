@@ -101,7 +101,11 @@ Bedienung:
 
 - **Klick auf einen Knoten** *erweitert* ihn: seine Nachbarn (bzw. bei einem
   Begriff die Seiten, die ihn erwähnen) werden in den Graphen geholt — so bauen Sie
-  Schritt für Schritt ein größeres Beziehungsnetz auf.
+  Schritt für Schritt ein größeres Beziehungsnetz auf. Erweiterte Knoten tragen
+  einen dünnen Ring.
+- **Doppelklick** auf einen erweiterten Knoten *klappt* ihn wieder *ein* und
+  entfernt den Teilgraphen, den er geöffnet hat — so öffnen und schließen Sie
+  Teilbäume beliebig.
 - **Knoten ziehen**, um den Graphen von Hand anzuordnen.
 - **Legenden-Chips** ein-/ausschalten, um Kantenarten (oder die Begriffe) ein- und
   auszublenden und dichte Ansichten zu entzerren.

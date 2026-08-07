@@ -214,7 +214,9 @@ function mergeGraph(data, ox, oy, parentId) {
     const k = e.source + "|" + e.target + "|" + e.type;
     if (!seen.has(k) && graph.nodes.has(e.source) && graph.nodes.has(e.target)) {
       seen.add(k);
-      graph.edges.push({ source: e.source, target: e.target, type: e.type });
+      // `addedBy` = the expansion that first revealed this edge, so collapsing that
+      // node can remove the edges it introduced (even to already-visible nodes).
+      graph.edges.push({ source: e.source, target: e.target, type: e.type, addedBy: parentId });
     }
   });
 }
@@ -367,9 +369,10 @@ async function onNodeClick(n) {
 function collapseNode(n) {
   if (n.root) return;   // the root is the anchor — use "Zurücksetzen" to start over
   const gone = descendantsOf(n.id);
-  if (!gone.size) { n.expanded = false; return; }  // nothing to collapse
   gone.forEach((id) => graph.nodes.delete(id));
-  graph.edges = graph.edges.filter((e) => !gone.has(e.source) && !gone.has(e.target));
+  // Drop edges into the removed subtree AND edges this node introduced to survivors.
+  graph.edges = graph.edges.filter(
+    (e) => !gone.has(e.source) && !gone.has(e.target) && e.addedBy !== n.id);
   n.expanded = false;
   if (gone.has(graph.selected)) graph.selected = graph.root;
   buildGraphDom($("#content"));

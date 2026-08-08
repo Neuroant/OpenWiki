@@ -17,13 +17,14 @@ from .graph import (
     extract_entities, extract_references,
 )
 from .llm import ChatModel, OllamaChat
+from .mcp_server import MCPStdioServer, build_server
 from .pdf_parser import PDFParser
 from .search import SearchResult, SemanticIndex
 from .tools import WikiTools
 from .web import WikiWebApp, serve
 from .wiki import Wiki, WikiBuilder, WikiPage, slugify, write_wiki
 
-__version__ = "0.14.0"
+__version__ = "0.15.0"
 
 __all__ = [
     "PDFParser",
@@ -64,5 +65,7 @@ __all__ = [
     "detect_page_offset",
     "extract_entities",
     "Entity",
+    "build_server",
+    "MCPStdioServer",
     "__version__",
 ]

@@ -18,6 +18,7 @@ from .chat_agent import WikiAgent
 from .graph import GraphStore, build_graph, extract_entities, extract_references
 from .embeddings import OllamaEmbedder
 from .llm import OllamaChat
+from .mcp_server import build_server
 from .models import ParsedDocument
 from .pdf_parser import PDFParser
 from .search import SemanticIndex
@@ -154,6 +155,19 @@ def _build_argparser() -> argparse.ArgumentParser:
     serve_p.add_argument("--host", default="http://localhost:11434", help="Ollama host URL.")
     serve_p.add_argument("--temperature", type=float, default=0.2, help="Sampling temperature (default: 0.2).")
     serve_p.add_argument("--dry-run", action="store_true", help="Agent previews edits without writing files.")
+
+    mcp_p = sub.add_parser("mcp", help="Expose the wiki (RAG+GraphRAG) to coding agents over MCP (stdio).")
+    mcp_p.add_argument("--wiki", type=Path, default=Path("output") / "wiki",
+                       help="Wiki directory (default: ./output/wiki).")
+    mcp_p.add_argument("-i", "--index", type=Path, default=Path("output") / "index",
+                       help="Search index directory (default: ./output/index).")
+    mcp_p.add_argument("--graph", type=Path, default=Path("output") / "graph",
+                       help="Knowledge-graph directory, if present (default: ./output/graph).")
+    mcp_p.add_argument("--model", default="qwen3:30b-a3b-instruct-2507-q4_K_M",
+                       help="Ollama chat model for `wiki_ask`.")
+    mcp_p.add_argument("--host", default="http://localhost:11434", help="Ollama host URL.")
+    mcp_p.add_argument("--temperature", type=float, default=0.2, help="Sampling temperature (default: 0.2).")
+    mcp_p.add_argument("--no-ask", action="store_true", help="Disable the `wiki_ask` tool (no chat model).")
 
     graph_p = sub.add_parser("graph-build", help="Build the Kuzu knowledge graph over the wiki.")
     graph_p.add_argument("source", type=Path, help="A PDF, or a .json produced by `ingest`.")
@@ -479,6 +493,31 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_mcp(args: argparse.Namespace) -> int:
+    from . import __version__
+
+    index = None
+    if (args.index / "index.json").is_file():
+        index = SemanticIndex.load(args.index)
+        if isinstance(index.embedder, OllamaEmbedder):
+            index.embedder.host = args.host.rstrip("/")
+    graph = None
+    if args.graph.exists():
+        try:
+            graph = GraphStore(args.graph)   # read-only: coding agents only read
+        except Exception as exc:
+            print(f"(graph not loaded: {exc})", file=sys.stderr)
+
+    agent = None
+    if index is not None and not args.no_ask:
+        chat = OllamaChat(model=args.model, host=args.host, temperature=args.temperature)
+        agent = RAGAgent(index, chat, graph=graph)
+
+    server = build_server(args.wiki, index=index, graph=graph, agent=agent, version=__version__)
+    server.serve()   # blocks on stdio (JSON-RPC)
+    return 0
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     # Ensure non-ASCII output (German umlauts, ·, –) prints correctly on Windows,
     # where stdout may otherwise default to a non-UTF-8 code page.
@@ -502,6 +541,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return _cmd_chat(args)
     if args.command == "serve":
         return _cmd_serve(args)
+    if args.command == "mcp":
+        return _cmd_mcp(args)
     if args.command == "graph-build":
         return _cmd_graph_build(args)
     return 1

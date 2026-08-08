@@ -278,6 +278,22 @@ The Help/Tutorial content lives in `openwiki/web/static/{help,tutorial}.md` and 
 rendered client-side; tutorial buttons are `run:<kind>:<arg>` links wired to the
 live UI.
 
+### Use from coding agents (MCP)
+
+`openwiki mcp` exposes the wiki's **RAG + GraphRAG** as an
+[MCP](https://modelcontextprotocol.io) server (dependency-free, stdio), so coding
+agents — **Claude Code**, **OpenCode**, Cursor, … — can query it as tools:
+`wiki_ask` (grounded, cited answers), `wiki_search`, `wiki_read_page`,
+`wiki_graph_neighbors`, `wiki_find_path`, `wiki_find_entity`.
+
+```bash
+openwiki mcp --wiki output/wiki --index output/index --graph output/graph
+```
+
+Setup and copy-paste config/commands/skills for Claude Code and OpenCode are in
+**[docs/coding-agents.md](docs/coding-agents.md)** (examples under
+[`examples/coding-agents/`](examples/coding-agents/)).
+
 ## Use as a library
 
 ```python
@@ -328,7 +344,8 @@ PDF ──PDFParser──▶ ParsedDocument ──▶ JSON / Markdown
 - `openwiki/chat_agent.py` — the multi-turn editing agent (tool loop + history)
 - `openwiki/graph/` — the Kuzu graph layer (`builder.py` writes it, `store.py` queries **and incrementally upserts** it, `references.py` extracts cross-references, `entities.py` extracts typed entities via an LLM)
 - `openwiki/web/` — stdlib web server + vanilla-JS SPA (browse, search, chat/edit, graph)
-- `openwiki/cli.py` — the `openwiki` command line (`ingest`, `build-wiki`, `index`, `search`, `ask`, `chat`, `graph-build`, `serve`)
+- `openwiki/mcp_server.py` — stdio MCP server exposing the wiki as tools for coding agents
+- `openwiki/cli.py` — the `openwiki` command line (`ingest`, `build-wiki`, `index`, `search`, `ask`, `chat`, `graph-build`, `serve`, `mcp`)
 
 ## Roadmap
 

@@ -112,6 +112,15 @@ Options: `--wiki DIR`, `-i/--index DIR`, `--graph DIR`, `--bind ADDR`, `--port N
 `--model NAME`, `--host URL`, `--temperature T`, `--dry-run`. The graph tab lights
 up automatically if `--graph` (default `output/graph`) exists.
 
+**MCP server (for coding agents)** — exposes RAG+GraphRAG as stdio MCP tools:
+```
+.venv\Scripts\python -m openwiki mcp --wiki output\wiki -i output\index --graph output\graph
+```
+Read-only tools (`wiki_ask`/`wiki_search`/`wiki_read_page`/`wiki_list_pages`/
+`wiki_graph_neighbors`/`wiki_find_path`/`wiki_find_entity`), advertised by
+availability. Options: `--model`, `--host`, `--no-ask`. Coding-agent setup is in
+`docs/coding-agents.md` (+ `examples/coding-agents/`).
+
 **Test** — the suite parses the first 5 pages of the sample PDF and skips
 cleanly if PyMuPDF or the PDF is absent:
 ```
@@ -220,8 +229,13 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   actions are `run:<kind>:<arg>` links (`page`/`search`/`ask`) that `app.js`
   intercepts and drives against the live UI. Reuses
   `WikiTools`/`WikiAgent`/`SemanticIndex`.
+- **`openwiki/mcp_server.py`** — a dependency-free **stdio MCP server**
+  (newline-delimited JSON-RPC 2.0: `initialize`/`tools/list`/`tools/call`), like
+  the web layer but for coding agents. `build_server(...)` wraps
+  `WikiTools`/`RAGAgent` as read-only `wiki_*` tools; `MCPStdioServer.handle()` is
+  pure (unit-tested without stdio).
 - **`openwiki/cli.py`** — argparse CLI with `ingest`, `build-wiki`, `index`,
-  `search`, `ask`, `chat`, `graph-build`, and `serve` subcommands. Add new
+  `search`, `ask`, `chat`, `graph-build`, `serve`, and `mcp` subcommands. Add new
   capabilities as new subcommands, not as more flags.
 
 ### Conventions & gotchas

@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "openwiki": {
+      "command": "<OPENWIKI>/.venv/bin/python",
+      "args": [
+        "-m", "openwiki", "mcp",
+        "--wiki",  "<OPENWIKI>/output/wiki",
+        "--index", "<OPENWIKI>/output/index",
+        "--graph", "<OPENWIKI>/output/graph"
+      ]
+    }
+  }
+}

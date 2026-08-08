@@ -84,6 +84,10 @@ header {
 .gnode:hover circle, .gnode:hover rect { stroke: var(--accent); }
 /* keep a decluttered (hidden) label reachable: show it while hovering its node */
 .gnode:hover text.graph-label { opacity: 1 !important; }
+/* active/selected subgraph: dim the rest, emphasise the anchor */
+.gnode.dim { opacity: 0.4; transition: opacity .15s ease; }
+.gnode.dim:hover { opacity: 1; }
+.gnode.selected text.graph-label { font-weight: 700; }
 
 /* Tutorial "run" action buttons (rendered from run: links) */
 .content a.run-action {

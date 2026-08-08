@@ -246,7 +246,10 @@ function buildGraphDom(content) {
   const open = document.createElement("button");
   open.className = "graph-open";
   open.textContent = "Seite öffnen →";
-  open.addEventListener("click", () => loadPage(graph.selected || graph.root));
+  open.addEventListener("click", () => {
+    const s = graph.nodes.get(graph.selected);
+    loadPage(s && s.kind === "page" ? s.id : graph.root);   // entities have no page
+  });
   bar.append(title, hint, reset, open);
 
   const filters = document.createElement("div");
@@ -272,12 +275,23 @@ function buildGraphDom(content) {
   graph._nodeEls = new Map();
   graph._labelEls = new Map();
 
+  // Active/selected subgraph = the selected node + the subtree it introduced.
+  // When a proper branch is selected we emphasise it and dim the rest.
+  const selId = graph.nodes.has(graph.selected) ? graph.selected : graph.root;
+  const selSet = new Set([selId]);
+  descendantsOf(selId).forEach((id) => selSet.add(id));
+  const visN = [...graph.nodes.values()].filter((n) => !isNodeHidden(n)).length;
+  const focus = selSet.size > 1 && selSet.size < visN;
+
   // Node degree over currently-visible edges — drives label priority.
   const deg = {};
   graph.edges.forEach((e) => {
     if (isEdgeHidden(e)) return;
+    const inSel = selSet.has(e.source) && selSet.has(e.target);
+    const base = e.type === "similar" ? 1.3 : 2;
     const line = svgEl("line", { stroke: EDGE_COLOR[e.type] || "#ccc",
-      "stroke-width": e.type === "similar" ? 1.3 : 2, "stroke-opacity": 0.4 });
+      "stroke-width": focus && inSel ? base + 1.7 : base,
+      "stroke-opacity": !focus ? 0.4 : (inSel ? 0.92 : 0.15) });
     edgeG.appendChild(line);
     graph._edgeEls.push({ e, line });
     deg[e.source] = (deg[e.source] || 0) + 1;
@@ -286,8 +300,13 @@ function buildGraphDom(content) {
 
   graph.nodes.forEach((n) => {
     if (isNodeHidden(n)) return;
-    const g = svgEl("g", { class: "gnode" + (n.expanded ? " expanded" : "") });
+    const g = svgEl("g", { class: "gnode" + (n.expanded ? " expanded" : "")
+      + (n.id === selId ? " selected" : "") + (focus && !selSet.has(n.id) ? " dim" : "") });
     const r = n.kind === "entity" ? 10 : (n.root ? 13 : 9);
+    if (n.id === selId) {          // accent ring marks the active/selected node
+      g.appendChild(svgEl("circle", { r: r + 7, fill: "none",
+        stroke: "#1971c2", "stroke-width": 2.5, "stroke-opacity": 0.9 }));
+    }
     if (n.expanded && !n.root) {   // outer ring marks an expanded node (double-click to collapse)
       g.appendChild(svgEl("circle", { r: r + 5, fill: "none",
         stroke: n.kind === "entity" ? "#f08c00" : "#4dabf7", "stroke-width": 1.5, "stroke-opacity": 0.5 }));
@@ -353,7 +372,7 @@ function attachNodeEvents(g, n) {
 }
 
 async function onNodeClick(n) {
-  if (n.kind === "page") graph.selected = n.id;
+  graph.selected = n.id;   // any node can be the active anchor (highlights its subtree)
   if (!n.expanded) {
     n.expanded = true;
     try {

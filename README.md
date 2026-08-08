@@ -263,8 +263,10 @@ The center pane has four tabs:
   **Click a node to expand** it (pull in its neighbours / an entity's pages) and
   **double-click to collapse** the subtree it opened — so you build up *and* tear
   down the graph. **Drag** nodes to arrange, toggle **edge-type filters**, and
-  "Seite öffnen" opens a page. Labels auto-declutter (culled names appear on
-  hover). Needs `graph-build` (entities with `--entities`).
+  "Seite öffnen" opens a page. The clicked node's subtree is highlighted (heavier
+  edges, accent-ringed anchor) while the rest dims, so the active subgraph stands
+  out. Labels auto-declutter (culled names appear on hover). Needs `graph-build`
+  (entities with `--entities`).
 
 The Help/Tutorial content lives in `openwiki/web/static/{help,tutorial}.md` and is
 rendered client-side; tutorial buttons are `run:<kind>:<arg>` links wired to the

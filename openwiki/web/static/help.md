@@ -107,6 +107,9 @@ Bedienung:
   entfernt den Teilgraphen, den er geöffnet hat — so öffnen und schließen Sie
   Teilbäume beliebig.
 - **Knoten ziehen**, um den Graphen von Hand anzuordnen.
+- Der zuletzt angeklickte Knoten ist der **aktive** Knoten (Akzent-Ring). Sein
+  Teilgraph wird hervorgehoben (kräftigere Linien), der Rest abgeblendet — so sehen
+  Sie auf einen Blick, welchen Teilbaum Sie gerade bearbeiten.
 - **Legenden-Chips** ein-/ausschalten, um Kantenarten (oder die Begriffe) ein- und
   auszublenden und dichte Ansichten zu entzerren.
 - **„Seite öffnen →"** öffnet die zuletzt gewählte Seite im Reiter **Wiki**;

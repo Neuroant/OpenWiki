@@ -365,19 +365,34 @@ def _print_edits(tools: WikiTools) -> None:
             print(f"  - {entry}", file=sys.stderr)
 
 
+def _open_graph(path: Path, writable: bool):
+    """Open the graph, falling back to read-only if a writable open is refused."""
+    if not path.exists():
+        return None
+    try:
+        return GraphStore(path, writable=writable)
+    except Exception as exc:
+        if writable:
+            try:
+                print(f"(graph opened read-only: {exc})", file=sys.stderr)
+                return GraphStore(path, writable=False)
+            except Exception as exc2:
+                print(f"(graph not loaded: {exc2})", file=sys.stderr)
+                return None
+        print(f"(graph not loaded: {exc})", file=sys.stderr)
+        return None
+
+
 def _cmd_chat(args: argparse.Namespace) -> int:
     index = None
     if (args.index / "index.json").is_file():
         index = SemanticIndex.load(args.index)
         if isinstance(index.embedder, OllamaEmbedder):
             index.embedder.host = args.host.rstrip("/")
-    graph = None
-    if args.graph.exists():
-        try:
-            graph = GraphStore(args.graph)
-        except Exception as exc:
-            print(f"(graph not loaded: {exc})", file=sys.stderr)
-    tools = WikiTools(args.wiki, index=index, graph=graph, dry_run=args.dry_run)
+    # Writable graph (+ embedder) → agent edits update the graph incrementally.
+    graph = _open_graph(args.graph, writable=index is not None and not args.dry_run)
+    embedder = index.embedder if index else None
+    tools = WikiTools(args.wiki, index=index, graph=graph, embedder=embedder, dry_run=args.dry_run)
     chat = OllamaChat(model=args.model, host=args.host, temperature=args.temperature)
     agent = WikiAgent(chat, tools)
 
@@ -447,19 +462,18 @@ def _cmd_serve(args: argparse.Namespace) -> int:
         if isinstance(index.embedder, OllamaEmbedder):
             index.embedder.host = args.host.rstrip("/")
 
-    graph = None
-    if args.graph.exists():
-        try:
-            graph = GraphStore(args.graph)
-        except Exception as exc:  # missing/corrupt graph shouldn't stop the server
-            print(f"(graph not loaded: {exc})", file=sys.stderr)
+    # Writable graph (+ embedder) → agent edits update the graph incrementally.
+    graph = _open_graph(args.graph, writable=index is not None and not args.dry_run)
+    embedder = index.embedder if index else None
 
-    tools = WikiTools(args.wiki, index=index, graph=graph, dry_run=args.dry_run)
+    tools = WikiTools(args.wiki, index=index, graph=graph, embedder=embedder, dry_run=args.dry_run)
     chat = OllamaChat(model=args.model, host=args.host, temperature=args.temperature)
     agent = WikiAgent(chat, tools)
     app = WikiWebApp(args.wiki, index=index, agent=agent, tools=tools, graph=graph)
 
-    features = ["search" if index else None, "chat", "graph" if graph else None]
+    graph_feat = ("graph+sync" if graph and getattr(graph, "writable", False) else
+                  ("graph" if graph else None))
+    features = ["search" if index else None, "chat", graph_feat]
     print(f"Serving wiki '{args.wiki}' — {', '.join(f for f in features if f)}.", file=sys.stderr)
     serve(app, host=args.bind, port=args.port)
     return 0

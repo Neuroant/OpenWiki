@@ -73,7 +73,9 @@ nicht nur nach Textinhalten.
 
 Jeder Werkzeugaufruf erscheint unter der Antwort als Chip: **·** für lesende,
 **✎** für schreibende Werkzeuge. Nach einer Änderung wird die betroffene Seite
-automatisch neu geladen.
+automatisch neu geladen. Ist ein Wissensgraph geladen, wird eine neue oder
+geänderte Seite **sofort** in den Graphen aufgenommen (mit `Ähnlich`-Kanten) —
+ohne kompletten Neuaufbau.
 
 ## Wissensgraph (Reiter „Graph")
 

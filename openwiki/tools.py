@@ -35,14 +35,27 @@ def _first_heading(path: Path) -> str:
 
 class WikiTools:
     def __init__(self, wiki_dir, index: Optional[SemanticIndex] = None,
-                 graph=None, dry_run: bool = False) -> None:
+                 graph=None, embedder=None, dry_run: bool = False) -> None:
         self.wiki_dir = Path(wiki_dir)
         self.pages_dir = self.wiki_dir / "pages"
         self.index = index
         self.graph = graph  # optional GraphStore (enables the graph-aware tools)
+        # Embedder for incremental graph updates (a writable graph + embedder means
+        # edits are reflected in the graph without a full rebuild).
+        self.embedder = embedder
         self.dry_run = dry_run
         self.edits: list[str] = []
         self._has_entities: Optional[bool] = None  # cached graph.has_entities()
+
+    def _sync_graph(self, slug: str, content: str) -> None:
+        """Reflect a write in the knowledge graph, if it's writable."""
+        if self.embedder is None or self.graph is None or not getattr(self.graph, "writable", False):
+            return
+        try:
+            self.graph.upsert_page(slug, content, embedder=self.embedder)
+            self.edits.append(f"graph: synced {slug}")
+        except Exception as exc:  # a graph hiccup must not fail the edit itself
+            self.edits.append(f"graph sync failed for {slug}: {exc}")
 
     def _graph_has_entities(self) -> bool:
         if self.graph is None:
@@ -268,4 +281,5 @@ class WikiTools:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
         self.edits.append(summary)
+        self._sync_graph(slug, content)   # reflect the edit in the graph (if writable)
         return f"OK: wrote '{slug}' ({len(content)} chars)."

@@ -183,6 +183,8 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   When a `GraphStore` is passed (`graph=`), it also exposes **`graph_neighbors`**
   and **`find_path`** (advertised only when a graph is present), and
   **`find_entity`** (only when the graph has entities — `_graph_has_entities()`).
+  With a writable graph + an `embedder`, every successful write calls `_sync_graph`
+  → `GraphStore.upsert_page`, so agent edits update the graph incrementally.
 - **`openwiki/chat_agent.py`** — `WikiAgent`: the multi-turn tool loop (model →
   tool calls → results → model …) with persistent history. Uses `chat_raw()`
   (tool calling) rather than `chat()`.
@@ -197,8 +199,12 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   `shared_entity` group), `find_path(a, b)`, entity queries (`entities_for_page`,
   `pages_for_entity`, `has_entities`), `hybrid_search(vec)`, and the Graph‑tab
   explorer API `explore(slug)` / `expand(type, id)` (typed page + entity nodes).
-  Opened **read-only** and lock-guarded (the threaded web server shares one
-  connection). Only `builder`/`store` import `kuzu`; `references`/`entities` do not.
+  With `writable=True` it also **upserts** pages incrementally
+  (`upsert_page(slug, text, embedder)`: MERGE the Page, replace its Chunks — the
+  HNSW index self-maintains on insert/delete — recompute `SIMILAR_TO`). Opened
+  read-only by default, `RLock`-guarded (an upsert holds the lock across a batch;
+  the threaded web server shares one connection). Only `builder`/`store` import
+  `kuzu`; `references`/`entities` do not.
 - **`openwiki/web/`** — the web UI. `server.py` = `WikiWebApp` (state) + a
   `ThreadingHTTPServer` handler exposing a JSON API (`/api/wiki`,
   `/api/pages/{slug}`, `/api/search`, `/api/chat`, `/api/graph/{slug}` = explore,
@@ -284,6 +290,14 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   the `shared_entity` edges, the `find_entity` tool, and the entity term in RAG
   expansion (`agent._EXPAND_RELS`). Extraction is slow (~1 call/page) — run it in
   the background; tests use a deterministic fake chat.
+- **Incremental updates:** `serve`/`chat` open the graph **writable** (exclusive
+  Kuzu lock) when an index is present and not `--dry-run`, passing `index.embedder`
+  to `WikiTools`; edits then upsert into the graph live. Writable is exclusive, so
+  one such process at a time (there's a read-only fallback if the lock is held).
+  Only `SIMILAR_TO` is recomputed on upsert — CHILD_OF/NEXT, REFERENCES and
+  entities still need a full `graph-build`. Kuzu's HNSW index supports incremental
+  insert/delete (verified), so no index rebuild; `DROP_VECTOR_INDEX` is buggy in
+  0.11 — avoid it.
 - **Cross-references:** the manual cites *printed* page numbers but nodes are keyed
   by *physical* PDF pages. `references.detect_page_offset()` finds the constant
   offset (the mode of `physical - printed` over every integer in the page text —

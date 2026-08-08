@@ -181,6 +181,12 @@ Tools: `search_wiki`, `list_pages`, `read_page`, `edit_page`, `append_section`,
 `create_page`. Edits are written into `output/wiki/pages/` — use `--dry-run` to
 preview them first. File access is confined to the pages directory.
 
+If a knowledge graph is present (and not `--dry-run`), edits update it
+**incrementally**: a created or edited page is upserted into the graph — chunked,
+embedded, and linked by `SIMILAR_TO` — so it joins the Graph tab and the agent's
+graph tools right away, without a full `graph-build`. (Structural/reference/entity
+edges still come from a full rebuild.)
+
 If a knowledge graph is present (`graph-build`), the agent also gets
 **`graph_neighbors`** (a page's related pages) and **`find_path`** (the shortest
 relationship chain between two pages) — so it can answer "what's related to X?"
@@ -320,7 +326,7 @@ PDF ──PDFParser──▶ ParsedDocument ──▶ JSON / Markdown
 - `openwiki/agent.py` — the RAG agent (retrieve → grounded prompt → cited answer)
 - `openwiki/tools.py` — the read/write tools the editing agent calls
 - `openwiki/chat_agent.py` — the multi-turn editing agent (tool loop + history)
-- `openwiki/graph/` — the Kuzu graph layer (`builder.py` writes it, `store.py` queries it, `references.py` extracts cross-references, `entities.py` extracts typed entities via an LLM)
+- `openwiki/graph/` — the Kuzu graph layer (`builder.py` writes it, `store.py` queries **and incrementally upserts** it, `references.py` extracts cross-references, `entities.py` extracts typed entities via an LLM)
 - `openwiki/web/` — stdlib web server + vanilla-JS SPA (browse, search, chat/edit, graph)
 - `openwiki/cli.py` — the `openwiki` command line (`ingest`, `build-wiki`, `index`, `search`, `ask`, `chat`, `graph-build`, `serve`)
 
@@ -337,3 +343,4 @@ PDF ──PDFParser──▶ ParsedDocument ──▶ JSON / Markdown
 - [x] **Graph-aware agent tools** — `graph_neighbors` and `find_path` let the agent traverse the graph (multi-hop, "how are X and Y connected?")
 - [x] **Graph-augmented `ask`** — RAG retrieval expands along graph edges (GraphRAG): semantic seeds + query-re-ranked connected pages
 - [x] **Entity layer** — LLM-extracted typed entities + `MENTIONS` edges (`--entities`), a `find_entity` tool, and shared-concept edges/expansion
+- [x] **Incremental graph updates** — agent edits upsert the page into the graph live (chunks + embeddings + `SIMILAR_TO`), no rebuild needed

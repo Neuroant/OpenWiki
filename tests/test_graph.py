@@ -401,3 +401,62 @@ def test_webapp_graph_explore_and_expand(entity_store):
     assert app.graph_explore("001-b")["root"] == "001-b"
     expanded = app.graph_expand("entity", _entity_key(entity_store, "Reverb"))
     assert {n["id"] for n in expanded["nodes"]} == {"001-b", "002-c"}
+
+
+# -- incremental updates on agent edits -------------------------------------
+
+@pytest.fixture
+def writable_store(tmp_path):
+    wiki = _wiki()
+    index = SemanticIndex.build(wiki, FakeEmbedder(), size_words=50, overlap_words=10)
+    GraphBuilder(tmp_path / "graph", similar_k=3).build(wiki, index)
+    s = GraphStore(tmp_path / "graph", writable=True)
+    yield s
+    s.close()
+
+
+def test_upsert_new_page_joins_graph(writable_store):
+    res = writable_store.upsert_page(
+        "900-new", "# Meine Notizen\n\nalpha nautilus alpha notes.", embedder=FakeEmbedder())
+    assert res["title"] == "Meine Notizen" and res["chunks"] >= 1
+    assert res["similar"] >= 1                                   # connected via SIMILAR_TO
+    nb = writable_store.neighborhood("900-new")
+    assert nb["center"] == "900-new"
+    assert any(n["rel"] == "similar" for n in nb["nodes"])       # shows in the Graph tab
+    # closest existing page for "alpha nautilus" is 000-a
+    assert any(e["target"] == "000-a" for e in nb["edges"] if e["type"] == "similar")
+
+
+def test_upsert_replaces_chunks_on_edit(writable_store):
+    def n_chunks():
+        return writable_store._rows("MATCH (c:Chunk {page_slug:'900-new'}) RETURN count(c);")[0][0]
+    writable_store.upsert_page("900-new", "alpha " * 400 + "nautilus", embedder=FakeEmbedder())
+    many = n_chunks()
+    writable_store.upsert_page("900-new", "alpha nautilus", embedder=FakeEmbedder())  # shorter
+    assert 1 <= n_chunks() < many                               # re-chunked, old chunks gone
+
+
+def test_upsert_requires_writable(store):
+    with pytest.raises(RuntimeError):
+        store.upsert_page("x", "text", embedder=FakeEmbedder())
+
+
+def test_wikitools_create_page_syncs_graph(tmp_path, writable_store):
+    from openwiki.tools import WikiTools
+
+    wdir = tmp_path / "w"
+    (wdir / "pages").mkdir(parents=True)
+    tools = WikiTools(wdir, graph=writable_store, embedder=FakeEmbedder())
+    assert tools.create_page("901-note", "Notiz", "alpha nautilus body").startswith("OK")
+    assert writable_store.neighborhood("901-note")["center"] == "901-note"
+    assert any("synced 901-note" in e for e in tools.edits)
+
+
+def test_wikitools_no_sync_on_readonly_graph(tmp_path, store):
+    from openwiki.tools import WikiTools
+
+    wdir = tmp_path / "w"
+    (wdir / "pages").mkdir(parents=True)
+    tools = WikiTools(wdir, graph=store, embedder=FakeEmbedder())  # read-only graph
+    tools.create_page("902-x", "X", "body")
+    assert not any("synced" in e for e in tools.edits)            # no write attempted

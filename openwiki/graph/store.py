@@ -8,6 +8,7 @@ vector index and graph traversal working together.
 
 from __future__ import annotations
 
+import re
 import threading
 from pathlib import Path
 from typing import Optional
@@ -19,25 +20,29 @@ except ImportError as exc:  # pragma: no cover
         "Kuzu is required for the graph layer. Install it with `pip install kuzu`."
     ) from exc
 
+import numpy as np
+
 from .builder import CHUNK_VECTOR_INDEX
 
 
 class GraphStore:
-    def __init__(self, db_path) -> None:
+    def __init__(self, db_path, writable: bool = False) -> None:
         self.db_path = Path(db_path)
         if not self.db_path.exists():
             raise FileNotFoundError(
                 f"No graph at {self.db_path}. Build it with `openwiki graph-build`."
             )
-        # Read-only: the store never writes, and this avoids taking Kuzu's
-        # exclusive write lock (so a serving process won't block, e.g., a rebuild
-        # or a second reader).
+        self.writable = writable
+        # Read-only by default: the store only reads, which avoids Kuzu's exclusive
+        # write lock (so a serving process won't block a rebuild or second reader).
+        # Incremental updates (agent edits) need a writable connection.
         try:
-            self._db = kuzu.Database(str(self.db_path), read_only=True)
+            self._db = kuzu.Database(str(self.db_path), read_only=not writable)
         except TypeError:  # older kuzu without the kwarg
             self._db = kuzu.Database(str(self.db_path))
         self._conn = kuzu.Connection(self._db)
-        self._lock = threading.Lock()  # one Kuzu connection, possibly many web threads
+        # Re-entrant: an upsert holds the lock across a batch and calls _rows within.
+        self._lock = threading.RLock()
 
     def close(self) -> None:
         self._conn.close()
@@ -52,6 +57,10 @@ class GraphStore:
             while res.has_next():
                 out.append(res.get_next())
         return out
+
+    def _exec(self, query: str, params: Optional[dict] = None) -> None:
+        with self._lock:
+            self._conn.execute(query, parameters=params) if params else self._conn.execute(query)
 
     @staticmethod
     def _node(row) -> dict:
@@ -216,6 +225,74 @@ class GraphStore:
         hops, slugs, titles, rels = rows[0]
         return {"from": from_slug, "to": to_slug, "hops": hops,
                 "nodes": slugs, "titles": titles, "rels": rels}
+
+    # -- incremental updates (agent edits) -----------------------------
+
+    _H1 = re.compile(r"^#\s+(.+)$", re.MULTILINE)
+
+    def upsert_page(self, slug: str, text: str, title: Optional[str] = None,
+                    embedder=None, similar_k: int = 6,
+                    chunk_size: int = 180, overlap: int = 30) -> dict:
+        """Add or refresh a page in the graph so an agent edit joins it live.
+
+        Upserts the `Page` node, replaces its `Chunk`s (+embeddings; the HNSW index
+        self-maintains), and recomputes its `SIMILAR_TO` edges. Structural
+        (CHILD_OF/NEXT), REFERENCES and entity edges are not derived here — a full
+        `graph-build` is still what produces those.
+        """
+        if not self.writable:
+            raise RuntimeError("GraphStore is read-only; open it writable to upsert.")
+        if embedder is None:
+            raise ValueError("upsert_page needs an embedder.")
+        from ..chunking import chunk_text, normalize_text
+
+        if title is None:
+            m = self._H1.search(text or "")
+            title = m.group(1).strip() if m else slug
+        chunks = chunk_text(normalize_text(text or ""), chunk_size, overlap)
+
+        emb = None
+        if chunks:
+            emb = embedder.embed_documents(chunks).astype(np.float32)
+            norms = np.linalg.norm(emb, axis=1, keepdims=True)
+            norms[norms == 0] = 1.0
+            emb = emb / norms
+
+        with self._lock:
+            self._exec(
+                "MERGE (p:Page {slug:$s}) "
+                "ON CREATE SET p.title=$t, p.level=0, p.pdf_start=0, p.pdf_end=0, p.seq=-1 "
+                "ON MATCH SET p.title=$t;", {"s": slug, "t": title})
+            self._exec("MATCH (c:Chunk {page_slug:$s}) DETACH DELETE c;", {"s": slug})
+            # undirected delete is unsupported in Kuzu — clear both directions
+            self._exec("MATCH (:Page {slug:$s})-[r:SIMILAR_TO]->() DELETE r;", {"s": slug})
+            self._exec("MATCH (:Page {slug:$s})<-[r:SIMILAR_TO]-() DELETE r;", {"s": slug})
+
+            if chunks:
+                for i, (ctext, vec) in enumerate(zip(chunks, emb)):
+                    cid = f"{slug}#{i}"
+                    self._exec("CREATE (:Chunk {id:$id, page_slug:$s, text:$t, emb:$e});",
+                               {"id": cid, "s": slug, "t": ctext, "e": vec.astype(float).tolist()})
+                    self._exec("MATCH (c:Chunk {id:$id}),(p:Page {slug:$s}) CREATE (c)-[:PART_OF]->(p);",
+                               {"id": cid, "s": slug})
+
+            n_sim = 0
+            if emb is not None:
+                mean = emb.mean(axis=0)
+                mean = mean / (np.linalg.norm(mean) or 1.0)
+                sims = self._rows(
+                    f"CALL QUERY_VECTOR_INDEX('Chunk', '{CHUNK_VECTOR_INDEX}', $v, $k) "
+                    "WITH node AS c, distance MATCH (c)-[:PART_OF]->(p:Page) "
+                    "WHERE p.slug <> $s RETURN p.slug, min(distance) AS d ORDER BY d LIMIT $lim;",
+                    {"v": mean.astype(float).tolist(), "k": similar_k * 6, "s": slug, "lim": similar_k})
+                for other, d in sims:
+                    score = max(0.0, 1.0 - float(d))
+                    for a, b in ((slug, other), (other, slug)):  # bidirectional
+                        self._exec(
+                            "MATCH (a:Page {slug:$a}),(b:Page {slug:$b}) "
+                            "CREATE (a)-[:SIMILAR_TO {score:$sc}]->(b);", {"a": a, "b": b, "sc": score})
+                    n_sim += 1
+        return {"slug": slug, "title": title, "chunks": len(chunks), "similar": n_sim}
 
     def hybrid_search(self, vector, k: int = 5) -> list[dict]:
         """Vector k-NN over chunks, then hop to the owning page (GraphRAG)."""

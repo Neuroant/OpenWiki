@@ -18,4 +18,7 @@ if (-not (Test-Path 'output\graph')) {
 try { Invoke-RestMethod -Uri 'http://localhost:11434/api/tags' -TimeoutSec 2 | Out-Null }
 catch { Write-Warning 'Ollama not reachable at http://localhost:11434 - start it (ollama serve) and pull qwen3:30b-a3b-instruct-2507-q4_K_M + bge-m3.' }
 
-opencode @args
+# --pure disables external (global ~/.config/opencode) plugins/agents whose large
+# system prompts otherwise blow past the local model's context window. Drop it if
+# you deliberately want your global OpenCode setup.
+opencode --pure @args

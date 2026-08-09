@@ -16,4 +16,7 @@ fi
 [ -e output/graph ] || echo 'warning: output/graph missing - graph tools unavailable (run: openwiki graph-build ...)' >&2
 curl -sf http://localhost:11434/api/tags >/dev/null 2>&1 || echo 'warning: Ollama not reachable at http://localhost:11434 (run: ollama serve)' >&2
 
-exec opencode "$@"
+# --pure disables external (global ~/.config/opencode) plugins/agents whose large
+# system prompts otherwise blow past the local model's context window. Drop it if
+# you deliberately want your global OpenCode setup.
+exec opencode --pure "$@"

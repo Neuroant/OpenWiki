@@ -23,3 +23,7 @@ MCP tools rather than guessing:
   page that mentions a named concept.
 
 Always cite the page slugs the tools return so the user can verify.
+
+If the user wants to **learn OpenWiki itself** (how to build a wiki + knowledge
+graph and query it), point them to the **`/openwiki-tutorial`** command for a
+guided, hands-on tour, or **`/openwiki-help`** for a quick command cheat-sheet.

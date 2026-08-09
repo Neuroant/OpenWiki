@@ -124,6 +124,19 @@ Use the `openwiki` MCP tools rather than guessing:
   relationships. Always cite the page slugs you used.
 ```
 
+### 4. Learn OpenWiki: the tutorial & help commands
+
+Two more commands teach OpenWiki *itself* (copy from
+`examples/coding-agents/claude-code/commands/`):
+
+- **`/openwiki-tutorial [module]`** — an interactive, module-by-module walkthrough
+  of every feature (ingest → wiki → index → semantic search → RAG → knowledge
+  graph). It detects which artifacts exist, demos the live `wiki_*` tools, and
+  gives "your turn" exercises. Omit the argument to start at the beginning, pass a
+  module number/name to jump, or `all` to run straight through.
+- **`/openwiki-help [question]`** — a quick command cheat-sheet and one-off
+  "how do I …" answers.
+
 ---
 
 ## OpenCode
@@ -166,6 +179,10 @@ $ARGUMENTS
 ```
 
 Then: `/wiki-ask …`
+
+The same **`/openwiki-tutorial`** and **`/openwiki-help`** commands ship for
+OpenCode too (`examples/coding-agents/opencode/command/`); their frontmatter sets
+`agent: openwiki` so they run under the wiki-scoped agent.
 
 ### Note on "skills"
 

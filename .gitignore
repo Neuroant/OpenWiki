@@ -23,3 +23,6 @@ output/
 .claude/settings.local.json
 .playwright-mcp/
 /openwiki-*.png
+
+# Isolated OpenCode config home created by start-opencode.{ps1,sh}
+/.opencode-home/

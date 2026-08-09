@@ -18,7 +18,11 @@ if (-not (Test-Path 'output\graph')) {
 try { Invoke-RestMethod -Uri 'http://localhost:11434/api/tags' -TimeoutSec 2 | Out-Null }
 catch { Write-Warning 'Ollama not reachable at http://localhost:11434 - start it (ollama serve) and pull qwen3:30b-a3b-instruct-2507-q4_K_M + bge-m3.' }
 
-# --pure disables external (global ~/.config/opencode) plugins/agents whose large
-# system prompts otherwise blow past the local model's context window. Drop it if
-# you deliberately want your global OpenCode setup.
+# Isolate this instance from your global OpenCode setup (~/.config/opencode: the
+# oh-my-opencode plugin and its agents) by pointing XDG_CONFIG_HOME at an empty,
+# project-local dir - so ONLY this project's config and the `openwiki` agent load.
+# --pure additionally disables any plugins. Run `opencode` directly (not this
+# script) if you want your global OpenCode setup instead.
+$env:XDG_CONFIG_HOME = Join-Path $PSScriptRoot '.opencode-home'
+New-Item -ItemType Directory -Force -Path $env:XDG_CONFIG_HOME | Out-Null
 opencode --pure @args

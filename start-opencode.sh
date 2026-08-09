@@ -16,7 +16,11 @@ fi
 [ -e output/graph ] || echo 'warning: output/graph missing - graph tools unavailable (run: openwiki graph-build ...)' >&2
 curl -sf http://localhost:11434/api/tags >/dev/null 2>&1 || echo 'warning: Ollama not reachable at http://localhost:11434 (run: ollama serve)' >&2
 
-# --pure disables external (global ~/.config/opencode) plugins/agents whose large
-# system prompts otherwise blow past the local model's context window. Drop it if
-# you deliberately want your global OpenCode setup.
+# Isolate this instance from your global OpenCode setup (~/.config/opencode: the
+# oh-my-opencode plugin and its agents) by pointing XDG_CONFIG_HOME at an empty,
+# project-local dir - so ONLY this project's config and the `openwiki` agent load.
+# --pure additionally disables any plugins. Run `opencode` directly (not this
+# script) if you want your global OpenCode setup instead.
+export XDG_CONFIG_HOME="$(pwd)/.opencode-home"
+mkdir -p "$XDG_CONFIG_HOME"
 exec opencode --pure "$@"

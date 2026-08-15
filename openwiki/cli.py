@@ -29,6 +29,7 @@ from .llm import OllamaChat
 from .mcp_server import build_server
 from .models import ParsedDocument
 from .pdf_parser import PDFParser
+from .pipeline import STAGES, BuildState, compute_fingerprints, stale_stages
 from .project import (
     DEFAULT_CHAT, DEFAULT_EMBED, DEFAULT_HOST, Project, render_manifest,
 )
@@ -60,6 +61,16 @@ def _build_argparser() -> argparse.ArgumentParser:
     init_p.add_argument("--source", action="append", type=Path, metavar="PATH",
                         help="A source document to register (repeatable); copied into sources/.")
     init_p.add_argument("--force", action="store_true", help="Overwrite an existing openwiki.toml.")
+
+    build_p = sub.add_parser("build", parents=[common],
+                             help="Run the pipeline (ingest → wiki → index → graph) from the manifest.")
+    build_p.add_argument("--only", default=None, metavar="STAGES",
+                         help="Comma-separated stages to run (ingest,wiki,index,graph).")
+    build_p.add_argument("--force", action="store_true", help="Rebuild even stages that are up to date.")
+    build_p.add_argument("-v", "--verbose", action="store_true", help="Verbose progress logging.")
+
+    sub.add_parser("status", parents=[common],
+                   help="Show the project's sources, settings, and per-stage build state.")
 
     ingest = sub.add_parser("ingest", parents=[common], help="Parse a PDF and extract its content.")
     ingest.add_argument("pdf", type=Path, help="Path to the PDF file.")
@@ -263,6 +274,187 @@ def _cmd_init(args: argparse.Namespace) -> int:
     else:
         print(f"  add inputs under {sources_dir}/ and list them under [[sources]] in openwiki.toml")
     print("  next: run `openwiki ingest/build-wiki/index/graph-build` (or `openwiki build`, coming soon)")
+    return 0
+
+
+def _cmd_build(args: argparse.Namespace) -> int:
+    logging.basicConfig(
+        level=logging.INFO if getattr(args, "verbose", False) else logging.WARNING,
+        format="%(levelname)s %(message)s",
+    )
+    project: Optional[Project] = getattr(args, "project_obj", None)
+    if project is None:
+        print("error: not in an OpenWiki project — run `openwiki init` first.", file=sys.stderr)
+        return 2
+
+    sources = project.source_paths()
+    if not sources:
+        print("error: no [[sources]] declared in openwiki.toml.", file=sys.stderr)
+        return 2
+    if len(sources) > 1:
+        print(f"note: {len(sources)} sources declared; building from the first only "
+              f"(multi-source merge is Phase 4).", file=sys.stderr)
+    source = sources[0]
+    if not source.is_file():
+        print(f"error: source not found: {source}", file=sys.stderr)
+        return 2
+
+    only: Optional[set] = None
+    if args.only:
+        only = {s.strip() for s in args.only.split(",") if s.strip()}
+        unknown = only - set(STAGES)
+        if unknown:
+            print(f"error: unknown stage(s): {', '.join(sorted(unknown))} "
+                  f"(choose from {', '.join(STAGES)}).", file=sys.stderr)
+            return 2
+
+    build = project.section("build")
+    models = project.section("models")
+    gcfg = project.section("graph")
+    split = int(build.get("split_level", 2))
+    tables = bool(build.get("tables", True))
+    host = models.get("host", DEFAULT_HOST)
+    stem = source.stem
+    parsed_path = project.parsed_dir / f"{stem}.json"
+
+    fps = compute_fingerprints(project, sources)
+    exists = {
+        "ingest": parsed_path.is_file(),
+        "wiki": (project.wiki_dir / "wiki.json").is_file(),
+        "index": (project.index_dir / "index.json").is_file(),
+        "graph": project.graph_path.exists(),
+    }
+    state = BuildState.load(project)
+    todo = stale_stages(state, fps, exists, only=only, force=args.force)
+
+    print(f"build '{project.name}' — source {source.name}", file=sys.stderr)
+    for stage in STAGES:
+        if only is not None and stage not in only:
+            continue
+        print(f"  [{'run ' if stage in todo else 'skip'}] {stage}", file=sys.stderr)
+    if not todo:
+        print("Everything up to date.", file=sys.stderr)
+        return 0
+
+    if ({"wiki", "index", "graph"} & set(todo)) and "ingest" not in todo and not parsed_path.is_file():
+        print(f"error: {parsed_path.name} missing — run `openwiki build` (or include ingest) first.",
+              file=sys.stderr)
+        return 2
+
+    doc = None
+
+    def _doc():
+        nonlocal doc
+        if doc is None:
+            doc = _load_parsed(parsed_path)
+        return doc
+
+    if "ingest" in todo:
+        project.parsed_dir.mkdir(parents=True, exist_ok=True)
+        doc = PDFParser(extract_tables=tables).parse(source)
+        parsed_path.write_text(
+            json.dumps(doc.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        state.record("ingest", fps["ingest"], parsed_path,
+                     {"pages": len(doc.pages), "outline": len(doc.outline)})
+        state.save()
+        print(f"  ingest → {len(doc.pages)} page(s) → {parsed_path}", file=sys.stderr)
+
+    if "wiki" in todo:
+        wiki = WikiBuilder(split_level=split).build(_doc())
+        write_wiki(wiki, project.wiki_dir, include_tables=tables)
+        state.record("wiki", fps["wiki"], project.wiki_dir, {"pages": len(wiki.pages)})
+        state.save()
+        print(f"  wiki → {len(wiki.pages)} page(s) → {project.wiki_dir}", file=sys.stderr)
+
+    index = None
+    if "index" in todo:
+        embedder = OllamaEmbedder(model=models.get("embed", DEFAULT_EMBED), host=host)
+        wiki = WikiBuilder(split_level=split).build(_doc())
+        index = SemanticIndex.build(
+            wiki, embedder,
+            size_words=int(build.get("chunk_size", 180)),
+            overlap_words=int(build.get("overlap", 30)),
+        )
+        index.save(project.index_dir)
+        state.record("index", fps["index"], project.index_dir,
+                     {"chunks": len(index.chunks), "dim": int(index.embeddings.shape[1])})
+        state.save()
+        print(f"  index → {len(index.chunks)} chunk(s) → {project.index_dir}", file=sys.stderr)
+
+    if "graph" in todo:
+        if index is None:
+            if not (project.index_dir / "index.json").is_file():
+                print("error: graph needs an index — run `openwiki build index` first.", file=sys.stderr)
+                return 2
+            index = SemanticIndex.load(project.index_dir)
+        wiki = WikiBuilder(split_level=split).build(_doc())
+        references = None if not gcfg.get("references", True) else extract_references(_doc(), wiki)
+        entities = None
+        if gcfg.get("entities", False):
+            chat = OllamaChat(model=models.get("chat", DEFAULT_CHAT), host=host)
+            print("  graph: extracting entities (one LLM call per page) …", file=sys.stderr)
+            entities = extract_entities(wiki, chat)
+        stats = build_graph(wiki, index, project.graph_path,
+                            similar_k=int(gcfg.get("similar_k", 6)),
+                            references=references, entities=entities)
+        state.record("graph", fps["graph"], project.graph_path,
+                     {"pages": stats["pages"], "chunks": stats["chunks"],
+                      "similar_to": stats["similar_edges"], "references": stats["reference_edges"]})
+        state.save()
+        print(f"  graph → {stats['pages']} page(s) / {stats['chunks']} chunk(s) → {project.graph_path}",
+              file=sys.stderr)
+
+    print(f"Built project '{project.name}'.")
+    return 0
+
+
+def _cmd_status(args: argparse.Namespace) -> int:
+    project: Optional[Project] = getattr(args, "project_obj", None)
+    if project is None:
+        print("error: not in an OpenWiki project — run `openwiki init` first.", file=sys.stderr)
+        return 2
+
+    sources = project.source_paths()
+    print(f"Project: {project.name}")
+    print(f"  root   : {project.root}")
+    if project.description:
+        print(f"  about  : {project.description}")
+    print(f"  models : embed={project.setting('models', 'embed', 'bge-m3')}  "
+          f"chat={project.setting('models', 'chat', DEFAULT_CHAT)}  "
+          f"host={project.setting('models', 'host', DEFAULT_HOST)}")
+    print(f"  build  : split_level={project.setting('build', 'split_level', 2)}  "
+          f"chunk={project.setting('build', 'chunk_size', 180)}w/"
+          f"{project.setting('build', 'overlap', 30)}w  "
+          f"entities={project.setting('graph', 'entities', False)}")
+    print("  sources:")
+    for src in sources:
+        rel = src.relative_to(project.root) if src.is_relative_to(project.root) else src
+        print(f"    {'ok     ' if src.is_file() else 'MISSING'}  {rel}")
+    if not sources:
+        print("    (none — add [[sources]] to openwiki.toml)")
+
+    fps = compute_fingerprints(project, sources) if sources else {}
+    stem = sources[0].stem if sources else ""
+    exists = {
+        "ingest": (project.parsed_dir / f"{stem}.json").is_file() if sources else False,
+        "wiki": (project.wiki_dir / "wiki.json").is_file(),
+        "index": (project.index_dir / "index.json").is_file(),
+        "graph": project.graph_path.exists(),
+    }
+    state = BuildState.load(project)
+    print("  stages :")
+    for stage in STAGES:
+        rec = state.get(stage)
+        if not exists.get(stage):
+            label = "missing"
+        elif not sources or state.fingerprint(stage) != fps.get(stage):
+            label = "stale"
+        else:
+            label = "up to date"
+        stats = rec.get("stats", {})
+        extra = ("  " + json.dumps(stats, ensure_ascii=False)) if stats else ""
+        print(f"    {stage:<7} {label:<11}{extra}")
     return 0
 
 
@@ -657,6 +849,8 @@ def _cmd_mcp(args: argparse.Namespace) -> int:
 
 
 _DISPATCH = {
+    "build": _cmd_build,
+    "status": _cmd_status,
     "ingest": _cmd_ingest,
     "build-wiki": _cmd_build_wiki,
     "index": _cmd_index,
@@ -691,6 +885,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 2
     if project is not None:
         print(f"[openwiki] project '{project.name}'  ({project.root})", file=sys.stderr)
+    args.project_obj = project
     _apply_project(args, project)
 
     handler = _DISPATCH.get(args.command)

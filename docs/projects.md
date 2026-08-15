@@ -1,6 +1,8 @@
 # OpenWiki projects — design & roadmap
 
-Status: **Phase 1 in progress.**
+Status: **Phases 1–2 landed** (project model + `init` + project-aware commands;
+`build` + `status` + `.openwiki/state.json` staleness). Next: Phase 3 (registry +
+global config).
 
 An **OpenWiki project** is a folder with a declarative manifest (`openwiki.toml`)
 and its own outputs, so state persists and you can keep several knowledge bases
@@ -106,16 +108,16 @@ under a synthetic top-level outline node (its name) so slugs don't collide.
 
 ## Roadmap
 
-- [ ] **Phase 1 — foundation** *(in progress)*
+- [x] **Phase 1 — foundation**
   - [x] `Project` model: discover (`find`), `load`, `resolve`, layout dirs, setting precedence
   - [x] `openwiki init` (scaffold `openwiki.toml` + `sources/` + `.gitignore`)
   - [x] Make existing commands project-aware (`--project`, manifest fills path/model/host/split-level defaults)
   - [x] Back-compat: no manifest → today's `./output`
   - [x] `tomllib`/`tomli` read + hand-rolled TOML writer; tests
-- [ ] **Phase 2 — build & status**
-  - [ ] `openwiki build` (single-source: ingest → wiki → index → graph from the manifest)
-  - [ ] `.openwiki/state.json` staleness (incremental builds; split-level mismatch guard)
-  - [ ] `openwiki status`
+- [x] **Phase 2 — build & status**
+  - [x] `openwiki build` (single-source: ingest → wiki → index → graph from the manifest; `--only`, `--force`)
+  - [x] `.openwiki/state.json` staleness (incremental builds via a per-stage fingerprint chain)
+  - [x] `openwiki status`
 - [ ] **Phase 3 — registry & global config**
   - [ ] `~/.openwiki/config.toml` cross-project defaults
   - [ ] registry: `openwiki project list` / `use` / `add` / `remove`

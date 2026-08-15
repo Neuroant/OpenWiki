@@ -596,6 +596,8 @@ function runAction(kind, arg) {
     setActive(arg);
     history.replaceState(null, "", "#" + arg);
     activateTab("graph");    // opens the Graph tab centered on this page
+  } else if (kind === "tab") {
+    activateTab(arg);        // switch the center tab (e.g. project)
   }
 }
 

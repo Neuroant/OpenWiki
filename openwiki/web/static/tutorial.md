@@ -47,10 +47,23 @@ eine Seite mit **„Seite öffnen →"**.
 
 [▶ Graph für „Smooth Sound Transitions“ öffnen](<run:graph:025-smooth-sound-transitions-sst>)
 
-## 6. Weiter geht's
+## 6. Das Projekt im Blick
+
+Wurde der Server in einem **Projekt** gestartet (einem Ordner mit `openwiki.toml`),
+zeigt der Reiter **Projekt** dessen Zustand: die **Quellen**, den **Build-Status**
+je Stufe (`ingest`, `wiki`, `index`, `graph` — *aktuell*, *veraltet* oder *fehlt*)
+und die verwendeten Modelle. So sehen Sie auf einen Blick, was ein `openwiki build`
+neu bauen würde. Ein eigenes Projekt legen Sie mit `openwiki init` an — Details im
+Reiter **Hilfe**.
+
+[▶ Reiter „Projekt" öffnen](<run:tab:project>)
+
+## 7. Weiter geht's
 
 - Kombinieren Sie Suche und Chat: erst ein Thema finden, dann gezielt nachfragen.
 - Bitten Sie den Agenten, einen Abschnitt zusammenzufassen und als neuen Abschnitt
   an eine Seite anzuhängen.
 - Wandern Sie im **Graph** von einer Seite zu ihren Querverweisen und zurück.
+- Verwalten Sie mehrere Wikis als **Projekte** (`openwiki init` → `openwiki build`)
+  und wechseln Sie dazwischen — Grundlagen im Reiter **Hilfe**.
 - Alle Funktionen im Detail finden Sie im Reiter **Hilfe**.

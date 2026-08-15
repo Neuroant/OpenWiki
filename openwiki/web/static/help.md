@@ -14,7 +14,7 @@ Die Oberfläche hat drei Bereiche:
 - **Links — Suche & Navigation:** ein Feld für die semantische Suche und der
   Navigationsbaum aller Wiki-Seiten (aus der Kapitelstruktur des Handbuchs).
 - **Mitte — Inhalt:** die gerenderte Seite. Über die Reiter **Wiki**, **Hilfe**,
-  **Tutorial** und **Graph** wechseln Sie die Ansicht.
+  **Tutorial**, **Graph** und **Projekt** wechseln Sie die Ansicht.
 - **Rechts — Agent:** ein Chat mit dem KI-Agenten, der Fragen beantwortet *und*
   Seiten bearbeiten kann.
 
@@ -149,11 +149,49 @@ doppelklicken Sie ihn wieder, um sie auszublenden.
 Den Graphen erzeugt man einmalig über die Kommandozeile mit
 `openwiki graph-build` (Begriffe mit `--entities`); fehlt er, ist der Reiter leer.
 
+## Projekt (Reiter „Projekt")
+
+Wurde der Server in einem **Projekt** gestartet (einem Ordner mit `openwiki.toml`,
+siehe „Ein neues Wiki anlegen"), zeigt der Reiter **Projekt** dessen Zustand — und
+der Projektname erscheint als Abzeichen (📁) oben in der Kopfzeile. Angezeigt wird:
+
+- **Quellen** — die deklarierten Eingabedokumente (mit ✓, falls vorhanden).
+- **Build-Status** je Stufe (`ingest`, `wiki`, `index`, `graph`) als **aktuell**,
+  **veraltet** oder **fehlt**, mit Kennzahlen (Seiten, Chunks …). So sehen Sie auf
+  einen Blick, was ein `openwiki build` neu bauen würde.
+- **Modelle & Einstellungen** — Einbettungs- und Chat-Modell, Ollama-Host,
+  `split_level` und Chunk-Größe aus dem Manifest.
+- **Registrierte Projekte** — alle per `openwiki project add` bekannten Projekte
+  (das aktive ist mit ★ markiert).
+
+Läuft der Server ohne Projekt (mit direkten `--wiki`/`--index`-Pfaden), weist der
+Reiter darauf hin und verweist auf `openwiki init`.
+
 ## Ein neues Wiki anlegen
 
-Ein Wiki entsteht aus einem PDF in wenigen Schritten auf der **Kommandozeile**.
-Jeder Befehl schreibt seine Ergebnisse nach `output/`; alle Befehle bauen
-aufeinander auf. Angenommen, Ihre Datei heißt `mein-handbuch.pdf`:
+**Als Projekt (empfohlen).** Ein *Projekt* bündelt ein Wiki in einem Ordner mit der
+Manifest-Datei `openwiki.toml` und eigenen Ausgaben — so bleibt der Zustand erhalten
+und Sie können mehrere Wikis nebeneinander pflegen und dazwischen wechseln:
+
+```bash
+openwiki init mein-handbuch --source mein-handbuch.pdf   # legt openwiki.toml + sources/ an
+cd mein-handbuch
+openwiki build                                           # ingest → wiki → index → graph, laut Manifest
+openwiki status                                          # Quellen, Einstellungen, Build-Status je Stufe
+openwiki serve --port 8137                               # bedient DIESES Projekt (Reiter „Projekt")
+```
+
+`openwiki build` läuft **inkrementell**: eine Prüfsumme je Stufe in
+`.openwiki/state.json` überspringt Stufen, deren Eingaben und Einstellungen
+unverändert sind (`--only ingest,wiki,index,graph`, `--force`). Alle Einstellungen
+(Modelle, `split_level`, Chunk-Größe, Entitäten …) stehen im `openwiki.toml`; ändern
+Sie es und führen Sie `openwiki build` erneut aus. Mehrere `[[sources]]`
+verschmelzen zu *einem* Korpus — weitere Quelle hinzufügen mit
+`openwiki project add-source weitere.pdf`. Projektübergreifende Vorgaben (z. B. Ihr
+Ollama-Host) gehören nach `~/.openwiki/config.toml`.
+
+**Einzelschritte (ohne Projekt).** Dieselbe Pipeline von Hand; jeder Befehl schreibt
+nach `output/` und baut auf dem vorigen auf (Datei z. B. `mein-handbuch.pdf`):
 
 **1. PDF einlesen** — extrahiert Text, Tabellen und die Kapitelstruktur:
 

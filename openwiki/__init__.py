@@ -17,6 +17,7 @@ from .graph import (
     extract_entities, extract_references,
 )
 from .llm import ChatModel, OllamaChat
+from .merge import combine_documents
 from .mcp_server import MCPStdioServer, build_server
 from .pdf_parser import PDFParser
 from .project import Project, Source, render_manifest
@@ -26,7 +27,7 @@ from .tools import WikiTools
 from .web import WikiWebApp, serve
 from .wiki import Wiki, WikiBuilder, WikiPage, slugify, write_wiki
 
-__version__ = "0.19.0"
+__version__ = "0.20.0"
 
 __all__ = [
     "PDFParser",
@@ -74,5 +75,6 @@ __all__ = [
     "render_manifest",
     "UserConfig",
     "Registry",
+    "combine_documents",
     "__version__",
 ]

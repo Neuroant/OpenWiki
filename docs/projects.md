@@ -1,8 +1,8 @@
 # OpenWiki projects — design & roadmap
 
-Status: **Phases 1–3 landed** (project model + `init` + project-aware commands;
-`build` + `status` + staleness; `~/.openwiki/` global config + project registry).
-Next: Phase 4 (multi-source merge).
+Status: **Complete — Phases 1–4 landed.** Project model + `init` + project-aware
+commands; `build` + `status` + staleness; `~/.openwiki/` global config + project
+registry; multi-source merge (several `[[sources]]` → one corpus).
 
 An **OpenWiki project** is a folder with a declarative manifest (`openwiki.toml`)
 and its own outputs, so state persists and you can keep several knowledge bases
@@ -122,6 +122,6 @@ under a synthetic top-level outline node (its name) so slugs don't collide.
   - [x] `~/.openwiki/config.toml` cross-project defaults (slots between manifest and built-in defaults)
   - [x] registry: `openwiki project list` / `use` / `add` / `remove`
   - [x] `project add-source` (surgical `[[sources]]` append — preserves comments, no full re-emit)
-- [ ] **Phase 4 — multi-source merge**
-  - [ ] combine `ParsedDocument`s (page offset + per-source top node)
-  - [ ] per-source reference offsets in the graph builder
+- [x] **Phase 4 — multi-source merge**
+  - [x] `combine_documents` (page/table/image offset + synthetic per-source top node; single source = passthrough)
+  - [x] per-source cross-references (`extract_references_multi`, resolved within each source's span via retained per-source IR)

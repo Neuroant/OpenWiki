@@ -24,10 +24,14 @@ from typing import Optional, Sequence
 
 from .agent import RAGAgent
 from .chat_agent import WikiAgent
-from .graph import GraphStore, build_graph, extract_entities, extract_references
+from .graph import (
+    GraphStore, build_graph, detect_page_offset, extract_entities,
+    extract_references, extract_references_multi,
+)
 from .embeddings import OllamaEmbedder
 from .llm import OllamaChat
 from .mcp_server import build_server
+from .merge import combine_documents
 from .models import ParsedDocument
 from .pdf_parser import PDFParser
 from .pipeline import STAGES, BuildState, compute_fingerprints, stale_stages
@@ -376,6 +380,26 @@ def _cmd_project(args: argparse.Namespace) -> int:
     return 1
 
 
+def _corpus_references(project, sources, doc, wiki, multi):
+    """Cross-reference edges for the corpus: single-source direct, else per-source
+    (each resolved within its own page span via the retained per-source IR)."""
+    if not multi:
+        return extract_references(doc, wiki)
+    metas = []
+    start = 0
+    for src in sources:
+        per = project.parsed_dir / f"{src.stem}.json"
+        if not per.is_file():
+            print(f"note: {per.name} missing — skipping cross-references "
+                  f"(re-run `openwiki build --only ingest,graph`).", file=sys.stderr)
+            return None
+        parsed = _load_parsed(per)
+        metas.append({"start": start, "count": len(parsed.pages),
+                      "printed_offset": detect_page_offset(parsed)})
+        start += len(parsed.pages)
+    return extract_references_multi(doc, wiki, metas)
+
+
 def _cmd_build(args: argparse.Namespace) -> int:
     logging.basicConfig(
         level=logging.INFO if getattr(args, "verbose", False) else logging.WARNING,
@@ -390,13 +414,12 @@ def _cmd_build(args: argparse.Namespace) -> int:
     if not sources:
         print("error: no [[sources]] declared in openwiki.toml.", file=sys.stderr)
         return 2
-    if len(sources) > 1:
-        print(f"note: {len(sources)} sources declared; building from the first only "
-              f"(multi-source merge is Phase 4).", file=sys.stderr)
-    source = sources[0]
-    if not source.is_file():
-        print(f"error: source not found: {source}", file=sys.stderr)
+    missing = [s for s in sources if not s.is_file()]
+    if missing:
+        for s in missing:
+            print(f"error: source not found: {s}", file=sys.stderr)
         return 2
+    multi = len(sources) > 1
 
     only: Optional[set] = None
     if args.only:
@@ -413,8 +436,7 @@ def _cmd_build(args: argparse.Namespace) -> int:
     split = int(build.get("split_level", 2))
     tables = bool(build.get("tables", True))
     host = models.get("host", DEFAULT_HOST)
-    stem = source.stem
-    parsed_path = project.parsed_dir / f"{stem}.json"
+    parsed_path = project.parsed_dir / ("_corpus.json" if multi else f"{sources[0].stem}.json")
 
     fps = compute_fingerprints(project, sources)
     exists = {
@@ -426,7 +448,7 @@ def _cmd_build(args: argparse.Namespace) -> int:
     state = BuildState.load(project)
     todo = stale_stages(state, fps, exists, only=only, force=args.force)
 
-    print(f"build '{project.name}' — source {source.name}", file=sys.stderr)
+    print(f"build '{project.name}' — {len(sources)} source(s)", file=sys.stderr)
     for stage in STAGES:
         if only is not None and stage not in only:
             continue
@@ -450,14 +472,22 @@ def _cmd_build(args: argparse.Namespace) -> int:
 
     if "ingest" in todo:
         project.parsed_dir.mkdir(parents=True, exist_ok=True)
-        doc = PDFParser(extract_tables=tables).parse(source)
+        parsed_docs = []
+        for src in sources:
+            parsed = PDFParser(extract_tables=tables).parse(src)
+            if multi:  # keep each source's IR so per-source offsets survive caching
+                (project.parsed_dir / f"{src.stem}.json").write_text(
+                    json.dumps(parsed.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
+            parsed_docs.append(parsed)
+        doc = combine_documents(parsed_docs, [s.stem for s in sources], title=project.name)
         parsed_path.write_text(
             json.dumps(doc.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8"
         )
         state.record("ingest", fps["ingest"], parsed_path,
-                     {"pages": len(doc.pages), "outline": len(doc.outline)})
+                     {"pages": len(doc.pages), "sources": len(sources)})
         state.save()
-        print(f"  ingest → {len(doc.pages)} page(s) → {parsed_path}", file=sys.stderr)
+        print(f"  ingest → {len(sources)} source(s), {len(doc.pages)} page(s) → {parsed_path}",
+              file=sys.stderr)
 
     if "wiki" in todo:
         wiki = WikiBuilder(split_level=split).build(_doc())
@@ -488,7 +518,8 @@ def _cmd_build(args: argparse.Namespace) -> int:
                 return 2
             index = SemanticIndex.load(project.index_dir)
         wiki = WikiBuilder(split_level=split).build(_doc())
-        references = None if not gcfg.get("references", True) else extract_references(_doc(), wiki)
+        references = (_corpus_references(project, sources, _doc(), wiki, multi)
+                     if gcfg.get("references", True) else None)
         entities = None
         if gcfg.get("entities", False):
             chat = OllamaChat(model=models.get("chat", DEFAULT_CHAT), host=host)

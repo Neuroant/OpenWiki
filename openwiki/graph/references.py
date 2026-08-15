@@ -71,3 +71,39 @@ def extract_references(doc: ParsedDocument, wiki: Wiki, offset=None) -> list:
 
     logger.info("References: offset=%d, %d edge(s)", offset, len(edges))
     return sorted(edges)
+
+
+def extract_references_multi(doc: ParsedDocument, wiki: Wiki, sources_meta: list) -> list:
+    """Cross-references for a **merged** corpus, resolving each within its source.
+
+    ``sources_meta`` is one dict per source, in merge order, with:
+      ``start`` — physical pages emitted *before* this source (0-based),
+      ``count`` — this source's page count,
+      ``printed_offset`` — this source's own ``physical - printed`` offset.
+
+    A "Seite N" on a page belonging to source *i* targets that source's printed
+    page N, i.e. merged physical page ``start_i + (N + printed_offset_i)`` — so a
+    reference never leaks across sources.
+    """
+    phys_to_slug = _physical_to_slug(wiki)
+    page_meta: dict = {}
+    for meta in sources_meta:
+        start = int(meta["start"])
+        for local in range(1, int(meta["count"]) + 1):
+            page_meta[start + local] = (start, int(meta["printed_offset"]))
+
+    edges = set()
+    for page in doc.pages:
+        src = phys_to_slug.get(page.number)
+        meta = page_meta.get(page.number)
+        if not src or meta is None:
+            continue
+        start, offset = meta
+        for match in _SEITE.finditer(page.text):
+            printed = int(match.group(1))
+            dst = phys_to_slug.get(start + printed + offset)
+            if dst and dst != src:
+                edges.add((src, dst))
+
+    logger.info("References (multi): %d source(s), %d edge(s)", len(sources_meta), len(edges))
+    return sorted(edges)

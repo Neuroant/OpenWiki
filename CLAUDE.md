@@ -58,8 +58,12 @@ user-global **`~/.openwiki/`** (override with `$OPENWIKI_HOME`) holds `config.to
 (cross-project setting defaults — below a project's manifest, above built-in
 defaults) and `registry.toml` (**`openwiki project list/use/add/remove/add-source`**;
 the active project is a from-anywhere fallback used only when you're not inside one —
-location always wins). Design + roadmap in `docs/projects.md` (Phases 1–3 landed;
-multi-source merge = Phase 4).
+location always wins). A project may declare **multiple `[[sources]]`**: `build`
+ingests each, keeps its per-source IR, and `combine_documents` merges them into one
+corpus (page/table/image offsets + a synthetic top-level section per source; a
+single source is passed through unchanged). Cross-references resolve **within** each
+source (`graph.extract_references_multi`, per-source printed-page offsets). Design +
+roadmap in `docs/projects.md` (the project concept is complete — Phases 1–4 landed).
 
 **Run the ingestion tool** — writes `<stem>.json` + `<stem>.md` under `--out`
 (default `./output`):
@@ -261,6 +265,11 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   **fingerprint chain** (`compute_fingerprints`) + the `.openwiki/state.json`
   lockfile (`BuildState`) + `stale_stages()`. Pure/testable; the CLI's `_cmd_build`
   does the actual stage execution (PDFParser → WikiBuilder → SemanticIndex → GraphBuilder).
+- **`openwiki/merge.py`** — `combine_documents(docs, names)` merges several
+  `ParsedDocument`s into one corpus (concatenate pages with a running offset, shift
+  table/image page numbers, wrap each source under a synthetic level-1 outline node
+  so slugs don't collide). Pure IR (depends only on `models`); single source ⇒
+  passthrough. Pairs with `graph.extract_references_multi` for per-source cross-refs.
 - **`openwiki/userconfig.py`** — user-global state under `~/.openwiki/`: `UserConfig`
   (`config.toml` cross-project setting defaults) + `Registry` (`registry.toml` named
   projects + active pointer). Read via `tomllib`; the registry has a tiny hand-rolled

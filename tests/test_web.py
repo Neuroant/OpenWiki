@@ -109,6 +109,28 @@ def test_graph_neighborhood_without_graph(tmp_path):
         WikiWebApp(tmp_path / "wiki").graph_neighborhood("000-a")
 
 
+def test_project_info_none(app):
+    assert app.project_info()["project"] is None
+
+
+def test_project_info_with_project(tmp_path):
+    from openwiki.project import MANIFEST, Project, render_manifest
+    root = tmp_path / "proj"
+    (root / "sources").mkdir(parents=True)
+    (root / "sources" / "m.pdf").write_bytes(b"%PDF-1.4 x")
+    (root / MANIFEST).write_text(
+        render_manifest(name="demo", sources=[{"type": "pdf", "path": "sources/m.pdf"}]),
+        encoding="utf-8")
+    proj = Project.load(root)
+    (tmp_path / "wiki" / "pages").mkdir(parents=True)
+
+    info = WikiWebApp(tmp_path / "wiki", project=proj).project_info()
+    assert info["project"]["name"] == "demo"
+    assert [s["name"] for s in info["project"]["stages"]] == ["ingest", "wiki", "index", "graph"]
+    assert all(s["status"] == "missing" for s in info["project"]["stages"])  # nothing built
+    assert info["project"]["sources"][0]["exists"] is True
+
+
 # -- HTTP round trip --------------------------------------------------------
 
 @pytest.fixture
@@ -148,8 +170,14 @@ def test_http_static_js(base_url):
 def test_http_index_html_has_tabs(base_url):
     status, body = _get(base_url + "/")
     assert status == 200
-    for tab in ('data-tab="wiki"', 'data-tab="help"', 'data-tab="tutorial"'):
+    for tab in ('data-tab="wiki"', 'data-tab="help"', 'data-tab="tutorial"',
+                'data-tab="graph"', 'data-tab="project"'):
         assert tab in body
+
+
+def test_http_api_project(base_url):
+    status, body = _get(base_url + "/api/project")
+    assert status == 200 and json.loads(body)["project"] is None  # app fixture has no project
 
 
 def test_http_static_help_doc(base_url):

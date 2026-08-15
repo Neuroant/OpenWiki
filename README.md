@@ -294,6 +294,115 @@ Setup and copy-paste config/commands/skills for Claude Code and OpenCode are in
 **[docs/coding-agents.md](docs/coding-agents.md)** (examples under
 [`examples/coding-agents/`](examples/coding-agents/)).
 
+## Projects — persist state, jump between wikis
+
+Instead of managing `output/` by hand and re-typing paths and flags, group a
+knowledge base into a **project**: a folder with an `openwiki.toml` manifest and
+its own outputs. Every command run inside a project (discovered from the working
+directory, or via `--project DIR`) reads its settings from the manifest — explicit
+flags still win, and outside a project the old `./output` defaults apply.
+
+```bash
+openwiki init my-manual --source path/to/manual.pdf   # scaffold openwiki.toml + sources/
+cd my-manual
+openwiki build                                        # ingest → wiki → index → graph, per the manifest
+openwiki status                                       # sources, settings, per-stage build state
+openwiki serve --port 8137                            # serves THIS project's wiki/index/graph
+```
+
+`openwiki init` writes a commented `openwiki.toml` you edit to taste:
+
+```toml
+[project]
+name = "my-manual"
+
+[[sources]]                 # one or more; all merge into a single corpus
+type = "pdf"
+path = "sources/manual.pdf"
+
+[build]
+split_level = 2             # shared by index & graph, so their slugs can't drift
+chunk_size = 180
+overlap = 30
+
+[models]
+host  = "http://localhost:11434"
+embed = "bge-m3"
+chat  = "qwen3:30b-a3b-instruct-2507-q4_K_M"
+
+[graph]
+similar_k = 6
+references = true
+entities = false
+```
+
+- **`openwiki build`** runs the whole pipeline into the project's `output/`,
+  **incrementally** — a per-stage fingerprint chain in `.openwiki/state.json` skips
+  stages whose inputs and settings are unchanged (`--only ingest,wiki,index,graph`,
+  `--force`). No more keeping `--split-level` in sync between `index` and `graph-build`.
+- **Multiple `[[sources]]`** merge into one corpus — each becomes a top-level wiki
+  section and cross-references resolve within each source. Add one with
+  `openwiki project add-source path/to/other.pdf`.
+- **Registry** — register projects and switch by name from anywhere:
+  ```bash
+  openwiki project add my-manual .     # register (name → path)
+  openwiki project use my-manual       # set the active project
+  openwiki project list                # * marks the active one
+  ```
+  Location always wins: inside a project folder you get *that* project; the active
+  registry entry is only a fallback for when you're not in one.
+- **Global defaults** — put cross-project settings (e.g. your Ollama host/models)
+  in `~/.openwiki/config.toml`; they apply below a project's manifest and above the
+  built-in defaults.
+
+Version everything except the artifacts: commit `openwiki.toml` + `sources/`,
+gitignore `output/` and `.openwiki/`, and anyone can `openwiki build` to regenerate
+the whole knowledge base. Full design + roadmap:
+**[docs/projects.md](docs/projects.md)**.
+
+## Deployment
+
+OpenWiki runs locally with no cloud services — "deploying" it means standing up the
+Python app plus a local Ollama on a host, then serving the browser UI (and/or the
+MCP server).
+
+1. **Prerequisites** — Python **3.10–3.13** and [Ollama](https://ollama.com). Pull
+   the models once, and make sure Ollama is running (`ollama serve` or the desktop app):
+   ```bash
+   ollama pull bge-m3
+   ollama pull qwen3:30b-a3b-instruct-2507-q4_K_M
+   ```
+   For longer documents raise Ollama's context window — set
+   `OLLAMA_CONTEXT_LENGTH=16384` (or higher) in the environment `ollama serve` starts from.
+
+2. **Install** — clone, create a venv, install:
+   ```bash
+   git clone https://github.com/Neuroant/OpenWiki.git && cd OpenWiki
+   py -m venv .venv && .venv\Scripts\python -m pip install -e .      # Windows
+   # python3 -m venv .venv && .venv/bin/pip install -e .             # macOS/Linux
+   ```
+
+3. **Build a knowledge base** (as a project, recommended):
+   ```bash
+   openwiki init kb --source path/to/document.pdf
+   cd kb && openwiki build
+   ```
+
+4. **Serve** — bind to the host so others on the network can reach it, and keep it
+   running under your OS service manager (systemd, Windows Task Scheduler / NSSM,
+   `tmux`, or a container):
+   ```bash
+   openwiki serve --bind 0.0.0.0 --port 8137     # then browse http://<host>:8137
+   ```
+   To expose it to a coding agent instead of/along with the browser, run `openwiki
+   mcp` (see above).
+
+> **Security:** the web UI and MCP server have **no authentication**, and the chat
+> agent can **edit wiki pages**. Only bind `0.0.0.0` on a trusted network; put a
+> reverse proxy with auth in front for anything wider; use `--dry-run` to let the
+> agent preview edits without writing. All processing (embeddings + LLM) is local
+> via Ollama — nothing is sent to third parties.
+
 ## Use as a library
 
 ```python
@@ -345,7 +454,8 @@ PDF ──PDFParser──▶ ParsedDocument ──▶ JSON / Markdown
 - `openwiki/graph/` — the Kuzu graph layer (`builder.py` writes it, `store.py` queries **and incrementally upserts** it, `references.py` extracts cross-references, `entities.py` extracts typed entities via an LLM)
 - `openwiki/web/` — stdlib web server + vanilla-JS SPA (browse, search, chat/edit, graph)
 - `openwiki/mcp_server.py` — stdio MCP server exposing the wiki as tools for coding agents
-- `openwiki/cli.py` — the `openwiki` command line (`ingest`, `build-wiki`, `index`, `search`, `ask`, `chat`, `graph-build`, `serve`, `mcp`)
+- `openwiki/project.py` · `pipeline.py` · `userconfig.py` · `merge.py` — the **project** layer: the `openwiki.toml` model + resolution, the `openwiki build` fingerprint/staleness state, the `~/.openwiki/` global config + registry, and multi-source merge
+- `openwiki/cli.py` — the `openwiki` command line (`init`, `build`, `status`, `project`, `ingest`, `build-wiki`, `index`, `search`, `ask`, `chat`, `graph-build`, `serve`, `mcp`)
 
 ## Roadmap
 
@@ -361,3 +471,4 @@ PDF ──PDFParser──▶ ParsedDocument ──▶ JSON / Markdown
 - [x] **Graph-augmented `ask`** — RAG retrieval expands along graph edges (GraphRAG): semantic seeds + query-re-ranked connected pages
 - [x] **Entity layer** — LLM-extracted typed entities + `MENTIONS` edges (`--entities`), a `find_entity` tool, and shared-concept edges/expansion
 - [x] **Incremental graph updates** — agent edits upsert the page into the graph live (chunks + embeddings + `SIMILAR_TO`), no rebuild needed
+- [x] **Project workspaces** — `openwiki.toml` projects with `openwiki init`/`build` (incremental) + `status`, a `~/.openwiki/` registry + global config, and multi-source merge ([docs/projects.md](docs/projects.md))

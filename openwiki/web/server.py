@@ -34,12 +34,13 @@ _CONTENT_TYPES = {
 class WikiWebApp:
     def __init__(self, wiki_dir, index: Optional[SemanticIndex] = None,
                  agent: Optional[WikiAgent] = None, tools: Optional[WikiTools] = None,
-                 graph=None, dry_run: bool = False) -> None:
+                 graph=None, dry_run: bool = False, project=None) -> None:
         self.wiki_dir = Path(wiki_dir)
         self.index = index
         self.tools = tools or WikiTools(wiki_dir, index=index, dry_run=dry_run)
         self.agent = agent
         self.graph = graph  # optional GraphStore
+        self.project = project  # optional Project (serves its build status in the UI)
         self._lock = threading.Lock()
 
     def manifest(self) -> dict:
@@ -83,6 +84,65 @@ class WikiWebApp:
         if self.graph is None:
             raise RuntimeError("No graph is loaded. Run `openwiki graph-build` first.")
         return self.graph.expand(node_type, node_id)
+
+    def project_info(self) -> dict:
+        """Active project's identity, sources, per-stage build status, and the
+        registered-project list (for the UI 'Projekt' tab). ``{"project": null}``
+        when the server wasn't started inside an OpenWiki project."""
+        if self.project is None:
+            return {"project": None, "registry": []}
+        from ..pipeline import STAGES, BuildState, compute_fingerprints
+        from ..userconfig import Registry
+
+        p = self.project
+        sources = p.source_paths()
+        multi = len(sources) > 1
+        stem = sources[0].stem if sources else ""
+        fingerprints = compute_fingerprints(p, sources) if sources else {}
+        state = BuildState.load(p)
+        ingest_out = (p.parsed_dir / "_corpus.json") if multi else (p.parsed_dir / f"{stem}.json")
+        exists = {
+            "ingest": bool(sources) and ingest_out.is_file(),
+            "wiki": (p.wiki_dir / "wiki.json").is_file(),
+            "index": (p.index_dir / "index.json").is_file(),
+            "graph": p.graph_path.exists(),
+        }
+        stages = []
+        for stage in STAGES:
+            record = state.get(stage)
+            if not exists.get(stage):
+                status = "missing"
+            elif not sources or state.fingerprint(stage) != fingerprints.get(stage):
+                status = "stale"
+            else:
+                status = "up_to_date"
+            stages.append({"name": stage, "status": status,
+                           "stats": record.get("stats", {}), "built": record.get("built", "")})
+
+        registry_obj = Registry.load()
+        active = registry_obj.active()
+        registry = [{"name": name, "path": path, "active": name == active}
+                    for name, path in sorted(registry_obj.projects().items())]
+        return {
+            "project": {
+                "name": p.name,
+                "root": str(p.root),
+                "description": p.description,
+                "sources": [
+                    {"path": (str(s.relative_to(p.root)) if s.is_relative_to(p.root) else str(s)),
+                     "exists": s.is_file()}
+                    for s in sources
+                ],
+                "stages": stages,
+                "models": {"embed": p.setting("models", "embed", "bge-m3"),
+                           "chat": p.setting("models", "chat", ""),
+                           "host": p.setting("models", "host", "")},
+                "build": {"split_level": p.setting("build", "split_level", 2),
+                          "chunk_size": p.setting("build", "chunk_size", 180),
+                          "overlap": p.setting("build", "overlap", 30)},
+            },
+            "registry": registry,
+        }
 
     def chat(self, message: str) -> dict:
         if self.agent is None:
@@ -149,6 +209,8 @@ def make_handler(app: WikiWebApp):
                     return self._static(path[len("/static/"):])
                 if path == "/api/wiki":
                     return self._json(app.manifest())
+                if path == "/api/project":
+                    return self._json(app.project_info())
                 if path.startswith("/api/pages/"):
                     slug = unquote(path[len("/api/pages/"):])
                     try:

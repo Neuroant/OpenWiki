@@ -947,7 +947,8 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     tools = WikiTools(args.wiki, index=index, graph=graph, embedder=embedder, dry_run=args.dry_run)
     chat = OllamaChat(model=args.model, host=args.host, temperature=args.temperature)
     agent = WikiAgent(chat, tools)
-    app = WikiWebApp(args.wiki, index=index, agent=agent, tools=tools, graph=graph)
+    app = WikiWebApp(args.wiki, index=index, agent=agent, tools=tools, graph=graph,
+                     project=getattr(args, "project_obj", None))
 
     graph_feat = ("graph+sync" if graph and getattr(graph, "writable", False) else
                   ("graph" if graph else None))

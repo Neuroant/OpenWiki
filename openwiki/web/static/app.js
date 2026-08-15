@@ -101,6 +101,8 @@ function renderActiveTab() {
     content.scrollTop = 0;
   } else if (state.tab === "graph") {
     renderGraph();
+  } else if (state.tab === "project") {
+    renderProject();
   } else {
     renderDoc(state.tab);
   }
@@ -139,6 +141,78 @@ function wireRunActions() {
     a.addEventListener("click", (e) => { e.preventDefault(); runAction(kind, arg); });
   });
 }
+// -- project tab (manifest, sources, build status, registry) ---------------
+
+async function loadProjectBadge() {
+  try {
+    const data = await getJSON("/api/project");
+    const badge = $("#project-badge");
+    if (data && data.project) {
+      badge.textContent = "📁 " + data.project.name;
+      badge.title = data.project.root;
+      badge.hidden = false;
+    } else {
+      badge.hidden = true;
+    }
+  } catch (_) { /* no project / older server — ignore */ }
+}
+
+async function renderProject() {
+  const content = $("#content");
+  content.innerHTML = `<p class="muted">Wird geladen…</p>`;
+  try {
+    const data = await getJSON("/api/project");
+    if (!data.project) {
+      content.innerHTML = `<div class="project-view"><h2>Kein Projekt aktiv</h2>` +
+        `<p class="muted">Der Server läuft ohne OpenWiki-Projekt (direkte Pfade). ` +
+        `Starte <code>openwiki serve</code> in einem Projektordner (mit <code>openwiki.toml</code>) ` +
+        `oder erstelle eines mit <code>openwiki init</code>.</p></div>`;
+      content.scrollTop = 0;
+      return;
+    }
+    const p = data.project;
+    const labels = { up_to_date: "aktuell", stale: "veraltet", missing: "fehlt" };
+    const badge = (s) => `<span class="pbadge pbadge-${s}">${labels[s] || s}</span>`;
+    const sources = p.sources.map((s) =>
+      `<li>${s.exists ? "✓" : "✗"} <code>${escapeHtml(s.path)}</code>` +
+      `${s.exists ? "" : ' <span class="muted">(fehlt)</span>'}</li>`).join("") ||
+      `<li class="muted">(keine Quellen deklariert)</li>`;
+    const stages = p.stages.map((st) => {
+      const stats = Object.keys(st.stats || {}).length
+        ? `<span class="muted">${escapeHtml(JSON.stringify(st.stats))}</span>` : "";
+      return `<tr><td><code>${st.name}</code></td><td>${badge(st.status)}</td>` +
+             `<td class="muted">${escapeHtml(st.built || "")}</td><td>${stats}</td></tr>`;
+    }).join("");
+    const registry = (data.registry || []).map((r) =>
+      `<li>${r.active ? "★" : "•"} <code>${escapeHtml(r.name)}</code> ` +
+      `<span class="muted">${escapeHtml(r.path)}</span></li>`).join("") ||
+      `<li class="muted">(keine registrierten Projekte)</li>`;
+    content.innerHTML = `<div class="project-view">
+      <h2>📁 ${escapeHtml(p.name)}</h2>
+      ${p.description ? `<p>${escapeHtml(p.description)}</p>` : ""}
+      <p class="muted"><code>${escapeHtml(p.root)}</code></p>
+      <h3>Quellen</h3><ul class="proj-list">${sources}</ul>
+      <h3>Build-Status</h3>
+      <table class="proj-table">
+        <thead><tr><th>Stufe</th><th>Status</th><th>Gebaut</th><th>Statistik</th></tr></thead>
+        <tbody>${stages}</tbody>
+      </table>
+      <p class="muted">Neu bauen mit <code>openwiki build</code> — inkrementell, nur veraltete Stufen.</p>
+      <h3>Modelle &amp; Einstellungen</h3>
+      <ul class="proj-list">
+        <li>Embedding: <code>${escapeHtml(p.models.embed)}</code></li>
+        <li>Chat: <code>${escapeHtml(p.models.chat)}</code></li>
+        <li>Ollama-Host: <code>${escapeHtml(p.models.host)}</code></li>
+        <li>split_level <code>${p.build.split_level}</code> · Chunks <code>${p.build.chunk_size}</code>/<code>${p.build.overlap}</code> Wörter</li>
+      </ul>
+      <h3>Registrierte Projekte</h3><ul class="proj-list">${registry}</ul>
+    </div>`;
+    content.scrollTop = 0;
+  } catch (e) {
+    content.innerHTML = `<p class="muted">Projekt nicht verfügbar: ${escapeHtml(e.message)}</p>`;
+  }
+}
+
 // -- graph tab (interactive neighborhood exploration) ----------------------
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -654,6 +728,7 @@ async function init() {
   try {
     state.manifest = await getJSON("/api/wiki");
     $("#doc-title").textContent = state.manifest.title || "";
+    loadProjectBadge();
     const pages = state.manifest.pages || [];
     state.firstSlug = pages.length ? pages[0].slug : null;
     renderNav();

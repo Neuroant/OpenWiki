@@ -19,12 +19,13 @@ from .graph import (
 from .llm import ChatModel, OllamaChat
 from .mcp_server import MCPStdioServer, build_server
 from .pdf_parser import PDFParser
+from .project import Project, Source, render_manifest
 from .search import SearchResult, SemanticIndex
 from .tools import WikiTools
 from .web import WikiWebApp, serve
 from .wiki import Wiki, WikiBuilder, WikiPage, slugify, write_wiki
 
-__version__ = "0.16.0"
+__version__ = "0.17.0"
 
 __all__ = [
     "PDFParser",
@@ -67,5 +68,8 @@ __all__ = [
     "Entity",
     "build_server",
     "MCPStdioServer",
+    "Project",
+    "Source",
+    "render_manifest",
     "__version__",
 ]

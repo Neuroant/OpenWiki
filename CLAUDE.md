@@ -43,6 +43,16 @@ py -m venv .venv
 .venv\Scripts\python -m pip install -e ".[dev]"
 ```
 
+**Projects (`openwiki.toml`)** — group a knowledge base into a folder with a
+manifest so state persists and you can keep several side by side. `openwiki init
+[DIR] --source FILE` scaffolds `openwiki.toml` + `sources/` + `.gitignore`. Every
+other command is **project-aware**: run inside a project (discovered from the CWD,
+or pass `--project DIR`) and unset paths/models/host/split-level are filled from
+the manifest — explicit flags always win, and with no manifest the historical
+`./output` defaults apply (back-compat). Design + roadmap in `docs/projects.md`
+(Phase 1 landed: model + `init` + resolution; `build`/`status`/registry/multi-source
+are Phases 2–4).
+
 **Run the ingestion tool** — writes `<stem>.json` + `<stem>.md` under `--out`
 (default `./output`):
 ```
@@ -234,9 +244,17 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   the web layer but for coding agents. `build_server(...)` wraps
   `WikiTools`/`RAGAgent` as read-only `wiki_*` tools; `MCPStdioServer.handle()` is
   pure (unit-tested without stdio).
-- **`openwiki/cli.py`** — argparse CLI with `ingest`, `build-wiki`, `index`,
-  `search`, `ask`, `chat`, `graph-build`, `serve`, and `mcp` subcommands. Add new
-  capabilities as new subcommands, not as more flags.
+- **`openwiki/project.py`** — the **project** layer: `Project` (discover via
+  `find`, `load`, `resolve`; `out_dir`/`wiki_dir`/`index_dir`/`graph_path`; manifest
+  `setting()` lookup) + a hand-rolled `render_manifest` (stdlib `tomllib` *reads*
+  TOML but can't *write* it). Only this module + `cli.py` know about projects; the
+  pipeline stays project-agnostic and keeps taking explicit paths.
+- **`openwiki/cli.py`** — argparse CLI with `init`, `ingest`, `build-wiki`, `index`,
+  `search`, `ask`, `chat`, `graph-build`, `serve`, and `mcp` subcommands. A shared
+  `--project` (parent parser) + `_apply_project(args, project)` fill unset
+  path/model/host/split-level args from the active project before dispatch (flags
+  override; no project → `./output`). Add new capabilities as new subcommands, not
+  as more flags.
 
 ### Conventions & gotchas
 

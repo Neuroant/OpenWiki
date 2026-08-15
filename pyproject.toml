@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "openwiki"
-version = "0.16.0"
+version = "0.17.0"
 description = "Learning to build agentic wikis, starting with PDF ingestion."
 readme = "README.md"
 requires-python = ">=3.10,<3.14"
@@ -12,6 +12,7 @@ dependencies = [
     "PyMuPDF>=1.24.0",
     "numpy>=1.26",
     "kuzu>=0.11",
+    "tomli>=2.0; python_version < '3.11'",
 ]
 
 [project.optional-dependencies]

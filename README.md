@@ -36,13 +36,19 @@ synthesizer manual (269 pages, 228 outline entries).
 
 ## Quickstart
 
-Requires Python **3.10–3.13** (the Kuzu graph layer has no 3.14 wheel on Windows).
+Requires Python **3.10–3.13** — **not 3.14** (the Kuzu graph + vector DB has no
+3.14 wheel yet). If `py --list` shows **3.14 as your default** (`*`), create the
+venv with 3.13 explicitly or you'll hit *"no valid python found"* on install:
 
 ```bash
-py -m venv .venv
-.venv\Scripts\python -m pip install -e ".[dev]"        # Windows
-# python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"   # macOS/Linux
+py -3.13 -m venv .venv                                 # Windows: force 3.13
+.venv\Scripts\python -m pip install -e ".[dev]"
+# macOS/Linux:  python3.13 -m venv .venv && .venv/bin/pip install -e ".[dev]"
 ```
+
+> Only the **venv** needs to be 3.13 — your system default can stay 3.14. Verify
+> with `.venv\Scripts\python --version`; set `PY_PYTHON=3.13` to make `py` default
+> to it. (`uv` users: `uv venv --python 3.13`.)
 
 Activate the environment (`.venv\Scripts\activate` on Windows,
 `source .venv/bin/activate` elsewhere), then ingest the sample PDF:
@@ -366,7 +372,8 @@ OpenWiki runs locally with no cloud services — "deploying" it means standing u
 Python app plus a local Ollama on a host, then serving the browser UI (and/or the
 MCP server).
 
-1. **Prerequisites** — Python **3.10–3.13** and [Ollama](https://ollama.com). Pull
+1. **Prerequisites** — Python **3.10–3.13** (**not 3.14** — no Kuzu wheel yet; build
+   the venv with `py -3.13`) and [Ollama](https://ollama.com). Pull
    the models once, and make sure Ollama is running (`ollama serve` or the desktop app):
    ```bash
    ollama pull bge-m3
@@ -378,8 +385,8 @@ MCP server).
 2. **Install** — clone, create a venv, install:
    ```bash
    git clone https://github.com/Neuroant/OpenWiki.git && cd OpenWiki
-   py -m venv .venv && .venv\Scripts\python -m pip install -e .      # Windows
-   # python3 -m venv .venv && .venv/bin/pip install -e .             # macOS/Linux
+   py -3.13 -m venv .venv && .venv\Scripts\python -m pip install -e .   # Windows (force 3.13)
+   # macOS/Linux:  python3.13 -m venv .venv && .venv/bin/pip install -e .
    ```
 
 3. **Build a knowledge base** (as a project, recommended):

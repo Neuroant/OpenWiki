@@ -53,8 +53,12 @@ the manifest — explicit flags always win, and with no manifest the historical
 declared pipeline (ingest → wiki → index → graph) into the project's layout,
 incrementally — a per-stage fingerprint chain in `.openwiki/state.json` skips
 stages whose inputs+params are unchanged (`--only STAGES`, `--force`);
-**`openwiki status`** reports sources, settings, and per-stage build state. Design +
-roadmap in `docs/projects.md` (Phases 1–2 landed; registry/global config = Phase 3,
+**`openwiki status`** reports sources, settings, and per-stage build state. A
+user-global **`~/.openwiki/`** (override with `$OPENWIKI_HOME`) holds `config.toml`
+(cross-project setting defaults — below a project's manifest, above built-in
+defaults) and `registry.toml` (**`openwiki project list/use/add/remove/add-source`**;
+the active project is a from-anywhere fallback used only when you're not inside one —
+location always wins). Design + roadmap in `docs/projects.md` (Phases 1–3 landed;
 multi-source merge = Phase 4).
 
 **Run the ingestion tool** — writes `<stem>.json` + `<stem>.md` under `--out`
@@ -257,9 +261,13 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   **fingerprint chain** (`compute_fingerprints`) + the `.openwiki/state.json`
   lockfile (`BuildState`) + `stale_stages()`. Pure/testable; the CLI's `_cmd_build`
   does the actual stage execution (PDFParser → WikiBuilder → SemanticIndex → GraphBuilder).
-- **`openwiki/cli.py`** — argparse CLI with `init`, `build`, `status`, `ingest`,
-  `build-wiki`, `index`, `search`, `ask`, `chat`, `graph-build`, `serve`, and `mcp`
-  subcommands. A shared
+- **`openwiki/userconfig.py`** — user-global state under `~/.openwiki/`: `UserConfig`
+  (`config.toml` cross-project setting defaults) + `Registry` (`registry.toml` named
+  projects + active pointer). Read via `tomllib`; the registry has a tiny hand-rolled
+  writer. `cli._resolve_project` adds the registry fallback on top of `Project.resolve`.
+- **`openwiki/cli.py`** — argparse CLI with `init`, `build`, `status`, `project`
+  (`list`/`use`/`add`/`remove`/`add-source`), `ingest`, `build-wiki`, `index`,
+  `search`, `ask`, `chat`, `graph-build`, `serve`, and `mcp` subcommands. A shared
   `--project` (parent parser) + `_apply_project(args, project)` fill unset
   path/model/host/split-level args from the active project before dispatch (flags
   override; no project → `./output`). Add new capabilities as new subcommands, not

@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -31,10 +32,11 @@ from .models import ParsedDocument
 from .pdf_parser import PDFParser
 from .pipeline import STAGES, BuildState, compute_fingerprints, stale_stages
 from .project import (
-    DEFAULT_CHAT, DEFAULT_EMBED, DEFAULT_HOST, Project, render_manifest,
+    DEFAULT_CHAT, DEFAULT_EMBED, DEFAULT_HOST, MANIFEST, Project, render_manifest,
 )
 from .search import SemanticIndex
 from .tools import WikiTools
+from .userconfig import Registry, UserConfig
 from .web import WikiWebApp, serve
 from .wiki import WikiBuilder, write_wiki
 
@@ -71,6 +73,20 @@ def _build_argparser() -> argparse.ArgumentParser:
 
     sub.add_parser("status", parents=[common],
                    help="Show the project's sources, settings, and per-stage build state.")
+
+    project_p = sub.add_parser("project", help="Manage the project registry (list/use/add/remove/add-source).")
+    psub = project_p.add_subparsers(dest="project_cmd", required=True)
+    psub.add_parser("list", help="List registered projects (the active one is marked *).")
+    p_use = psub.add_parser("use", help="Set the active project (a from-anywhere default).")
+    p_use.add_argument("name")
+    p_add = psub.add_parser("add", help="Register a project (name → path).")
+    p_add.add_argument("name", nargs="?", help="Name (default: the project's manifest name).")
+    p_add.add_argument("path", nargs="?", type=Path, help="Project dir (default: the discovered project).")
+    p_rm = psub.add_parser("remove", help="Unregister a project.")
+    p_rm.add_argument("name")
+    p_src = psub.add_parser("add-source", parents=[common],
+                            help="Copy a file into sources/ and append it to openwiki.toml.")
+    p_src.add_argument("path", type=Path, help="Source document to add.")
 
     ingest = sub.add_parser("ingest", parents=[common], help="Parse a PDF and extract its content.")
     ingest.add_argument("pdf", type=Path, help="Path to the PDF file.")
@@ -277,6 +293,89 @@ def _cmd_init(args: argparse.Namespace) -> int:
     return 0
 
 
+def _resolve_project(explicit) -> Optional[Project]:
+    """Location-first (``--project`` > ``$OPENWIKI_PROJECT`` > discovery), then fall
+    back to the registry's active project when not inside one."""
+    project = Project.resolve(explicit)
+    if project is None and explicit is None and not os.environ.get("OPENWIKI_PROJECT"):
+        active = Registry.load().active_path()
+        if active is not None and (active / MANIFEST).is_file():
+            project = Project.load(active)
+    return project
+
+
+def _cmd_project(args: argparse.Namespace) -> int:
+    action = args.project_cmd
+    reg = Registry.load()
+
+    if action == "list":
+        projects = reg.projects()
+        if not projects:
+            print("(no registered projects — `openwiki project add`)")
+            return 0
+        active = reg.active()
+        for name in sorted(projects):
+            root = Path(projects[name])
+            mark = "*" if name == active else " "
+            note = "" if (root / MANIFEST).is_file() else "   (missing)"
+            print(f" {mark} {name:<20} {root}{note}")
+        return 0
+
+    if action == "use":
+        if not reg.use(args.name):
+            print(f"error: no registered project '{args.name}' (see `openwiki project list`).", file=sys.stderr)
+            return 2
+        print(f"Active project → {args.name}")
+        return 0
+
+    if action == "add":
+        if args.path is not None:
+            root = Path(args.path).resolve()
+        else:
+            found = Project.find(Path.cwd())
+            if found is None:
+                print("error: not in a project and no PATH given.", file=sys.stderr)
+                return 2
+            root = found.root
+        if not (root / MANIFEST).is_file():
+            print(f"error: no {MANIFEST} in {root}.", file=sys.stderr)
+            return 2
+        name = args.name or Project.load(root).name
+        reg.add(name, root)
+        print(f"Registered '{name}' → {root}")
+        return 0
+
+    if action == "remove":
+        if not reg.remove(args.name):
+            print(f"error: no registered project '{args.name}'.", file=sys.stderr)
+            return 2
+        print(f"Unregistered '{args.name}'")
+        return 0
+
+    if action == "add-source":
+        project: Optional[Project] = getattr(args, "project_obj", None)
+        if project is None:
+            print("error: not in an OpenWiki project — run `openwiki init` first.", file=sys.stderr)
+            return 2
+        src = Path(args.path)
+        if not src.is_file():
+            print(f"error: source not found: {src}", file=sys.stderr)
+            return 2
+        sources_dir = project.root / "sources"
+        sources_dir.mkdir(exist_ok=True)
+        dest = sources_dir / src.name
+        if src.resolve() != dest.resolve():
+            shutil.copy2(src, dest)
+        block = (f'\n[[sources]]\ntype = "{_source_type(src)}"\n'
+                 f'path = "sources/{src.name}"\n')
+        with (project.root / MANIFEST).open("a", encoding="utf-8") as fh:
+            fh.write(block)
+        print(f"Added source sources/{src.name} to '{project.name}'")
+        return 0
+
+    return 1
+
+
 def _cmd_build(args: argparse.Namespace) -> int:
     logging.basicConfig(
         level=logging.INFO if getattr(args, "verbose", False) else logging.WARNING,
@@ -458,8 +557,10 @@ def _cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
-def _apply_project(args: argparse.Namespace, project: Optional[Project]) -> None:
-    """Fill unset (``None``) path/model/host/split-level args from the project.
+def _apply_project(args: argparse.Namespace, project: Optional[Project],
+                   userconfig: Optional[UserConfig] = None) -> None:
+    """Fill unset (``None``) path/model/host/split-level args by precedence:
+    ``flag > project manifest > ~/.openwiki/config.toml > built-in default``.
 
     Explicit flags (non-``None``) always win. With no project, the historical
     ``./output`` defaults apply, so behaviour is unchanged outside a project.
@@ -473,6 +574,8 @@ def _apply_project(args: argparse.Namespace, project: Optional[Project]) -> None
     def val(attr: str, section: str, key: str, default) -> None:
         if hasattr(args, attr) and getattr(args, attr) is None:
             chosen = project.setting(section, key, None) if project is not None else None
+            if chosen is None and userconfig is not None:
+                chosen = userconfig.setting(section, key, None)
             setattr(args, attr, chosen if chosen is not None else default)
 
     p = project
@@ -851,6 +954,7 @@ def _cmd_mcp(args: argparse.Namespace) -> int:
 _DISPATCH = {
     "build": _cmd_build,
     "status": _cmd_status,
+    "project": _cmd_project,
     "ingest": _cmd_ingest,
     "build-wiki": _cmd_build_wiki,
     "index": _cmd_index,
@@ -877,16 +981,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.command == "init":
         return _cmd_init(args)
 
-    # Resolve the active project and fill unset defaults from its manifest.
+    # Resolve the active project (location-first, then registry) and fill unset
+    # defaults from its manifest and the user-global config.
     try:
-        project = Project.resolve(getattr(args, "project", None))
+        project = _resolve_project(getattr(args, "project", None))
     except (FileNotFoundError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
-    if project is not None:
+    if project is not None and args.command != "project":
         print(f"[openwiki] project '{project.name}'  ({project.root})", file=sys.stderr)
     args.project_obj = project
-    _apply_project(args, project)
+    _apply_project(args, project, UserConfig.load())
 
     handler = _DISPATCH.get(args.command)
     return handler(args) if handler else 1

@@ -1,8 +1,8 @@
 # OpenWiki projects — design & roadmap
 
-Status: **Phases 1–2 landed** (project model + `init` + project-aware commands;
-`build` + `status` + `.openwiki/state.json` staleness). Next: Phase 3 (registry +
-global config).
+Status: **Phases 1–3 landed** (project model + `init` + project-aware commands;
+`build` + `status` + staleness; `~/.openwiki/` global config + project registry).
+Next: Phase 4 (multi-source merge).
 
 An **OpenWiki project** is a folder with a declarative manifest (`openwiki.toml`)
 and its own outputs, so state persists and you can keep several knowledge bases
@@ -118,10 +118,10 @@ under a synthetic top-level outline node (its name) so slugs don't collide.
   - [x] `openwiki build` (single-source: ingest → wiki → index → graph from the manifest; `--only`, `--force`)
   - [x] `.openwiki/state.json` staleness (incremental builds via a per-stage fingerprint chain)
   - [x] `openwiki status`
-- [ ] **Phase 3 — registry & global config**
-  - [ ] `~/.openwiki/config.toml` cross-project defaults
-  - [ ] registry: `openwiki project list` / `use` / `add` / `remove`
-  - [ ] general TOML emitter (`project add-source` rewrites the manifest)
+- [x] **Phase 3 — registry & global config**
+  - [x] `~/.openwiki/config.toml` cross-project defaults (slots between manifest and built-in defaults)
+  - [x] registry: `openwiki project list` / `use` / `add` / `remove`
+  - [x] `project add-source` (surgical `[[sources]]` append — preserves comments, no full re-emit)
 - [ ] **Phase 4 — multi-source merge**
   - [ ] combine `ParsedDocument`s (page offset + per-source top node)
   - [ ] per-source reference offsets in the graph builder

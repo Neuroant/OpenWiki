@@ -123,6 +123,20 @@ def test_write_wiki(tmp_path, sample_wiki):
     assert "[Intro]" in index and "[Usage]" in index
 
 
+def test_write_wiki_clears_stale_pages(tmp_path, sample_wiki):
+    """A rebuild must not leave orphan .md files from a prior build (different slugs)."""
+    pages_dir = tmp_path / "pages"
+    pages_dir.mkdir(parents=True)
+    orphan = pages_dir / "999-orphan-from-an-old-build.md"
+    orphan.write_text("stale", encoding="utf-8")
+
+    write_wiki(sample_wiki, tmp_path)
+
+    assert not orphan.exists()  # the stale page is gone
+    slugs = {f.stem for f in pages_dir.glob("*.md")}
+    assert slugs == {p.slug for p in sample_wiki.pages}  # exactly the current pages remain
+
+
 def test_parsed_document_round_trip():
     doc = _doc(outline=[(1, "A", 1)], pages=["hello"])
     doc.pages[0].tables.append(TableData(page_number=1, rows=[["a", "b"]], bbox=(0, 0, 1, 1)))

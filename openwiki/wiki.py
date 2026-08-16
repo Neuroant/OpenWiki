@@ -181,6 +181,12 @@ def write_wiki(wiki: Wiki, out_dir, include_tables: bool = True) -> dict:
     pages_dir = out_dir / "pages"
     pages_dir.mkdir(parents=True, exist_ok=True)
 
+    # Clear a prior build's pages so slugs that were renamed or dropped (e.g. after
+    # a different --split-level or outline change) don't linger as orphan files —
+    # wiki.json/index/graph are rewritten wholesale, so pages/ must be too.
+    for stale in pages_dir.glob("*.md"):
+        stale.unlink()
+
     for i, page in enumerate(wiki.pages):
         (pages_dir / page.filename).write_text(
             _render_page(wiki, page, i, include_tables), encoding="utf-8"

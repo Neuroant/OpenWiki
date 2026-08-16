@@ -122,7 +122,7 @@ tools when the graph exists).
 .venv\Scripts\python -m openwiki graph-build output\301357_NAUTILUS_OG_G1.json
 ```
 Options: `--out DIR`, `-i/--index DIR`, `--split-level N` (must match the indexed
-wiki), `--similar-k N`, `--no-references` (skip the "siehe Seite N" edges),
+wiki), `--similar-k N`, `--no-references` (skip the page + section cross-ref edges),
 `--entities` (LLM-extract typed entities → `Entity` + `MENTIONS`; **slow**, one
 call/page), `--entity-model NAME`, `--entity-types "A,B,C"` (the domain ontology;
 overrides the default), `--entity-max-chars N`, `-v`.
@@ -225,7 +225,8 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   (Page/Chunk nodes; CHILD_OF/NEXT/PART_OF/SIMILAR_TO/REFERENCES edges; an HNSW
   index on `Chunk.emb` — embeddings **mirrored** from the index, which stays
   untouched; plus opt-in `Entity` nodes + `MENTIONS`). `references.py` extracts
-  the manual's "siehe Seite N" cross-refs (see the offset note below);
+  page ("Seite N") + section/chapter ("Abschnitt 1.6", "Kapitel 2") cross-refs
+  (see the offset note below);
   `entities.py` LLM-extracts typed entities per page (opt-in); `store.py`
   (`GraphStore`) answers `neighborhood(slug)` (agent's `graph_neighbors`, incl. a
   `shared_entity` group), `find_path(a, b)`, entity queries (`entities_for_page`,
@@ -389,15 +390,23 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   bookmarks are untouched.
   insert/delete (verified), so no index rebuild; `DROP_VECTOR_INDEX` is buggy in
   0.11 — avoid it.
-- **Cross-references:** the manual cites *printed* page numbers but nodes are keyed
-  by *physical* PDF pages. `references.detect_page_offset()` finds the constant
-  offset (the mode of `physical - printed` over every integer in the page text —
-  the true offset spikes because each page prints its own number; sample = 6),
-  and `extract_references()` resolves each "Seite N" to the page whose physical
-  span contains `N + offset`. `graph-build` computes these from the
-  `ParsedDocument` (not the `Wiki`, which lacks per-physical-page text) and passes
-  them to the builder. A page that is both a structural neighbor and a reference
-  target shows as the structural rel (dedup order in `GraphStore.neighborhood`).
+- **Cross-references:** `references.py` extracts two citation styles as Page→Page
+  edges (unioned). **(a) Page numbers** — the manual cites *printed* page numbers but
+  nodes are keyed by *physical* PDF pages. `detect_page_offset()` finds the constant
+  offset (the mode of `physical - printed` over every integer in the page text — the
+  true offset spikes because each page prints its own number; sample = 6), and
+  resolves each "Seite N" to the page whose physical span contains `N + offset`.
+  **(b) Section/chapter numbers** — "Abschnitt 1.6" / "Kapitel 2" (dominant in the
+  informatik lecture corpus; the synth manual barely used page refs). `_section_page_map`
+  reads the running headers (`N.M Title` / `Kapitel N` at the top of each page) into a
+  *section-number → physical-page* map, and `_section_edges` resolves each ref against
+  it. Note `outline.synthesize_outline` *drops* the section number from page titles, so
+  this re-derives it from the headers at graph-build time. `graph-build` computes both
+  from the `ParsedDocument` (not the `Wiki`, which lacks per-physical-page text); for a
+  **merged** corpus `extract_references_multi` scopes the section map **per source
+  window** so "Kapitel 2" never leaks between sources (informatik: 2 page-ref → 32 total
+  edges). A page that is both a structural neighbor and a reference target shows as the
+  structural rel (dedup order in `GraphStore.neighborhood`).
 
 ## Output
 

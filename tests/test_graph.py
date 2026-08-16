@@ -16,6 +16,7 @@ import json
 
 from openwiki.graph import (
     GraphBuilder, GraphStore, detect_page_offset, extract_entities, extract_references,
+    extract_references_multi,
 )
 from openwiki.models import DocumentMetadata, ParsedDocument
 from openwiki.models import Page as DocPage
@@ -148,6 +149,46 @@ def test_extract_references_resolves_printed_to_physical():
 def test_extract_references_wrong_offset_does_not_resolve():
     # printed 4 + offset 0 = physical 4, which is page A itself -> excluded
     assert ("000-a", "002-c") not in extract_references(_ref_doc(), _ref_wiki(), offset=0)
+
+
+def _section_wiki(slugs_pages) -> Wiki:
+    pages = [WikiPage(slug=s, title=s.split("-", 1)[-1].title(), level=1, order=i,
+                      pdf_page_start=p, pdf_page_end=p, text="x")
+             for i, (s, p) in enumerate(slugs_pages)]
+    return Wiki(title="T", pages=pages, source="x.pdf", split_level=2)
+
+
+def test_extract_references_resolves_section_and_chapter():
+    # "Abschnitt N.M" / "Kapitel N" resolve via running headers, not page numbers.
+    pages = [
+        DocPage(number=1, text="Kapitel 1\nGrundlagen"),                  # declares chapter 1
+        DocPage(number=2, text="1.2 Vertiefung\nVgl. Abschnitt 1.3 und Kapitel 1."),
+        DocPage(number=3, text="1.3 Kernidee\nDer eigentliche Stoff."),   # declares section 1.3
+    ]
+    doc = ParsedDocument(metadata=DocumentMetadata(source_path="x.pdf", page_count=3), outline=[], pages=pages)
+    wiki = _section_wiki([("000-intro", 1), ("001-vert", 2), ("002-kern", 3)])
+    edges = extract_references(doc, wiki)
+    assert ("001-vert", "002-kern") in edges   # "Abschnitt 1.3" -> section header on physical page 3
+    assert ("001-vert", "000-intro") in edges  # "Kapitel 1"    -> chapter start on physical page 1
+    assert all(src != dst for src, dst in edges)
+
+
+def test_extract_references_multi_section_stays_within_source():
+    # Each source has its own "1.1"; a "Abschnitt 1.1" must resolve within its source.
+    pages = [
+        DocPage(number=1, text="1.1 Alpha"),
+        DocPage(number=2, text="1.2 Beta\nSiehe Abschnitt 1.1."),   # source 1 -> phys 1
+        DocPage(number=3, text="1.1 Gamma"),
+        DocPage(number=4, text="1.2 Delta\nSiehe Abschnitt 1.1."),  # source 2 -> phys 3
+    ]
+    doc = ParsedDocument(metadata=DocumentMetadata(source_path="m", page_count=4), outline=[], pages=pages)
+    wiki = _section_wiki([("s1-alpha", 1), ("s1-beta", 2), ("s2-gamma", 3), ("s2-delta", 4)])
+    metas = [{"start": 0, "count": 2, "printed_offset": 0},
+             {"start": 2, "count": 2, "printed_offset": 0}]
+    edges = extract_references_multi(doc, wiki, metas)
+    assert ("s1-beta", "s1-alpha") in edges       # within source 1
+    assert ("s2-delta", "s2-gamma") in edges      # within source 2
+    assert ("s2-delta", "s1-alpha") not in edges  # did NOT leak across sources
 
 
 def test_graph_references_and_referenced_by(tmp_path):

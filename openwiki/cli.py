@@ -36,6 +36,7 @@ from .mcp_server import build_server
 from .merge import combine_documents
 from .models import ParsedDocument
 from .ontology import format_entity_types, propose_ontology, sample_corpus
+from .outline import synthesize_outline
 from .pdf_parser import PDFParser
 from .pipeline import STAGES, BuildState, compute_fingerprints, stale_stages
 from .project import (
@@ -613,8 +614,11 @@ def _cmd_build(args: argparse.Namespace) -> int:
     if "ingest" in todo:
         project.parsed_dir.mkdir(parents=True, exist_ok=True)
         parsed_docs = []
+        synth = build.get("synthesize_outline", True)
         for src in sources:
             parsed = PDFParser(extract_tables=tables).parse(src)
+            if synth and not parsed.outline:   # no PDF bookmarks → derive section pages from headings
+                parsed.outline = synthesize_outline(parsed)
             if multi:  # keep each source's IR so per-source offsets survive caching
                 (project.parsed_dir / f"{src.stem}.json").write_text(
                     json.dumps(parsed.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")

@@ -183,6 +183,7 @@ description = {_toml_str(description)}
 [build]
 split_level = {split_level}   # shared by index & graph so their page slugs can't drift
 tables = {str(tables).lower()}
+synthesize_outline = true   # derive section pages from headings when a PDF has no bookmarks
 chunk_size = {chunk_size}
 overlap = {overlap}
 

@@ -20,6 +20,7 @@ from .llm import ChatModel, OllamaChat
 from .merge import combine_documents
 from .mcp_server import MCPStdioServer, build_server
 from .ontology import format_entity_types, propose_ontology, sample_corpus
+from .outline import synthesize_outline
 from .pdf_parser import PDFParser
 from .project import Project, Source, render_manifest
 from .userconfig import Registry, UserConfig
@@ -28,7 +29,7 @@ from .tools import WikiTools
 from .web import WikiWebApp, serve
 from .wiki import Wiki, WikiBuilder, WikiPage, slugify, write_wiki
 
-__version__ = "0.22.1"
+__version__ = "0.23.0"
 
 __all__ = [
     "PDFParser",
@@ -80,5 +81,6 @@ __all__ = [
     "propose_ontology",
     "sample_corpus",
     "format_entity_types",
+    "synthesize_outline",
     "__version__",
 ]

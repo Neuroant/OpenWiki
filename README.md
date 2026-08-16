@@ -515,6 +515,7 @@ PDF ──PDFParser──▶ ParsedDocument ──▶ JSON / Markdown
 - `openwiki/web/` — stdlib web server + vanilla-JS SPA (browse, search, chat/edit, graph)
 - `openwiki/mcp_server.py` — stdio MCP server exposing the wiki as tools for coding agents
 - `openwiki/project.py` · `pipeline.py` · `userconfig.py` · `merge.py` — the **project** layer: the `openwiki.toml` model + resolution, the `openwiki build` fingerprint/staleness state, the `~/.openwiki/` global config + registry, and multi-source merge
+- `openwiki/outline.py` — synthesizes a section outline from heading text when a PDF has no bookmarks (finer wiki pages)
 - `openwiki/ontology.py` — proposes a domain entity ontology from the corpus (one LLM call) for `openwiki ontology`
 - `openwiki/cli.py` — the `openwiki` command line (`init`, `build`, `status`, `project`, `ontology`, `ingest`, `build-wiki`, `index`, `search`, `ask`, `chat`, `graph-build`, `serve`, `mcp`)
 

@@ -363,6 +363,13 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   one such process at a time (there's a read-only fallback if the lock is held).
   Only `SIMILAR_TO` is recomputed on upsert — CHILD_OF/NEXT, REFERENCES and
   entities still need a full `graph-build`. Kuzu's HNSW index supports incremental
+- **Outline synthesis** (`outline.py`): when a source PDF has **no bookmarks**,
+  `openwiki build` (with `[build] synthesize_outline`, default on) derives a flat
+  section outline from **numbered running headers** (e.g. `10.1 Title` at the top of
+  each page) — first-appearance page per distinct section — so the wiki splits a
+  document into section pages instead of one page. Text-only heuristic; returns `[]`
+  (→ keep the original outline) unless it finds ≥3 distinct sections. PDFs *with*
+  bookmarks are untouched.
   insert/delete (verified), so no index rebuild; `DROP_VECTOR_INDEX` is buggy in
   0.11 — avoid it.
 - **Cross-references:** the manual cites *printed* page numbers but nodes are keyed

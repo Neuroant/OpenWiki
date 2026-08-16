@@ -58,7 +58,7 @@ def compute_fingerprints(project: Project, sources: Iterable[Path]) -> dict:
     entities = graph.get("entities", False)
 
     src = sources_signature(sources)
-    ingest = _hash("ingest", src, tables)
+    ingest = _hash("ingest", src, tables, build.get("synthesize_outline", True))
     wiki = _hash("wiki", ingest, split, tables)
     index = _hash(
         "index", ingest, split,

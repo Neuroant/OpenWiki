@@ -7,21 +7,27 @@
 #   .\install-openwiki.ps1 -Git         # install from GitHub instead
 #   .\install-openwiki.ps1 -Editable    # editable install of this checkout (for hacking)
 param([switch]$Git, [switch]$Editable)
-$ErrorActionPreference = 'Stop'
+
+# NOTE: we deliberately do NOT set `$ErrorActionPreference = 'Stop'`. Native tools
+# (py, pip, pipx) write progress/warnings to stderr, which Windows PowerShell 5.1
+# would otherwise turn into terminating errors. We check $LASTEXITCODE explicitly.
+
+function Die($msg) { Write-Host "ERROR: $msg"; exit 1 }
 
 # 1. Locate Python 3.13.
-try { $py = (& py -3.13 -c "import sys; print(sys.executable)").Trim() }
-catch {
-    Write-Error "Python 3.13 not found. Install it from https://www.python.org/downloads/ -- 3.14 will NOT work (no Kuzu wheel)."
-    exit 1
+$py = & py -3.13 -c "import sys; print(sys.executable)" 2>$null
+if (-not $py) {
+    Die "Python 3.13 not found. Install it from https://www.python.org/downloads/ -- 3.14 will NOT work (no Kuzu wheel)."
 }
+$py = "$py".Trim()
 Write-Host "Using Python 3.13: $py"
 
-# 2. Ensure pipx is available for that interpreter.
-& $py -m pipx --version *> $null
+# 2. Ensure pipx is available for that interpreter (install if missing).
+& $py -m pipx --version 1>$null 2>$null
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "Installing pipx..."
+    Write-Host "pipx not found -- installing it for Python 3.13..."
     & $py -m pip install --user --upgrade pipx
+    if ($LASTEXITCODE -ne 0) { Die "Could not install pipx (see pip output above)." }
 }
 
 # 3. Pick the source (local checkout by default; GitHub with -Git).
@@ -32,9 +38,10 @@ $extra = @(); if ($Editable -and -not $Git) { $extra = @('--editable') }
 # 4. Install (into pipx's own 3.13 venv; --force reinstalls if present).
 Write-Host "Installing openwiki from $source ..."
 & $py -m pipx install --force --python $py @extra $source
+if ($LASTEXITCODE -ne 0) { Die "pipx install failed (see output above)." }
 
 # 5. Make sure pipx's bin dir is on PATH.
-& $py -m pipx ensurepath | Out-Null
+& $py -m pipx ensurepath 1>$null 2>$null
 
 Write-Host ""
 Write-Host "Done. Open a NEW terminal, then verify:  openwiki --help"

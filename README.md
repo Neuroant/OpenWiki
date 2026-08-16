@@ -387,6 +387,10 @@ repository, and you do **not** create a new virtual environment, per project.
 #   .\install-openwiki.ps1        # Windows   ·   ./install-openwiki.sh   # macOS/Linux
 ```
 
+> The package installs **two identical commands**: `openwiki` and **`owiki`**. If
+> another tool on your PATH already provides an `openwiki` command, just use
+> **`owiki`** — same tool, collision-free.
+
 **2. Scaffold → build → serve** — in any folder you like:
 
 ```bash

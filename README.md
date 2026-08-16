@@ -348,7 +348,9 @@ entities = false
   `--force`). No more keeping `--split-level` in sync between `index` and `graph-build`.
 - **Multiple `[[sources]]`** merge into one corpus — each becomes a top-level wiki
   section and cross-references resolve within each source. Add one with
-  `openwiki project add-source path/to/other.pdf`.
+  `openwiki project add-source path/to/other.pdf`. Point `--source` / `add-source`
+  at a **folder** to register all its `*.pdf` files at once (a glob works too):
+  `openwiki init proj --source C:\docs` or `--source "C:\docs\*.pdf"`.
 - **Registry** — register projects and switch by name from anywhere:
   ```bash
   openwiki project add my-manual .     # register (name → path)

@@ -155,3 +155,34 @@ def test_cmd_init_refuses_existing(tmp_path):
     _write_project(root)
     ns = _ns("init", dir=root, name=None, source=None, force=False)
     assert cli._cmd_init(ns) == 2
+
+
+def test_expand_sources_dir_glob_file(tmp_path):
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "a.pdf").write_bytes(b"%PDF a")
+    (docs / "b.pdf").write_bytes(b"%PDF b")
+    (docs / "notes.txt").write_bytes(b"x")   # non-pdf ignored by dir/glob scan
+
+    assert sorted(p.name for p in cli._expand_sources([docs])) == ["a.pdf", "b.pdf"]
+    assert sorted(p.name for p in cli._expand_sources([str(docs / "*.pdf")])) == ["a.pdf", "b.pdf"]
+    assert [p.name for p in cli._expand_sources([docs / "a.pdf"])] == ["a.pdf"]
+
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    with pytest.raises(FileNotFoundError):
+        cli._expand_sources([empty])
+    with pytest.raises(FileNotFoundError):
+        cli._expand_sources([tmp_path / "missing"])
+
+
+def test_cmd_init_scans_folder(tmp_path):
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "a.pdf").write_bytes(b"%PDF a")
+    (docs / "b.pdf").write_bytes(b"%PDF b")
+    ns = _ns("init", dir=tmp_path / "proj", name="multi", source=[docs], force=False)
+    assert cli._cmd_init(ns) == 0
+    proj = Project.load(tmp_path / "proj")
+    assert {s.path for s in proj.sources} == {"sources/a.pdf", "sources/b.pdf"}
+    assert (tmp_path / "proj" / "sources" / "a.pdf").is_file()

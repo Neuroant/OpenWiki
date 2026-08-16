@@ -14,6 +14,7 @@ See ``docs/projects.md``.
 from __future__ import annotations
 
 import argparse
+import glob
 import json
 import logging
 import os
@@ -65,7 +66,8 @@ def _build_argparser() -> argparse.ArgumentParser:
                         help="Project directory (default: current directory).")
     init_p.add_argument("--name", default=None, help="Project name (default: directory name).")
     init_p.add_argument("--source", action="append", type=Path, metavar="PATH",
-                        help="A source document to register (repeatable); copied into sources/.")
+                        help="A source file, a folder (registers its *.pdf files), or a glob "
+                             "(repeatable); copied into sources/.")
     init_p.add_argument("--force", action="store_true", help="Overwrite an existing openwiki.toml.")
 
     build_p = sub.add_parser("build", parents=[common],
@@ -90,7 +92,7 @@ def _build_argparser() -> argparse.ArgumentParser:
     p_rm.add_argument("name")
     p_src = psub.add_parser("add-source", parents=[common],
                             help="Copy a file into sources/ and append it to openwiki.toml.")
-    p_src.add_argument("path", type=Path, help="Source document to add.")
+    p_src.add_argument("path", type=Path, help="A source file, a folder (its *.pdf files), or a glob.")
 
     ingest = sub.add_parser("ingest", parents=[common], help="Parse a PDF and extract its content.")
     ingest.add_argument("pdf", type=Path, help="Path to the PDF file.")
@@ -259,6 +261,44 @@ def _source_type(path: Path) -> str:
     return {".txt": "text", ".md": "text"}.get(path.suffix.lower(), "pdf")
 
 
+def _expand_sources(raw) -> "list[Path]":
+    """Expand each ``--source`` argument into concrete input files.
+
+    A **directory** contributes its top-level ``*.pdf`` files; a **glob**
+    (containing ``*``/``?``/``[``) contributes its matches; a plain **file** is taken
+    as-is. Duplicates (by resolved path) are dropped; ``FileNotFoundError`` is raised
+    if an argument matches nothing.
+    """
+    files: "list[Path]" = []
+    seen: set = set()
+
+    def _add(path: Path) -> None:
+        resolved = path.resolve()
+        if path.is_file() and resolved not in seen:
+            seen.add(resolved)
+            files.append(path)
+
+    for item in raw:
+        text = str(item)
+        if any(ch in text for ch in "*?["):
+            matches = sorted(Path(m) for m in glob.glob(text))
+            if not matches:
+                raise FileNotFoundError(f"no files match: {text}")
+            for match in matches:
+                _add(match)
+        elif Path(item).is_dir():
+            pdfs = sorted(Path(item).glob("*.pdf"))
+            if not pdfs:
+                raise FileNotFoundError(f"no .pdf files in directory: {item}")
+            for pdf in pdfs:
+                _add(pdf)
+        elif Path(item).is_file():
+            _add(Path(item))
+        else:
+            raise FileNotFoundError(f"source not found: {item}")
+    return files
+
+
 def _cmd_init(args: argparse.Namespace) -> int:
     root: Path = args.dir.resolve()
     root.mkdir(parents=True, exist_ok=True)
@@ -269,12 +309,18 @@ def _cmd_init(args: argparse.Namespace) -> int:
 
     sources_dir = root / "sources"
     sources_dir.mkdir(exist_ok=True)
+    try:
+        inputs = _expand_sources(args.source or [])
+    except FileNotFoundError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     sources: list[dict] = []
-    for src in args.source or []:
-        src = Path(src)
-        if not src.is_file():
-            print(f"error: source not found: {src}", file=sys.stderr)
-            return 2
+    seen_names: set = set()
+    for src in inputs:
+        if src.name in seen_names:
+            print(f"note: skipping duplicate filename '{src.name}' ({src})", file=sys.stderr)
+            continue
+        seen_names.add(src.name)
         dest = sources_dir / src.name
         if src.resolve() != dest.resolve():
             shutil.copy2(src, dest)
@@ -361,20 +407,31 @@ def _cmd_project(args: argparse.Namespace) -> int:
         if project is None:
             print("error: not in an OpenWiki project — run `openwiki init` first.", file=sys.stderr)
             return 2
-        src = Path(args.path)
-        if not src.is_file():
-            print(f"error: source not found: {src}", file=sys.stderr)
+        try:
+            inputs = _expand_sources([args.path])
+        except FileNotFoundError as exc:
+            print(f"error: {exc}", file=sys.stderr)
             return 2
         sources_dir = project.root / "sources"
         sources_dir.mkdir(exist_ok=True)
-        dest = sources_dir / src.name
-        if src.resolve() != dest.resolve():
-            shutil.copy2(src, dest)
-        block = (f'\n[[sources]]\ntype = "{_source_type(src)}"\n'
-                 f'path = "sources/{src.name}"\n')
-        with (project.root / MANIFEST).open("a", encoding="utf-8") as fh:
-            fh.write(block)
-        print(f"Added source sources/{src.name} to '{project.name}'")
+        existing = {s.path for s in project.sources}
+        added: list[str] = []
+        for src in inputs:
+            rel = f"sources/{src.name}"
+            if rel in existing:
+                print(f"note: already declared, skipping {rel}", file=sys.stderr)
+                continue
+            existing.add(rel)
+            dest = sources_dir / src.name
+            if src.resolve() != dest.resolve():
+                shutil.copy2(src, dest)
+            with (project.root / MANIFEST).open("a", encoding="utf-8") as fh:
+                fh.write(f'\n[[sources]]\ntype = "{_source_type(src)}"\npath = "{rel}"\n')
+            added.append(rel)
+        if not added:
+            print("Nothing added (all matches already declared).")
+            return 0
+        print(f"Added {len(added)} source(s) to '{project.name}': {', '.join(added)}")
         return 0
 
     return 1

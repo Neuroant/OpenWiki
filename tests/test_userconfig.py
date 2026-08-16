@@ -97,6 +97,26 @@ def test_resolve_project_registry_fallback(tmp_path, monkeypatch):
     assert resolved is not None and resolved.root == proj.root
 
 
+def test_add_source_scans_folder_and_is_idempotent(tmp_path):
+    proj = _mk_project(tmp_path / "p")   # declares sources/m.pdf
+    more = tmp_path / "more"
+    more.mkdir()
+    (more / "x.pdf").write_bytes(b"%PDF x")
+    (more / "y.pdf").write_bytes(b"%PDF y")
+
+    ns = argparse.Namespace(command="project", project_cmd="add-source", path=more, project_obj=proj)
+    assert cli._cmd_project(ns) == 0
+    assert {s.path for s in Project.load(proj.root).sources} == {
+        "sources/m.pdf", "sources/x.pdf", "sources/y.pdf"}
+
+    # adding the same folder again declares nothing new — each real `owiki` invocation
+    # loads a fresh project, so reload to mirror that.
+    ns2 = argparse.Namespace(command="project", project_cmd="add-source", path=more,
+                             project_obj=Project.load(proj.root))
+    assert cli._cmd_project(ns2) == 0
+    assert len(Project.load(proj.root).sources) == 3
+
+
 def test_add_source_appends_and_stays_valid_toml(tmp_path):
     proj = _mk_project(tmp_path / "p")
     extra = tmp_path / "extra.pdf"

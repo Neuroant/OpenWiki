@@ -92,3 +92,33 @@ def test_agent_stops_at_iteration_limit(tools):
 def test_think_tags_stripped(tools):
     chat = ScriptedChat([{"role": "assistant", "content": "<think>secret</think>Antwort."}])
     assert WikiAgent(chat, tools).send("frage").reply == "Antwort."
+
+
+def test_summarize_wiki_reads_title_and_top_sections(tmp_path):
+    from openwiki.chat_agent import summarize_wiki
+
+    wiki = tmp_path / "wiki"
+    wiki.mkdir()
+    (wiki / "wiki.json").write_text(json.dumps({
+        "title": "Informatik",
+        "pages": [
+            {"slug": "001-a", "title": "Grundbegriffe", "parent": None},
+            {"slug": "002-b", "title": "Algorithmen", "parent": None},
+            {"slug": "003-c", "title": "Ein Unterabschnitt", "parent": "001-a"},
+        ],
+    }), encoding="utf-8")
+    summary = summarize_wiki(wiki)
+    assert 'titled "Informatik"' in summary
+    assert "Grundbegriffe" in summary and "Algorithmen" in summary
+    assert "Unterabschnitt" not in summary  # only top-level sections listed
+    assert summarize_wiki(tmp_path / "missing") == ""  # no manifest → empty string
+
+
+def test_wiki_summary_grounds_the_system_prompt(tools):
+    chat = ScriptedChat([{"role": "assistant", "content": "ok"}])
+    grounded = WikiAgent(chat, tools, wiki_summary='This wiki is titled "Informatik".')
+    system = grounded.messages[0]
+    assert system["role"] == "system"
+    assert "About this wiki:" in system["content"] and "Informatik" in system["content"]
+    # No summary → the base prompt is left untouched (back-compat).
+    assert "About this wiki:" not in WikiAgent(chat, tools).messages[0]["content"]

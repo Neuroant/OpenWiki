@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Optional, Sequence
 
 from .agent import RAGAgent
-from .chat_agent import WikiAgent
+from .chat_agent import WikiAgent, summarize_wiki
 from .graph import (
     GraphStore, build_graph, detect_page_offset, extract_entities,
     extract_references, extract_references_multi,
@@ -1021,7 +1021,7 @@ def _cmd_chat(args: argparse.Namespace) -> int:
     embedder = index.embedder if index else None
     tools = WikiTools(args.wiki, index=index, graph=graph, embedder=embedder, dry_run=args.dry_run)
     chat = OllamaChat(model=args.model, host=args.host, temperature=args.temperature)
-    agent = WikiAgent(chat, tools)
+    agent = WikiAgent(chat, tools, wiki_summary=summarize_wiki(args.wiki))
 
     if args.message:  # non-interactive: run the given turns in one session
         for message in args.message:
@@ -1098,7 +1098,7 @@ def _cmd_serve(args: argparse.Namespace) -> int:
 
     tools = WikiTools(args.wiki, index=index, graph=graph, embedder=embedder, dry_run=args.dry_run)
     chat = OllamaChat(model=args.model, host=args.host, temperature=args.temperature)
-    agent = WikiAgent(chat, tools)
+    agent = WikiAgent(chat, tools, wiki_summary=summarize_wiki(args.wiki))
     app = WikiWebApp(args.wiki, index=index, agent=agent, tools=tools, graph=graph,
                      project=getattr(args, "project_obj", None))
 

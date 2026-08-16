@@ -29,7 +29,7 @@
       "type": "local",
       "command": [
         ".venv/Scripts/python.exe", "-m", "openwiki", "mcp",
-        "--wiki", "output/wiki", "--index", "output/index", "--graph", "output/graph"
+        "--project", "G:/OpenWiki/Projects/Informatik/informatik-wiki"
       ],
       "enabled": true
     }

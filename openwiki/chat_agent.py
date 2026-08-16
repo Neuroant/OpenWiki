@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from .llm import Message
 from .tools import WikiTools
@@ -20,8 +21,10 @@ SYSTEM_PROMPT = (
     "and edit wiki pages with the provided tools.\n"
     "Guidelines:\n"
     "- Answer in the user's language.\n"
-    "- To answer a question: search first, read the most relevant page(s), then "
-    "reply concisely and cite the page slug(s) you used.\n"
+    "- Always search the wiki before answering any question about its content — "
+    "including broad ones like \"what is this wiki about?\". Read the most relevant "
+    "page(s), then reply concisely and cite the page slug(s) you used. Never answer "
+    "a content question from prior knowledge; if the tools find nothing, say so.\n"
     "- To edit: read the page first so you use exact text, then call edit_page, "
     "append_section, or create_page. Make only the changes the user asked for.\n"
     "- After editing, state briefly what you changed (page slug + what/why).\n"
@@ -29,6 +32,30 @@ SYSTEM_PROMPT = (
 )
 
 _THINK = re.compile(r"<think>.*?</think>", re.DOTALL)
+
+
+def summarize_wiki(wiki_dir) -> str:
+    """A one-line identity for the wiki (title + top-level section titles), read
+    from ``wiki.json``. Injected into the agent's system prompt so it knows which
+    wiki it is serving and won't answer content questions from prior knowledge of
+    some other document. Returns ``""`` when no manifest is present."""
+    manifest = Path(wiki_dir) / "wiki.json"
+    if not manifest.is_file():
+        return ""
+    try:
+        data = json.loads(manifest.read_text(encoding="utf-8"))
+    except (ValueError, OSError):
+        return ""
+    title = (data.get("title") or Path(wiki_dir).name).strip()
+    sections = [p.get("title", "").strip() for p in data.get("pages", []) if not p.get("parent")]
+    sections = [s for s in sections if s]
+    summary = f'This wiki is titled "{title}".'
+    if sections:
+        shown = "; ".join(sections[:12])
+        if len(sections) > 12:
+            shown += "; …"
+        summary += f" Its main sections are: {shown}."
+    return summary
 
 
 @dataclass
@@ -46,11 +73,16 @@ class AgentTurn:
 
 class WikiAgent:
     def __init__(self, chat, tools: WikiTools, system_prompt: str = SYSTEM_PROMPT,
-                 max_iterations: int = 6) -> None:
+                 wiki_summary: str = "", max_iterations: int = 6) -> None:
         self.chat = chat
         self.tools = tools
         self.max_iterations = max_iterations
-        self.messages: list[Message] = [{"role": "system", "content": system_prompt}]
+        prompt = system_prompt
+        if wiki_summary:
+            prompt += ("\n\nAbout this wiki: " + wiki_summary +
+                       " Answer every content question from THIS wiki via the tools; "
+                       "do not draw on outside knowledge of other products or manuals.")
+        self.messages: list[Message] = [{"role": "system", "content": prompt}]
 
     def send(self, user_message: str) -> AgentTurn:
         """Run one user turn to completion, executing any tool calls in between."""

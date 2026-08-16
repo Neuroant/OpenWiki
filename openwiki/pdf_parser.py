@@ -13,12 +13,18 @@ import logging
 from pathlib import Path
 from typing import Optional, Union
 
+# PyMuPDF renamed its import package to ``pymupdf``; the old ``import fitz`` still
+# works but prints a deprecation warning. Prefer the new name (aliased to ``fitz`` so
+# the rest of this module is unchanged), and fall back for older PyMuPDF versions.
 try:
-    import fitz  # PyMuPDF
-except ImportError as exc:  # pragma: no cover
-    raise ImportError(
-        "PyMuPDF is required for PDF parsing. Install it with `pip install PyMuPDF`."
-    ) from exc
+    import pymupdf as fitz
+except ImportError:
+    try:
+        import fitz  # PyMuPDF < 1.24.3
+    except ImportError as exc:  # pragma: no cover
+        raise ImportError(
+            "PyMuPDF is required for PDF parsing. Install it with `pip install PyMuPDF`."
+        ) from exc
 
 from .models import (
     DocumentMetadata,

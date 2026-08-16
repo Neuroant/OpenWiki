@@ -297,9 +297,15 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   `cd`-ing into any project and running OpenCode gets an agent scoped to *that* wiki.
   Pure string/JSON rendering (`render_files`) + file writes (`scaffold_opencode`); the
   CLI picks the MCP command (`owiki` if on PATH, else `sys.executable -m openwiki`).
+- **`openwiki/claude_code_template.py`** — `owiki claude-code`: the same idea for
+  **Claude Code** — writes a project-scoped `.mcp.json` (registers `openwiki` as an MCP
+  server via `owiki mcp` discovery) plus `.claude/commands/*` (`wiki-ask`,
+  `wiki-explore`, `openwiki-help`) and an auto-applied `.claude/skills/openwiki`. Same
+  `render_files`/`scaffold_claude_code` shape; shares `cli._mcp_command()`.
 - **`openwiki/cli.py`** — argparse CLI with `init`, `build`, `status`, `project`
-  (`list`/`use`/`add`/`remove`/`add-source`), `opencode`, `ontology`, `ingest`, `build-wiki`,
-  `index`, `search`, `ask`, `chat`, `graph-build`, `serve`, and `mcp` subcommands. A shared
+  (`list`/`use`/`add`/`remove`/`add-source`), `opencode`, `claude-code`, `ontology`, `ingest`,
+  `build-wiki`, `index`, `search`, `ask`, `chat`, `graph-build`, `serve`, and `mcp`
+  subcommands. A shared
   `--project` (parent parser) + `_apply_project(args, project)` fill unset
   path/model/host/split-level args from the active project before dispatch (flags
   override; no project → `./output`). Add new capabilities as new subcommands, not

@@ -8,6 +8,21 @@ graph traversal over your document, instead of guessing.
 The server is `openwiki mcp`: a dependency-free stdio (newline-delimited
 JSON-RPC 2.0) server, in the same spirit as the rest of the project.
 
+## Quickest setup — scaffold it per project
+
+If your wiki is an OpenWiki **project** (an `openwiki.toml` folder), let the CLI write
+the config for you, from inside the project:
+
+```bash
+owiki claude-code     # → .mcp.json + .claude/ (commands + skill)
+owiki opencode        # → opencode.json + .opencode/ (agent + commands)
+```
+
+Both wire the MCP as **`owiki mcp` with project discovery**: the agent launches the
+server *from the project folder*, so it resolves that project's wiki/index/graph from
+the manifest — no absolute paths, and it can't drift to another project's corpus.
+Everything below explains the same wiring by hand (and for non-project wikis).
+
 ## The MCP server
 
 ```bash
@@ -61,29 +76,29 @@ You should see an `initialize` result and a `tools/list` with the tools above.
 
 ### 1. Register the MCP server
 
-Either add it to a project's **`.mcp.json`**
+For a **project**, just run `owiki claude-code` (above) — it writes the `.mcp.json`
+below. To do it by hand, add it to the project's **`.mcp.json`**
 (see `examples/coding-agents/claude-code/.mcp.json`):
 
 ```json
 {
   "mcpServers": {
     "openwiki": {
-      "command": "<OPENWIKI>/.venv/bin/python",
-      "args": ["-m", "openwiki", "mcp",
-               "--wiki",  "<OPENWIKI>/output/wiki",
-               "--index", "<OPENWIKI>/output/index",
-               "--graph", "<OPENWIKI>/output/graph"]
+      "command": "owiki",
+      "args": ["mcp"]
     }
   }
 }
 ```
 
+`owiki mcp` (no path flags) discovers the project from the folder Claude Code runs it
+in. No global `owiki`? Use the venv Python and explicit paths instead:
+`"command": "<OPENWIKI>/.venv/bin/python", "args": ["-m","openwiki","mcp","--wiki","<OPENWIKI>/output/wiki", …]`.
+
 …or from the CLI:
 
 ```bash
-claude mcp add openwiki --scope project -- \
-  <OPENWIKI>/.venv/bin/python -m openwiki mcp \
-  --wiki <OPENWIKI>/output/wiki --index <OPENWIKI>/output/index --graph <OPENWIKI>/output/graph
+claude mcp add openwiki --scope project -- owiki mcp
 ```
 
 Claude will now call `wiki_ask`, `wiki_search`, etc. on its own when relevant.
@@ -143,9 +158,9 @@ Two more commands teach OpenWiki *itself* (copy from
 
 ### 1. Register the MCP server
 
-Add it to **`opencode.json`** (project root or `~/.config/opencode/`); see
-`examples/coding-agents/opencode/opencode.json`. `cwd` lets you use relative
-paths:
+For a **project**, `owiki opencode` (above) writes this (plus the `openwiki` agent).
+By hand, add it to **`opencode.json`** (project root); see
+`examples/coding-agents/opencode/opencode.json`:
 
 ```json
 {
@@ -153,16 +168,17 @@ paths:
   "mcp": {
     "openwiki": {
       "type": "local",
-      "command": ["<OPENWIKI>/.venv/bin/python", "-m", "openwiki", "mcp",
-                  "--wiki", "output/wiki", "--index", "output/index", "--graph", "output/graph"],
-      "cwd": "<OPENWIKI>",
+      "command": ["owiki", "mcp"],
       "enabled": true
     }
   }
 }
 ```
 
-The `wiki_*` tools are then available to OpenCode's agents automatically.
+`owiki mcp` discovers the project from the folder OpenCode runs it in. No global
+`owiki`? Use `["<OPENWIKI>/.venv/bin/python", "-m", "openwiki", "mcp", "--wiki", …]`
+with explicit absolute paths instead. The `wiki_*` tools are then available to
+OpenCode's agents automatically.
 
 ### 2. A command
 

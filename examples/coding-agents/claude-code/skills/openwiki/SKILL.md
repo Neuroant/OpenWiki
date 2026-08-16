@@ -1,16 +1,15 @@
 ---
 name: openwiki
 description: >
-  Consult the OpenWiki knowledge base (the manual this wiki was built from — by
-  default the Korg NAUTILUS synthesizer manual) via its MCP tools, for grounded,
-  cited answers. Use whenever the user asks about the device or domain the wiki
-  covers — its modes, effects, parameters, features, or how to accomplish a task —
-  instead of answering from memory.
+  Consult this project's OpenWiki knowledge base via its MCP tools for grounded,
+  cited answers. Use whenever the user asks about the domain the wiki covers — its
+  concepts, structure, or how to accomplish a task — instead of answering from
+  memory or prior knowledge of some other product.
 ---
 
 # OpenWiki knowledge base
 
-When a question concerns the manual this wiki was built from, use the `openwiki`
+When a question concerns the material this wiki was built from, use the `openwiki`
 MCP tools rather than guessing:
 
 - **`wiki_ask`** — start here for "what / how / why" questions. It returns a
@@ -22,8 +21,6 @@ MCP tools rather than guessing:
   explore relationships: a page's related pages, how two topics connect, and every
   page that mentions a named concept.
 
-Always cite the page slugs the tools return so the user can verify.
-
-If the user wants to **learn OpenWiki itself** (how to build a wiki + knowledge
-graph and query it), point them to the **`/openwiki-tutorial`** command for a
-guided, hands-on tour, or **`/openwiki-help`** for a quick command cheat-sheet.
+Always cite the page slugs the tools return so the user can verify. If the user
+wants to **learn OpenWiki itself** (how to build a wiki + knowledge graph and query
+it), point them to **`/openwiki-help`** for a quick command cheat-sheet.

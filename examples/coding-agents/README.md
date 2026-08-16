@@ -3,10 +3,19 @@
 Config, commands, and a skill for using OpenWiki's **RAG + GraphRAG** from coding
 agents via the `openwiki mcp` server. Full guide: [`../../docs/coding-agents.md`](../../docs/coding-agents.md).
 
-Replace `<OPENWIKI>` with the absolute path to your checkout, and use the venv's
-Python (`.venv/bin/python`, or `.venv\Scripts\python.exe` on Windows). Build the
-artifacts first (`ingest` → `build-wiki` → `index` → `graph-build`) and have
-Ollama running.
+**The easy way — scaffold it per project.** From inside an OpenWiki project run:
+
+```
+owiki claude-code     # writes .mcp.json + .claude/ (commands + skill)
+owiki opencode        # writes opencode.json + .opencode/ (agent + commands)
+```
+
+Both wire the MCP as `owiki mcp` with **project discovery** (the agent runs it from
+the project folder), so there are no hardcoded paths and the tools always point at
+*that* project's wiki. Build the artifacts first (`owiki build`) and have Ollama
+running. The files below are the same setup, for reference / manual copying — the
+`.mcp.json` / `opencode.json` use `owiki mcp` (install it globally with
+`install-openwiki.ps1` / `.sh`, or swap in `<repo>/.venv/bin/python -m openwiki`).
 
 ```
 claude-code/

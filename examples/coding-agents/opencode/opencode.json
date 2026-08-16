@@ -3,11 +3,7 @@
   "mcp": {
     "openwiki": {
       "type": "local",
-      "command": [
-        "<OPENWIKI>/.venv/bin/python", "-m", "openwiki", "mcp",
-        "--wiki", "output/wiki", "--index", "output/index", "--graph", "output/graph"
-      ],
-      "cwd": "<OPENWIKI>",
+      "command": ["owiki", "mcp"],
       "enabled": true
     }
   }

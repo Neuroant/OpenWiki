@@ -26,6 +26,7 @@ from typing import Optional, Sequence
 
 from .agent import RAGAgent
 from .chat_agent import WikiAgent, summarize_wiki
+from .opencode_template import scaffold_opencode
 from .graph import (
     GraphStore, build_graph, detect_page_offset, extract_entities,
     extract_references, extract_references_multi,
@@ -72,6 +73,14 @@ def _build_argparser() -> argparse.ArgumentParser:
                         help="A source file, a folder (registers its *.pdf files), or a glob "
                              "(repeatable); copied into sources/.")
     init_p.add_argument("--force", action="store_true", help="Overwrite an existing openwiki.toml.")
+    init_p.add_argument("--opencode", action="store_true",
+                        help="Also scaffold an OpenCode agent config (opencode.json + .opencode/).")
+
+    oc_p = sub.add_parser("opencode", parents=[common],
+                          help="Scaffold an OpenCode agent config (opencode.json + .opencode/) into the project.")
+    oc_p.add_argument("--force", action="store_true", help="Overwrite existing OpenCode files.")
+    oc_p.add_argument("--model", default=None, help="Chat model for the agent (default: the project's models.chat).")
+    oc_p.add_argument("--host", default=None, help="Ollama host URL (default: the project's models.host).")
 
     build_p = sub.add_parser("build", parents=[common],
                              help="Run the pipeline (ingest → wiki → index → graph) from the manifest.")
@@ -355,7 +364,57 @@ def _cmd_init(args: argparse.Namespace) -> int:
         print(f"  sources  -> {sources_dir}  ({len(sources)} file(s) registered)")
     else:
         print(f"  add inputs under {sources_dir}/ and list them under [[sources]] in openwiki.toml")
-    print("  next: run `openwiki ingest/build-wiki/index/graph-build` (or `openwiki build`, coming soon)")
+    if getattr(args, "opencode", False):
+        _scaffold_opencode_for(Project.load(root), force=args.force)
+    print("  next: run `openwiki build` (or the individual ingest/build-wiki/index/graph-build stages)")
+    if not getattr(args, "opencode", False):
+        print("  tip: `openwiki opencode` adds a local OpenCode agent wired to this project")
+    return 0
+
+
+def _opencode_mcp_command() -> list:
+    """The command OpenCode should spawn for the `openwiki` MCP server. Prefer the
+    global `owiki` (portable — it discovers the project from its own folder);
+    otherwise fall back to the exact interpreter running now (it has openwiki)."""
+    if shutil.which("owiki"):
+        return ["owiki", "mcp"]
+    return [Path(sys.executable).as_posix(), "-m", "openwiki", "mcp"]
+
+
+def _scaffold_opencode_for(project: Project, force: bool,
+                           model: Optional[str] = None, host: Optional[str] = None) -> None:
+    userconfig = UserConfig.load()
+    chat = (model or project.setting("models", "chat", None)
+            or userconfig.setting("models", "chat", None) or DEFAULT_CHAT)
+    embed = (project.setting("models", "embed", None)
+             or userconfig.setting("models", "embed", None) or DEFAULT_EMBED)
+    host = (host or project.setting("models", "host", None)
+            or userconfig.setting("models", "host", None) or DEFAULT_HOST)
+    command = _opencode_mcp_command()
+    written, skipped = scaffold_opencode(
+        project.root, chat_model=chat, embed_model=embed, host=host,
+        mcp_command=command, force=force,
+    )
+    for path in written:
+        print(f"  wrote    {path.relative_to(project.root)}")
+    for path in skipped:
+        print(f"  skipped  {path.relative_to(project.root)}  (exists; --force to overwrite)")
+    print(f"  agent 'openwiki' -> {chat} via `{' '.join(command)}` (MCP)")
+    if not shutil.which("owiki"):
+        print("  note: `owiki` is not on PATH; the MCP uses this Python. Install it globally "
+              "(install-openwiki.ps1 / .sh) for a portable `owiki mcp`.", file=sys.stderr)
+
+
+def _cmd_opencode(args: argparse.Namespace) -> int:
+    project = getattr(args, "project_obj", None)
+    if project is None:
+        print("error: not inside an OpenWiki project (no openwiki.toml found). "
+              "Run `openwiki init` first, or pass --project DIR.", file=sys.stderr)
+        return 2
+    print(f"Scaffolding OpenCode config into project '{project.name}' ({project.root})")
+    _scaffold_opencode_for(project, force=args.force, model=args.model, host=args.host)
+    print(f"\nDone. `cd \"{project.root}\"` and run `opencode` — the 'openwiki' agent "
+          "will query this project on your local model.")
     return 0
 
 
@@ -1139,6 +1198,7 @@ _DISPATCH = {
     "build": _cmd_build,
     "status": _cmd_status,
     "project": _cmd_project,
+    "opencode": _cmd_opencode,
     "ontology": _cmd_ontology,
     "ingest": _cmd_ingest,
     "build-wiki": _cmd_build_wiki,

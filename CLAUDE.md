@@ -287,9 +287,18 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   **propose** a domain `entity_types` ontology (names + descriptions + examples) that
   you review/`--write` into the manifest. Scaffolding, not a build stage — extraction
   stays deterministic. Pure (`propose_ontology`/`sample_corpus`/`format_entity_types`).
+- **`openwiki/opencode_template.py`** — `owiki opencode` (and `owiki init --opencode`):
+  scaffolds a ready-to-run **OpenCode** config into a project — `opencode.json` (local
+  Ollama provider + the `openwiki` MCP server) + the `openwiki` agent and its
+  `/openwiki-help`/`/openwiki-tutorial` commands under `.opencode/`. Generated from the
+  project's own model/host, **project-agnostic** (no sample-corpus specifics), and the
+  MCP command is `owiki mcp` with **project discovery** (CWD = the project folder), so
+  `cd`-ing into any project and running OpenCode gets an agent scoped to *that* wiki.
+  Pure string/JSON rendering (`render_files`) + file writes (`scaffold_opencode`); the
+  CLI picks the MCP command (`owiki` if on PATH, else `sys.executable -m openwiki`).
 - **`openwiki/cli.py`** — argparse CLI with `init`, `build`, `status`, `project`
-  (`list`/`use`/`add`/`remove`/`add-source`), `ontology`, `ingest`, `build-wiki`, `index`,
-  `search`, `ask`, `chat`, `graph-build`, `serve`, and `mcp` subcommands. A shared
+  (`list`/`use`/`add`/`remove`/`add-source`), `opencode`, `ontology`, `ingest`, `build-wiki`,
+  `index`, `search`, `ask`, `chat`, `graph-build`, `serve`, and `mcp` subcommands. A shared
   `--project` (parent parser) + `_apply_project(args, project)` fill unset
   path/model/host/split-level args from the active project before dispatch (flags
   override; no project → `./output`). Add new capabilities as new subcommands, not

@@ -415,6 +415,21 @@ name after registering them (`openwiki project add` / `openwiki project use`).
 Cross-project defaults (your Ollama host/models) live in `~/.openwiki/config.toml`.
 See **Projects** above for the manifest and registry details.
 
+**3. (optional) Add a local OpenCode agent** — give the project its own
+[OpenCode](https://opencode.ai) setup: an `openwiki` agent running on your local
+model, with this project's wiki wired in as an MCP server.
+
+```bash
+openwiki opencode                            # inside the project → writes opencode.json + .opencode/
+# …or fold it into init:  openwiki init C:\wikis\my-manual --source … --opencode
+cd C:\wikis\my-manual && opencode            # the 'openwiki' agent now queries THIS project
+```
+
+The config is generated from the project's own model/host and uses `owiki mcp` with
+project discovery, so the agent is always scoped to the folder it lives in — no
+hardcoded paths, and no drifting to another project's corpus. Slash commands
+`/openwiki-help` and `/openwiki-tutorial` come with it.
+
 > You only clone this repo and `pip install -e .` if you want to **modify OpenWiki
 > itself**. To just *use* it for building wikis, one install plus project folders is
 > all you need — and that venv must be Python **3.13**, not 3.14 (see Quickstart).

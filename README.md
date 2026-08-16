@@ -366,6 +366,47 @@ gitignore `output/` and `.openwiki/`, and anyone can `openwiki build` to regener
 the whole knowledge base. Full design + roadmap:
 **[docs/projects.md](docs/projects.md)**.
 
+## Create a new project
+
+You install OpenWiki **once** (the `openwiki` command, in a Python **3.13** venv) and
+then create **as many projects as you like**. A project is just a *data folder* with
+an `openwiki.toml`, its sources, and its outputs — you do **not** clone or copy this
+repository, and you do **not** create a new virtual environment, per project.
+
+| | What it is | How many |
+| --- | --- | --- |
+| **The install** | the `openwiki` package in a Python 3.13 venv | **once** |
+| **A project** | any folder with an `openwiki.toml` (+ `sources/`, `output/`) | **as many as you want, anywhere** |
+
+**1. Make the `openwiki` command reachable** — pick one:
+
+```bash
+.venv\Scripts\activate                       # activate the venv (Windows) → `openwiki` on PATH
+# …or call it by full path, no activation:   <repo>\.venv\Scripts\openwiki …
+# …or install a global CLI via pipx (isolated 3.13 venv) — use the helper script:
+#   .\install-openwiki.ps1        # Windows   ·   ./install-openwiki.sh   # macOS/Linux
+```
+
+**2. Scaffold → build → serve** — in any folder you like:
+
+```bash
+openwiki init C:\wikis\my-manual --source C:\docs\my-manual.pdf
+cd C:\wikis\my-manual
+openwiki build                               # ingest → wiki → index → graph (needs Ollama running)
+openwiki serve --port 8137                   # then http://127.0.0.1:8137
+```
+
+That folder is now **self-contained** (`openwiki.toml`, `sources/`, `output/`).
+Repeat `openwiki init` elsewhere for more projects, add another source with
+`openwiki project add-source other.pdf`, and switch between projects by `cd` — or by
+name after registering them (`openwiki project add` / `openwiki project use`).
+Cross-project defaults (your Ollama host/models) live in `~/.openwiki/config.toml`.
+See **Projects** above for the manifest and registry details.
+
+> You only clone this repo and `pip install -e .` if you want to **modify OpenWiki
+> itself**. To just *use* it for building wikis, one install plus project folders is
+> all you need — and that venv must be Python **3.13**, not 3.14 (see Quickstart).
+
 ## Deployment
 
 OpenWiki runs locally with no cloud services — "deploying" it means standing up the

@@ -613,6 +613,17 @@ def _cmd_project(args: argparse.Namespace) -> int:
     return 1
 
 
+def _entity_chat(model: str, host: str) -> OllamaChat:
+    """A near-deterministic chat model for entity extraction: greedy decoding
+    (``temperature=0``) + a fixed ``seed``. Extraction is one free-form call per
+    page, so sampling otherwise makes the entity set swing wildly run to run
+    (identical pages once yielded 1053 entities, then 510). Greedy decoding removes
+    that variance — the entity *count* and the bulk of the set become stable — with
+    only minor residual flicker on borderline entities from GPU floating-point
+    non-determinism (which no prompt/param can fully eliminate)."""
+    return OllamaChat(model=model, host=host, temperature=0.0, options={"seed": 0})
+
+
 def _corpus_references(project, sources, doc, wiki, multi):
     """Cross-reference edges for the corpus: single-source direct, else per-source
     (each resolved within its own page span via the retained per-source IR)."""
@@ -758,7 +769,7 @@ def _cmd_build(args: argparse.Namespace) -> int:
                      if gcfg.get("references", True) else None)
         entities = None
         if gcfg.get("entities", False):
-            chat = OllamaChat(model=models.get("chat", DEFAULT_CHAT), host=host)
+            chat = _entity_chat(models.get("chat", DEFAULT_CHAT), host)
             print("  graph: extracting entities (one LLM call per page) …", file=sys.stderr)
             entities = extract_entities(wiki, chat,
                                         types=gcfg.get("entity_types"),
@@ -1153,7 +1164,7 @@ def _cmd_graph_build(args: argparse.Namespace) -> int:
 
     entities = None
     if args.entities:
-        chat = OllamaChat(model=args.entity_model, host=args.host)
+        chat = _entity_chat(args.entity_model, args.host)
         print(f"Extracting entities with {chat.name} (one call per page) …", file=sys.stderr)
 
         def _progress(done, total, found):

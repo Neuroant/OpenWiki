@@ -72,6 +72,8 @@ def _system_prompt(types: dict[str, str]) -> str:
     lines = "\n".join(f"- {t}: {d}" if d else f"- {t}" for t, d in types.items())
     return (
         "You extract named domain entities from the given text (it may be German). "
+        "Be exhaustive and consistent: extract EVERY entity of the allowed types "
+        "that the text names — do not sample or summarize. "
         "Return ONLY a JSON array of objects {\"name\": ..., \"type\": ...}. "
         "Allowed types and what they mean:\n" + lines +
         "\nRules: only concrete, named things (skip generic filler words like "

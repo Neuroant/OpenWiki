@@ -34,11 +34,15 @@ class OllamaChat:
         host: str = "http://localhost:11434",
         temperature: float = 0.2,
         timeout: float = 300.0,
+        options: dict | None = None,
     ) -> None:
         self.model = model
         self.host = host.rstrip("/")
         self.temperature = temperature
         self.timeout = timeout
+        # Extra Ollama options merged into every request (e.g. a fixed ``seed`` for
+        # reproducible decoding). Per-call ``options`` still take precedence.
+        self.options = dict(options or {})
 
     @property
     def name(self) -> str:
@@ -54,7 +58,7 @@ class OllamaChat:
             "model": self.model,
             "messages": list(messages),
             "stream": False,
-            "options": {"temperature": self.temperature, **(options or {})},
+            "options": {"temperature": self.temperature, **self.options, **(options or {})},
         }
         if tools:
             body["tools"] = tools

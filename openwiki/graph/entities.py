@@ -76,10 +76,14 @@ def _system_prompt(types: dict[str, str]) -> str:
         "that the text names — do not sample or summarize. "
         "Return ONLY a JSON array of objects {\"name\": ..., \"type\": ...}. "
         "Allowed types and what they mean:\n" + lines +
-        "\nRules: only concrete, named things (skip generic filler words like "
-        "'thing'/'value'/'Sache'/'Wert'); use the canonical name as written; "
-        "3–40 characters; no duplicates. If none, return []. Output the JSON array "
-        "and nothing else."
+        "\nExtract only meaningful, named domain concepts. Do NOT extract:\n"
+        "- variable / parameter / identifier names or code tokens (e.g. i, res, tmp, self, this, asize, size);\n"
+        "- programming keywords or primitive types (int, bool, void, char, null, true, false);\n"
+        "- bare operators or generic verbs (add, sub, mul, max, min, copy);\n"
+        "- person or author names and bibliographic citations (e.g. 'Aho', 'Dahl', 'Goos');\n"
+        "- generic filler ('thing' / 'value' / 'Sache' / 'Wert').\n"
+        "Use the canonical name as written; 3–40 characters; no duplicates. If none, "
+        "return []. Output the JSON array and nothing else."
     )
 
 

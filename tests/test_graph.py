@@ -345,6 +345,16 @@ def test_extract_entities_resolves_and_links():
     assert by_name["Reverb"].type == "Effect"
 
 
+def test_system_prompt_lists_types_and_excludes_noise():
+    from openwiki.graph.entities import _system_prompt
+
+    prompt = _system_prompt({"Algorithm": "named procedural methods"}).lower()
+    assert "algorithm" in prompt and "named procedural methods" in prompt
+    # the noise categories that inflated the Algorithm bucket must be excluded
+    for term in ("author", "keyword", "identifier", "operator"):
+        assert term in prompt
+
+
 @pytest.fixture
 def entity_store(tmp_path):
     wiki = _entity_wiki()

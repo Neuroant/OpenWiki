@@ -42,6 +42,12 @@ def test_propose_ontology_parses_dedups_and_survives_junk():
     assert propose_ontology(FakeChat("not json at all"), "x") == []
 
 
+def test_propose_ontology_tolerates_fences_and_prose_brackets():
+    inner = json.dumps([{"name": "Konzept", "description": "x"}])
+    reply = "Sure, here [in the domain] are the types:\n```json\n" + inner + "\n```\nHope it helps!"
+    assert [i["name"] for i in propose_ontology(FakeChat(reply), "s")] == ["Konzept"]
+
+
 def test_format_entity_types():
     items = [{"name": "Konzept", "description": "a concept"}, {"name": "Satz", "description": ""}]
     assert format_entity_types(items) == ["Konzept: a concept", "Satz"]

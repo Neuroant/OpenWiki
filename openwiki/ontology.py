@@ -40,29 +40,46 @@ def sample_corpus(texts: Sequence[str], n: int = 40, budget: int = 6000) -> str:
     return "\n---\n".join(t.strip()[:per] for t in picked)[:budget]
 
 
+_FENCE = re.compile(r"```(?:json)?", re.IGNORECASE)
+
+
+def _extract_items(reply: str) -> list:
+    """Best-effort pull of a JSON array of objects from a chat reply.
+
+    Tolerates ``<think>`` blocks, ```` ```json ```` fences, and surrounding prose
+    (including stray brackets) by trying object-only arrays first, then a greedy span.
+    """
+    reply = _FENCE.sub("", _THINK.sub("", reply))
+    candidates = re.findall(r"\[[^\[\]]*\]", reply, re.DOTALL)  # arrays w/o nested arrays (i.e. of objects)
+    greedy = _JSON_ARRAY.search(reply)
+    if greedy:
+        candidates.append(greedy.group(0))
+    for cand in candidates:
+        try:
+            data = json.loads(cand)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(data, list):
+            items = [x for x in data if isinstance(x, dict) and str(x.get("name", "")).strip()]
+            if items:
+                return items
+    return []
+
+
 def propose_ontology(chat, sample_text: str, n_types: int = 7) -> list[dict]:
     """One chat call → a de-duplicated list of ``{"name", "description"}`` type proposals."""
     messages = [
         {"role": "system", "content": _SYSTEM.format(n=n_types)},
         {"role": "user", "content": "Sample text from the corpus:\n\n" + sample_text},
     ]
-    reply = _THINK.sub("", chat.chat(messages))
-    match = _JSON_ARRAY.search(reply)
-    if not match:
-        return []
-    try:
-        data = json.loads(match.group(0))
-    except json.JSONDecodeError:
-        return []
     out: list[dict] = []
     seen: set = set()
-    for item in data if isinstance(data, list) else []:
-        if isinstance(item, dict):
-            name = str(item.get("name", "")).strip()
-            desc = str(item.get("description", "")).strip()
-            if name and name.lower() not in seen:
-                seen.add(name.lower())
-                out.append({"name": name, "description": desc})
+    for item in _extract_items(chat.chat(messages)):
+        name = str(item.get("name", "")).strip()
+        desc = str(item.get("description", "")).strip()
+        if name and name.lower() not in seen:
+            seen.add(name.lower())
+            out.append({"name": name, "description": desc})
     return out[:n_types]
 
 

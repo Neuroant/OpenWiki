@@ -397,7 +397,14 @@ def _cmd_ontology(args: argparse.Namespace) -> int:
 
     chat = OllamaChat(model=args.model, host=args.host, temperature=0.2)
     print(f"Proposing an ontology from {len(texts)} text sample(s) with {chat.name} …", file=sys.stderr)
-    items = propose_ontology(chat, sample_corpus(texts), n_types=args.types)
+    sample = sample_corpus(texts)
+    items: list = []
+    for attempt in range(3):   # the model is occasionally non-JSON; retry a couple of times
+        items = propose_ontology(chat, sample, n_types=args.types)
+        if items:
+            break
+        if attempt < 2:
+            print(f"  (attempt {attempt + 1} returned nothing — retrying…)", file=sys.stderr)
     if not items:
         print("error: the model returned no usable ontology — try again or a different --model.", file=sys.stderr)
         return 2

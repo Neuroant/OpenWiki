@@ -66,6 +66,15 @@ def test_fingerprints_change_with_params(tmp_path):
     assert fp["graph"] != base["graph"]
 
 
+def test_graph_fingerprint_tracks_entity_ontology(tmp_path):
+    proj = _project(tmp_path / "p")
+    proj.data["graph"]["entities"] = True
+    srcs = proj.source_paths()
+    base = compute_fingerprints(proj, srcs)["graph"]
+    proj.data["graph"]["entity_types"] = ["Concept", "Method"]   # changing the ontology…
+    assert compute_fingerprints(proj, srcs)["graph"] != base      # …invalidates the graph stage
+
+
 def test_buildstate_roundtrip(tmp_path):
     proj = _project(tmp_path / "p")
     state = BuildState.load(proj)

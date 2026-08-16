@@ -124,7 +124,8 @@ tools when the graph exists).
 Options: `--out DIR`, `-i/--index DIR`, `--split-level N` (must match the indexed
 wiki), `--similar-k N`, `--no-references` (skip the "siehe Seite N" edges),
 `--entities` (LLM-extract typed entities → `Entity` + `MENTIONS`; **slow**, one
-call/page), `--entity-model NAME`, `-v`.
+call/page), `--entity-model NAME`, `--entity-types "A,B,C"` (the domain ontology;
+overrides the default), `--entity-max-chars N`, `-v`.
 
 **Web UI** — browse + search + chat/edit + graph in the browser (stdlib server):
 ```
@@ -274,8 +275,12 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   (`config.toml` cross-project setting defaults) + `Registry` (`registry.toml` named
   projects + active pointer). Read via `tomllib`; the registry has a tiny hand-rolled
   writer. `cli._resolve_project` adds the registry fallback on top of `Project.resolve`.
+- **`openwiki/ontology.py`** — `owiki ontology`: samples the corpus + one LLM call to
+  **propose** a domain `entity_types` ontology (names + descriptions + examples) that
+  you review/`--write` into the manifest. Scaffolding, not a build stage — extraction
+  stays deterministic. Pure (`propose_ontology`/`sample_corpus`/`format_entity_types`).
 - **`openwiki/cli.py`** — argparse CLI with `init`, `build`, `status`, `project`
-  (`list`/`use`/`add`/`remove`/`add-source`), `ingest`, `build-wiki`, `index`,
+  (`list`/`use`/`add`/`remove`/`add-source`), `ontology`, `ingest`, `build-wiki`, `index`,
   `search`, `ask`, `chat`, `graph-build`, `serve`, and `mcp` subcommands. A shared
   `--project` (parent parser) + `_apply_project(args, project)` fill unset
   path/model/host/split-level args from the active project before dispatch (flags
@@ -340,8 +345,12 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   `list_transform(nodes(p), x -> x.slug)` / `... x.title` and
   `list_transform(rels(p), x -> label(x))` — Kuzu has **no** `[n IN nodes(p) | ...]`
   list-comprehension syntax. String matching uses `contains(lower(x), lower($q))`.
-- **Entities** (opt-in): `entities.py` does one LLM call per page with a typed
-  ontology (`ENTITY_TYPES`), parses a JSON array, and resolves by normalized
+- **Entities** (opt-in): `entities.py` does one LLM call per page with a **typed
+  ontology that is configurable per project** — `DEFAULT_ENTITY_TYPES` (tuned to the
+  synth sample) unless overridden by `[graph] entity_types` in `openwiki.toml` (or
+  `graph-build --entity-types`); `coerce_types()` accepts a name list, `"Name: desc"`
+  strings, or a dict, and `[graph] entity_max_chars` caps the text per call. It parses
+  a JSON array and resolves by normalized
   name-within-type (`_normalize`: lowercase + strip German articles) so surface
   variants merge. `Entity`/`MENTIONS` tables are **always created** (empty without
   `--entities`), so store/agent code degrades gracefully; `has_entities()` gates

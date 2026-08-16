@@ -18,6 +18,7 @@ import glob
 import json
 import logging
 import os
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -34,6 +35,7 @@ from .llm import OllamaChat
 from .mcp_server import build_server
 from .merge import combine_documents
 from .models import ParsedDocument
+from .ontology import format_entity_types, propose_ontology, sample_corpus
 from .pdf_parser import PDFParser
 from .pipeline import STAGES, BuildState, compute_fingerprints, stale_stages
 from .project import (
@@ -79,6 +81,14 @@ def _build_argparser() -> argparse.ArgumentParser:
 
     sub.add_parser("status", parents=[common],
                    help="Show the project's sources, settings, and per-stage build state.")
+
+    ont_p = sub.add_parser("ontology", parents=[common],
+                           help="Propose a domain entity ontology ([graph] entity_types) from the corpus.")
+    ont_p.add_argument("--write", action="store_true",
+                       help="Write the proposal into openwiki.toml [graph] entity_types.")
+    ont_p.add_argument("--types", type=int, default=7, help="How many types to propose (default: 7).")
+    ont_p.add_argument("--model", default=None, help="Ollama chat model (default: manifest models.chat).")
+    ont_p.add_argument("--host", default=None, help="Ollama host URL.")
 
     project_p = sub.add_parser("project", help="Manage the project registry (list/use/add/remove/add-source).")
     psub = project_p.add_subparsers(dest="project_cmd", required=True)
@@ -250,6 +260,11 @@ def _build_argparser() -> argparse.ArgumentParser:
                          help="Extract typed entities via an LLM (one call/page; slow). Adds Entity + MENTIONS.")
     graph_p.add_argument("--entity-model", default=None,
                          help="Ollama model for entity extraction.")
+    graph_p.add_argument("--entity-types", default=None, metavar="LIST",
+                         help="Comma-separated entity types for --entities (e.g. "
+                              "'Concept,Method,Component'); overrides the default ontology.")
+    graph_p.add_argument("--entity-max-chars", type=int, default=None,
+                         help="Chars of each page sent to the entity model (default: 8000).")
     graph_p.add_argument("--host", default=None, help="Ollama host URL (for --entities).")
     graph_p.add_argument("-v", "--verbose", action="store_true", help="Verbose progress logging.")
     return parser
@@ -340,6 +355,67 @@ def _cmd_init(args: argparse.Namespace) -> int:
     else:
         print(f"  add inputs under {sources_dir}/ and list them under [[sources]] in openwiki.toml")
     print("  next: run `openwiki ingest/build-wiki/index/graph-build` (or `openwiki build`, coming soon)")
+    return 0
+
+
+def _toml_quote(value: str) -> str:
+    return '"' + str(value).replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _sample_texts(project: Project) -> list:
+    """Text to sample for the ontology proposal: index chunks if present, else wiki pages."""
+    index_json = project.index_dir / "index.json"
+    if index_json.is_file():
+        data = json.loads(index_json.read_text(encoding="utf-8"))
+        return [c.get("text", "") for c in data.get("chunks", [])]
+    return [p.read_text(encoding="utf-8") for p in sorted((project.wiki_dir / "pages").glob("*.md"))]
+
+
+def _write_entity_types(project: Project, types: list) -> None:
+    """Insert or replace ``[graph] entity_types`` in the manifest, preserving the rest."""
+    path = project.root / MANIFEST
+    text = path.read_text(encoding="utf-8")
+    block = "entity_types = [\n" + "".join(f"  {_toml_quote(t)},\n" for t in types) + "]\n"
+    if re.search(r"(?m)^entity_types\s*=\s*\[", text):
+        text = re.sub(r"(?ms)^entity_types\s*=\s*\[.*?^\]\n", block, text, count=1)
+    elif re.search(r"(?m)^entities\s*=", text):
+        text = re.sub(r"(?m)^(entities\s*=.*\n)", r"\1" + block, text, count=1)
+    else:
+        text = text.rstrip() + "\n\n[graph]\nentities = true\n" + block
+    path.write_text(text, encoding="utf-8")
+
+
+def _cmd_ontology(args: argparse.Namespace) -> int:
+    project: Optional[Project] = getattr(args, "project_obj", None)
+    if project is None:
+        print("error: not in an OpenWiki project — run `openwiki init` first.", file=sys.stderr)
+        return 2
+    texts = _sample_texts(project)
+    if not texts:
+        print("error: nothing to sample — build the wiki/index first (`openwiki build`).", file=sys.stderr)
+        return 2
+
+    chat = OllamaChat(model=args.model, host=args.host, temperature=0.2)
+    print(f"Proposing an ontology from {len(texts)} text sample(s) with {chat.name} …", file=sys.stderr)
+    items = propose_ontology(chat, sample_corpus(texts), n_types=args.types)
+    if not items:
+        print("error: the model returned no usable ontology — try again or a different --model.", file=sys.stderr)
+        return 2
+    types = format_entity_types(items)
+
+    print("# Proposed [graph] entity_types:")
+    print("entity_types = [")
+    for entry in types:
+        print(f"  {_toml_quote(entry)},")
+    print("]")
+
+    if args.write:
+        _write_entity_types(project, types)
+        print(f"\n✓ written to {project.root / MANIFEST}", file=sys.stderr)
+        print("  Next: ensure `entities = true`, then `openwiki build --only graph`.", file=sys.stderr)
+    else:
+        print("\n(Review, add under [graph] with `entities = true`, then `openwiki build --only graph`. "
+              "Use --write to insert it automatically.)", file=sys.stderr)
     return 0
 
 
@@ -581,7 +657,9 @@ def _cmd_build(args: argparse.Namespace) -> int:
         if gcfg.get("entities", False):
             chat = OllamaChat(model=models.get("chat", DEFAULT_CHAT), host=host)
             print("  graph: extracting entities (one LLM call per page) …", file=sys.stderr)
-            entities = extract_entities(wiki, chat)
+            entities = extract_entities(wiki, chat,
+                                        types=gcfg.get("entity_types"),
+                                        max_chars=int(gcfg.get("entity_max_chars", 8000)))
         stats = build_graph(wiki, index, project.graph_path,
                             similar_k=int(gcfg.get("similar_k", 6)),
                             references=references, entities=entities)
@@ -705,6 +783,9 @@ def _apply_project(args: argparse.Namespace, project: Optional[Project],
         path("wiki", p.wiki_dir if p else None, Path("output") / "wiki")
         path("index", p.index_dir if p else None, Path("output") / "index")
         path("graph", p.graph_path if p else None, Path("output") / "graph")
+        val("model", "models", "chat", DEFAULT_CHAT)
+        val("host", "models", "host", DEFAULT_HOST)
+    elif cmd == "ontology":
         val("model", "models", "chat", DEFAULT_CHAT)
         val("host", "models", "host", DEFAULT_HOST)
     elif cmd == "graph-build":
@@ -975,7 +1056,10 @@ def _cmd_graph_build(args: argparse.Namespace) -> int:
         def _progress(done, total, found):
             print(f"  page {done}/{total} — {found} entities so far", file=sys.stderr)
 
-        entities = extract_entities(wiki, chat, on_progress=_progress if args.verbose else None)
+        types = [t.strip() for t in args.entity_types.split(",")] if args.entity_types else None
+        entities = extract_entities(wiki, chat, types=types,
+                                    max_chars=args.entity_max_chars or 8000,
+                                    on_progress=_progress if args.verbose else None)
 
     stats = build_graph(wiki, index, args.out, similar_k=args.similar_k,
                         references=references, entities=entities)
@@ -1044,6 +1128,7 @@ _DISPATCH = {
     "build": _cmd_build,
     "status": _cmd_status,
     "project": _cmd_project,
+    "ontology": _cmd_ontology,
     "ingest": _cmd_ingest,
     "build-wiki": _cmd_build_wiki,
     "index": _cmd_index,

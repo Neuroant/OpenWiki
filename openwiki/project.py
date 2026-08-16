@@ -195,6 +195,8 @@ chat  = {_toml_str(chat)}
 similar_k = {similar_k}
 references = {str(references).lower()}
 entities = {str(entities).lower()}
+# entity_types = ["Concept", "Method", "Component", "Property"]   # domain ontology used when entities = true
+# entity_max_chars = 8000   # how much of each page the entity model sees
 
 [serve]
 port = {port}

@@ -1,13 +1,15 @@
 """LLM-based entity extraction — the semantic layer over the wiki.
 
-One local chat-model call per wiki page pulls out typed named entities (Modes,
-Effects, Features, Parameters, …). Entities are resolved by normalized
-name-within-type (lowercase, strip German articles) so surface variants merge.
-The result feeds `Entity` nodes + `Page-[:MENTIONS]->Entity` edges into the
-graph, which connect pages that discuss the same concept even when they neither
-cross-reference nor are cosine-similar.
+One local chat-model call per wiki page pulls out typed named entities. The
+**ontology** (the set of entity types) is *configurable per project*: the default
+below is tuned to the sample synthesizer manual, but any domain can supply its own
+via ``entity_types`` (a list of names, ``"Name: description"`` strings, or a dict).
+Entities are resolved by normalized name-within-type (lowercase, strip German
+articles) so surface variants merge, and feed ``Entity`` nodes +
+``Page-[:MENTIONS]->Entity`` edges into the graph — connecting pages that discuss
+the same concept even when they neither cross-reference nor are cosine-similar.
 
-Imports a `ChatModel` (see :mod:`openwiki.llm`) — no Kuzu here.
+Imports a ``ChatModel`` (see :mod:`openwiki.llm`) — no Kuzu here.
 """
 
 from __future__ import annotations
@@ -16,15 +18,17 @@ import json
 import logging
 import re
 from dataclasses import dataclass, field
+from typing import Union
 
 from ..llm import ChatModel
 from ..wiki import Wiki
 
 logger = logging.getLogger(__name__)
 
-# The typed ontology, tuned to a synthesizer manual. Kept small so the model
-# stays consistent; descriptions go into the prompt.
-ENTITY_TYPES: dict[str, str] = {
+# Default ontology, tuned to the sample synthesizer manual. Override per project
+# with ``entity_types`` — e.g. for computer science:
+#   ["Concept", "Definition", "Satz", "Algorithmus", "Datenstruktur", "Paradigma", "Notation"]
+DEFAULT_ENTITY_TYPES: dict[str, str] = {
     "Mode": "an operating mode (PROGRAM, COMBINATION, SEQUENCER, SAMPLING, GLOBAL, SET LIST)",
     "SoundObject": "a sound/data object (Program, Combination, Multisample, Drumkit, Wave Sequence, Sample)",
     "Effect": "an audio effect or effect slot (Reverb, Delay, IFX, MFX, …)",
@@ -32,21 +36,49 @@ ENTITY_TYPES: dict[str, str] = {
     "Parameter": "a named parameter/setting (Amp Level, Hold Time, Cutoff, Resonance, …)",
     "Hardware": "a physical control/connector/component (MASTER VOLUME slider, joystick, damper pedal, USB port)",
 }
+# Back-compat alias (older code/tests referenced ENTITY_TYPES).
+ENTITY_TYPES = DEFAULT_ENTITY_TYPES
 
-_SYSTEM_PROMPT = (
-    "You extract named entities from German synthesizer-manual text. "
-    "Return ONLY a JSON array of objects {\"name\": ..., \"type\": ...}. "
-    "Allowed types and what they mean:\n"
-    + "\n".join(f"- {t}: {d}" for t, d in ENTITY_TYPES.items())
-    + "\nRules: only concrete, named things (skip generic words like 'Sound', 'Taste', "
-    "'Wert'); use the canonical name as written; 3–40 characters; no duplicates. "
-    "If none, return []. Output the JSON array and nothing else."
-)
+Ontology = Union[dict, list, tuple, None]
 
 _ARTICLES = {"der", "die", "das", "dem", "den", "des", "ein", "eine", "einen",
              "einem", "einer", "the", "a", "an"}
 _JSON_ARRAY = re.compile(r"\[.*\]", re.DOTALL)
 _THINK = re.compile(r"<think>.*?</think>", re.DOTALL)
+
+
+def coerce_types(types: Ontology) -> dict[str, str]:
+    """Normalize an ontology spec into a ``{type: description}`` dict.
+
+    Accepts ``None`` (→ :data:`DEFAULT_ENTITY_TYPES`), a ``{name: description}``
+    dict, or a sequence of names — each optionally ``"Name: description"``.
+    """
+    if types is None:
+        return dict(DEFAULT_ENTITY_TYPES)
+    if isinstance(types, dict):
+        out = {str(k).strip(): str(v).strip() for k, v in types.items() if str(k).strip()}
+        return out or dict(DEFAULT_ENTITY_TYPES)
+    out: dict[str, str] = {}
+    for item in types:
+        text = str(item).strip()
+        if not text:
+            continue
+        name, sep, desc = text.partition(":")
+        out[name.strip()] = desc.strip() if sep else ""
+    return out or dict(DEFAULT_ENTITY_TYPES)
+
+
+def _system_prompt(types: dict[str, str]) -> str:
+    lines = "\n".join(f"- {t}: {d}" if d else f"- {t}" for t, d in types.items())
+    return (
+        "You extract named domain entities from the given text (it may be German). "
+        "Return ONLY a JSON array of objects {\"name\": ..., \"type\": ...}. "
+        "Allowed types and what they mean:\n" + lines +
+        "\nRules: only concrete, named things (skip generic filler words like "
+        "'thing'/'value'/'Sache'/'Wert'); use the canonical name as written; "
+        "3–40 characters; no duplicates. If none, return []. Output the JSON array "
+        "and nothing else."
+    )
 
 
 @dataclass
@@ -67,7 +99,7 @@ def _valid(norm: str) -> bool:
     return 2 <= len(norm) <= 40 and not norm.isdigit()
 
 
-def _parse(reply: str) -> list[tuple[str, str]]:
+def _parse(reply: str, allowed: set) -> list[tuple[str, str]]:
     reply = _THINK.sub("", reply)
     match = _JSON_ARRAY.search(reply)
     if not match:
@@ -80,31 +112,40 @@ def _parse(reply: str) -> list[tuple[str, str]]:
     for item in data if isinstance(data, list) else []:
         if isinstance(item, dict):
             name, etype = item.get("name"), item.get("type")
-            if isinstance(name, str) and etype in ENTITY_TYPES:
+            if isinstance(name, str) and etype in allowed:
                 out.append((name.strip(), etype))
     return out
 
 
-def _extract_page(chat: ChatModel, title: str, text: str) -> list[tuple[str, str]]:
+def _extract_page(chat: ChatModel, title: str, text: str, system_prompt: str,
+                  allowed: set) -> list[tuple[str, str]]:
     messages = [
-        {"role": "system", "content": _SYSTEM_PROMPT},
+        {"role": "system", "content": system_prompt},
         {"role": "user", "content": f"Page title: {title}\n\nText:\n{text}"},
     ]
     try:
-        return _parse(chat.chat(messages))
+        return _parse(chat.chat(messages), allowed)
     except Exception as exc:  # a bad page shouldn't abort the whole run
         logger.warning("entity extraction failed on '%s': %s", title, exc)
         return []
 
 
-def extract_entities(wiki: Wiki, chat: ChatModel, max_chars: int = 8000,
-                     on_progress=None) -> list[Entity]:
-    """Extract and resolve entities across all wiki pages (one call per page)."""
+def extract_entities(wiki: Wiki, chat: ChatModel, types: Ontology = None,
+                     max_chars: int = 8000, on_progress=None) -> list[Entity]:
+    """Extract and resolve entities across all wiki pages (one call per page).
+
+    ``types`` selects the ontology (see :func:`coerce_types`); ``max_chars`` caps
+    how much of each page's text is sent to the model (raise it for coarse,
+    document-sized pages, at the cost of a bigger prompt).
+    """
+    type_map = coerce_types(types)
+    system_prompt = _system_prompt(type_map)
+    allowed = set(type_map)
     by_key: dict[str, Entity] = {}
     for i, page in enumerate(wiki.pages):
         text = page.text.strip()[:max_chars]
         if text:
-            for name, etype in _extract_page(chat, page.title, text):
+            for name, etype in _extract_page(chat, page.title, text, system_prompt, allowed):
                 norm = _normalize(name)
                 if not _valid(norm):
                     continue
@@ -117,5 +158,6 @@ def extract_entities(wiki: Wiki, chat: ChatModel, max_chars: int = 8000,
                     entity.pages.append(page.slug)
         if on_progress:
             on_progress(i + 1, len(wiki.pages), len(by_key))
-    logger.info("Entities: %d unique across %d pages", len(by_key), len(wiki.pages))
+    logger.info("Entities: %d unique across %d pages (%d types)",
+                len(by_key), len(wiki.pages), len(type_map))
     return list(by_key.values())

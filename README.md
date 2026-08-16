@@ -244,6 +244,12 @@ With entities present, the Graph tab shows **"Gemeinsame Begriffe"** (shared-
 concept) edges, the agent gains a **`find_entity`** tool, and graph-augmented
 `ask` also expands along shared concepts.
 
+The type **ontology is configurable per project** — the default is tuned to the
+synth sample, so for another domain set `[graph] entity_types` in `openwiki.toml`
+(or `graph-build --entity-types "Concept,Theorem,Algorithm,…"`). Don't want to
+write it by hand? **`openwiki ontology`** samples your corpus and proposes a fitting
+one (`--write` drops it straight into the manifest).
+
 ### Web UI
 
 `serve` starts a local web UI (stdlib `http.server`, no extra dependencies) that
@@ -509,7 +515,8 @@ PDF ──PDFParser──▶ ParsedDocument ──▶ JSON / Markdown
 - `openwiki/web/` — stdlib web server + vanilla-JS SPA (browse, search, chat/edit, graph)
 - `openwiki/mcp_server.py` — stdio MCP server exposing the wiki as tools for coding agents
 - `openwiki/project.py` · `pipeline.py` · `userconfig.py` · `merge.py` — the **project** layer: the `openwiki.toml` model + resolution, the `openwiki build` fingerprint/staleness state, the `~/.openwiki/` global config + registry, and multi-source merge
-- `openwiki/cli.py` — the `openwiki` command line (`init`, `build`, `status`, `project`, `ingest`, `build-wiki`, `index`, `search`, `ask`, `chat`, `graph-build`, `serve`, `mcp`)
+- `openwiki/ontology.py` — proposes a domain entity ontology from the corpus (one LLM call) for `openwiki ontology`
+- `openwiki/cli.py` — the `openwiki` command line (`init`, `build`, `status`, `project`, `ontology`, `ingest`, `build-wiki`, `index`, `search`, `ask`, `chat`, `graph-build`, `serve`, `mcp`)
 
 ## Roadmap
 

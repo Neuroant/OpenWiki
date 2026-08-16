@@ -68,7 +68,8 @@ def compute_fingerprints(project: Project, sources: Iterable[Path]) -> dict:
     graph_fp = _hash(
         "graph", index, split,
         graph.get("similar_k", 6), graph.get("references", True), entities,
-        models.get("chat", "") if entities else "",
+        (models.get("chat", ""), graph.get("entity_types"), graph.get("entity_max_chars"))
+        if entities else "",
     )
     return {"ingest": ingest, "wiki": wiki, "index": index, "graph": graph_fp}
 

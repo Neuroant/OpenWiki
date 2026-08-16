@@ -171,40 +171,94 @@ async function renderProject() {
       return;
     }
     const p = data.project;
+    const esc = escapeHtml;
     const labels = { up_to_date: "aktuell", stale: "veraltet", missing: "fehlt" };
     const badge = (s) => `<span class="pbadge pbadge-${s}">${labels[s] || s}</span>`;
+    const kv = (obj) => `<table class="proj-kv"><tbody>` +
+      Object.entries(obj).map(([k, v]) =>
+        `<tr><td><code>${esc(k)}</code></td><td><code>${esc(String(v))}</code></td></tr>`).join("") +
+      `</tbody></table>`;
+
     const sources = p.sources.map((s) =>
-      `<li>${s.exists ? "✓" : "✗"} <code>${escapeHtml(s.path)}</code>` +
-      `${s.exists ? "" : ' <span class="muted">(fehlt)</span>'}</li>`).join("") ||
-      `<li class="muted">(keine Quellen deklariert)</li>`;
+      `<li>${s.exists ? "✓" : "✗"} <code>${esc(s.path)}</code>${s.exists ? "" : ' <span class="muted">(fehlt)</span>'}</li>`
+    ).join("") || `<li class="muted">(keine Quellen)</li>`;
+
     const stages = p.stages.map((st) => {
       const stats = Object.keys(st.stats || {}).length
-        ? `<span class="muted">${escapeHtml(JSON.stringify(st.stats))}</span>` : "";
+        ? `<span class="muted">${esc(JSON.stringify(st.stats))}</span>` : "";
       return `<tr><td><code>${st.name}</code></td><td>${badge(st.status)}</td>` +
-             `<td class="muted">${escapeHtml(st.built || "")}</td><td>${stats}</td></tr>`;
+             `<td class="muted">${esc(st.built || "")}</td><td>${stats}</td></tr>`;
     }).join("");
+
+    const cfg = p.settings || {};
+    const settingsHtml = `<div class="proj-cols">
+      <div><h4>build</h4>${kv(cfg.build || {})}</div>
+      <div><h4>models</h4>${kv(cfg.models || {})}</div>
+      <div><h4>graph</h4>${kv(cfg.graph || {})}</div>
+      <div><h4>serve</h4>${kv(cfg.serve || {})}</div>
+    </div>`;
+
+    const ont = p.ontology || [];
+    const ontHtml = ont.length
+      ? `<ul class="proj-list">${ont.map((o) =>
+          `<li><code>${esc(o.name)}</code>${o.description ? " — <span class=\"muted\">" + esc(o.description) + "</span>" : ""}</li>`).join("")}</ul>`
+      : `<p class="muted">Standard-Ontologie (kein <code>entity_types</code> gesetzt).</p>`;
+
+    const ix = p.index;
+    const indexHtml = ix
+      ? kv({ "Embedding-Modell": ix.model, "Dimensionen": ix.dim, "Chunks": ix.chunks })
+      : `<p class="muted">Kein Index geladen.</p>`;
+
+    let graphHtml;
+    const g = p.graph;
+    if (g) {
+      const et = g.entity_types || [];
+      const maxN = et.reduce((m, x) => Math.max(m, x.count), 0) || 1;
+      const typesHtml = et.length
+        ? `<div class="ent-bars">${et.map((x) =>
+            `<div class="ent-bar"><span class="ent-name">${esc(x.type)}</span>` +
+            `<span class="ent-track"><span class="ent-fill" style="width:${Math.round(100 * x.count / maxN)}%"></span></span>` +
+            `<span class="ent-count">${x.count}</span></div>`).join("")}</div>`
+        : `<p class="muted">(keine Entitäten — mit <code>entities = true</code> bauen)</p>`;
+      graphHtml = `<div class="proj-cols">
+        <div><h4>Knoten</h4>${kv({ Page: g.pages, Chunk: g.chunks, Entity: g.entities })}</div>
+        <div><h4>Kanten</h4>${kv({
+          "CHILD_OF (Hierarchie)": g.child_of, "NEXT (Reihenfolge)": g.next,
+          "PART_OF (Chunk→Page)": g.part_of, "SIMILAR_TO (ähnlich)": g.similar_to,
+          "REFERENCES (Verweise)": g.references, "MENTIONS (Begriffe)": g.mentions })}</div>
+      </div>
+      <h4>Entitätstypen (Verteilung)</h4>${typesHtml}`;
+    } else {
+      graphHtml = `<p class="muted">Kein Graph geladen (mit <code>openwiki build</code> erzeugen).</p>`;
+    }
+
     const registry = (data.registry || []).map((r) =>
-      `<li>${r.active ? "★" : "•"} <code>${escapeHtml(r.name)}</code> ` +
-      `<span class="muted">${escapeHtml(r.path)}</span></li>`).join("") ||
-      `<li class="muted">(keine registrierten Projekte)</li>`;
+      `<li>${r.active ? "★" : "•"} <code>${esc(r.name)}</code> <span class="muted">${esc(r.path)}</span></li>`
+    ).join("") || `<li class="muted">(keine registrierten Projekte)</li>`;
+
     content.innerHTML = `<div class="project-view">
-      <h2>📁 ${escapeHtml(p.name)}</h2>
-      ${p.description ? `<p>${escapeHtml(p.description)}</p>` : ""}
-      <p class="muted"><code>${escapeHtml(p.root)}</code></p>
-      <h3>Quellen</h3><ul class="proj-list">${sources}</ul>
+      <h2>📁 ${esc(p.name)}</h2>
+      ${p.description ? `<p>${esc(p.description)}</p>` : ""}
+      <p class="muted"><code>${esc(p.root)}</code></p>
+
+      <h3>Quellen <span class="muted">(${p.sources.length})</span></h3>
+      <ul class="proj-list">${sources}</ul>
+
       <h3>Build-Status</h3>
       <table class="proj-table">
         <thead><tr><th>Stufe</th><th>Status</th><th>Gebaut</th><th>Statistik</th></tr></thead>
         <tbody>${stages}</tbody>
       </table>
       <p class="muted">Neu bauen mit <code>openwiki build</code> — inkrementell, nur veraltete Stufen.</p>
-      <h3>Modelle &amp; Einstellungen</h3>
-      <ul class="proj-list">
-        <li>Embedding: <code>${escapeHtml(p.models.embed)}</code></li>
-        <li>Chat: <code>${escapeHtml(p.models.chat)}</code></li>
-        <li>Ollama-Host: <code>${escapeHtml(p.models.host)}</code></li>
-        <li>split_level <code>${p.build.split_level}</code> · Chunks <code>${p.build.chunk_size}</code>/<code>${p.build.overlap}</code> Wörter</li>
-      </ul>
+
+      <h3>Einstellungen <span class="muted">(alle Pipeline-Parameter)</span></h3>${settingsHtml}
+
+      <h3>Ontologie <span class="muted">(Entitätstypen)</span></h3>${ontHtml}
+
+      <h3>Wissensgraph</h3>${graphHtml}
+
+      <h3>Semantischer Index</h3>${indexHtml}
+
       <h3>Registrierte Projekte</h3><ul class="proj-list">${registry}</ul>
     </div>`;
     content.scrollTop = 0;

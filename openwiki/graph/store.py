@@ -74,14 +74,19 @@ class GraphStore:
     def stats(self) -> dict:
         def count(q):
             return self._rows(q)[0][0]
+        by_type = [{"type": t, "count": n} for t, n in
+                   self._rows("MATCH (e:Entity) RETURN e.type, count(e) AS n ORDER BY n DESC;")]
         return {
             "pages": count("MATCH (p:Page) RETURN count(p);"),
             "chunks": count("MATCH (c:Chunk) RETURN count(c);"),
+            "entities": count("MATCH (e:Entity) RETURN count(e);"),
             "child_of": count("MATCH ()-[r:CHILD_OF]->() RETURN count(r);"),
+            "next": count("MATCH ()-[r:NEXT]->() RETURN count(r);"),
+            "part_of": count("MATCH ()-[r:PART_OF]->() RETURN count(r);"),
             "similar_to": count("MATCH ()-[r:SIMILAR_TO]->() RETURN count(r);"),
             "references": count("MATCH ()-[r:REFERENCES]->() RETURN count(r);"),
-            "entities": count("MATCH (e:Entity) RETURN count(e);"),
             "mentions": count("MATCH ()-[r:MENTIONS]->() RETURN count(r);"),
+            "entity_types": by_type,
         }
 
     def has_entities(self) -> bool:

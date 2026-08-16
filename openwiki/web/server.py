@@ -123,6 +123,56 @@ class WikiWebApp:
         active = registry_obj.active()
         registry = [{"name": name, "path": path, "active": name == active}
                     for name, path in sorted(registry_obj.projects().items())]
+        # Full settings, per section (every parameter used across the pipeline).
+        settings = {
+            "build": {"split_level": p.setting("build", "split_level", 2),
+                      "tables": p.setting("build", "tables", True),
+                      "synthesize_outline": p.setting("build", "synthesize_outline", True),
+                      "chunk_size": p.setting("build", "chunk_size", 180),
+                      "overlap": p.setting("build", "overlap", 30)},
+            "models": {"embed": p.setting("models", "embed", "bge-m3"),
+                       "chat": p.setting("models", "chat", ""),
+                       "host": p.setting("models", "host", "")},
+            "graph": {"similar_k": p.setting("graph", "similar_k", 6),
+                      "references": p.setting("graph", "references", True),
+                      "entities": p.setting("graph", "entities", False),
+                      "entity_max_chars": p.setting("graph", "entity_max_chars", 8000)},
+            "serve": {"port": p.setting("serve", "port", 8000),
+                      "bind": p.setting("serve", "bind", "127.0.0.1"),
+                      "temperature": p.setting("serve", "temperature", 0.2)},
+        }
+
+        # The entity ontology (parsed "Name: description" list), if any.
+        ontology = []
+        for entry in (p.setting("graph", "entity_types", None) or []):
+            name, sep, desc = str(entry).partition(":")
+            ontology.append({"name": name.strip(), "description": desc.strip() if sep else ""})
+
+        # Semantic index details (model + embedding dim + chunk count).
+        index_info = None
+        if self.index is not None:
+            try:
+                index_info = {"model": self.index.model_name,
+                              "dim": int(self.index.embeddings.shape[1]),
+                              "chunks": len(self.index.chunks)}
+            except Exception:
+                index_info = None
+        elif (p.index_dir / "index.json").is_file():
+            try:
+                meta = json.loads((p.index_dir / "index.json").read_text(encoding="utf-8"))
+                index_info = {"model": meta.get("model"), "dim": meta.get("dim"),
+                              "chunks": meta.get("count")}
+            except (ValueError, OSError):
+                index_info = None
+
+        # Live knowledge-graph statistics (nodes / edges / entity-type distribution).
+        graph_stats = None
+        if self.graph is not None:
+            try:
+                graph_stats = self.graph.stats()
+            except Exception:
+                graph_stats = None
+
         return {
             "project": {
                 "name": p.name,
@@ -134,12 +184,10 @@ class WikiWebApp:
                     for s in sources
                 ],
                 "stages": stages,
-                "models": {"embed": p.setting("models", "embed", "bge-m3"),
-                           "chat": p.setting("models", "chat", ""),
-                           "host": p.setting("models", "host", "")},
-                "build": {"split_level": p.setting("build", "split_level", 2),
-                          "chunk_size": p.setting("build", "chunk_size", 180),
-                          "overlap": p.setting("build", "overlap", 30)},
+                "settings": settings,
+                "ontology": ontology,
+                "index": index_info,
+                "graph": graph_stats,
             },
             "registry": registry,
         }

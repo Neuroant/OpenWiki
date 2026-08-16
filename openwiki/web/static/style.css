@@ -179,3 +179,19 @@ header {
 .pbadge-up_to_date { background: #e6f4ea; color: #1e7e34; }
 .pbadge-stale { background: #fff4e5; color: #b5730a; }
 .pbadge-missing { background: #f1f3f5; color: var(--muted); }
+.project-view h4 {
+  margin: 12px 0 4px; font-size: 12px; color: var(--muted); font-weight: 700;
+  text-transform: uppercase; letter-spacing: .04em;
+}
+.proj-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 28px; align-items: start; }
+.proj-kv { border-collapse: collapse; width: 100%; }
+.proj-kv td { padding: 2px 10px 2px 0; font-size: 13px; vertical-align: top; }
+.proj-kv td:first-child { color: var(--muted); white-space: nowrap; }
+.proj-kv code { font-size: 12px; }
+.ent-bars { display: flex; flex-direction: column; gap: 3px; max-width: 520px; margin: 2px 0; }
+.ent-bar { display: grid; grid-template-columns: 165px 1fr 42px; align-items: center; gap: 8px; font-size: 12px; }
+.ent-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ent-track { background: var(--bg); border: 1px solid var(--line); border-radius: 4px; height: 12px; overflow: hidden; }
+.ent-fill { display: block; height: 100%; background: var(--accent); }
+.ent-count { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+@media (max-width: 720px) { .proj-cols { grid-template-columns: 1fr; } }

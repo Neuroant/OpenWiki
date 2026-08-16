@@ -240,17 +240,25 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
 - **`openwiki/web/`** — the web UI. `server.py` = `WikiWebApp` (state) + a
   `ThreadingHTTPServer` handler exposing a JSON API (`/api/wiki`,
   `/api/pages/{slug}`, `/api/search`, `/api/chat`, `/api/graph/{slug}` = explore,
-  `/api/graph/expand`) plus static files (served `no-cache`); `serve()` runs it.
+  `/api/graph/expand`, `/api/project` = the active project's full overview) plus
+  static files (served `no-cache`); `serve()` runs it.
   The Graph tab is a hand-rolled **force-directed explorer** (`app.js`: `physicsTick`
   spring/charge sim, click-to-expand / double-click-to-collapse via a `parent`
   (introducer) pointer + `descendantsOf`, drag, edge-type filters, active-subgraph
   focus highlight (selected node's subtree emphasised, rest dimmed), greedy
   `declutterLabels` collision culling using real `getBBox` widths) — no JS libraries. `static/` = a no-build vanilla-JS SPA with client-side Markdown via a
-  vendored `marked.min.js`. The center pane has three tabs (**Wiki / Hilfe /
-  Tutorial**); Help & Tutorial are Markdown docs (`static/help.md`,
-  `static/tutorial.md`) served as static files and rendered client-side. Tutorial
-  actions are `run:<kind>:<arg>` links (`page`/`search`/`ask`) that `app.js`
-  intercepts and drives against the live UI. Reuses
+  vendored `marked.min.js`. The center pane has five tabs (**Projekt / Wiki /
+  Graph / Tutorial / Hilfe**); Help & Tutorial are Markdown docs
+  (`static/help.md`, `static/tutorial.md`) served as static files and rendered
+  client-side. The **Projekt tab** (`renderProject`, backed by `/api/project` →
+  `WikiWebApp.project_info()`) is a complete read-only overview of the active
+  project's knowledge model: sources, per-stage build status, **all** pipeline
+  settings (build/models/graph/serve), the entity **ontology**, live graph stats
+  from `GraphStore.stats()` (node/edge counts + an entity-type distribution bar
+  chart), the semantic-index summary (model/dim/chunks), and the registered-project
+  list — it renders `{"project": null}` gracefully when served outside a project.
+  Tutorial actions are `run:<kind>:<arg>` links (`page`/`search`/`ask`/`tab`) that
+  `app.js` intercepts and drives against the live UI. Reuses
   `WikiTools`/`WikiAgent`/`SemanticIndex`.
 - **`openwiki/mcp_server.py`** — a dependency-free **stdio MCP server**
   (newline-delimited JSON-RPC 2.0: `initialize`/`tools/list`/`tools/call`), like

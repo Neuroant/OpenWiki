@@ -24,7 +24,8 @@ import sys
 from pathlib import Path
 from typing import Optional, Sequence
 
-from .agent import RAGAgent
+from .agent import RAGAgent, _EXPAND_RELS
+from .eval import evaluate, load_eval_set
 from .chat_agent import WikiAgent, summarize_wiki
 from .claude_code_template import scaffold_claude_code
 from .opencode_template import scaffold_opencode
@@ -175,6 +176,20 @@ def _build_argparser() -> argparse.ArgumentParser:
     search_p.add_argument("-k", "--top-k", type=int, default=5, help="Number of results (default: 5).")
     search_p.add_argument("--host", default=None, help="Ollama host URL.")
     search_p.add_argument("--full", action="store_true", help="Print full chunk text instead of a snippet.")
+
+    eval_p = sub.add_parser("eval", parents=[common],
+                            help="Evaluate retrieval quality (RAG vs GraphRAG) over a ground-truth question set.")
+    eval_p.add_argument("--eval-set", type=Path, default=None,
+                        help="JSONL of {\"question\", \"pages\"} lines (default: <project>/eval.jsonl).")
+    eval_p.add_argument("-i", "--index", type=Path, default=None, help="Index dir (default: project's).")
+    eval_p.add_argument("--graph", type=Path, default=None,
+                        help="Graph dir; enables the GraphRAG column (default: project's graph).")
+    eval_p.add_argument("--top-k", type=int, default=5, help="Semantic seed pages (default: 5).")
+    eval_p.add_argument("--expand-k", type=int, default=3,
+                        help="Graph-expanded pages added for GraphRAG (default: 3).")
+    eval_p.add_argument("--no-graph", action="store_true", help="Skip the GraphRAG column.")
+    eval_p.add_argument("--misses", action="store_true", help="List questions with no expected page in the top-k.")
+    eval_p.add_argument("--host", default=None, help="Ollama host URL.")
 
     ask_p = sub.add_parser("ask", parents=[common], help="Answer a question over the wiki with RAG (retrieval + chat model).")
     ask_p.add_argument("question", help="The question to answer.")
@@ -874,6 +889,10 @@ def _apply_project(args: argparse.Namespace, project: Optional[Project],
     elif cmd == "search":
         path("index", p.index_dir if p else None, Path("output") / "index")
         val("host", "models", "host", DEFAULT_HOST)
+    elif cmd == "eval":
+        path("index", p.index_dir if p else None, Path("output") / "index")
+        path("graph", p.graph_path if p else None, Path("output") / "graph")
+        val("host", "models", "host", DEFAULT_HOST)
     elif cmd == "ask":
         path("index", p.index_dir if p else None, Path("output") / "index")
         path("graph", p.graph_path if p else None, Path("output") / "graph")
@@ -1027,6 +1046,88 @@ def _cmd_search(args: argparse.Namespace) -> int:
         )
         print(f"    pages/{result.page_slug}.md   ({result.chunk_id})")
         print(f"    {body}\n")
+    return 0
+
+
+def _semantic_pages(index: SemanticIndex, question: str, n: int) -> list:
+    """The top ``n`` distinct page slugs for a query, by semantic rank (a page's
+    first — best — chunk fixes its position)."""
+    ranked: list = []
+    for result in index.search(question, k=max(n * 6, 30)):
+        if result.page_slug not in ranked:
+            ranked.append(result.page_slug)
+            if len(ranked) >= n:
+                break
+    return ranked
+
+
+def _cmd_eval(args: argparse.Namespace) -> int:
+    project = getattr(args, "project_obj", None)
+    path = args.eval_set or ((project.root / "eval.jsonl") if project else Path("eval.jsonl"))
+    if not Path(path).is_file():
+        print(f"error: eval set not found: {path}\n"
+              '  create a JSONL of {"question": "...", "pages": ["slug", ...]} lines.',
+              file=sys.stderr)
+        return 2
+    items = load_eval_set(path)
+    if not items:
+        print(f"error: eval set is empty: {path}", file=sys.stderr)
+        return 2
+    if not (args.index / "index.json").is_file():
+        print(f"error: no index at {args.index} (run `openwiki index` first).", file=sys.stderr)
+        return 2
+
+    index = SemanticIndex.load(args.index)
+    if isinstance(index.embedder, OllamaEmbedder):
+        index.embedder.host = args.host.rstrip("/")
+    top_k, expand_k = args.top_k, args.expand_k
+    budget = top_k + expand_k
+
+    graph = None
+    if not args.no_graph:
+        graph = _open_graph(args.graph, writable=False)
+
+    def retrieve_rag(question: str) -> list:
+        return _semantic_pages(index, question, budget)
+
+    def retrieve_graphrag(question: str) -> list:
+        seeds = _semantic_pages(index, question, top_k)
+        candidates: list = []
+        for slug in seeds:
+            try:
+                neighborhood = graph.neighborhood(slug)
+            except KeyError:
+                continue
+            for node in neighborhood["nodes"]:
+                if (node["rel"] in _EXPAND_RELS and node["slug"] not in seeds
+                        and node["slug"] not in candidates):
+                    candidates.append(node["slug"])
+        related = ([r.page_slug for r in index.best_chunk_per_page(question, candidates)][:expand_k]
+                   if candidates else [])
+        return seeds + related
+
+    print(f"Eval: {path}  ({len(items)} questions)   k={budget}  (top_k={top_k} + expand_k={expand_k})",
+          file=sys.stderr)
+    reports = [("RAG (semantic)", evaluate(items, retrieve_rag, budget))]
+    if graph is not None:
+        reports.append(("GraphRAG", evaluate(items, retrieve_graphrag, budget)))
+
+    print(f"\n{'retriever':<18}{'MRR':>8}{'hit@k':>9}{'recall@k':>10}")
+    print("-" * 45)
+    for name, report in reports:
+        print(f"{name:<18}{report.mrr:>8.3f}{report.hit_rate:>8.1%} {report.recall:>9.1%}")
+
+    if args.misses:
+        # misses of the strongest retriever we ran
+        name, report = reports[-1]
+        misses = report.misses
+        print(f"\n{len(misses)} miss(es) for {name} (no expected page in top-{budget}):")
+        for r in misses:
+            print(f"  · {r.question}")
+            print(f"      expected {r.expected}  ·  got {r.ranked[:budget]}")
+
+    if graph is not None:
+        graph.close()
     return 0
 
 
@@ -1249,6 +1350,7 @@ _DISPATCH = {
     "build-wiki": _cmd_build_wiki,
     "index": _cmd_index,
     "search": _cmd_search,
+    "eval": _cmd_eval,
     "ask": _cmd_ask,
     "chat": _cmd_chat,
     "serve": _cmd_serve,

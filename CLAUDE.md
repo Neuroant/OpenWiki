@@ -275,6 +275,16 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   **fingerprint chain** (`compute_fingerprints`) + the `.openwiki/state.json`
   lockfile (`BuildState`) + `stale_stages()`. Pure/testable; the CLI's `_cmd_build`
   does the actual stage execution (PDFParser → WikiBuilder → SemanticIndex → GraphBuilder).
+- **`openwiki/eval.py`** — `owiki eval`: retrieval evaluation. Pure ranking metrics
+  (`reciprocal_rank`/`hit_at_k`/`recall_at_k`) + an `evaluate(items, retrieve, k)` driver
+  that takes a `retrieve(question) -> ranked page slugs` callable, so it's backend-agnostic
+  and unit-testable with fakes (no Ollama/Kuzu). The CLI plugs in two retrievers over the
+  same budget `top_k+expand_k`: **RAG** = top semantic pages; **GraphRAG** = `top_k` semantic
+  seeds + `expand_k` graph-expanded (same `_EXPAND_RELS` + `best_chunk_per_page` as the
+  agent). Eval sets are per-project JSONL (`<project>/eval.jsonl`: `{"question","pages"}`).
+  The controlled same-budget comparison is deliberate: it asks whether graph expansion beats
+  *more* semantic hits (on definitional Qs it does not — semantic is already near-perfect;
+  the graph is for relational/multi-hop questions).
 - **`openwiki/merge.py`** — `combine_documents(docs, names)` merges several
   `ParsedDocument`s into one corpus (concatenate pages with a running offset, shift
   table/image page numbers, wrap each source under a synthetic level-1 outline node
@@ -304,7 +314,7 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   `render_files`/`scaffold_claude_code` shape; shares `cli._mcp_command()`.
 - **`openwiki/cli.py`** — argparse CLI with `init`, `build`, `status`, `project`
   (`list`/`use`/`add`/`remove`/`add-source`), `opencode`, `claude-code`, `ontology`, `ingest`,
-  `build-wiki`, `index`, `search`, `ask`, `chat`, `graph-build`, `serve`, and `mcp`
+  `build-wiki`, `index`, `search`, `eval`, `ask`, `chat`, `graph-build`, `serve`, and `mcp`
   subcommands. A shared
   `--project` (parent parser) + `_apply_project(args, project)` fill unset
   path/model/host/split-level args from the active project before dispatch (flags

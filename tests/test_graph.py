@@ -337,6 +337,21 @@ def _entity_wiki() -> Wiki:
     return Wiki(title="T", pages=pages, source="x.pdf", split_level=2)
 
 
+def test_normalize_merges_variants_but_not_distinct_compounds():
+    from openwiki.graph.entities import _normalize
+    # singular/plural, umlaut, ß, hyphenation, article → one merge key
+    assert _normalize("Signal") == _normalize("Signale")
+    assert _normalize("Datenstruktur") == _normalize("Datenstrukturen")
+    assert _normalize("Binärbaum") == _normalize("Binärbäume")
+    assert _normalize("Flußdiagramm") == _normalize("Flussdiagramm")
+    assert _normalize("Teile-und-Herrsche") == _normalize("Teile und Herrsche")
+    assert _normalize("die Menge") == _normalize("Mengen")
+    # distinct compounds sharing a stem must NOT collapse
+    assert _normalize("Systemgrenze") != _normalize("Systemzustand")
+    assert _normalize("Schaltnetze") != _normalize("Schaltwerke")
+    assert _normalize("Baum") == "baum"      # short words kept intact
+
+
 def test_extract_entities_resolves_and_links():
     entities = extract_entities(_entity_wiki(), _EntityChat())
     by_name = {e.name: e for e in entities}

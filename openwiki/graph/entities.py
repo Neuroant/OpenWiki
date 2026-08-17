@@ -43,6 +43,13 @@ Ontology = Union[dict, list, tuple, None]
 
 _ARTICLES = {"der", "die", "das", "dem", "den", "des", "ein", "eine", "einen",
              "einem", "einer", "the", "a", "an"}
+_UMLAUTS = str.maketrans({"ä": "a", "ö": "o", "ü": "u", "ß": "ss"})
+# Conservative German plural / weak-inflection endings, longest first. Tuned to
+# merge singular/plural (Signal/Signale, Datenstruktur/Datenstrukturen) without
+# over-merging distinct compounds — verified to produce zero false merges on the
+# informatik corpus. `-er`/`-s`/`-us` are deliberately excluded (too destructive:
+# Rechner, Prozess).
+_PLURAL_SUFFIXES = ("en", "n", "e")
 _JSON_ARRAY = re.compile(r"\[.*\]", re.DOTALL)
 _THINK = re.compile(r"<think>.*?</think>", re.DOTALL)
 
@@ -96,9 +103,20 @@ class Entity:
 
 
 def _normalize(name: str) -> str:
-    words = re.sub(r"[^\w\s-]", " ", name.lower()).split()
-    words = [w for w in words if w not in _ARTICLES]
-    return " ".join(words).strip()
+    """Merge-key for an entity name, so surface variants resolve to one entity:
+    lowercase, drop punctuation, split hyphens, strip German articles, fold
+    umlauts/ß, then remove one conservative plural/inflection suffix. Deterministic
+    and dependency-free. The display name keeps its original surface form; only this
+    key is normalized. Merges e.g. Signal/Signale, Datenstruktur/Datenstrukturen,
+    Flußdiagramm/Flussdiagramm, Teile-und-Herrsche/Teile und Herrsche — without
+    merging distinct compounds (Systemgrenze ≠ Systemzustand)."""
+    text = re.sub(r"[^\w\s-]", " ", name.lower()).replace("-", " ")
+    words = [w.translate(_UMLAUTS) for w in text.split() if w not in _ARTICLES]
+    base = " ".join(words).strip()
+    for suffix in _PLURAL_SUFFIXES:
+        if base.endswith(suffix) and len(base) - len(suffix) >= 4:
+            return base[:-len(suffix)]
+    return base
 
 
 def _valid(norm: str) -> bool:

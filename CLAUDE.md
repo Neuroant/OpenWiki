@@ -396,9 +396,12 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   synth sample) unless overridden by `[graph] entity_types` in `openwiki.toml` (or
   `graph-build --entity-types`); `coerce_types()` accepts a name list, `"Name: desc"`
   strings, or a dict, and `[graph] entity_max_chars` caps the text per call. It parses
-  a JSON array and resolves by normalized
-  name-within-type (`_normalize`: lowercase + strip German articles) so surface
-  variants merge. `Entity`/`MENTIONS` tables are **always created** (empty without
+  a JSON array and resolves by normalized name-within-type (`_normalize`: lowercase,
+  strip German articles, fold umlauts/ß, split hyphens, and remove one conservative
+  plural/inflection suffix — `en`/`n`/`e`, not `er`/`s`) so surface variants merge
+  (Signal/Signale, Datenstruktur/Datenstrukturen, Flußdiagramm/Flussdiagramm) without
+  over-merging distinct compounds (Systemgrenze ≠ Systemzustand); the display name keeps
+  its surface form. `Entity`/`MENTIONS` tables are **always created** (empty without
   `--entities`), so store/agent code degrades gracefully; `has_entities()` gates
   the `shared_entity` edges, the `find_entity` tool, and the entity term in RAG
   expansion (`agent._EXPAND_RELS`). Extraction is slow (~1 call/page) — run it in

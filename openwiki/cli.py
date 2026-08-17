@@ -196,6 +196,12 @@ def _build_argparser() -> argparse.ArgumentParser:
                         help="Graph-expanded pages added for GraphRAG (default: 3).")
     eval_p.add_argument("--no-graph", action="store_true", help="Skip the GraphRAG column.")
     eval_p.add_argument("--misses", action="store_true", help="List questions with no expected page in the top-k.")
+    eval_p.add_argument("--answers", action="store_true",
+                        help="Also generate RAG & GraphRAG answers and score citation grounding (slow).")
+    eval_p.add_argument("--judge", action="store_true",
+                        help="With --answers, an LLM judge picks the better answer per question (slower).")
+    eval_p.add_argument("--limit", type=int, default=None, help="Only evaluate the first N questions.")
+    eval_p.add_argument("--model", default=None, help="Chat model for --answers (default: project's models.chat).")
     eval_p.add_argument("--host", default=None, help="Ollama host URL.")
 
     ask_p = sub.add_parser("ask", parents=[common], help="Answer a question over the wiki with RAG (retrieval + chat model).")
@@ -934,6 +940,7 @@ def _apply_project(args: argparse.Namespace, project: Optional[Project],
     elif cmd == "eval":
         path("index", p.index_dir if p else None, Path("output") / "index")
         path("graph", p.graph_path if p else None, Path("output") / "graph")
+        val("model", "models", "chat", DEFAULT_CHAT)
         val("host", "models", "host", DEFAULT_HOST)
     elif cmd == "ask":
         path("index", p.index_dir if p else None, Path("output") / "index")
@@ -1137,9 +1144,60 @@ def _cmd_eval(args: argparse.Namespace) -> int:
             print(f"  · {r.question}")
             print(f"      expected {r.expected}  ·  got {r.ranked[:budget]}")
 
+    if args.answers:
+        if graph is None:
+            print("\n(--answers needs a graph for the GraphRAG comparison)", file=sys.stderr)
+        else:
+            _answer_eval(items, index, graph, args, top_k, expand_k)
+
     if graph is not None:
         graph.close()
     return 0
+
+
+def _answer_eval(items, index, graph, args, top_k: int, expand_k: int) -> None:
+    """Generate RAG vs GraphRAG *answers* for the eval set and report answer quality:
+    objective citation grounding (did the answer cite a ground-truth page?) and, with
+    ``--judge``, an LLM's pairwise verdict (position-balanced across questions)."""
+    from .agent import RAGAgent
+    from .eval import grounding, judge_pairwise
+
+    subset = items[: args.limit] if args.limit else items
+    chat = OllamaChat(model=args.model, host=args.host, temperature=0.2)
+    rag_agent = RAGAgent(index, chat, top_k=top_k, graph=None)
+    graph_agent = RAGAgent(index, chat, top_k=top_k, graph=graph, expand_k=expand_k)
+    judge = OllamaChat(model=args.model, host=args.host, temperature=0.0) if args.judge else None
+
+    print(f"\nGenerating answers for {len(subset)} question(s) "
+          f"(RAG + GraphRAG{' + judge' if judge else ''}) — slow …", file=sys.stderr)
+    acc = {"RAG": {"hit": 0.0, "recall": 0.0}, "GraphRAG": {"hit": 0.0, "recall": 0.0}}
+    tally = {"RAG": 0, "GraphRAG": 0, "tie": 0}
+    for i, item in enumerate(subset):
+        answers = {"RAG": rag_agent.answer(item.question), "GraphRAG": graph_agent.answer(item.question)}
+        for name, ans in answers.items():
+            g = grounding(ans, item.expected)
+            acc[name]["hit"] += 1.0 if g["cite_hit"] else 0.0
+            acc[name]["recall"] += g["expected_recall"]
+        if judge is not None:
+            # alternate which system is shown as A vs B to cancel the judge's position bias
+            if i % 2 == 0:
+                verdict = judge_pairwise(judge, item.question, answers["RAG"].answer, answers["GraphRAG"].answer)
+                winner = {"a": "RAG", "b": "GraphRAG", "tie": "tie"}[verdict]
+            else:
+                verdict = judge_pairwise(judge, item.question, answers["GraphRAG"].answer, answers["RAG"].answer)
+                winner = {"a": "GraphRAG", "b": "RAG", "tie": "tie"}[verdict]
+            tally[winner] += 1
+        print(f"  {i + 1}/{len(subset)} done", file=sys.stderr)
+
+    n = len(subset) or 1
+    print(f"\nAnswer grounding — cited a ground-truth page   [{len(subset)} questions]")
+    print(f"{'retriever':<18}{'cite-hit':>10}{'exp-recall':>12}")
+    print("-" * 40)
+    for name in ("RAG", "GraphRAG"):
+        print(f"{name:<18}{acc[name]['hit'] / n:>9.1%}{acc[name]['recall'] / n:>11.1%}")
+    if judge is not None:
+        print(f"\nLLM judge (position-balanced):  GraphRAG {tally['GraphRAG']}  ·  "
+              f"RAG {tally['RAG']}  ·  tie {tally['tie']}")
 
 
 def _cmd_ask(args: argparse.Namespace) -> int:

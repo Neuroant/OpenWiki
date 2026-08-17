@@ -338,9 +338,17 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   recall lands ~4–12 pts *below* pure RAG. Reason: bge-m3 already ranks the relevant pages
   highly, and graph expansion *restricts* candidates to the seeds' neighbours and re-ranks
   them by the same query — worse than ranking over all pages, so it only displaces good hits.
-  Take-away: on this corpus the graph's value is **not retrieval recall** (it may still help
-  *answer specificity* — the A/B panel shows GraphRAG citing a graph-pulled page for a sharper
-  answer — and human exploration via the Graph tab / `find_path` / `find_entity`).
+  Take-away: on this corpus the graph's value is **not retrieval recall** — but it **is answer
+  quality**, measured directly: on the relational set GraphRAG answers cite a ground-truth page
+  more often (**67% vs 58%** cite-hit, **58% vs 46%** expected-recall) and an LLM judge preferred
+  them **8–4** over RAG. The topically-connected pages the graph pulls in help the model even
+  when they displace a semantic hit (so page-recall drops while answer grounding rises). Plus
+  human exploration via the Graph tab / `find_path` / `find_entity`. To reproduce, `owiki eval
+  --answers` also **generates** RAG vs GraphRAG answers
+  (via `RAGAgent`, graph off/on) and scores **citation grounding** (`eval.grounding`: did the
+  answer cite a ground-truth page? — objective, from the eval set); `--judge` adds an
+  **LLM-as-judge** pairwise verdict (`eval.judge_pairwise`, position-balanced across questions
+  to cancel A/B bias). Slow (2–3 chat calls/question); `--limit N` for a subset.
 - **`openwiki/merge.py`** — `combine_documents(docs, names)` merges several
   `ParsedDocument`s into one corpus (concatenate pages with a running offset, shift
   table/image page numbers, wrap each source under a synthetic level-1 outline node

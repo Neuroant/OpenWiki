@@ -2,11 +2,43 @@
 
 from __future__ import annotations
 
+from openwiki.agent import RAGAnswer, Source
 from openwiki.eval import (
-    EvalItem, evaluate, hit_at_k, load_eval_set, recall_at_k, reciprocal_rank,
+    EvalItem, cited_page_slugs, evaluate, grounding, hit_at_k, judge_pairwise,
+    load_eval_set, recall_at_k, reciprocal_rank,
 )
 
 RANKED = ["a", "b", "c", "d"]
+
+
+def _src(marker, slug):
+    return Source(marker=marker, page_slug=slug, page_title=slug.upper(),
+                  pdf_page_start=marker, pdf_page_end=marker, chunk_id=f"c{marker}",
+                  score=1.0 / marker, text="")
+
+
+def test_answer_grounding_uses_citations():
+    ans = RAGAnswer(question="q", answer="Because of X [1] and Y.",
+                    sources=[_src(1, "a"), _src(2, "b")], model="m")
+    assert cited_page_slugs(ans) == {"a"}                     # only [1] is cited
+    g = grounding(ans, ["a", "c"])
+    assert g["cite_hit"] is True and g["expected_recall"] == 0.5
+    assert grounding(ans, ["c"])["cite_hit"] is False         # cited page isn't expected
+
+
+class _Judge:
+    def __init__(self, reply):
+        self.reply = reply
+
+    def chat(self, messages):
+        return self.reply
+
+
+def test_judge_pairwise_parses_verdict():
+    assert judge_pairwise(_Judge("A"), "q", "x", "y") == "a"
+    assert judge_pairwise(_Judge("The better one is B."), "q", "x", "y") == "b"
+    assert judge_pairwise(_Judge("<think>weighing…</think>tie"), "q", "x", "y") == "tie"
+    assert judge_pairwise(_Judge("(no clear token)"), "q", "x", "y") == "tie"   # fallback
 
 
 def test_reciprocal_rank():

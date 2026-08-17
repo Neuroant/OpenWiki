@@ -14,6 +14,7 @@ Kuzu imports here.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Iterable, Sequence
@@ -164,3 +165,45 @@ def make_retrievers(index, graph, top_k: int, expand_k: int):
             return seeds + graph_expand(index, graph, seeds, question, expand_k)
 
     return rag, graphrag
+
+
+# -- answer-quality evaluation -------------------------------------------------
+
+def cited_page_slugs(answer) -> set:
+    """The wiki pages an answer actually cited — its ``[n]`` markers resolved to the
+    ``Source`` pages they refer to (a :class:`~openwiki.agent.RAGAnswer`)."""
+    markers = answer.cited_markers()
+    return {s.page_slug for s in answer.sources if s.marker in markers}
+
+
+def grounding(answer, expected: Iterable[str]) -> dict:
+    """Objective answer grounding vs the ground-truth pages: did the answer *cite*
+    an expected page, and what fraction of them?"""
+    cited = cited_page_slugs(answer)
+    exp = set(expected)
+    hit = bool(cited & exp)
+    recall = len(cited & exp) / len(exp) if exp else 0.0
+    return {"cited": sorted(cited), "cite_hit": hit, "expected_recall": recall}
+
+
+_JUDGE_SYSTEM = (
+    "You are an impartial judge comparing two answers, A and B, to the same question "
+    "about a documentation wiki. Choose the answer that is more accurate, specific, "
+    "and complete. Ignore length and formatting. Reply with exactly one token — "
+    "`A`, `B`, or `tie` — and nothing else."
+)
+_VERDICT = re.compile(r"\b(a|b|tie)\b", re.IGNORECASE)
+_THINK = re.compile(r"<think>.*?</think>", re.DOTALL)
+
+
+def judge_pairwise(chat, question: str, answer_a: str, answer_b: str) -> str:
+    """Ask a judge model which of two answers is better → ``"a"`` / ``"b"`` / ``"tie"``.
+    Callers should balance which system is A vs B across questions to cancel position bias."""
+    user = (f"Question: {question}\n\n"
+            f"Answer A:\n{answer_a or '(no answer)'}\n\n"
+            f"Answer B:\n{answer_b or '(no answer)'}\n\n"
+            "Which answer is better — A, B, or tie?")
+    reply = _THINK.sub("", chat.chat(
+        [{"role": "system", "content": _JUDGE_SYSTEM}, {"role": "user", "content": user}]))
+    match = _VERDICT.search(reply)
+    return match.group(1).lower() if match else "tie"

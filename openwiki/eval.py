@@ -207,3 +207,44 @@ def judge_pairwise(chat, question: str, answer_a: str, answer_b: str) -> str:
         [{"role": "system", "content": _JUDGE_SYSTEM}, {"role": "user", "content": user}]))
     match = _VERDICT.search(reply)
     return match.group(1).lower() if match else "tie"
+
+
+def run_answer_eval(items, index, graph, chat, top_k: int = 5, expand_k: int = 3,
+                    judge=None, on_progress=None) -> dict:
+    """Generate a RAG and a GraphRAG answer per item and score answer quality:
+    citation **grounding** vs the ground-truth pages and, if ``judge`` is given, a
+    position-balanced LLM pairwise verdict. Backend-agnostic (``index``/``graph``/
+    ``chat`` injected); returns aggregate metrics. Shared by the CLI and the web job."""
+    from .agent import RAGAgent
+
+    items = list(items)
+    rag_agent = RAGAgent(index, chat, top_k=top_k, graph=None)
+    graph_agent = RAGAgent(index, chat, top_k=top_k, graph=graph, expand_k=expand_k)
+    acc = {"RAG": {"hit": 0.0, "recall": 0.0}, "GraphRAG": {"hit": 0.0, "recall": 0.0}}
+    tally = {"RAG": 0, "GraphRAG": 0, "tie": 0}
+    for i, item in enumerate(items):
+        answers = {"RAG": rag_agent.answer(item.question),
+                   "GraphRAG": graph_agent.answer(item.question)}
+        for name, ans in answers.items():
+            g = grounding(ans, item.expected)
+            acc[name]["hit"] += 1.0 if g["cite_hit"] else 0.0
+            acc[name]["recall"] += g["expected_recall"]
+        if judge is not None:
+            if i % 2 == 0:   # alternate A/B assignment to cancel position bias
+                verdict = judge_pairwise(judge, item.question, answers["RAG"].answer, answers["GraphRAG"].answer)
+                winner = {"a": "RAG", "b": "GraphRAG", "tie": "tie"}[verdict]
+            else:
+                verdict = judge_pairwise(judge, item.question, answers["GraphRAG"].answer, answers["RAG"].answer)
+                winner = {"a": "GraphRAG", "b": "RAG", "tie": "tie"}[verdict]
+            tally[winner] += 1
+        if on_progress:
+            on_progress(i + 1, len(items))
+    div = len(items) or 1
+    return {
+        "questions": len(items),
+        "judged": judge is not None,
+        "grounding": {name: {"cite_hit": acc[name]["hit"] / div,
+                             "expected_recall": acc[name]["recall"] / div}
+                      for name in ("RAG", "GraphRAG")},
+        "tally": tally,
+    }

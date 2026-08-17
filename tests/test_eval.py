@@ -41,6 +41,44 @@ def test_judge_pairwise_parses_verdict():
     assert judge_pairwise(_Judge("(no clear token)"), "q", "x", "y") == "tie"   # fallback
 
 
+class _FakeResult:
+    def __init__(self, slug, marker):
+        self.page_slug, self.page_title = slug, slug.upper()
+        self.pdf_page_start = self.pdf_page_end = marker
+        self.chunk_id, self.score, self.text = f"c{marker}", 1.0 / marker, f"text {slug}"
+
+
+class _FakeIndex:
+    def __init__(self, slugs):
+        self.slugs = slugs
+
+    def search(self, query, k):
+        return [_FakeResult(s, i + 1) for i, s in enumerate(self.slugs[:k])]
+
+    def best_chunk_per_page(self, query, slugs):
+        return [_FakeResult(s, i + 1) for i, s in enumerate(slugs)]
+
+
+class _FakeChat:
+    name = "fake"
+
+    def chat(self, messages):
+        return "The answer relies on [1]."          # always cites the top source
+
+
+def test_run_answer_eval_aggregates(monkeypatch):
+    from openwiki import eval as ev
+    items = [ev.EvalItem("q1", ["a"]), ev.EvalItem("q2", ["b"])]
+    index = _FakeIndex(["a", "b", "c"])
+    # graph=None → RAG and GraphRAG both retrieve seeds; the top source is 'a'
+    result = ev.run_answer_eval(items, index, graph=None, chat=_FakeChat(),
+                                top_k=3, expand_k=0, judge=_Judge("tie"))
+    assert result["questions"] == 2 and result["judged"] is True
+    # both answers cite 'a': q1 (expected 'a') hits, q2 (expected 'b') doesn't → 50%
+    assert result["grounding"]["RAG"]["cite_hit"] == 0.5
+    assert result["tally"]["tie"] == 2
+
+
 def test_reciprocal_rank():
     assert reciprocal_rank(RANKED, ["c"]) == 1 / 3       # first hit at position 3
     assert reciprocal_rank(RANKED, ["a", "d"]) == 1.0    # earliest hit wins

@@ -204,11 +204,15 @@ header {
 .eval-controls label { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; color: var(--muted); }
 .eval-controls label span { font-variant-numeric: tabular-nums; color: var(--ink); font-weight: 600; min-width: 14px; }
 .eval-controls input[type="range"] { width: 120px; }
+.eval-controls select { padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px;
+  font: inherit; background: #fff; color: var(--ink); }
 .eval-table { border-collapse: collapse; margin: 6px 0 4px; min-width: 380px; }
 .eval-table th, .eval-table td { text-align: left; padding: 6px 16px; border-bottom: 1px solid var(--line);
   font-size: 13.5px; font-variant-numeric: tabular-nums; }
 .eval-table th { color: var(--muted); font-weight: 600; font-size: 12px; }
 .eval-table td.ev-best { color: #1e7e34; font-weight: 700; }
+.aq-judge { margin: 10px 0 2px; font-size: 13.5px; }
+.aq-judge .ev-best { color: #1e7e34; font-weight: 700; }
 
 /* Live A/B */
 .eval-ab-controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 10px 0; }

@@ -279,9 +279,11 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   `ThreadingHTTPServer` handler exposing a JSON API (`/api/wiki`,
   `/api/pages/{slug}`, `/api/search`, `/api/chat`, `/api/graph/{slug}` = explore,
   `/api/graph/expand`, `/api/project` = the active project's full overview,
-  `/api/eval?top_k=&expand_k=` = the retrieval benchmark, `/api/compare` (POST) =
-  one question through RAG + GraphRAG side by side, `/api/health` = KB quality
-  metrics) plus static files (served `no-cache`); `serve()` runs it.
+  `/api/eval?top_k=&expand_k=&eval_set=` = the retrieval benchmark, `/api/eval-sets`
+  = the project's `*.jsonl` eval sets, `/api/compare` (POST) = one question through
+  RAG + GraphRAG side by side, `/api/answer-eval` (GET status / POST start) = the
+  async answer-quality job, `/api/health` = KB quality metrics) plus static files
+  (served `no-cache`); `serve()` runs it.
   The Graph tab is a hand-rolled **force-directed explorer** (`app.js`: `physicsTick`
   spring/charge sim, click-to-expand / double-click-to-collapse via a `parent`
   (introducer) pointer + `descendantsOf`, drag, edge-type filters, active-subgraph
@@ -295,10 +297,15 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   drill-down, plus a **Live A/B** panel (`runCompare` → `/api/compare` →
   `WikiWebApp.compare()`) that sends one question through both retrievers side by
   side — the retrieved pages (seed vs `+Graph` badges, clickable) and, opt-in, both
-  generated answers (2 chat calls, slow) — plus a **KB-health** panel (`renderHealth`
-  → `/api/health` → `GraphStore.health()`): connectivity (avg degree, orphan/gap
-  pages), entity singleton ratio, concept-hub bars, best-connected pages. All
-  read-only. Help & Tutorial are Markdown docs
+  generated answers (2 chat calls, slow) — an **Antwortqualität** panel that runs the
+  slow answer-quality eval as an **async background job** (`start_answer_eval` spawns a
+  thread → `eval.run_answer_eval`; the UI polls `/api/answer-eval` for progress) and
+  shows citation grounding (cite-hit / expected-recall) + the LLM-judge tally (this is
+  where GraphRAG wins) — and a **KB-health** panel (`renderHealth` → `/api/health` →
+  `GraphStore.health()`): connectivity, singleton ratio, concept-hub bars. An
+  **eval-set selector** (`/api/eval-sets`) drives the benchmark + answer-eval, so you
+  can run `eval.jsonl` or `eval_relational.jsonl`. All read-only. Help & Tutorial are
+  Markdown docs
   (`static/help.md`, `static/tutorial.md`) served as static files and rendered
   client-side. The **Projekt tab** (`renderProject`, backed by `/api/project` →
   `WikiWebApp.project_info()`) is a complete read-only overview of the active

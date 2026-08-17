@@ -271,8 +271,9 @@ async function renderProject() {
 
 // -- evaluation tab (retrieval benchmark: RAG vs GraphRAG) -----------------
 
-const evalState = { top_k: 5, expand_k: 3, data: null, busy: false };
+const evalState = { top_k: 5, expand_k: 3, evalSet: null, data: null, busy: false };
 const compareState = { data: null, busy: false };
+const answerEval = { timer: 0 };   // poll handle for the background answer-quality job
 
 async function renderEval() {
   const content = $("#content");
@@ -283,6 +284,7 @@ async function renderEval() {
       <strong>GraphRAG</strong> (Seeds + Graph-Erweiterung), gleiches Budget
       <code>top_k + expand_k</code>.</p>
     <div class="eval-controls">
+      <label>Eval-Menge <select id="ev-set"></select></label>
       <label>top_k <input type="range" id="ev-topk" min="1" max="12" value="${evalState.top_k}">
         <span id="ev-topk-v">${evalState.top_k}</span></label>
       <label>expand_k <input type="range" id="ev-expandk" min="0" max="8" value="${evalState.expand_k}">
@@ -291,6 +293,19 @@ async function renderEval() {
       <span id="ev-status" class="muted"></span>
     </div>
     <div id="ev-results"></div>
+
+    <h3>Antwortqualität · RAG vs. GraphRAG
+      <span class="muted">(generiert Antworten — langsam, läuft im Hintergrund)</span></h3>
+    <p class="muted">Bewertet die <em>generierten</em> Antworten: Zitat-Treffer gegen die
+      Ground-Truth-Seiten (objektiv) und optional ein LLM-Richter. Nutzt dieselben
+      <code>top_k</code>/<code>expand_k</code> wie oben.</p>
+    <div class="eval-controls">
+      <label><input type="checkbox" id="aq-judge" /> LLM-Richter</label>
+      <label>Limit <input type="number" id="aq-limit" min="1" placeholder="alle" style="width:64px" /></label>
+      <button id="aq-run" class="graph-open">Messen</button>
+      <span id="aq-status" class="muted"></span>
+    </div>
+    <div id="aq-results"></div>
 
     <h3>Live A/B · RAG vs. GraphRAG</h3>
     <p class="muted">Eine Frage durch beide Retriever schicken und die abgerufenen
@@ -319,6 +334,9 @@ async function renderEval() {
   const abRun = () => runCompare();
   $("#ab-run").addEventListener("click", abRun);
   $("#ab-q").addEventListener("keydown", (e) => { if (e.key === "Enter") abRun(); });
+  $("#aq-run").addEventListener("click", startAnswerEval);
+  populateEvalSets();    // fill the eval-set dropdown
+  refreshAnswerEval();   // reflect a running/finished answer-eval job on tab open
   content.scrollTop = 0;
   if (evalState.data) renderEvalResults(evalState.data);   // show last result instantly
   if (compareState.data) { $("#ab-q").value = compareState.data.question || ""; renderCompareResults(compareState.data); }
@@ -376,6 +394,19 @@ async function renderHealth() {
   }
 }
 
+async function populateEvalSets() {
+  const sel = $("#ev-set");
+  if (!sel) return;
+  try {
+    const data = await getJSON("/api/eval-sets");
+    if (!evalState.evalSet) evalState.evalSet = data.default;
+    sel.innerHTML = (data.sets || []).map((s) =>
+      `<option value="${escapeHtml(s)}"${s === evalState.evalSet ? " selected" : ""}>${escapeHtml(s)}</option>`
+    ).join("") || `<option value="">(keine)</option>`;
+    sel.addEventListener("change", () => { evalState.evalSet = sel.value; runEval(); });
+  } catch (e) { /* endpoint may be absent */ }
+}
+
 async function runEval() {
   if (evalState.busy) return;
   evalState.busy = true;
@@ -383,7 +414,8 @@ async function runEval() {
   if (status) status.textContent = "läuft…";
   if (btn) btn.disabled = true;
   try {
-    const data = await getJSON(`/api/eval?top_k=${evalState.top_k}&expand_k=${evalState.expand_k}`);
+    const set = evalState.evalSet ? `&eval_set=${encodeURIComponent(evalState.evalSet)}` : "";
+    const data = await getJSON(`/api/eval?top_k=${evalState.top_k}&expand_k=${evalState.expand_k}${set}`);
     evalState.data = data;
     renderEvalResults(data);
   } catch (e) {
@@ -425,7 +457,8 @@ function renderEvalResults(data) {
         `erhalten ${escapeHtml(it.ranked.join(", "))}</span></li>`).join("")}</ul>`
     : `<p class="muted">Keine Fehlschläge — jede Frage findet ihre Seite in Top-${data.budget}.</p>`;
   el.innerHTML =
-    `<p class="muted">${data.count} Fragen · k=${data.budget} ` +
+    `<p class="muted">${data.eval_set ? "<code>" + escapeHtml(data.eval_set) + "</code> · " : ""}` +
+    `${data.count} Fragen · k=${data.budget} ` +
     `(top_k=${data.top_k} + expand_k=${data.expand_k})</p>` +
     `<table class="eval-table"><thead><tr><th>Retriever</th><th>MRR</th>` +
     `<th>hit@k</th><th>recall@k</th></tr></thead><tbody>${rows}</tbody></table>` +
@@ -479,6 +512,82 @@ function renderCompareResults(d) {
     `<div class="ab-cols">${col("RAG", d.rag)}${col("GraphRAG", d.graphrag)}</div>`;
   el.querySelectorAll("a.ab-page").forEach((a) =>
     a.addEventListener("click", (e) => { e.preventDefault(); loadPage(a.dataset.slug); }));
+}
+
+// -- answer-quality eval (background job: RAG vs GraphRAG answers) ----------
+
+async function startAnswerEval() {
+  const btn = $("#aq-run");
+  const body = {
+    judge: $("#aq-judge").checked,
+    limit: parseInt($("#aq-limit").value, 10) || null,
+    top_k: evalState.top_k, expand_k: evalState.expand_k,
+    eval_set: evalState.evalSet,
+  };
+  btn.disabled = true;
+  try {
+    const job = await postJSON("/api/answer-eval", body);
+    renderAnswerEvalJob(job);
+    if (job.status === "running") pollAnswerEval();
+  } catch (e) {
+    const el = $("#aq-results");
+    if (el) el.innerHTML = `<p class="muted">Fehler: ${escapeHtml(e.message)}</p>`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function refreshAnswerEval() {
+  try {
+    const job = await getJSON("/api/answer-eval");
+    renderAnswerEvalJob(job);
+    if (job.status === "running") pollAnswerEval();
+  } catch (e) { /* tab may lack the endpoint */ }
+}
+
+function pollAnswerEval() {
+  if (answerEval.timer) return;
+  answerEval.timer = setInterval(async () => {
+    let job;
+    try { job = await getJSON("/api/answer-eval"); } catch (e) { return; }
+    renderAnswerEvalJob(job);
+    if (job.status !== "running") { clearInterval(answerEval.timer); answerEval.timer = 0; }
+  }, 3000);
+}
+
+function renderAnswerEvalJob(job) {
+  const status = $("#aq-status"), el = $("#aq-results");
+  if (!status || !el) return;
+  if (job.status === "running") {
+    status.textContent = `läuft… ${job.done || 0}/${job.total || "?"}  (2–3 Modell-Aufrufe/Frage)`;
+    return;
+  }
+  status.textContent = "";
+  if (job.status === "error") {
+    el.innerHTML = `<p class="muted">Fehler: ${escapeHtml(job.error || "")}</p>`;
+    return;
+  }
+  if (job.status !== "done" || !job.result) { el.innerHTML = ""; return; }
+  const r = job.result, g = r.grounding, pct = (x) => (100 * x).toFixed(1) + "%";
+  const bestHit = Math.max(g.RAG.cite_hit, g.GraphRAG.cite_hit);
+  const bestRec = Math.max(g.RAG.expected_recall, g.GraphRAG.expected_recall);
+  const cell = (v, best, txt) => `<td class="${v === best ? "ev-best" : ""}">${txt}</td>`;
+  const rows = ["RAG", "GraphRAG"].map((name) =>
+    `<tr><td><strong>${name}</strong></td>` +
+    cell(g[name].cite_hit, bestHit, pct(g[name].cite_hit)) +
+    cell(g[name].expected_recall, bestRec, pct(g[name].expected_recall)) + `</tr>`).join("");
+  let judge = "";
+  if (r.judged) {
+    const t = r.tally, lead = t.GraphRAG > t.RAG ? "GraphRAG" : (t.RAG > t.GraphRAG ? "RAG" : null);
+    judge = `<p class="aq-judge">LLM-Richter (positionsbalanciert): ` +
+      `<span class="${lead === "GraphRAG" ? "ev-best" : ""}">GraphRAG ${t.GraphRAG}</span> · ` +
+      `<span class="${lead === "RAG" ? "ev-best" : ""}">RAG ${t.RAG}</span> · unentschieden ${t.tie}</p>`;
+  }
+  el.innerHTML =
+    `<p class="muted">${r.questions} Fragen · top_k=${job.top_k} + expand_k=${job.expand_k}` +
+    `${r.judged ? "" : " · nur Grounding"}</p>` +
+    `<table class="eval-table"><thead><tr><th>Retriever</th><th>Zitat-Treffer</th>` +
+    `<th>Erw.-Recall</th></tr></thead><tbody>${rows}</tbody></table>${judge}`;
 }
 
 // -- graph tab (interactive neighborhood exploration) ----------------------

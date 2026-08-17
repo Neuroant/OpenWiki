@@ -42,6 +42,8 @@ class WikiWebApp:
         self.graph = graph  # optional GraphStore
         self.project = project  # optional Project (serves its build status in the UI)
         self._lock = threading.Lock()
+        self._ans_lock = threading.Lock()          # guards the answer-eval job state
+        self._ans_job = {"status": "idle"}
 
     def manifest(self) -> dict:
         manifest_path = self.wiki_dir / "wiki.json"
@@ -201,19 +203,30 @@ class WikiWebApp:
             "registry": registry,
         }
 
-    def eval_set_path(self) -> Optional[Path]:
-        """Where this project's benchmark lives (``<project>/eval.jsonl``)."""
-        root = self.project.root if self.project is not None else self.wiki_dir.parent
+    def _eval_root(self) -> Path:
+        return self.project.root if self.project is not None else self.wiki_dir.parent
+
+    def eval_sets(self) -> list:
+        """Available eval-set files (``*.jsonl``) in the project root."""
+        return sorted(p.name for p in self._eval_root().glob("*.jsonl"))
+
+    def eval_set_path(self, name=None) -> Optional[Path]:
+        """Resolve an eval set by bare filename (default ``eval.jsonl``)."""
+        root = self._eval_root()
+        if name:
+            candidate = root / Path(str(name)).name    # strip any directory (no traversal)
+            if candidate.suffix == ".jsonl" and candidate.is_file():
+                return candidate
         return root / "eval.jsonl"
 
-    def run_eval(self, top_k: int = 5, expand_k: int = 3) -> dict:
-        """Run the retrieval benchmark (RAG vs GraphRAG) over ``eval.jsonl`` at the
-        given budget, for the Evaluation tab. Read-only."""
+    def run_eval(self, top_k: int = 5, expand_k: int = 3, eval_set=None) -> dict:
+        """Run the retrieval benchmark (RAG vs GraphRAG) over the chosen eval set at
+        the given budget, for the Evaluation tab. Read-only."""
         from ..eval import evaluate, load_eval_set, make_retrievers
 
         top_k = max(1, min(int(top_k), 20))
         expand_k = max(0, min(int(expand_k), 10))
-        path = self.eval_set_path()
+        path = self.eval_set_path(eval_set)
         if self.index is None:
             return {"error": "No search index is loaded.", "exists": bool(path and path.is_file())}
         if path is None or not path.is_file():
@@ -235,7 +248,7 @@ class WikiWebApp:
         reports = [report("RAG", rag_fn)]
         if graphrag_fn is not None:
             reports.append(report("GraphRAG", graphrag_fn))
-        return {"exists": True, "path": str(path), "count": len(items),
+        return {"exists": True, "path": str(path), "eval_set": path.name, "count": len(items),
                 "top_k": top_k, "expand_k": expand_k, "budget": budget, "reports": reports}
 
     def compare(self, question: str, top_k: int = 5, expand_k: int = 3,
@@ -284,6 +297,63 @@ class WikiWebApp:
             return {"graph": True, **self.graph.health()}
         except Exception as exc:  # never crash the tab on a graph hiccup
             return {"graph": True, "error": str(exc)}
+
+    def answer_eval_status(self) -> dict:
+        with self._ans_lock:
+            return dict(self._ans_job)
+
+    def start_answer_eval(self, top_k: int = 5, expand_k: int = 3,
+                          judge: bool = False, limit=None, eval_set=None) -> dict:
+        """Kick off (in a background thread) an answer-quality run over ``eval.jsonl``
+        — RAG vs GraphRAG answers scored by citation grounding + optional LLM judge.
+        Slow, so it runs async; poll ``answer_eval_status()``. Read-only."""
+        from ..eval import load_eval_set
+        from ..llm import OllamaChat
+
+        with self._ans_lock:
+            if self._ans_job.get("status") == "running":
+                return dict(self._ans_job)
+            if self.index is None or self.graph is None:
+                return {"status": "error", "error": "Answer eval needs both an index and a graph."}
+            chat = getattr(self.agent, "chat", None)
+            if chat is None:
+                return {"status": "error", "error": "No chat model configured."}
+            path = self.eval_set_path(eval_set)
+            if path is None or not path.is_file():
+                return {"status": "error", "error": f"No eval set at {path}."}
+            items = load_eval_set(path)
+            if limit:
+                items = items[: max(1, int(limit))]
+            if not items:
+                return {"status": "error", "error": "Eval set is empty."}
+            top_k = max(1, min(int(top_k), 20))
+            expand_k = max(1, min(int(expand_k), 10))
+            judge_chat = (OllamaChat(model=chat.model, host=chat.host, temperature=0.0)
+                          if judge and isinstance(chat, OllamaChat) else None)
+            set_name = path.name
+            self._ans_job = {"status": "running", "done": 0, "total": len(items), "eval_set": set_name,
+                             "judged": bool(judge_chat), "top_k": top_k, "expand_k": expand_k}
+
+        def worker():
+            from ..eval import run_answer_eval
+            try:
+                def progress(done, total):
+                    with self._ans_lock:
+                        if self._ans_job.get("status") == "running":
+                            self._ans_job["done"] = done
+                result = run_answer_eval(items, self.index, self.graph, chat,
+                                         top_k, expand_k, judge=judge_chat, on_progress=progress)
+                with self._ans_lock:
+                    self._ans_job = {"status": "done", "done": len(items), "total": len(items),
+                                     "eval_set": set_name, "top_k": top_k, "expand_k": expand_k,
+                                     "result": result}
+            except Exception as exc:  # never let the worker thread crash silently
+                with self._ans_lock:
+                    self._ans_job = {"status": "error", "error": str(exc)}
+
+        threading.Thread(target=worker, daemon=True).start()
+        with self._ans_lock:
+            return dict(self._ans_job)
 
     def chat(self, message: str) -> dict:
         if self.agent is None:
@@ -352,13 +422,18 @@ def make_handler(app: WikiWebApp):
                     return self._json(app.manifest())
                 if path == "/api/project":
                     return self._json(app.project_info())
+                if path == "/api/eval-sets":
+                    return self._json({"sets": app.eval_sets(), "default": "eval.jsonl"})
                 if path == "/api/eval":
                     query = parse_qs(urlparse(self.path).query)
                     top_k = int(query.get("top_k", ["5"])[0])
                     expand_k = int(query.get("expand_k", ["3"])[0])
-                    return self._json(app.run_eval(top_k, expand_k))
+                    eval_set = query.get("eval_set", [None])[0]
+                    return self._json(app.run_eval(top_k, expand_k, eval_set))
                 if path == "/api/health":
                     return self._json(app.health_stats())
+                if path == "/api/answer-eval":
+                    return self._json(app.answer_eval_status())
                 if path.startswith("/api/pages/"):
                     slug = unquote(path[len("/api/pages/"):])
                     try:
@@ -396,6 +471,10 @@ def make_handler(app: WikiWebApp):
                     return self._json(app.compare(
                         question, int(data.get("top_k", 5)), int(data.get("expand_k", 3)),
                         bool(data.get("answers", False))))
+                if path == "/api/answer-eval":
+                    return self._json(app.start_answer_eval(
+                        int(data.get("top_k", 5)), int(data.get("expand_k", 3)),
+                        bool(data.get("judge", False)), data.get("limit"), data.get("eval_set")))
                 if path == "/api/graph/expand":
                     node_id = (data.get("id") or "").strip()
                     if not node_id:

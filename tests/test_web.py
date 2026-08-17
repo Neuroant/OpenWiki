@@ -115,6 +115,12 @@ def test_health_stats_without_graph(app):
     assert app.health_stats() == {"graph": False}   # app fixture has no graph
 
 
+def test_answer_eval_needs_a_graph(app):
+    assert app.answer_eval_status() == {"status": "idle"}
+    result = app.start_answer_eval()                 # app fixture has no graph
+    assert result["status"] == "error" and "graph" in result["error"].lower()
+
+
 def test_chat_edits_page(app):
     out = app.chat("bitte ändern")
     assert out["reply"] == "Erledigt."

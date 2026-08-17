@@ -57,6 +57,8 @@ def _build_argparser() -> argparse.ArgumentParser:
         prog="openwiki",
         description="OpenWiki — tools for building agentic wikis.",
     )
+    from . import __version__
+    parser.add_argument("--version", action="version", version=f"openwiki {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
 
     # Shared by every command that operates on a project's artifacts.

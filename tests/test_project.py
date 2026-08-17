@@ -197,6 +197,14 @@ def test_resolve_source_specs_url_repo_and_file(tmp_path):
     assert (sources_dir / "notes.md").is_file()                # only the file was copied
 
 
+def test_cli_version_flag(capsys):
+    from openwiki import __version__
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["--version"])
+    assert exc.value.code == 0
+    assert __version__ in capsys.readouterr().out       # argparse prints --version to stdout
+
+
 def test_resolve_eval_set_defaults_to_project_root(tmp_path):
     assert cli._resolve_eval_set(None, SimpleNamespace(root=tmp_path)) == tmp_path / "eval.jsonl"
     assert cli._resolve_eval_set(None, None) == Path.cwd() / "eval.jsonl"   # no project → CWD

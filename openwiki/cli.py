@@ -40,7 +40,7 @@ from .merge import combine_documents
 from .models import ParsedDocument
 from .ontology import format_entity_types, propose_ontology, sample_corpus
 from .outline import synthesize_outline
-from .sources import is_supported, parse_source, source_stem, source_type
+from .sources import is_supported, is_url, parse_source, source_exists, source_stem, source_type
 from .pipeline import STAGES, BuildState, compute_fingerprints, stale_stages
 from .project import (
     DEFAULT_CHAT, DEFAULT_EMBED, DEFAULT_HOST, MANIFEST, Project, render_manifest,
@@ -71,9 +71,12 @@ def _build_argparser() -> argparse.ArgumentParser:
     init_p.add_argument("dir", nargs="?", type=Path, default=Path("."),
                         help="Project directory (default: current directory).")
     init_p.add_argument("--name", default=None, help="Project name (default: directory name).")
-    init_p.add_argument("--source", action="append", type=Path, metavar="PATH",
-                        help="A source file (pdf/md/txt), a folder (registers its supported files), or a glob "
-                             "(repeatable); copied into sources/.")
+    init_p.add_argument("--source", action="append", metavar="SOURCE",
+                        help="A source file (pdf/md/txt/html) copied into sources/, a folder, a glob, "
+                             "an http(s) URL, or (with --repo) a code-repo directory (repeatable).")
+    init_p.add_argument("--repo", action="store_true",
+                        help="Treat a directory --source as one code-repository source (in place), "
+                             "not a folder to scan for files.")
     init_p.add_argument("--force", action="store_true", help="Overwrite an existing openwiki.toml.")
     init_p.add_argument("--opencode", action="store_true",
                         help="Also scaffold an OpenCode agent config (opencode.json + .opencode/).")
@@ -117,8 +120,11 @@ def _build_argparser() -> argparse.ArgumentParser:
     p_rm = psub.add_parser("remove", help="Unregister a project.")
     p_rm.add_argument("name")
     p_src = psub.add_parser("add-source", parents=[common],
-                            help="Copy a file into sources/ and append it to openwiki.toml.")
-    p_src.add_argument("path", type=Path, help="A source file (pdf/md/txt), a folder (its supported files), or a glob.")
+                            help="Add a source to openwiki.toml (copy a file, or reference a URL / code repo).")
+    p_src.add_argument("path", help="A source file/folder/glob (copied into sources/), an http(s) URL, "
+                                    "or (with --repo) a code-repo directory.")
+    p_src.add_argument("--repo", action="store_true",
+                       help="Treat a directory as one code-repository source (referenced in place).")
 
     ingest = sub.add_parser("ingest", parents=[common], help="Parse a source (PDF/Markdown/text/HTML/URL) and extract its content.")
     ingest.add_argument("pdf", metavar="source",
@@ -341,6 +347,35 @@ def _expand_sources(raw) -> "list[Path]":
     return files
 
 
+def _resolve_source_specs(raw_sources, sources_dir: Path, repo: bool = False) -> "list[dict]":
+    """Turn raw ``--source`` args into ``[{type, path}]`` manifest specs. **URLs**
+    (and, with ``repo=True``, **directories**) are referenced in place; other local
+    files/globs/scan-dirs are expanded and copied into ``sources_dir``."""
+    project_root = sources_dir.parent
+    specs: "list[dict]" = []
+    to_copy: list = []
+    for item in raw_sources:
+        text = str(item)
+        if is_url(text):
+            specs.append({"type": "web", "path": text})
+        elif repo and Path(text).is_dir():
+            resolved = Path(text).resolve()
+            try:
+                path = resolved.relative_to(project_root).as_posix()
+            except ValueError:
+                path = str(resolved)   # repo outside the project → absolute reference
+            specs.append({"type": "code", "path": path})
+        else:
+            to_copy.append(item)
+    for src in _expand_sources(to_copy):
+        dest = sources_dir / src.name
+        if src.resolve() != dest.resolve():
+            sources_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dest)
+        specs.append({"type": source_type(src), "path": f"sources/{src.name}"})
+    return specs
+
+
 def _cmd_init(args: argparse.Namespace) -> int:
     root: Path = args.dir.resolve()
     root.mkdir(parents=True, exist_ok=True)
@@ -352,21 +387,17 @@ def _cmd_init(args: argparse.Namespace) -> int:
     sources_dir = root / "sources"
     sources_dir.mkdir(exist_ok=True)
     try:
-        inputs = _expand_sources(args.source or [])
+        specs = _resolve_source_specs(args.source or [], sources_dir, repo=getattr(args, "repo", False))
     except FileNotFoundError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     sources: list[dict] = []
-    seen_names: set = set()
-    for src in inputs:
-        if src.name in seen_names:
-            print(f"note: skipping duplicate filename '{src.name}' ({src})", file=sys.stderr)
+    seen: set = set()
+    for spec in specs:
+        if spec["path"] in seen:
             continue
-        seen_names.add(src.name)
-        dest = sources_dir / src.name
-        if src.resolve() != dest.resolve():
-            shutil.copy2(src, dest)
-        sources.append({"type": source_type(src), "path": f"sources/{src.name}"})
+        seen.add(spec["path"])
+        sources.append(spec)
 
     name = args.name or root.name
     manifest.write_text(render_manifest(name=name, sources=sources), encoding="utf-8")
@@ -378,7 +409,8 @@ def _cmd_init(args: argparse.Namespace) -> int:
     print(f"Initialized OpenWiki project '{name}' at {root}")
     print(f"  manifest -> {manifest}")
     if sources:
-        print(f"  sources  -> {sources_dir}  ({len(sources)} file(s) registered)")
+        print(f"  sources  -> {len(sources)} declared "
+              f"({', '.join(s['type'] for s in sources)})")
     else:
         print(f"  add inputs under {sources_dir}/ and list them under [[sources]] in openwiki.toml")
     if getattr(args, "opencode", False):
@@ -595,27 +627,23 @@ def _cmd_project(args: argparse.Namespace) -> int:
         if project is None:
             print("error: not in an OpenWiki project — run `openwiki init` first.", file=sys.stderr)
             return 2
+        sources_dir = project.root / "sources"
+        sources_dir.mkdir(exist_ok=True)
         try:
-            inputs = _expand_sources([args.path])
+            specs = _resolve_source_specs([args.path], sources_dir, repo=getattr(args, "repo", False))
         except FileNotFoundError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 2
-        sources_dir = project.root / "sources"
-        sources_dir.mkdir(exist_ok=True)
         existing = {s.path for s in project.sources}
         added: list[str] = []
-        for src in inputs:
-            rel = f"sources/{src.name}"
-            if rel in existing:
-                print(f"note: already declared, skipping {rel}", file=sys.stderr)
+        for spec in specs:
+            if spec["path"] in existing:
+                print(f"note: already declared, skipping {spec['path']}", file=sys.stderr)
                 continue
-            existing.add(rel)
-            dest = sources_dir / src.name
-            if src.resolve() != dest.resolve():
-                shutil.copy2(src, dest)
+            existing.add(spec["path"])
             with (project.root / MANIFEST).open("a", encoding="utf-8") as fh:
-                fh.write(f'\n[[sources]]\ntype = "{source_type(src)}"\npath = "{rel}"\n')
-            added.append(rel)
+                fh.write(f'\n[[sources]]\ntype = {_toml_quote(spec["type"])}\npath = {_toml_quote(spec["path"])}\n')
+            added.append(spec["path"])
         if not added:
             print("Nothing added (all matches already declared).")
             return 0
@@ -660,7 +688,7 @@ def _corpus_references(project, sources, doc, wiki, multi):
     metas = []
     start = 0
     for src in sources:
-        per = project.parsed_dir / f"{src.stem}.json"
+        per = project.parsed_dir / f"{source_stem(src)}.json"
         if not per.is_file():
             print(f"note: {per.name} missing — skipping cross-references "
                   f"(re-run `openwiki build --only ingest,graph`).", file=sys.stderr)
@@ -686,7 +714,7 @@ def _cmd_build(args: argparse.Namespace) -> int:
     if not sources:
         print("error: no [[sources]] declared in openwiki.toml.", file=sys.stderr)
         return 2
-    missing = [s for s in sources if not s.is_file()]
+    missing = [s for s in sources if not source_exists(s)]
     if missing:
         for s in missing:
             print(f"error: source not found: {s}", file=sys.stderr)
@@ -708,7 +736,7 @@ def _cmd_build(args: argparse.Namespace) -> int:
     split = int(build.get("split_level", 2))
     tables = bool(build.get("tables", True))
     host = models.get("host", DEFAULT_HOST)
-    parsed_path = project.parsed_dir / ("_corpus.json" if multi else f"{sources[0].stem}.json")
+    parsed_path = project.parsed_dir / ("_corpus.json" if multi else f"{source_stem(sources[0])}.json")
 
     fps = compute_fingerprints(project, sources)
     exists = {
@@ -751,10 +779,10 @@ def _cmd_build(args: argparse.Namespace) -> int:
             if synth and not parsed.outline:   # no PDF bookmarks → derive section pages from headings
                 parsed.outline = synthesize_outline(parsed)
             if multi:  # keep each source's IR so per-source offsets survive caching
-                (project.parsed_dir / f"{src.stem}.json").write_text(
+                (project.parsed_dir / f"{source_stem(src)}.json").write_text(
                     json.dumps(parsed.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
             parsed_docs.append(parsed)
-        doc = combine_documents(parsed_docs, [s.stem for s in sources], title=project.name)
+        doc = combine_documents(parsed_docs, [source_stem(s) for s in sources], title=project.name)
         parsed_path.write_text(
             json.dumps(doc.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8"
         )

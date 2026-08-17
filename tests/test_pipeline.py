@@ -8,9 +8,22 @@ from pathlib import Path
 import pytest
 
 from openwiki.pipeline import (
-    STAGES, BuildState, compute_fingerprints, sources_signature, stale_stages,
+    STAGES, BuildState, compute_fingerprints, file_sig, sources_signature, stale_stages,
 )
 from openwiki.project import MANIFEST, Project, render_manifest
+
+
+def test_file_sig_url_and_directory(tmp_path):
+    assert file_sig("https://example.com/page")[0] == "url"     # URLs sign by string
+    repo = tmp_path / "repo" / "src"
+    repo.mkdir(parents=True)
+    (repo / "a.py").write_text("x = 1\n", encoding="utf-8")
+    (repo / "big.bin").write_bytes(b"\x00" * 10)                 # binary → excluded
+    sig = file_sig(tmp_path / "repo")
+    assert sig[0] == "dir"
+    entries = sig[2]
+    assert any("a.py" in entry[0] for entry in entries)
+    assert not any("big.bin" in entry[0] for entry in entries)  # pruned from the signature
 
 
 def _project(root: Path, **kw) -> Project:

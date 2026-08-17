@@ -129,9 +129,18 @@ class Project:
     def state_dir(self) -> Path:
         return self.root / STATE_DIR
 
-    def source_paths(self) -> list[Path]:
-        """Declared sources resolved against the project root."""
-        return [self.root / s.path for s in self.sources]
+    def source_paths(self) -> list:
+        """Declared sources resolved: a URL is returned as-is (a ``str``), an absolute
+        path as-is, and a relative path joined to the project root. Repo/URL sources
+        therefore point in place; file sources point under ``sources/``."""
+        out: list = []
+        for s in self.sources:
+            if str(s.path).lower().startswith(("http://", "https://")):
+                out.append(s.path)
+            else:
+                path = Path(s.path)
+                out.append(path if path.is_absolute() else self.root / path)
+        return out
 
 
 def _toml_str(value: str) -> str:
@@ -169,7 +178,9 @@ def render_manifest(
         blocks = (
             "# [[sources]]         # add one block per input; all merge into one corpus\n"
             '# type = "pdf"\n'
-            '# path = "sources/manual.pdf"\n'
+            '# path = "sources/manual.pdf"   # a file (copied into sources/),\n'
+            '#                               # or type="web" + path="https://…" (a URL),\n'
+            '#                               # or type="code" + path="../my-repo" (a code repo)\n'
         )
     return f"""# openwiki.toml — OpenWiki project manifest.
 # Rebuild every artifact from this file with:  openwiki build

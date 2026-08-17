@@ -178,6 +178,39 @@ def test_expand_sources_dir_glob_file(tmp_path):
         cli._expand_sources([tmp_path / "missing"])
 
 
+def test_resolve_source_specs_url_repo_and_file(tmp_path):
+    sources_dir = tmp_path / "proj" / "sources"
+    sources_dir.mkdir(parents=True)
+    doc = tmp_path / "notes.md"
+    doc.write_text("# H\nbody", encoding="utf-8")
+    repo = tmp_path / "repo" / "src"
+    repo.mkdir(parents=True)
+    (repo / "a.py").write_text("x = 1\n", encoding="utf-8")
+
+    specs = cli._resolve_source_specs(
+        ["https://example.com/p", str(tmp_path / "repo"), str(doc)], sources_dir, repo=True)
+    by_type = {s["type"]: s["path"] for s in specs}
+    assert by_type["web"] == "https://example.com/p"          # URL referenced in place
+    assert by_type["code"].endswith("repo")                    # repo referenced (absolute here)
+    assert by_type["markdown"] == "sources/notes.md"
+    assert (sources_dir / "notes.md").is_file()                # only the file was copied
+
+
+def test_source_paths_resolves_url_absolute_and_relative(tmp_path):
+    root = tmp_path / "proj"
+    root.mkdir()
+    absrepo = tmp_path / "extern" / "repo"
+    sources = [{"type": "web", "path": "https://example.com/p"},
+               {"type": "code", "path": str(absrepo)},
+               {"type": "markdown", "path": "sources/a.md"}]
+    (root / MANIFEST).write_text(render_manifest(name="p", sources=sources), encoding="utf-8")
+
+    paths = Project.load(root).source_paths()
+    assert paths[0] == "https://example.com/p"                 # URL stays a string
+    assert Path(paths[1]) == absrepo                           # absolute path as-is
+    assert paths[2] == root.resolve() / "sources" / "a.md"     # relative joined to root
+
+
 def test_cmd_init_scans_folder(tmp_path):
     docs = tmp_path / "docs"
     docs.mkdir()

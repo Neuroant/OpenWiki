@@ -56,6 +56,11 @@ def is_supported(source: PathLike) -> bool:
     return is_url(source) or Path(str(source)).is_dir() or _suffix(source) in SUPPORTED_SUFFIXES
 
 
+def source_exists(source: PathLike) -> bool:
+    """Whether a source is available: a URL is assumed reachable; a file/dir must exist."""
+    return is_url(source) or Path(str(source)).exists()
+
+
 def source_stem(source: PathLike) -> str:
     """A filesystem-safe stem for naming outputs, for a file, a directory, or a URL
     (``https://en.wikipedia.org/wiki/Graph_theory`` → ``Graph_theory``)."""

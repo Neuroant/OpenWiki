@@ -355,11 +355,17 @@ entities = false
   **incrementally** — a per-stage fingerprint chain in `.openwiki/state.json` skips
   stages whose inputs and settings are unchanged (`--only ingest,wiki,index,graph`,
   `--force`). No more keeping `--split-level` in sync between `index` and `graph-build`.
-- **Multiple `[[sources]]`** merge into one corpus — each becomes a top-level wiki
-  section and cross-references resolve within each source. Add one with
-  `openwiki project add-source path/to/other.pdf`. Point `--source` / `add-source`
-  at a **folder** to register all its `*.pdf` files at once (a glob works too):
-  `openwiki init proj --source C:\docs` or `--source "C:\docs\*.pdf"`.
+- **Multiple `[[sources]]` of any type** merge into one corpus — each becomes a
+  top-level wiki section. A source can be a **file** (pdf/md/txt/html, copied into
+  `sources/`), an **`http(s)` URL**, or a **code-repo directory** (both referenced in
+  place):
+  ```bash
+  openwiki project add-source path/to/other.pdf          # a file
+  openwiki project add-source https://example.com/page   # a web page
+  openwiki project add-source ../my-service --repo        # a code repository
+  ```
+  Point `--source` / `add-source` at a **folder** (without `--repo`) to register all
+  its files at once, or a glob: `openwiki init proj --source "C:\docs\*.pdf"`.
 - **Registry** — register projects and switch by name from anywhere:
   ```bash
   openwiki project add my-manual .     # register (name → path)

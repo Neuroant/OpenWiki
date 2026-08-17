@@ -61,6 +61,34 @@ def _included(path: Path) -> bool:
     return path.suffix.lower() in _CODE_SUFFIXES or path.name in _INCLUDE_NAMES
 
 
+def _is_text(path: Path, max_bytes: int) -> bool:
+    try:
+        if path.stat().st_size > max_bytes:
+            return False
+        with path.open("rb") as fh:
+            return b"\x00" not in fh.read(8192)   # NUL byte ⇒ treat as binary
+    except OSError:
+        return False
+
+
+def collect_files(root, max_bytes: int = 500_000) -> list[Path]:
+    """The source files under ``root`` a repo wiki would include: extension/name
+    allowlist, noisy dirs (`.git`/`node_modules`/…/dotfolders) and binary/oversized
+    files pruned. Sorted by POSIX relative path (a valid pre-order over the tree).
+    Shared by :class:`CodeParser` and the build fingerprint."""
+    root = Path(root)
+    found: list[Path] = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = sorted(d for d in dirnames
+                             if d not in _EXCLUDE_DIRS and not d.startswith("."))
+        for name in sorted(filenames):
+            path = Path(dirpath) / name
+            if _included(path) and _is_text(path, max_bytes):
+                found.append(path)
+    found.sort(key=lambda p: p.relative_to(root).as_posix())
+    return found
+
+
 class CodeParser:
     """Parse a source-code repository (a directory) into a :class:`ParsedDocument`."""
 
@@ -72,7 +100,7 @@ class CodeParser:
         if not root.is_dir():
             raise NotADirectoryError(f"not a directory: {repo_path}")
 
-        files = self._collect_files(root)
+        files = collect_files(root, self.max_bytes)
         if max_pages is not None:
             files = files[: max(0, max_pages - 1)]   # leave room for the overview page
 
@@ -87,28 +115,6 @@ class CodeParser:
         return sections_to_document(sections, str(root), "code", title_fallback=root.name)
 
     # -- internals ------------------------------------------------------
-
-    def _collect_files(self, root: Path) -> list[Path]:
-        found: list[Path] = []
-        for dirpath, dirnames, filenames in os.walk(root):
-            dirnames[:] = sorted(d for d in dirnames
-                                 if d not in _EXCLUDE_DIRS and not d.startswith("."))
-            for name in sorted(filenames):
-                path = Path(dirpath) / name
-                if _included(path) and self._is_text(path):
-                    found.append(path)
-        # sorted by POSIX relative path → a valid pre-order over the tree
-        found.sort(key=lambda p: p.relative_to(root).as_posix())
-        return found
-
-    def _is_text(self, path: Path) -> bool:
-        try:
-            if path.stat().st_size > self.max_bytes:
-                return False
-            with path.open("rb") as fh:
-                return b"\x00" not in fh.read(8192)   # NUL byte ⇒ treat as binary
-        except OSError:
-            return False
 
     def _render_file(self, path: Path, rel: str) -> str:
         text = path.read_text(encoding="utf-8", errors="replace")

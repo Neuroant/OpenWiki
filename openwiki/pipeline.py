@@ -35,8 +35,19 @@ def _hash(*parts) -> str:
     return digest.hexdigest()[:16]
 
 
-def file_sig(path: Path) -> Optional[list]:
-    """A cheap content signature: (name, size, mtime_ns). ``None`` if missing."""
+def file_sig(source) -> Optional[list]:
+    """A cheap content signature for a source. A **URL** signs by its string (remote
+    content isn't sniffed — ``--force`` re-fetches); a **directory** (repo) signs over
+    its included files' (relpath, size, mtime); a **file** by (name, size, mtime_ns).
+    ``None`` if a local path is missing."""
+    if str(source).lower().startswith(("http://", "https://")):
+        return ["url", str(source)]
+    path = Path(source)
+    if path.is_dir():
+        from .code_parser import collect_files
+        return ["dir", path.name, [[f.relative_to(path).as_posix(),
+                                     f.stat().st_size, f.stat().st_mtime_ns]
+                                    for f in collect_files(path)]]
     try:
         st = path.stat()
     except OSError:

@@ -60,10 +60,17 @@ user-global **`~/.openwiki/`** (override with `$OPENWIKI_HOME`) holds `config.to
 (cross-project setting defaults — below a project's manifest, above built-in
 defaults) and `registry.toml` (**`openwiki project list/use/add/remove/add-source`**;
 the active project is a from-anywhere fallback used only when you're not inside one —
-location always wins). A project may declare **multiple `[[sources]]`**: `build`
+location always wins). A project may declare **multiple `[[sources]]`** of **any type**
+(pdf/markdown/text file, an `http(s)` **URL**, or a **code-repo directory**): `build`
 ingests each, keeps its per-source IR, and `combine_documents` merges them into one
 corpus (page/table/image offsets + a synthetic top-level section per source; a
-single source is passed through unchanged). Cross-references resolve **within** each
+single source is passed through unchanged). File sources are copied into `sources/`;
+URL and repo sources are **referenced in place** (path = the URL, or the repo dir —
+relative if under the project, else absolute), so `Project.source_paths()` returns a
+URL string as-is and joins only relative paths to the root. `openwiki project
+add-source <url>` auto-registers a web source; `add-source <dir> --repo` (and
+`init … --repo`) a code source; the build fingerprint signs a URL by its string and a
+repo by its file tree (`pipeline.file_sig`). Cross-references resolve **within** each
 source (`graph.extract_references_multi`, per-source printed-page offsets). Design +
 roadmap in `docs/projects.md` (the project concept is complete — Phases 1–4 landed).
 

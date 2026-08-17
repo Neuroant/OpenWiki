@@ -85,6 +85,18 @@ class WikiWebApp:
             raise RuntimeError("No graph is loaded. Run `openwiki graph-build` first.")
         return self.graph.expand(node_type, node_id)
 
+    def _source_info(self, source) -> dict:
+        """Display info for a declared source (file, directory/repo, or URL)."""
+        from ..sources import is_url, source_exists, source_type
+        if is_url(source):
+            return {"path": str(source), "exists": True, "type": "web"}
+        path = Path(str(source))
+        try:
+            shown = str(path.relative_to(self.project.root))
+        except ValueError:
+            shown = str(path)
+        return {"path": shown, "exists": source_exists(source), "type": source_type(source)}
+
     def project_info(self) -> dict:
         """Active project's identity, sources, per-stage build status, and the
         registered-project list (for the UI 'Projekt' tab). ``{"project": null}``
@@ -94,10 +106,11 @@ class WikiWebApp:
         from ..pipeline import STAGES, BuildState, compute_fingerprints
         from ..userconfig import Registry
 
+        from ..sources import source_stem
         p = self.project
         sources = p.source_paths()
         multi = len(sources) > 1
-        stem = sources[0].stem if sources else ""
+        stem = source_stem(sources[0]) if sources else ""
         fingerprints = compute_fingerprints(p, sources) if sources else {}
         state = BuildState.load(p)
         ingest_out = (p.parsed_dir / "_corpus.json") if multi else (p.parsed_dir / f"{stem}.json")
@@ -178,11 +191,7 @@ class WikiWebApp:
                 "name": p.name,
                 "root": str(p.root),
                 "description": p.description,
-                "sources": [
-                    {"path": (str(s.relative_to(p.root)) if s.is_relative_to(p.root) else str(s)),
-                     "exists": s.is_file()}
-                    for s in sources
-                ],
+                "sources": [self._source_info(s) for s in sources],
                 "stages": stages,
                 "settings": settings,
                 "ontology": ontology,

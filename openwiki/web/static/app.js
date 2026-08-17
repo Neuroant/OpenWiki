@@ -304,6 +304,9 @@ async function renderEval() {
       <span id="ab-status" class="muted"></span>
     </div>
     <div id="ab-results"></div>
+
+    <h3>Wissensbasis-Qualität</h3>
+    <div id="health-results"><p class="muted">Wird geladen…</p></div>
   </div>`;
   const topk = $("#ev-topk"), expandk = $("#ev-expandk");
   const sync = () => { $("#ev-topk-v").textContent = topk.value; $("#ev-expandk-v").textContent = expandk.value; };
@@ -320,6 +323,57 @@ async function renderEval() {
   if (evalState.data) renderEvalResults(evalState.data);   // show last result instantly
   if (compareState.data) { $("#ab-q").value = compareState.data.question || ""; renderCompareResults(compareState.data); }
   runEval();
+  renderHealth();
+}
+
+async function renderHealth() {
+  const el = $("#health-results");
+  if (!el) return;
+  try {
+    const h = await getJSON("/api/health");
+    if (!h.graph) { el.innerHTML = `<p class="muted">Kein Graph geladen — keine Qualitätsmetriken.</p>`; return; }
+    if (h.error) { el.innerHTML = `<p class="muted">${escapeHtml(h.error)}</p>`; return; }
+    const esc = escapeHtml;
+    const pct = h.entities ? Math.round(100 * h.singleton_entities / h.entities) : 0;
+    const kv = (obj) => `<table class="proj-kv"><tbody>` + Object.entries(obj).map(([k, v]) =>
+      `<tr><td>${esc(k)}</td><td><code>${esc(String(v))}</code></td></tr>`).join("") + `</tbody></table>`;
+    const conn = kv({
+      "Ø Verbindungen/Seite": h.avg_degree,
+      "Seiten ohne Ähnlichkeitskante": h.pages_no_similar,
+      "Seiten ohne Entitäten": h.pages_no_entities,
+      "verwaiste Seiten": h.orphans.length,
+    });
+    const orphans = h.orphans.length
+      ? `<ul class="proj-list">${h.orphans.slice(0, 12).map((o) =>
+          `<li><a href="#" data-slug="${esc(o.slug)}" class="ab-page">${esc(o.title)}</a></li>`).join("")}</ul>`
+      : `<p class="muted">Keine verwaisten Seiten — alle sind verbunden.</p>`;
+    const ent = kv({
+      "Entitäten gesamt": h.entities,
+      "Singletons (nur 1 Seite)": `${h.singleton_entities} (${pct}%)`,
+      "seitenübergreifend (≥2 Seiten)": h.cross_page_entities,
+    });
+    const maxHub = h.hubs.reduce((m, x) => Math.max(m, x.pages), 0) || 1;
+    const hubBars = `<div class="ent-bars">${h.hubs.map((x) =>
+      `<div class="ent-bar"><span class="ent-name">${esc(x.name)}</span>` +
+      `<span class="ent-track"><span class="ent-fill" style="width:${Math.round(100 * x.pages / maxHub)}%"></span></span>` +
+      `<span class="ent-count">${x.pages}</span></div>`).join("")}</div>`;
+    const topPages = `<ul class="proj-list">${h.top_pages.slice(0, 8).map((p) =>
+      `<li><a href="#" data-slug="${esc(p.slug)}" class="ab-page">${esc(p.title)}</a> ` +
+      `<span class="muted">· ${p.degree}</span></li>`).join("")}</ul>`;
+    el.innerHTML =
+      `<div class="proj-cols">` +
+      `<div><h4>Konnektivität</h4>${conn}<h4>Verwaiste Seiten</h4>${orphans}</div>` +
+      `<div><h4>Entitäten-Vernetzung</h4>${ent}` +
+      `<p class="muted" style="font-size:12px">Viele Singletons = die Entitäten verbinden den Korpus kaum; ` +
+      `die seitenübergreifenden tragen die <code>shared_entity</code>-Kanten.</p></div>` +
+      `</div>` +
+      `<h4>Top-Konzepte <span class="muted">(Seiten je Entität)</span></h4>${hubBars}` +
+      `<h4>Bestvernetzte Seiten <span class="muted">(ähnlich + Verweise)</span></h4>${topPages}`;
+    el.querySelectorAll("a.ab-page").forEach((a) =>
+      a.addEventListener("click", (e) => { e.preventDefault(); loadPage(a.dataset.slug); }));
+  } catch (e) {
+    el.innerHTML = `<p class="muted">Qualitätsdaten nicht verfügbar: ${escapeHtml(e.message)}</p>`;
+  }
 }
 
 async function runEval() {

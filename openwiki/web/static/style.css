@@ -198,6 +198,8 @@ header {
 
 /* -- evaluation tab -- */
 .eval-view h3 { margin: 20px 0 6px; font-size: 15px; }
+.eval-view h4 { margin: 14px 0 4px; font-size: 12px; color: var(--muted); font-weight: 700;
+  text-transform: uppercase; letter-spacing: .04em; }
 .eval-controls { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; margin: 12px 0 4px; }
 .eval-controls label { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; color: var(--muted); }
 .eval-controls label span { font-variant-numeric: tabular-nums; color: var(--ink); font-weight: 600; min-width: 14px; }

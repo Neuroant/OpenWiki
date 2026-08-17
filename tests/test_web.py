@@ -111,6 +111,10 @@ def test_compare_retrieval_only(app):
     assert "000-a" in [s["slug"] for s in result["rag"]["sources"]]   # semantic hit
 
 
+def test_health_stats_without_graph(app):
+    assert app.health_stats() == {"graph": False}   # app fixture has no graph
+
+
 def test_chat_edits_page(app):
     out = app.chat("bitte ändern")
     assert out["reply"] == "Erledigt."

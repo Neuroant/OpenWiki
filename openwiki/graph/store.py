@@ -89,6 +89,45 @@ class GraphStore:
             "entity_types": by_type,
         }
 
+    def health(self, hub_limit: int = 12) -> dict:
+        """Knowledge-base *quality* signals (for the Evaluation tab's health panel):
+        connectivity, orphan/gap pages, entity singleton ratio, concept hubs."""
+        def one(q):
+            return self._rows(q)[0][0]
+
+        pages = one("MATCH (p:Page) RETURN count(p);")
+        no_similar = one("MATCH (p:Page) OPTIONAL MATCH (p)-[r:SIMILAR_TO]-(:Page) "
+                         "WITH p, count(r) AS n WHERE n = 0 RETURN count(p);")
+        no_entities = one("MATCH (p:Page) OPTIONAL MATCH (p)-[m:MENTIONS]->(:Entity) "
+                          "WITH p, count(m) AS n WHERE n = 0 RETURN count(p);")
+        avg_degree = float(self._rows(
+            "MATCH (p:Page) OPTIONAL MATCH (p)-[r:SIMILAR_TO|REFERENCES]-(:Page) "
+            "WITH p, count(r) AS d RETURN avg(d);")[0][0] or 0)
+        # Orphans: no similar, no reference, and no entity mention at all.
+        orphans = [{"slug": r[0], "title": r[1]} for r in self._rows(
+            "MATCH (p:Page) "
+            "OPTIONAL MATCH (p)-[s:SIMILAR_TO]-(:Page) "
+            "OPTIONAL MATCH (p)-[rf:REFERENCES]-(:Page) "
+            "OPTIONAL MATCH (p)-[m:MENTIONS]->(:Entity) "
+            "WITH p, count(s) + count(rf) + count(m) AS deg WHERE deg = 0 "
+            "RETURN p.slug, p.title ORDER BY p.slug;")]
+        top_pages = [{"slug": r[0], "title": r[1], "degree": r[2]} for r in self._rows(
+            "MATCH (p:Page) OPTIONAL MATCH (p)-[r:SIMILAR_TO|REFERENCES]-(:Page) "
+            f"WITH p, count(r) AS deg RETURN p.slug, p.title, deg ORDER BY deg DESC LIMIT {int(hub_limit)};")]
+        entities = one("MATCH (e:Entity) RETURN count(e);")
+        singletons = one("MATCH (:Page)-[:MENTIONS]->(e:Entity) "
+                         "WITH e, count(*) AS n WHERE n = 1 RETURN count(e);") if entities else 0
+        hubs = [{"name": r[0], "type": r[1], "pages": r[2]} for r in self._rows(
+            "MATCH (p:Page)-[:MENTIONS]->(e:Entity) WITH e, count(p) AS n "
+            f"RETURN e.name, e.type, n ORDER BY n DESC LIMIT {int(hub_limit)};")]
+        return {
+            "pages": pages, "avg_degree": round(avg_degree, 2),
+            "pages_no_similar": no_similar, "pages_no_entities": no_entities,
+            "orphans": orphans, "top_pages": top_pages,
+            "entities": entities, "singleton_entities": singletons,
+            "cross_page_entities": entities - singletons, "hubs": hubs,
+        }
+
     def has_entities(self) -> bool:
         return self._rows("MATCH (e:Entity) RETURN count(e);")[0][0] > 0
 

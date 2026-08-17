@@ -267,6 +267,15 @@ class WikiWebApp:
             "graphrag": side(self.graph) if self.graph is not None else None,
         }
 
+    def health_stats(self) -> dict:
+        """Knowledge-base quality signals for the Evaluation tab's health panel."""
+        if self.graph is None:
+            return {"graph": False}
+        try:
+            return {"graph": True, **self.graph.health()}
+        except Exception as exc:  # never crash the tab on a graph hiccup
+            return {"graph": True, "error": str(exc)}
+
     def chat(self, message: str) -> dict:
         if self.agent is None:
             raise RuntimeError("Chat is unavailable (no agent configured).")
@@ -339,6 +348,8 @@ def make_handler(app: WikiWebApp):
                     top_k = int(query.get("top_k", ["5"])[0])
                     expand_k = int(query.get("expand_k", ["3"])[0])
                     return self._json(app.run_eval(top_k, expand_k))
+                if path == "/api/health":
+                    return self._json(app.health_stats())
                 if path.startswith("/api/pages/"):
                     slug = unquote(path[len("/api/pages/"):])
                     try:

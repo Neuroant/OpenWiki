@@ -366,6 +366,16 @@ def entity_store(tmp_path):
     s.close()
 
 
+def test_graph_health(entity_store):
+    h = entity_store.health()
+    assert h["pages"] == 3 and h["entities"] == 2
+    # both Arpeggiator (000-a, 001-b) and Reverb (001-b, 002-c) span two pages
+    assert h["singleton_entities"] == 0 and h["cross_page_entities"] == 2
+    assert h["hubs"][0]["pages"] == 2
+    assert {hub["name"] for hub in h["hubs"]} == {"Arpeggiator", "Reverb"}
+    assert isinstance(h["orphans"], list) and isinstance(h["top_pages"], list)
+
+
 def test_entity_graph_stats(entity_store):
     assert entity_store.has_entities()
     assert entity_store.stats()["entities"] == 2

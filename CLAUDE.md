@@ -243,8 +243,8 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   `/api/pages/{slug}`, `/api/search`, `/api/chat`, `/api/graph/{slug}` = explore,
   `/api/graph/expand`, `/api/project` = the active project's full overview,
   `/api/eval?top_k=&expand_k=` = the retrieval benchmark, `/api/compare` (POST) =
-  one question through RAG + GraphRAG side by side) plus static files
-  (served `no-cache`); `serve()` runs it.
+  one question through RAG + GraphRAG side by side, `/api/health` = KB quality
+  metrics) plus static files (served `no-cache`); `serve()` runs it.
   The Graph tab is a hand-rolled **force-directed explorer** (`app.js`: `physicsTick`
   spring/charge sim, click-to-expand / double-click-to-collapse via a `parent`
   (introducer) pointer + `descendantsOf`, drag, edge-type filters, active-subgraph
@@ -258,8 +258,10 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   drill-down, plus a **Live A/B** panel (`runCompare` → `/api/compare` →
   `WikiWebApp.compare()`) that sends one question through both retrievers side by
   side — the retrieved pages (seed vs `+Graph` badges, clickable) and, opt-in, both
-  generated answers (2 chat calls, slow). Read-only (phases: benchmark ✓, A/B ✓,
-  health-stats next). Help & Tutorial are Markdown docs
+  generated answers (2 chat calls, slow) — plus a **KB-health** panel (`renderHealth`
+  → `/api/health` → `GraphStore.health()`): connectivity (avg degree, orphan/gap
+  pages), entity singleton ratio, concept-hub bars, best-connected pages. All
+  read-only. Help & Tutorial are Markdown docs
   (`static/help.md`, `static/tutorial.md`) served as static files and rendered
   client-side. The **Projekt tab** (`renderProject`, backed by `/api/project` →
   `WikiWebApp.project_info()`) is a complete read-only overview of the active

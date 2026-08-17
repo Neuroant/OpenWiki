@@ -32,6 +32,9 @@ synthesizer manual (269 pages, 228 outline entries → a 51-page wiki → 815
 embedded chunks → a graph of 51 pages / 815 chunks / 306 SIMILAR_TO + 122
 REFERENCES edges, plus 801 entities / 1431 MENTIONS with `--entities`).
 
+A chronological feature roadmap of everything built so far (by release) is in
+`docs/roadmap.md`.
+
 ## Environment & commands
 
 Windows with a local virtualenv (`.venv`, **Python 3.13** — kuzu has no 3.14

@@ -13,7 +13,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Optional
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 from ..chat_agent import WikiAgent
 from ..search import SemanticIndex
@@ -192,6 +192,43 @@ class WikiWebApp:
             "registry": registry,
         }
 
+    def eval_set_path(self) -> Optional[Path]:
+        """Where this project's benchmark lives (``<project>/eval.jsonl``)."""
+        root = self.project.root if self.project is not None else self.wiki_dir.parent
+        return root / "eval.jsonl"
+
+    def run_eval(self, top_k: int = 5, expand_k: int = 3) -> dict:
+        """Run the retrieval benchmark (RAG vs GraphRAG) over ``eval.jsonl`` at the
+        given budget, for the Evaluation tab. Read-only."""
+        from ..eval import evaluate, load_eval_set, make_retrievers
+
+        top_k = max(1, min(int(top_k), 20))
+        expand_k = max(0, min(int(expand_k), 10))
+        path = self.eval_set_path()
+        if self.index is None:
+            return {"error": "No search index is loaded.", "exists": bool(path and path.is_file())}
+        if path is None or not path.is_file():
+            return {"exists": False, "path": str(path) if path else None,
+                    "top_k": top_k, "expand_k": expand_k, "reports": []}
+        items = load_eval_set(path)
+        budget = top_k + expand_k
+        rag_fn, graphrag_fn = make_retrievers(self.index, self.graph, top_k, expand_k)
+
+        def report(name: str, retrieve) -> dict:
+            rep = evaluate(items, retrieve, budget)
+            return {
+                "name": name, "mrr": rep.mrr, "hit_rate": rep.hit_rate, "recall": rep.recall,
+                "items": [{"question": r.question, "expected": r.expected,
+                           "ranked": r.ranked[:budget], "hit": bool(r.hit), "rr": r.rr}
+                          for r in rep.items],
+            }
+
+        reports = [report("RAG", rag_fn)]
+        if graphrag_fn is not None:
+            reports.append(report("GraphRAG", graphrag_fn))
+        return {"exists": True, "path": str(path), "count": len(items),
+                "top_k": top_k, "expand_k": expand_k, "budget": budget, "reports": reports}
+
     def chat(self, message: str) -> dict:
         if self.agent is None:
             raise RuntimeError("Chat is unavailable (no agent configured).")
@@ -259,6 +296,11 @@ def make_handler(app: WikiWebApp):
                     return self._json(app.manifest())
                 if path == "/api/project":
                     return self._json(app.project_info())
+                if path == "/api/eval":
+                    query = parse_qs(urlparse(self.path).query)
+                    top_k = int(query.get("top_k", ["5"])[0])
+                    expand_k = int(query.get("expand_k", ["3"])[0])
+                    return self._json(app.run_eval(top_k, expand_k))
                 if path.startswith("/api/pages/"):
                     slug = unquote(path[len("/api/pages/"):])
                     try:

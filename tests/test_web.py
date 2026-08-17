@@ -90,6 +90,19 @@ def test_search(app):
     assert results and results[0]["slug"] == "000-a"
 
 
+def test_run_eval(app, tmp_path):
+    assert app.run_eval()["exists"] is False           # no eval.jsonl yet
+    (tmp_path / "eval.jsonl").write_text(
+        '{"question": "lautstarke", "pages": ["000-a"]}\n'
+        '{"question": "effekt", "pages": ["001-b"]}\n', encoding="utf-8")
+    result = app.run_eval(top_k=2, expand_k=1)
+    assert result["exists"] and result["count"] == 2
+    assert [r["name"] for r in result["reports"]] == ["RAG"]   # no graph → RAG only
+    rag = result["reports"][0]
+    assert rag["hit_rate"] == 1.0 and rag["mrr"] == 1.0        # each question finds its page
+    assert result["budget"] == 3
+
+
 def test_chat_edits_page(app):
     out = app.chat("bitte ändern")
     assert out["reply"] == "Erledigt."

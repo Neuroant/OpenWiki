@@ -103,6 +103,8 @@ function renderActiveTab() {
     renderGraph();
   } else if (state.tab === "project") {
     renderProject();
+  } else if (state.tab === "eval") {
+    renderEval();
   } else {
     renderDoc(state.tab);
   }
@@ -265,6 +267,97 @@ async function renderProject() {
   } catch (e) {
     content.innerHTML = `<p class="muted">Projekt nicht verfügbar: ${escapeHtml(e.message)}</p>`;
   }
+}
+
+// -- evaluation tab (retrieval benchmark: RAG vs GraphRAG) -----------------
+
+const evalState = { top_k: 5, expand_k: 3, data: null, busy: false };
+
+async function renderEval() {
+  const content = $("#content");
+  content.innerHTML = `<div class="eval-view">
+    <h2>Evaluation</h2>
+    <p class="muted">Retrieval-Qualität über die Ground-Truth-Fragen in
+      <code>eval.jsonl</code> — <strong>RAG</strong> (semantisch) vs.
+      <strong>GraphRAG</strong> (Seeds + Graph-Erweiterung), gleiches Budget
+      <code>top_k + expand_k</code>.</p>
+    <div class="eval-controls">
+      <label>top_k <input type="range" id="ev-topk" min="1" max="12" value="${evalState.top_k}">
+        <span id="ev-topk-v">${evalState.top_k}</span></label>
+      <label>expand_k <input type="range" id="ev-expandk" min="0" max="8" value="${evalState.expand_k}">
+        <span id="ev-expandk-v">${evalState.expand_k}</span></label>
+      <button id="ev-run" class="graph-open">Ausführen</button>
+      <span id="ev-status" class="muted"></span>
+    </div>
+    <div id="ev-results"></div>
+  </div>`;
+  const topk = $("#ev-topk"), expandk = $("#ev-expandk");
+  const sync = () => { $("#ev-topk-v").textContent = topk.value; $("#ev-expandk-v").textContent = expandk.value; };
+  const rerun = () => { evalState.top_k = +topk.value; evalState.expand_k = +expandk.value; runEval(); };
+  topk.addEventListener("input", sync);
+  expandk.addEventListener("input", sync);
+  topk.addEventListener("change", rerun);   // fire on release, not every tick
+  expandk.addEventListener("change", rerun);
+  $("#ev-run").addEventListener("click", rerun);
+  content.scrollTop = 0;
+  if (evalState.data) renderEvalResults(evalState.data);   // show last result instantly
+  runEval();
+}
+
+async function runEval() {
+  if (evalState.busy) return;
+  evalState.busy = true;
+  const status = $("#ev-status"), btn = $("#ev-run");
+  if (status) status.textContent = "läuft…";
+  if (btn) btn.disabled = true;
+  try {
+    const data = await getJSON(`/api/eval?top_k=${evalState.top_k}&expand_k=${evalState.expand_k}`);
+    evalState.data = data;
+    renderEvalResults(data);
+  } catch (e) {
+    const r = $("#ev-results");
+    if (r) r.innerHTML = `<p class="muted">Evaluation fehlgeschlagen: ${escapeHtml(e.message)}</p>`;
+  } finally {
+    evalState.busy = false;
+    if (status) status.textContent = "";
+    if (btn) btn.disabled = false;
+  }
+}
+
+function renderEvalResults(data) {
+  const el = $("#ev-results");
+  if (!el) return;
+  if (data.error) { el.innerHTML = `<p class="muted">${escapeHtml(data.error)}</p>`; return; }
+  if (!data.exists) {
+    el.innerHTML = `<p class="muted">Keine Eval-Menge gefunden` +
+      (data.path ? ` (<code>${escapeHtml(data.path)}</code>)` : "") +
+      `. Lege eine JSONL-Datei mit Zeilen ` +
+      `<code>{"question": "…", "pages": ["slug"]}</code> an.</p>`;
+    return;
+  }
+  const pct = (x) => (100 * x).toFixed(1) + "%";
+  const best = {};   // highlight the leading value per metric
+  ["mrr", "hit_rate", "recall"].forEach((m) => { best[m] = Math.max(...data.reports.map((r) => r[m])); });
+  const cell = (r, m, txt) => `<td class="${r[m] === best[m] && data.reports.length > 1 ? "ev-best" : ""}">${txt}</td>`;
+  const rows = data.reports.map((r) =>
+    `<tr><td><strong>${escapeHtml(r.name)}</strong></td>` +
+    cell(r, "mrr", r.mrr.toFixed(3)) + cell(r, "hit_rate", pct(r.hit_rate)) +
+    cell(r, "recall", pct(r.recall)) + `</tr>`).join("");
+  const last = data.reports[data.reports.length - 1];
+  const misses = (last && last.items || []).filter((it) => !it.hit);
+  const missHtml = misses.length
+    ? `<h3>Fehlschläge <span class="muted">(${escapeHtml(last.name)}, keine erwartete Seite in Top-${data.budget})</span></h3>` +
+      `<ul class="proj-list">${misses.map((it) =>
+        `<li><strong>${escapeHtml(it.question)}</strong><br>` +
+        `<span class="muted">erwartet ${escapeHtml(it.expected.join(", "))} · ` +
+        `erhalten ${escapeHtml(it.ranked.join(", "))}</span></li>`).join("")}</ul>`
+    : `<p class="muted">Keine Fehlschläge — jede Frage findet ihre Seite in Top-${data.budget}.</p>`;
+  el.innerHTML =
+    `<p class="muted">${data.count} Fragen · k=${data.budget} ` +
+    `(top_k=${data.top_k} + expand_k=${data.expand_k})</p>` +
+    `<table class="eval-table"><thead><tr><th>Retriever</th><th>MRR</th>` +
+    `<th>hit@k</th><th>recall@k</th></tr></thead><tbody>${rows}</tbody></table>` +
+    missHtml;
 }
 
 // -- graph tab (interactive neighborhood exploration) ----------------------

@@ -241,15 +241,21 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
 - **`openwiki/web/`** — the web UI. `server.py` = `WikiWebApp` (state) + a
   `ThreadingHTTPServer` handler exposing a JSON API (`/api/wiki`,
   `/api/pages/{slug}`, `/api/search`, `/api/chat`, `/api/graph/{slug}` = explore,
-  `/api/graph/expand`, `/api/project` = the active project's full overview) plus
-  static files (served `no-cache`); `serve()` runs it.
+  `/api/graph/expand`, `/api/project` = the active project's full overview,
+  `/api/eval?top_k=&expand_k=` = the retrieval benchmark) plus static files
+  (served `no-cache`); `serve()` runs it.
   The Graph tab is a hand-rolled **force-directed explorer** (`app.js`: `physicsTick`
   spring/charge sim, click-to-expand / double-click-to-collapse via a `parent`
   (introducer) pointer + `descendantsOf`, drag, edge-type filters, active-subgraph
   focus highlight (selected node's subtree emphasised, rest dimmed), greedy
   `declutterLabels` collision culling using real `getBBox` widths) — no JS libraries. `static/` = a no-build vanilla-JS SPA with client-side Markdown via a
-  vendored `marked.min.js`. The center pane has five tabs (**Projekt / Wiki /
-  Graph / Tutorial / Hilfe**); Help & Tutorial are Markdown docs
+  vendored `marked.min.js`. The center pane has six tabs (**Projekt / Wiki /
+  Graph / Evaluation / Tutorial / Hilfe**). The **Evaluation tab** (`renderEval`,
+  backed by `/api/eval` → `WikiWebApp.run_eval()`, reusing `eval.make_retrievers`)
+  runs the project's `eval.jsonl` benchmark live with `top_k`/`expand_k` sliders,
+  shows the RAG-vs-GraphRAG metric table (leading value highlighted) + miss
+  drill-down; read-only (Phase 1 of a planned benchmark → live-A/B → health-stats
+  tab). Help & Tutorial are Markdown docs
   (`static/help.md`, `static/tutorial.md`) served as static files and rendered
   client-side. The **Projekt tab** (`renderProject`, backed by `/api/project` →
   `WikiWebApp.project_info()`) is a complete read-only overview of the active

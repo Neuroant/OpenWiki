@@ -195,3 +195,15 @@ header {
 .ent-fill { display: block; height: 100%; background: var(--accent); }
 .ent-count { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
 @media (max-width: 720px) { .proj-cols { grid-template-columns: 1fr; } }
+
+/* -- evaluation tab -- */
+.eval-view h3 { margin: 20px 0 6px; font-size: 15px; }
+.eval-controls { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; margin: 12px 0 4px; }
+.eval-controls label { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; color: var(--muted); }
+.eval-controls label span { font-variant-numeric: tabular-nums; color: var(--ink); font-weight: 600; min-width: 14px; }
+.eval-controls input[type="range"] { width: 120px; }
+.eval-table { border-collapse: collapse; margin: 6px 0 4px; min-width: 380px; }
+.eval-table th, .eval-table td { text-align: left; padding: 6px 16px; border-bottom: 1px solid var(--line);
+  font-size: 13.5px; font-variant-numeric: tabular-nums; }
+.eval-table th { color: var(--muted); font-weight: 600; font-size: 12px; }
+.eval-table td.ev-best { color: #1e7e34; font-weight: 700; }

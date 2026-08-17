@@ -18,6 +18,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Iterable, Sequence
 
+from .agent import _EXPAND_RELS  # canonical expansion edges (agent imports no Kuzu)
+
 
 @dataclass
 class EvalItem:
@@ -114,3 +116,51 @@ def evaluate(items: Sequence[EvalItem], retrieve: Callable[[str], list[str]],
             recall=recall_at_k(ranked, item.expected, k),
         ))
     return report
+
+
+# -- retrievers (dependency-injected: take an index/graph, import no Kuzu/Ollama) --
+
+def semantic_pages(index, question: str, n: int) -> list[str]:
+    """The top ``n`` distinct page slugs for a query, by semantic rank."""
+    ranked: list[str] = []
+    for result in index.search(question, k=max(n * 6, 30)):
+        if result.page_slug not in ranked:
+            ranked.append(result.page_slug)
+            if len(ranked) >= n:
+                break
+    return ranked
+
+
+def graph_expand(index, graph, seeds: list[str], question: str, expand_k: int) -> list[str]:
+    """Pages reachable from ``seeds`` along expansion edges, re-ranked by the query."""
+    candidates: list[str] = []
+    for slug in seeds:
+        try:
+            neighborhood = graph.neighborhood(slug)
+        except KeyError:
+            continue
+        for node in neighborhood["nodes"]:
+            if (node["rel"] in _EXPAND_RELS and node["slug"] not in seeds
+                    and node["slug"] not in candidates):
+                candidates.append(node["slug"])
+    if not candidates:
+        return []
+    return [r.page_slug for r in index.best_chunk_per_page(question, candidates)][:expand_k]
+
+
+def make_retrievers(index, graph, top_k: int, expand_k: int):
+    """Return ``(rag, graphrag)`` retrieve callables over the same ``top_k+expand_k``
+    budget: RAG = top semantic pages; GraphRAG = ``top_k`` seeds + ``expand_k``
+    graph-expanded. ``graphrag`` is ``None`` when no graph is available."""
+    budget = top_k + expand_k
+
+    def rag(question: str) -> list[str]:
+        return semantic_pages(index, question, budget)
+
+    graphrag = None
+    if graph is not None and expand_k > 0:
+        def graphrag(question: str) -> list[str]:      # noqa: E731 (named for the report)
+            seeds = semantic_pages(index, question, top_k)
+            return seeds + graph_expand(index, graph, seeds, question, expand_k)
+
+    return rag, graphrag

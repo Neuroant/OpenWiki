@@ -24,8 +24,8 @@ import sys
 from pathlib import Path
 from typing import Optional, Sequence
 
-from .agent import RAGAgent, _EXPAND_RELS
-from .eval import evaluate, load_eval_set
+from .agent import RAGAgent
+from .eval import evaluate, load_eval_set, make_retrievers
 from .chat_agent import WikiAgent, summarize_wiki
 from .claude_code_template import scaffold_claude_code
 from .opencode_template import scaffold_opencode
@@ -1049,18 +1049,6 @@ def _cmd_search(args: argparse.Namespace) -> int:
     return 0
 
 
-def _semantic_pages(index: SemanticIndex, question: str, n: int) -> list:
-    """The top ``n`` distinct page slugs for a query, by semantic rank (a page's
-    first — best — chunk fixes its position)."""
-    ranked: list = []
-    for result in index.search(question, k=max(n * 6, 30)):
-        if result.page_slug not in ranked:
-            ranked.append(result.page_slug)
-            if len(ranked) >= n:
-                break
-    return ranked
-
-
 def _cmd_eval(args: argparse.Namespace) -> int:
     project = getattr(args, "project_obj", None)
     path = args.eval_set or ((project.root / "eval.jsonl") if project else Path("eval.jsonl"))
@@ -1083,34 +1071,14 @@ def _cmd_eval(args: argparse.Namespace) -> int:
     top_k, expand_k = args.top_k, args.expand_k
     budget = top_k + expand_k
 
-    graph = None
-    if not args.no_graph:
-        graph = _open_graph(args.graph, writable=False)
-
-    def retrieve_rag(question: str) -> list:
-        return _semantic_pages(index, question, budget)
-
-    def retrieve_graphrag(question: str) -> list:
-        seeds = _semantic_pages(index, question, top_k)
-        candidates: list = []
-        for slug in seeds:
-            try:
-                neighborhood = graph.neighborhood(slug)
-            except KeyError:
-                continue
-            for node in neighborhood["nodes"]:
-                if (node["rel"] in _EXPAND_RELS and node["slug"] not in seeds
-                        and node["slug"] not in candidates):
-                    candidates.append(node["slug"])
-        related = ([r.page_slug for r in index.best_chunk_per_page(question, candidates)][:expand_k]
-                   if candidates else [])
-        return seeds + related
+    graph = None if args.no_graph else _open_graph(args.graph, writable=False)
+    rag_fn, graphrag_fn = make_retrievers(index, graph, top_k, expand_k)
 
     print(f"Eval: {path}  ({len(items)} questions)   k={budget}  (top_k={top_k} + expand_k={expand_k})",
           file=sys.stderr)
-    reports = [("RAG (semantic)", evaluate(items, retrieve_rag, budget))]
-    if graph is not None:
-        reports.append(("GraphRAG", evaluate(items, retrieve_graphrag, budget)))
+    reports = [("RAG (semantic)", evaluate(items, rag_fn, budget))]
+    if graphrag_fn is not None:
+        reports.append(("GraphRAG", evaluate(items, graphrag_fn, budget)))
 
     print(f"\n{'retriever':<18}{'MRR':>8}{'hit@k':>9}{'recall@k':>10}")
     print("-" * 45)

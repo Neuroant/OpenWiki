@@ -272,6 +272,7 @@ async function renderProject() {
 // -- evaluation tab (retrieval benchmark: RAG vs GraphRAG) -----------------
 
 const evalState = { top_k: 5, expand_k: 3, data: null, busy: false };
+const compareState = { data: null, busy: false };
 
 async function renderEval() {
   const content = $("#content");
@@ -290,6 +291,19 @@ async function renderEval() {
       <span id="ev-status" class="muted"></span>
     </div>
     <div id="ev-results"></div>
+
+    <h3>Live A/B · RAG vs. GraphRAG</h3>
+    <p class="muted">Eine Frage durch beide Retriever schicken und die abgerufenen
+      Seiten (und optional die generierten Antworten) vergleichen. Nutzt dieselben
+      <code>top_k</code>/<code>expand_k</code> wie oben.</p>
+    <div class="eval-ab-controls">
+      <input id="ab-q" type="text" placeholder="Frage stellen…" />
+      <label><input type="checkbox" id="ab-ans" /> Antworten generieren
+        <span class="muted">(langsam)</span></label>
+      <button id="ab-run" class="graph-open">Vergleichen</button>
+      <span id="ab-status" class="muted"></span>
+    </div>
+    <div id="ab-results"></div>
   </div>`;
   const topk = $("#ev-topk"), expandk = $("#ev-expandk");
   const sync = () => { $("#ev-topk-v").textContent = topk.value; $("#ev-expandk-v").textContent = expandk.value; };
@@ -299,8 +313,12 @@ async function renderEval() {
   topk.addEventListener("change", rerun);   // fire on release, not every tick
   expandk.addEventListener("change", rerun);
   $("#ev-run").addEventListener("click", rerun);
+  const abRun = () => runCompare();
+  $("#ab-run").addEventListener("click", abRun);
+  $("#ab-q").addEventListener("keydown", (e) => { if (e.key === "Enter") abRun(); });
   content.scrollTop = 0;
   if (evalState.data) renderEvalResults(evalState.data);   // show last result instantly
+  if (compareState.data) { $("#ab-q").value = compareState.data.question || ""; renderCompareResults(compareState.data); }
   runEval();
 }
 
@@ -358,6 +376,55 @@ function renderEvalResults(data) {
     `<table class="eval-table"><thead><tr><th>Retriever</th><th>MRR</th>` +
     `<th>hit@k</th><th>recall@k</th></tr></thead><tbody>${rows}</tbody></table>` +
     missHtml;
+}
+
+async function runCompare() {
+  if (compareState.busy) return;
+  const q = $("#ab-q").value.trim();
+  if (!q) return;
+  const answers = $("#ab-ans").checked;
+  compareState.busy = true;
+  const status = $("#ab-status"), btn = $("#ab-run");
+  if (status) status.textContent = answers ? "läuft… (Antworten können 1–2 Min dauern)" : "läuft…";
+  if (btn) btn.disabled = true;
+  try {
+    const data = await postJSON("/api/compare", {
+      question: q, top_k: evalState.top_k, expand_k: evalState.expand_k, answers });
+    compareState.data = data;
+    renderCompareResults(data);
+  } catch (e) {
+    const el = $("#ab-results");
+    if (el) el.innerHTML = `<p class="muted">Vergleich fehlgeschlagen: ${escapeHtml(e.message)}</p>`;
+  } finally {
+    compareState.busy = false;
+    if (status) status.textContent = "";
+    if (btn) btn.disabled = false;
+  }
+}
+
+function renderCompareResults(d) {
+  const el = $("#ab-results");
+  if (!el) return;
+  const badge = (k) => `<span class="ab-kind ab-${k}">${k === "related" ? "+Graph" : "seed"}</span>`;
+  const col = (title, s) => {
+    if (!s) return `<div class="ab-col"><h4>${title}</h4><p class="muted">Kein Graph geladen.</p></div>`;
+    const answer = s.answer != null
+      ? `<div class="ab-answer">${marked.parse(s.answer)}</div>` : "";
+    const cited = new Set(s.cited || []);
+    const src = s.sources.map((x) =>
+      `<li>${badge(x.kind)} <a href="#" data-slug="${escapeHtml(x.slug)}" class="ab-page">${escapeHtml(x.title)}</a>` +
+      `<span class="muted"> · ${x.score}</span>` +
+      (cited.has(x.marker) ? ` <span class="ab-cited">[${x.marker}] zitiert</span>` : "")).join("");
+    return `<div class="ab-col"><h4>${title} <span class="muted">(${s.sources.length} Quellen)</span></h4>` +
+           `${answer}<ul class="ab-src">${src}</ul></div>`;
+  };
+  el.innerHTML =
+    `<p class="muted">„${escapeHtml(d.question)}"  ·  top_k=${d.top_k} + expand_k=${d.expand_k}` +
+    (d.answers ? "" : "  ·  nur Retrieval") +
+    (d.answers_available ? "" : "  ·  <em>kein Chat-Modell — nur Retrieval möglich</em>") + `</p>` +
+    `<div class="ab-cols">${col("RAG", d.rag)}${col("GraphRAG", d.graphrag)}</div>`;
+  el.querySelectorAll("a.ab-page").forEach((a) =>
+    a.addEventListener("click", (e) => { e.preventDefault(); loadPage(a.dataset.slug); }));
 }
 
 // -- graph tab (interactive neighborhood exploration) ----------------------

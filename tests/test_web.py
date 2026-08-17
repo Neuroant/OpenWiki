@@ -103,6 +103,14 @@ def test_run_eval(app, tmp_path):
     assert result["budget"] == 3
 
 
+def test_compare_retrieval_only(app):
+    result = app.compare("lautstarke", top_k=2, expand_k=1, answers=False)
+    assert result["graph_available"] is False and result["graphrag"] is None
+    assert result["answers"] is False
+    assert result["rag"]["answer"] is None
+    assert "000-a" in [s["slug"] for s in result["rag"]["sources"]]   # semantic hit
+
+
 def test_chat_edits_page(app):
     out = app.chat("bitte ändern")
     assert out["reply"] == "Erledigt."

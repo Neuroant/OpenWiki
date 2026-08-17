@@ -242,7 +242,8 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   `ThreadingHTTPServer` handler exposing a JSON API (`/api/wiki`,
   `/api/pages/{slug}`, `/api/search`, `/api/chat`, `/api/graph/{slug}` = explore,
   `/api/graph/expand`, `/api/project` = the active project's full overview,
-  `/api/eval?top_k=&expand_k=` = the retrieval benchmark) plus static files
+  `/api/eval?top_k=&expand_k=` = the retrieval benchmark, `/api/compare` (POST) =
+  one question through RAG + GraphRAG side by side) plus static files
   (served `no-cache`); `serve()` runs it.
   The Graph tab is a hand-rolled **force-directed explorer** (`app.js`: `physicsTick`
   spring/charge sim, click-to-expand / double-click-to-collapse via a `parent`
@@ -254,8 +255,11 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   backed by `/api/eval` → `WikiWebApp.run_eval()`, reusing `eval.make_retrievers`)
   runs the project's `eval.jsonl` benchmark live with `top_k`/`expand_k` sliders,
   shows the RAG-vs-GraphRAG metric table (leading value highlighted) + miss
-  drill-down; read-only (Phase 1 of a planned benchmark → live-A/B → health-stats
-  tab). Help & Tutorial are Markdown docs
+  drill-down, plus a **Live A/B** panel (`runCompare` → `/api/compare` →
+  `WikiWebApp.compare()`) that sends one question through both retrievers side by
+  side — the retrieved pages (seed vs `+Graph` badges, clickable) and, opt-in, both
+  generated answers (2 chat calls, slow). Read-only (phases: benchmark ✓, A/B ✓,
+  health-stats next). Help & Tutorial are Markdown docs
   (`static/help.md`, `static/tutorial.md`) served as static files and rendered
   client-side. The **Projekt tab** (`renderProject`, backed by `/api/project` →
   `WikiWebApp.project_info()`) is a complete read-only overview of the active

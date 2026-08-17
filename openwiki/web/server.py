@@ -229,6 +229,44 @@ class WikiWebApp:
         return {"exists": True, "path": str(path), "count": len(items),
                 "top_k": top_k, "expand_k": expand_k, "budget": budget, "reports": reports}
 
+    def compare(self, question: str, top_k: int = 5, expand_k: int = 3,
+                answers: bool = False) -> dict:
+        """Side-by-side RAG vs GraphRAG for one question (Evaluation tab, live A/B).
+        Always returns the retrieved pages per side; with ``answers`` it also
+        generates both answers (2 chat-model calls — slow). Read-only."""
+        from ..agent import RAGAgent
+
+        question = (question or "").strip()
+        if not question:
+            raise RuntimeError("empty question")
+        if self.index is None:
+            raise RuntimeError("No search index is loaded.")
+        top_k = max(1, min(int(top_k), 20))
+        expand_k = max(0, min(int(expand_k), 10))
+        chat = getattr(self.agent, "chat", None)
+        want_answers = bool(answers) and chat is not None
+
+        def side(graph) -> dict:
+            agent = RAGAgent(self.index, chat, top_k=top_k, graph=graph, expand_k=expand_k)
+            if want_answers:
+                result = agent.answer(question)
+                sources, answer, cited = result.sources, result.answer, sorted(result.cited_markers())
+            else:
+                sources, answer, cited = agent.retrieve(question), None, []
+            return {
+                "answer": answer, "cited": cited,
+                "sources": [{"marker": s.marker, "slug": s.page_slug, "title": s.page_title,
+                             "kind": s.kind, "score": round(float(s.score), 3)} for s in sources],
+            }
+
+        return {
+            "question": question, "top_k": top_k, "expand_k": expand_k,
+            "answers": want_answers, "graph_available": self.graph is not None,
+            "answers_available": chat is not None,
+            "rag": side(None),
+            "graphrag": side(self.graph) if self.graph is not None else None,
+        }
+
     def chat(self, message: str) -> dict:
         if self.agent is None:
             raise RuntimeError("Chat is unavailable (no agent configured).")
@@ -331,6 +369,13 @@ def make_handler(app: WikiWebApp):
                     if not message:
                         return self._json({"error": "empty message"}, 400)
                     return self._json(app.chat(message))
+                if path == "/api/compare":
+                    question = (data.get("question") or "").strip()
+                    if not question:
+                        return self._json({"error": "empty question"}, 400)
+                    return self._json(app.compare(
+                        question, int(data.get("top_k", 5)), int(data.get("expand_k", 3)),
+                        bool(data.get("answers", False))))
                 if path == "/api/graph/expand":
                     node_id = (data.get("id") or "").strip()
                     if not node_id:

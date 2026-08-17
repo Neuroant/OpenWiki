@@ -8,10 +8,10 @@ OpenWiki is a learning project for building **agentic wikis** — pipelines that
 turn source documents into structured, machine-navigable knowledge bases. Two
 stages are implemented:
 
-1. **Ingestion** — source parsers (PDF via PyMuPDF; Markdown/plain-text and HTML/web
-   pages — URL or file — via stdlib) that extract text, tables, the outline, and
-   images into a structured document model, dispatched by source type
-   (`sources.parse_source`).
+1. **Ingestion** — source parsers, all behind one dispatch (`sources.parse_source`):
+   **PDF** (PyMuPDF), **Markdown/plain-text**, **HTML/web pages** (URL or file), and
+   **source-code repositories** (a directory) — the last three stdlib-only — extract
+   text, tables, the outline, and images into a structured document model.
 2. **Wiki generation** — splitting that model into a tree of linked wiki pages
    along the outline.
 3. **Semantic search** — chunking the wiki pages, embedding them with a local
@@ -196,13 +196,21 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   and turning `<h1>`…`<h6>` into the same heading→section→page model (reuses
   `markdown_parser.sections_to_document`). Title from `<title>` (else first `<h1>`).
   No BeautifulSoup/requests.
+- **`openwiki/code_parser.py`** — `CodeParser.parse()`, the source-code repository
+  parser: a **directory** → a root **overview page** (repo name + file tree) + one
+  page per source file (its content in a fenced code block, language from the
+  extension; `.md`/`.rst`/`.txt` kept as prose), file title = repo-relative path,
+  reusing `sections_to_document`. `os.walk` prunes noisy dirs (`.git`/`node_modules`/
+  `__pycache__`/build dirs + dotfolders), an extension allowlist + name matches
+  select files, and binary (NUL-byte sniff) / oversized files are skipped.
 - **`openwiki/sources.py`** — `parse_source(source, …)` dispatches by type (URL or
-  `.html` → WebParser; `.md`/`.txt` → MarkdownParser; `.pdf` → PDFParser, imported
-  **lazily** so a non-PDF setup needs no PyMuPDF) + `source_type()` (adds `web`),
-  `is_url()`, `is_supported()`, `source_stem()` (a filesystem-safe name for a file
-  *or* URL), `SUPPORTED_SUFFIXES`. The one place the pipeline maps a source to a
-  parser; `cli` routes `ingest`/`build`/`build-wiki`/`index`/`graph-build` through it
-  (`ingest` also takes a URL; other commands take local files + `.json`).
+  `.html` → WebParser; a **directory** → CodeParser; `.md`/`.txt` → MarkdownParser;
+  `.pdf` → PDFParser, imported **lazily** so a non-PDF setup needs no PyMuPDF) +
+  `source_type()` (`web`/`code`/…), `is_url()`, `is_supported()`, `source_stem()`
+  (a filesystem-safe name for a file, directory, *or* URL), `SUPPORTED_SUFFIXES`. The
+  one place the pipeline maps a source to a parser; `cli` routes `ingest`/`build`/
+  `build-wiki`/`index`/`graph-build` through it (`ingest` also takes a URL or a repo
+  dir; the project `--source` folder-scan still expands a dir to its files instead).
 - **`openwiki/wiki.py`** — `WikiBuilder.build(doc) -> Wiki` splits the IR along
   the outline: entries with `level <= split_level` become pages, deeper ones
   become in-page contents. **Key constraint:** text is only separable at

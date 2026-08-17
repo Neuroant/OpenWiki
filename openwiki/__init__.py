@@ -21,6 +21,7 @@ from .merge import combine_documents
 from .mcp_server import MCPStdioServer, build_server
 from .ontology import format_entity_types, propose_ontology, sample_corpus
 from .outline import synthesize_outline
+from .code_parser import CodeParser
 from .html_parser import WebParser
 from .markdown_parser import MarkdownParser
 from .pdf_parser import PDFParser
@@ -32,12 +33,13 @@ from .tools import WikiTools
 from .web import WikiWebApp, serve
 from .wiki import Wiki, WikiBuilder, WikiPage, slugify, write_wiki
 
-__version__ = "0.34.0"
+__version__ = "0.35.0"
 
 __all__ = [
     "PDFParser",
     "MarkdownParser",
     "WebParser",
+    "CodeParser",
     "parse_source",
     "source_type",
     "ParsedDocument",

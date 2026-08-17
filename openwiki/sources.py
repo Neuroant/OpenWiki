@@ -35,9 +35,11 @@ def _suffix(source: PathLike) -> str:
 
 
 def source_type(source: PathLike) -> str:
-    """Short type tag: ``web`` / ``pdf`` / ``markdown`` / ``text`` / ``unknown``."""
+    """Short type tag: ``web`` / ``code`` / ``pdf`` / ``markdown`` / ``text`` / ``unknown``."""
     if is_url(source):
         return "web"
+    if Path(str(source)).is_dir():
+        return "code"
     ext = _suffix(source)
     if ext in HTML_SUFFIXES:
         return "web"
@@ -51,11 +53,11 @@ def source_type(source: PathLike) -> str:
 
 
 def is_supported(source: PathLike) -> bool:
-    return is_url(source) or _suffix(source) in SUPPORTED_SUFFIXES
+    return is_url(source) or Path(str(source)).is_dir() or _suffix(source) in SUPPORTED_SUFFIXES
 
 
 def source_stem(source: PathLike) -> str:
-    """A filesystem-safe stem for naming outputs, for a file path *or* a URL
+    """A filesystem-safe stem for naming outputs, for a file, a directory, or a URL
     (``https://en.wikipedia.org/wiki/Graph_theory`` → ``Graph_theory``)."""
     text = str(source)
     if is_url(text):
@@ -64,7 +66,10 @@ def source_stem(source: PathLike) -> str:
         stem = parts[-1] if parts else (parsed.netloc or "page")
         stem = re.sub(r"\.(html?|php|aspx?)$", "", stem, flags=re.IGNORECASE)
         return re.sub(r"[^\w.-]+", "-", stem).strip("-") or "page"
-    return Path(text).stem
+    path = Path(text)
+    if path.is_dir():
+        return path.resolve().name or "repo"
+    return path.stem
 
 
 def parse_source(source: PathLike, *, extract_tables: bool = True, extract_images: bool = False,
@@ -74,6 +79,9 @@ def parse_source(source: PathLike, *, extract_tables: bool = True, extract_image
     if is_url(source) or _suffix(source) in HTML_SUFFIXES:
         from .html_parser import WebParser
         return WebParser().parse(source, max_pages=max_pages)
+    if Path(str(source)).is_dir():
+        from .code_parser import CodeParser
+        return CodeParser().parse(source, max_pages=max_pages)
     ext = _suffix(source)
     if ext in MARKDOWN_SUFFIXES:
         from .markdown_parser import MarkdownParser

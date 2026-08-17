@@ -332,8 +332,15 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   seeds + `expand_k` graph-expanded (same `_EXPAND_RELS` + `best_chunk_per_page` as the
   agent). Eval sets are per-project JSONL (`<project>/eval.jsonl`: `{"question","pages"}`).
   The controlled same-budget comparison is deliberate: it asks whether graph expansion beats
-  *more* semantic hits (on definitional Qs it does not — semantic is already near-perfect;
-  the graph is for relational/multi-hop questions).
+  *more* semantic hits. **Rigorously measured on informatik, it does not** — across
+  definitional *and* relational question sets (`eval.jsonl` and a 12-question
+  `eval_relational.jsonl` of graph-connected page pairs), and every budget tested, GraphRAG's
+  recall lands ~4–12 pts *below* pure RAG. Reason: bge-m3 already ranks the relevant pages
+  highly, and graph expansion *restricts* candidates to the seeds' neighbours and re-ranks
+  them by the same query — worse than ranking over all pages, so it only displaces good hits.
+  Take-away: on this corpus the graph's value is **not retrieval recall** (it may still help
+  *answer specificity* — the A/B panel shows GraphRAG citing a graph-pulled page for a sharper
+  answer — and human exploration via the Graph tab / `find_path` / `find_entity`).
 - **`openwiki/merge.py`** — `combine_documents(docs, names)` merges several
   `ParsedDocument`s into one corpus (concatenate pages with a running offset, shift
   table/image page numbers, wrap each source under a synthetic level-1 outline node

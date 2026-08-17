@@ -635,8 +635,14 @@ def _entity_chat(model: str, host: str) -> OllamaChat:
     (identical pages once yielded 1053 entities, then 510). Greedy decoding removes
     that variance — the entity *count* and the bulk of the set become stable — with
     only minor residual flicker on borderline entities from GPU floating-point
-    non-determinism (which no prompt/param can fully eliminate)."""
-    return OllamaChat(model=model, host=host, temperature=0.0, options={"seed": 0})
+    non-determinism (which no prompt/param can fully eliminate).
+
+    ``num_predict`` caps the output: greedy decoding can fall into a repetition loop
+    on some dense pages and generate until the timeout (dropping the page with no
+    entities); the cap stops that in seconds. An entity list needs far fewer tokens
+    than this bound. ``timeout`` is a generous backstop."""
+    return OllamaChat(model=model, host=host, temperature=0.0, timeout=600.0,
+                      options={"seed": 0, "num_predict": 4096})
 
 
 def _corpus_references(project, sources, doc, wiki, multi):

@@ -346,11 +346,16 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   highly, and graph expansion *restricts* candidates to the seeds' neighbours and re-ranks
   them by the same query — worse than ranking over all pages, so it only displaces good hits.
   Take-away: on this corpus the graph's value is **not retrieval recall** — but it **is answer
-  quality**, measured directly: on the relational set GraphRAG answers cite a ground-truth page
-  more often (**67% vs 58%** cite-hit, **58% vs 46%** expected-recall) and an LLM judge preferred
-  them **8–4** over RAG. The topically-connected pages the graph pulls in help the model even
-  when they displace a semantic hit (so page-recall drops while answer grounding rises). Plus
-  human exploration via the Graph tab / `find_path` / `find_entity`. To reproduce, `owiki eval
+  quality**, measured directly on **both** question sets. On the **relational** set GraphRAG
+  answers cite a ground-truth page more often (**67% vs 58%** cite-hit, **58% vs 46%**
+  expected-recall) and an LLM judge preferred them **8–4**; on the **definitional** set the
+  objective grounding lift shrinks (cite-hit **ties at 86%**, expected-recall **86% vs 82%**) —
+  as expected, since definitional answers are more single-page — yet the judge preferred GraphRAG
+  *even more* strongly, **11–3**. Both sets show the same core pattern: retrieval recall drops
+  (definitional 92.9% vs 100%) while answer grounding holds/rises — the topically-connected pages
+  the graph pulls in help the model even when they displace a semantic hit. Plus
+  human exploration via the Graph tab / `find_path` / `find_entity`. Full writeup (methodology,
+  both metric tables, caveats) in `docs/RAG-vs-GraphRAG.md`. To reproduce, `owiki eval
   --answers` also **generates** RAG vs GraphRAG answers
   (via `RAGAgent`, graph off/on) and scores **citation grounding** (`eval.grounding`: did the
   answer cite a ground-truth page? — objective, from the eval set); `--judge` adds an

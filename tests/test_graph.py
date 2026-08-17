@@ -352,6 +352,24 @@ def test_normalize_merges_variants_but_not_distinct_compounds():
     assert _normalize("Baum") == "baum"      # short words kept intact
 
 
+class _EmptyChat:
+    """Always returns an empty array — simulates the greedy repetition-loop failure
+    that yields no parseable entities for a page."""
+    name = "empty"
+
+    def chat(self, messages):
+        return "[]"
+
+
+def test_retry_on_empty_recovers_dropped_pages():
+    wiki = _entity_wiki()
+    # primary yields nothing; the (sampled) retry model recovers the entities
+    recovered = extract_entities(wiki, _EmptyChat(), retry_chat=_EntityChat(), retry_min_chars=1)
+    assert {e.name for e in recovered} == {"Arpeggiator", "Reverb"}
+    # with no retry model, the empty primary drops everything
+    assert extract_entities(wiki, _EmptyChat(), retry_min_chars=1) == []
+
+
 def test_extract_entities_resolves_and_links():
     entities = extract_entities(_entity_wiki(), _EntityChat())
     by_name = {e.name: e for e in entities}

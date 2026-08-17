@@ -155,21 +155,34 @@ def _extract_page(chat: ChatModel, title: str, text: str, system_prompt: str,
 
 
 def extract_entities(wiki: Wiki, chat: ChatModel, types: Ontology = None,
-                     max_chars: int = 8000, on_progress=None) -> list[Entity]:
+                     max_chars: int = 8000, on_progress=None,
+                     retry_chat: ChatModel = None, retry_min_chars: int = 400) -> list[Entity]:
     """Extract and resolve entities across all wiki pages (one call per page).
 
     ``types`` selects the ontology (see :func:`coerce_types`); ``max_chars`` caps
     how much of each page's text is sent to the model (raise it for coarse,
     document-sized pages, at the cost of a bigger prompt).
+
+    ``retry_chat`` (optional): a fallback model used to re-extract a *substantial*
+    page (text length ≥ ``retry_min_chars``) that the primary returned nothing for.
+    Greedy decoding can fall into a repetition loop and yield ``[]`` on some pages;
+    a sampled retry usually escapes it, so content pages aren't silently dropped.
     """
     type_map = coerce_types(types)
     system_prompt = _system_prompt(type_map)
     allowed = set(type_map)
     by_key: dict[str, Entity] = {}
+    retried = 0
     for i, page in enumerate(wiki.pages):
         text = page.text.strip()[:max_chars]
         if text:
-            for name, etype in _extract_page(chat, page.title, text, system_prompt, allowed):
+            found = _extract_page(chat, page.title, text, system_prompt, allowed)
+            if not found and retry_chat is not None and len(text) >= retry_min_chars:
+                retried += 1
+                found = _extract_page(retry_chat, page.title, text, system_prompt, allowed)
+                if found:
+                    logger.info("entity retry recovered %d entities on '%s'", len(found), page.title)
+            for name, etype in found:
                 norm = _normalize(name)
                 if not _valid(norm):
                     continue
@@ -182,6 +195,7 @@ def extract_entities(wiki: Wiki, chat: ChatModel, types: Ontology = None,
                     entity.pages.append(page.slug)
         if on_progress:
             on_progress(i + 1, len(wiki.pages), len(by_key))
-    logger.info("Entities: %d unique across %d pages (%d types)",
-                len(by_key), len(wiki.pages), len(type_map))
+    logger.info("Entities: %d unique across %d pages (%d types%s)",
+                len(by_key), len(wiki.pages), len(type_map),
+                f"; {retried} empty page(s) retried" if retried else "")
     return list(by_key.values())

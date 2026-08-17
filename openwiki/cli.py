@@ -645,6 +645,16 @@ def _entity_chat(model: str, host: str) -> OllamaChat:
                       options={"seed": 0, "num_predict": 4096})
 
 
+def _entity_retry_chat(model: str, host: str) -> OllamaChat:
+    """Fallback model for the retry-on-empty path: a *sampled* chat (temperature
+    0.6) so it takes a different decoding path than the greedy primary and escapes
+    the repetition loop that made a page yield nothing. A fixed seed keeps the retry
+    reproducible; only pages the greedy pass dropped ever reach it, so the bulk of
+    extraction stays deterministic."""
+    return OllamaChat(model=model, host=host, temperature=0.6, timeout=600.0,
+                      options={"seed": 1, "num_predict": 4096})
+
+
 def _corpus_references(project, sources, doc, wiki, multi):
     """Cross-reference edges for the corpus: single-source direct, else per-source
     (each resolved within its own page span via the retained per-source IR)."""
@@ -790,11 +800,12 @@ def _cmd_build(args: argparse.Namespace) -> int:
                      if gcfg.get("references", True) else None)
         entities = None
         if gcfg.get("entities", False):
-            chat = _entity_chat(models.get("chat", DEFAULT_CHAT), host)
+            model = models.get("chat", DEFAULT_CHAT)
             print("  graph: extracting entities (one LLM call per page) …", file=sys.stderr)
-            entities = extract_entities(wiki, chat,
+            entities = extract_entities(wiki, _entity_chat(model, host),
                                         types=gcfg.get("entity_types"),
-                                        max_chars=int(gcfg.get("entity_max_chars", 8000)))
+                                        max_chars=int(gcfg.get("entity_max_chars", 8000)),
+                                        retry_chat=_entity_retry_chat(model, host))
         stats = build_graph(wiki, index, project.graph_path,
                             similar_k=int(gcfg.get("similar_k", 6)),
                             references=references, entities=entities)
@@ -1248,7 +1259,8 @@ def _cmd_graph_build(args: argparse.Namespace) -> int:
         types = [t.strip() for t in args.entity_types.split(",")] if args.entity_types else None
         entities = extract_entities(wiki, chat, types=types,
                                     max_chars=args.entity_max_chars or 8000,
-                                    on_progress=_progress if args.verbose else None)
+                                    on_progress=_progress if args.verbose else None,
+                                    retry_chat=_entity_retry_chat(args.entity_model, args.host))
 
     stats = build_graph(wiki, index, args.out, similar_k=args.similar_k,
                         references=references, entities=entities)

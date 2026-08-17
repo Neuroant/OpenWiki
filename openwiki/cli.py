@@ -40,7 +40,7 @@ from .merge import combine_documents
 from .models import ParsedDocument
 from .ontology import format_entity_types, propose_ontology, sample_corpus
 from .outline import synthesize_outline
-from .sources import is_supported, parse_source, source_type
+from .sources import is_supported, parse_source, source_stem, source_type
 from .pipeline import STAGES, BuildState, compute_fingerprints, stale_stages
 from .project import (
     DEFAULT_CHAT, DEFAULT_EMBED, DEFAULT_HOST, MANIFEST, Project, render_manifest,
@@ -120,8 +120,9 @@ def _build_argparser() -> argparse.ArgumentParser:
                             help="Copy a file into sources/ and append it to openwiki.toml.")
     p_src.add_argument("path", type=Path, help="A source file (pdf/md/txt), a folder (its supported files), or a glob.")
 
-    ingest = sub.add_parser("ingest", parents=[common], help="Parse a source (PDF/Markdown/text) and extract its content.")
-    ingest.add_argument("pdf", type=Path, metavar="source", help="Path to the source file (.pdf, .md, or .txt).")
+    ingest = sub.add_parser("ingest", parents=[common], help="Parse a source (PDF/Markdown/text/HTML/URL) and extract its content.")
+    ingest.add_argument("pdf", metavar="source",
+                        help="A source file (.pdf/.md/.txt/.html) or an http(s) URL to fetch.")
     ingest.add_argument(
         "-o", "--out", type=Path, default=None,
         help="Output directory (default: project's output, else ./output).",
@@ -960,7 +961,7 @@ def _cmd_ingest(args: argparse.Namespace) -> int:
         max_pages=args.max_pages,
     )
 
-    stem = args.pdf.stem
+    stem = source_stem(args.pdf)
     json_path = out_dir / f"{stem}.json"
     md_path = out_dir / f"{stem}.md"
     json_path.write_text(
@@ -972,7 +973,7 @@ def _cmd_ingest(args: argparse.Namespace) -> int:
 
     n_tables = sum(len(p.tables) for p in doc.pages)
     n_images = sum(len(p.images) for p in doc.pages)
-    print(f"Parsed {len(doc.pages)} page(s) from {args.pdf.name}")
+    print(f"Parsed {len(doc.pages)} page(s) from {args.pdf}")
     print(f"  outline entries : {len(doc.outline)}")
     print(f"  tables extracted: {n_tables}")
     if args.images:

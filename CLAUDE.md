@@ -8,9 +8,10 @@ OpenWiki is a learning project for building **agentic wikis** — pipelines that
 turn source documents into structured, machine-navigable knowledge bases. Two
 stages are implemented:
 
-1. **Ingestion** — source parsers (PDF via PyMuPDF; Markdown/plain-text via stdlib)
-   that extract text, tables, the outline, and images into a structured document
-   model, dispatched by file type (`sources.parse_source`).
+1. **Ingestion** — source parsers (PDF via PyMuPDF; Markdown/plain-text and HTML/web
+   pages — URL or file — via stdlib) that extract text, tables, the outline, and
+   images into a structured document model, dispatched by source type
+   (`sources.parse_source`).
 2. **Wiki generation** — splitting that model into a tree of linked wiki pages
    along the outline.
 3. **Semantic search** — chunking the wiki pages, embedding them with a local
@@ -188,11 +189,20 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   `OutlineItem` at that page) so `WikiBuilder` splits/groups exactly as it does a
   PDF's bookmark outline; headings inside ``` code fences are ignored; a titleless
   preamble → front matter; plain text with no headings → a single page.
-- **`openwiki/sources.py`** — `parse_source(path, …)` dispatches by extension to the
-  right parser (PDFParser imported **lazily**, so a Markdown-only setup needs no
-  PyMuPDF) + `source_type()`/`is_supported()`/`SUPPORTED_SUFFIXES`. The one place the
-  pipeline maps a file type to a parser; `cli` routes `ingest`/`build`/`build-wiki`/
-  `index`/`graph-build` through it.
+- **`openwiki/html_parser.py`** — `WebParser.parse()`, the web-page parser: an
+  `http(s)` **URL** (fetched via stdlib `urllib`) or a local `.html`/`.htm` file →
+  the same IR. A stdlib `html.parser.HTMLParser` subclass (`_Extractor`) walks the
+  DOM, dropping boilerplate (`script`/`style`/`head`/`nav`/`footer`/`aside`/`form`)
+  and turning `<h1>`…`<h6>` into the same heading→section→page model (reuses
+  `markdown_parser.sections_to_document`). Title from `<title>` (else first `<h1>`).
+  No BeautifulSoup/requests.
+- **`openwiki/sources.py`** — `parse_source(source, …)` dispatches by type (URL or
+  `.html` → WebParser; `.md`/`.txt` → MarkdownParser; `.pdf` → PDFParser, imported
+  **lazily** so a non-PDF setup needs no PyMuPDF) + `source_type()` (adds `web`),
+  `is_url()`, `is_supported()`, `source_stem()` (a filesystem-safe name for a file
+  *or* URL), `SUPPORTED_SUFFIXES`. The one place the pipeline maps a source to a
+  parser; `cli` routes `ingest`/`build`/`build-wiki`/`index`/`graph-build` through it
+  (`ingest` also takes a URL; other commands take local files + `.json`).
 - **`openwiki/wiki.py`** — `WikiBuilder.build(doc) -> Wiki` splits the IR along
   the outline: entries with `level <= split_level` become pages, deeper ones
   become in-page contents. **Key constraint:** text is only separable at

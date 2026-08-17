@@ -33,6 +33,21 @@ _FENCE = re.compile(r"^\s*(```|~~~)")
 SUFFIXES = (".md", ".markdown", ".txt")
 
 
+def sections_to_document(sections, source_path: str, fmt: str,
+                         title_fallback: str = "") -> ParsedDocument:
+    """Build a :class:`ParsedDocument` from ``[(level, title | None, text), ...]``
+    sections — the shared tail of every heading-structured parser (Markdown, HTML):
+    each section becomes a page, each titled section an :class:`OutlineItem` at that
+    page, and the document title is the first level-1 heading (else ``title_fallback``)."""
+    pages = [Page(number=i + 1, text=text) for i, (_, _, text) in enumerate(sections)]
+    outline = [OutlineItem(level=level, title=title, page=i + 1)
+               for i, (level, title, _) in enumerate(sections) if title is not None]
+    doc_title = next((t for lvl, t, _ in sections if t and lvl == 1), "") or title_fallback
+    metadata = DocumentMetadata(source_path=source_path, page_count=len(pages),
+                                title=doc_title, format=fmt)
+    return ParsedDocument(metadata=metadata, outline=outline, pages=pages)
+
+
 class MarkdownParser:
     """Parse a Markdown/plain-text file into a :class:`ParsedDocument`."""
 
@@ -42,20 +57,10 @@ class MarkdownParser:
             raise FileNotFoundError(f"source not found: {path}")
 
         logger.info("Reading %s", path)
-        raw = path.read_text(encoding="utf-8")
-        sections = self._split_sections(raw)
+        sections = self._split_sections(path.read_text(encoding="utf-8"))
         if max_pages is not None:
             sections = sections[:max_pages]
-
-        pages = [Page(number=i + 1, text=text) for i, (_, _, text) in enumerate(sections)]
-        outline = [OutlineItem(level=level, title=title, page=i + 1)
-                   for i, (level, title, _) in enumerate(sections) if title is not None]
-        doc_title = next((t for lvl, t, _ in sections if t and lvl == 1), "") or path.stem
-
-        metadata = DocumentMetadata(source_path=str(path), page_count=len(pages),
-                                    title=doc_title, format="markdown")
-        logger.info("Done: %d section page(s)", len(pages))
-        return ParsedDocument(metadata=metadata, outline=outline, pages=pages)
+        return sections_to_document(sections, str(path), "markdown", title_fallback=path.stem)
 
     # -- internals ------------------------------------------------------
 

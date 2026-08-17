@@ -4,7 +4,8 @@ Learning to build **agentic wikis** — pipelines that turn source documents int
 structured, machine-navigable knowledge bases.
 
 It starts with **ingestion**: `openwiki ingest` turns a source — a **PDF** (via
-PyMuPDF) or a **Markdown / plain-text** file (stdlib) — into a structured document
+PyMuPDF), a **Markdown / plain-text** file, or a **web page** (an `http(s)` URL or a
+local `.html`), the latter two on the stdlib alone — into a structured document
 model (text, tables, outline, and optionally images), then writes it as **JSON**
 (for downstream agents / retrieval) and **Markdown** (for humans). New source types
 slot in behind `sources.parse_source` without touching the rest of the pipeline.

@@ -21,18 +21,23 @@ from .merge import combine_documents
 from .mcp_server import MCPStdioServer, build_server
 from .ontology import format_entity_types, propose_ontology, sample_corpus
 from .outline import synthesize_outline
+from .markdown_parser import MarkdownParser
 from .pdf_parser import PDFParser
 from .project import Project, Source, render_manifest
+from .sources import parse_source, source_type
 from .userconfig import Registry, UserConfig
 from .search import SearchResult, SemanticIndex
 from .tools import WikiTools
 from .web import WikiWebApp, serve
 from .wiki import Wiki, WikiBuilder, WikiPage, slugify, write_wiki
 
-__version__ = "0.32.2"
+__version__ = "0.33.0"
 
 __all__ = [
     "PDFParser",
+    "MarkdownParser",
+    "parse_source",
+    "source_type",
     "ParsedDocument",
     "DocumentMetadata",
     "OutlineItem",

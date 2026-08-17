@@ -162,9 +162,11 @@ def test_expand_sources_dir_glob_file(tmp_path):
     docs.mkdir()
     (docs / "a.pdf").write_bytes(b"%PDF a")
     (docs / "b.pdf").write_bytes(b"%PDF b")
-    (docs / "notes.txt").write_bytes(b"x")   # non-pdf ignored by dir/glob scan
+    (docs / "notes.txt").write_bytes(b"x")   # a supported source too
+    (docs / "cover.png").write_bytes(b"x")   # unsupported → skipped by the dir scan
 
-    assert sorted(p.name for p in cli._expand_sources([docs])) == ["a.pdf", "b.pdf"]
+    # a directory now contributes all supported files (pdf/md/txt), not just pdf
+    assert sorted(p.name for p in cli._expand_sources([docs])) == ["a.pdf", "b.pdf", "notes.txt"]
     assert sorted(p.name for p in cli._expand_sources([str(docs / "*.pdf")])) == ["a.pdf", "b.pdf"]
     assert [p.name for p in cli._expand_sources([docs / "a.pdf"])] == ["a.pdf"]
 

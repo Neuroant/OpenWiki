@@ -40,7 +40,7 @@ from .merge import combine_documents
 from .models import ParsedDocument
 from .ontology import format_entity_types, propose_ontology, sample_corpus
 from .outline import synthesize_outline
-from .pdf_parser import PDFParser
+from .sources import is_supported, parse_source, source_type
 from .pipeline import STAGES, BuildState, compute_fingerprints, stale_stages
 from .project import (
     DEFAULT_CHAT, DEFAULT_EMBED, DEFAULT_HOST, MANIFEST, Project, render_manifest,
@@ -72,7 +72,7 @@ def _build_argparser() -> argparse.ArgumentParser:
                         help="Project directory (default: current directory).")
     init_p.add_argument("--name", default=None, help="Project name (default: directory name).")
     init_p.add_argument("--source", action="append", type=Path, metavar="PATH",
-                        help="A source file, a folder (registers its *.pdf files), or a glob "
+                        help="A source file (pdf/md/txt), a folder (registers its supported files), or a glob "
                              "(repeatable); copied into sources/.")
     init_p.add_argument("--force", action="store_true", help="Overwrite an existing openwiki.toml.")
     init_p.add_argument("--opencode", action="store_true",
@@ -118,10 +118,10 @@ def _build_argparser() -> argparse.ArgumentParser:
     p_rm.add_argument("name")
     p_src = psub.add_parser("add-source", parents=[common],
                             help="Copy a file into sources/ and append it to openwiki.toml.")
-    p_src.add_argument("path", type=Path, help="A source file, a folder (its *.pdf files), or a glob.")
+    p_src.add_argument("path", type=Path, help="A source file (pdf/md/txt), a folder (its supported files), or a glob.")
 
-    ingest = sub.add_parser("ingest", parents=[common], help="Parse a PDF and extract its content.")
-    ingest.add_argument("pdf", type=Path, help="Path to the PDF file.")
+    ingest = sub.add_parser("ingest", parents=[common], help="Parse a source (PDF/Markdown/text) and extract its content.")
+    ingest.add_argument("pdf", type=Path, metavar="source", help="Path to the source file (.pdf, .md, or .txt).")
     ingest.add_argument(
         "-o", "--out", type=Path, default=None,
         help="Output directory (default: project's output, else ./output).",
@@ -135,7 +135,7 @@ def _build_argparser() -> argparse.ArgumentParser:
     ingest.add_argument("-v", "--verbose", action="store_true", help="Verbose progress logging.")
 
     wiki = sub.add_parser("build-wiki", parents=[common], help="Split a parsed document into linked wiki pages.")
-    wiki.add_argument("source", type=Path, help="A PDF, or a .json produced by `ingest`.")
+    wiki.add_argument("source", type=Path, help="A source (PDF/Markdown/text), or a .json produced by `ingest`.")
     wiki.add_argument(
         "-o", "--out", type=Path, default=None,
         help="Output directory (default: project's wiki, else ./output/wiki).",
@@ -152,7 +152,7 @@ def _build_argparser() -> argparse.ArgumentParser:
     wiki.add_argument("-v", "--verbose", action="store_true", help="Verbose progress logging.")
 
     index_p = sub.add_parser("index", parents=[common], help="Build a semantic search index over the wiki.")
-    index_p.add_argument("source", type=Path, help="A PDF, or a .json produced by `ingest`.")
+    index_p.add_argument("source", type=Path, help="A source (PDF/Markdown/text), or a .json produced by `ingest`.")
     index_p.add_argument(
         "-o", "--out", type=Path, default=None,
         help="Index output directory (default: project's index, else ./output/index).",
@@ -270,7 +270,7 @@ def _build_argparser() -> argparse.ArgumentParser:
     mcp_p.add_argument("--no-ask", action="store_true", help="Disable the `wiki_ask` tool (no chat model).")
 
     graph_p = sub.add_parser("graph-build", parents=[common], help="Build the Kuzu knowledge graph over the wiki.")
-    graph_p.add_argument("source", type=Path, help="A PDF, or a .json produced by `ingest`.")
+    graph_p.add_argument("source", type=Path, help="A source (PDF/Markdown/text), or a .json produced by `ingest`.")
     graph_p.add_argument(
         "-o", "--out", type=Path, default=None,
         help="Graph database directory (default: project's graph, else ./output/graph).",
@@ -302,17 +302,13 @@ def _build_argparser() -> argparse.ArgumentParser:
 
 # ----------------------------------------------------------------- projects
 
-def _source_type(path: Path) -> str:
-    return {".txt": "text", ".md": "text"}.get(path.suffix.lower(), "pdf")
-
-
 def _expand_sources(raw) -> "list[Path]":
     """Expand each ``--source`` argument into concrete input files.
 
-    A **directory** contributes its top-level ``*.pdf`` files; a **glob**
-    (containing ``*``/``?``/``[``) contributes its matches; a plain **file** is taken
-    as-is. Duplicates (by resolved path) are dropped; ``FileNotFoundError`` is raised
-    if an argument matches nothing.
+    A **directory** contributes its top-level supported files (pdf / md / txt); a
+    **glob** (containing ``*``/``?``/``[``) contributes its matches; a plain **file**
+    is taken as-is. Duplicates (by resolved path) are dropped; ``FileNotFoundError``
+    is raised if an argument matches nothing.
     """
     files: "list[Path]" = []
     seen: set = set()
@@ -332,11 +328,11 @@ def _expand_sources(raw) -> "list[Path]":
             for match in matches:
                 _add(match)
         elif Path(item).is_dir():
-            pdfs = sorted(Path(item).glob("*.pdf"))
-            if not pdfs:
-                raise FileNotFoundError(f"no .pdf files in directory: {item}")
-            for pdf in pdfs:
-                _add(pdf)
+            found = sorted(p for p in Path(item).glob("*") if p.is_file() and is_supported(p))
+            if not found:
+                raise FileNotFoundError(f"no supported source files (pdf/md/txt) in directory: {item}")
+            for path in found:
+                _add(path)
         elif Path(item).is_file():
             _add(Path(item))
         else:
@@ -369,7 +365,7 @@ def _cmd_init(args: argparse.Namespace) -> int:
         dest = sources_dir / src.name
         if src.resolve() != dest.resolve():
             shutil.copy2(src, dest)
-        sources.append({"type": _source_type(src), "path": f"sources/{src.name}"})
+        sources.append({"type": source_type(src), "path": f"sources/{src.name}"})
 
     name = args.name or root.name
     manifest.write_text(render_manifest(name=name, sources=sources), encoding="utf-8")
@@ -617,7 +613,7 @@ def _cmd_project(args: argparse.Namespace) -> int:
             if src.resolve() != dest.resolve():
                 shutil.copy2(src, dest)
             with (project.root / MANIFEST).open("a", encoding="utf-8") as fh:
-                fh.write(f'\n[[sources]]\ntype = "{_source_type(src)}"\npath = "{rel}"\n')
+                fh.write(f'\n[[sources]]\ntype = "{source_type(src)}"\npath = "{rel}"\n')
             added.append(rel)
         if not added:
             print("Nothing added (all matches already declared).")
@@ -750,7 +746,7 @@ def _cmd_build(args: argparse.Namespace) -> int:
         parsed_docs = []
         synth = build.get("synthesize_outline", True)
         for src in sources:
-            parsed = PDFParser(extract_tables=tables).parse(src)
+            parsed = parse_source(src, extract_tables=tables)
             if synth and not parsed.outline:   # no PDF bookmarks → derive section pages from headings
                 parsed.outline = synthesize_outline(parsed)
             if multi:  # keep each source's IR so per-source offsets survive caching
@@ -956,12 +952,13 @@ def _cmd_ingest(args: argparse.Namespace) -> int:
     out_dir: Path = args.out
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    parser = PDFParser(
+    doc = parse_source(
+        args.pdf,
         extract_tables=not args.no_tables,
         extract_images=args.images,
         image_dir=(out_dir / "images") if args.images else None,
+        max_pages=args.max_pages,
     )
-    doc = parser.parse(args.pdf, max_pages=args.max_pages)
 
     stem = args.pdf.stem
     json_path = out_dir / f"{stem}.json"
@@ -996,12 +993,12 @@ def _cmd_build_wiki(args: argparse.Namespace) -> int:
         data = json.loads(source.read_text(encoding="utf-8"))
         doc = ParsedDocument.from_dict(data)
     else:
-        parser = PDFParser(
+        doc = parse_source(
+            source,
             extract_tables=not args.no_tables,
             extract_images=args.images,
             image_dir=(args.out.parent / "images") if args.images else None,
         )
-        doc = parser.parse(source)
 
     wiki = WikiBuilder(split_level=args.split_level).build(doc)
     write_wiki(wiki, args.out, include_tables=not args.no_tables)
@@ -1019,7 +1016,7 @@ def _load_parsed(source: Path, extract_tables: bool = False) -> ParsedDocument:
     """Load a ParsedDocument from a `.json` (fast) or by parsing a PDF."""
     if source.suffix.lower() == ".json":
         return ParsedDocument.from_dict(json.loads(source.read_text(encoding="utf-8")))
-    return PDFParser(extract_tables=extract_tables).parse(source)
+    return parse_source(source, extract_tables=extract_tables)
 
 
 def _cmd_index(args: argparse.Namespace) -> int:

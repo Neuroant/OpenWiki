@@ -8,8 +8,9 @@ OpenWiki is a learning project for building **agentic wikis** — pipelines that
 turn source documents into structured, machine-navigable knowledge bases. Two
 stages are implemented:
 
-1. **Ingestion** — a PDF parser that extracts text, tables, the table-of-contents
-   outline, and images into a structured document model.
+1. **Ingestion** — source parsers (PDF via PyMuPDF; Markdown/plain-text via stdlib)
+   that extract text, tables, the outline, and images into a structured document
+   model, dispatched by file type (`sources.parse_source`).
 2. **Wiki generation** — splitting that model into a tree of linked wiki pages
    along the outline.
 3. **Semantic search** — chunking the wiki pages, embedding them with a local
@@ -181,6 +182,17 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   ParsedDocument`. Each concern is an isolated `_read_*` method (metadata /
   outline / text / tables / images). **This is the only module that imports
   `fitz` (PyMuPDF).**
+- **`openwiki/markdown_parser.py`** — `MarkdownParser.parse()`, the second source
+  parser (stdlib-only, no PyMuPDF). Maps a `.md`/`.markdown`/`.txt` file to the same
+  `ParsedDocument` IR: **each ATX heading section becomes a "page"** (+ an
+  `OutlineItem` at that page) so `WikiBuilder` splits/groups exactly as it does a
+  PDF's bookmark outline; headings inside ``` code fences are ignored; a titleless
+  preamble → front matter; plain text with no headings → a single page.
+- **`openwiki/sources.py`** — `parse_source(path, …)` dispatches by extension to the
+  right parser (PDFParser imported **lazily**, so a Markdown-only setup needs no
+  PyMuPDF) + `source_type()`/`is_supported()`/`SUPPORTED_SUFFIXES`. The one place the
+  pipeline maps a file type to a parser; `cli` routes `ingest`/`build`/`build-wiki`/
+  `index`/`graph-build` through it.
 - **`openwiki/wiki.py`** — `WikiBuilder.build(doc) -> Wiki` splits the IR along
   the outline: entries with `level <= split_level` become pages, deeper ones
   become in-page contents. **Key constraint:** text is only separable at
@@ -336,8 +348,9 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
 ### Conventions & gotchas
 
 - Keep PyMuPDF (`fitz`) confined to `pdf_parser.py`; everything else depends only
-  on `models.py`. That boundary is what will let a second source parser (HTML,
-  Docling, ...) slot in without touching downstream code.
+  on `models.py`. That boundary paid off: `markdown_parser.py` slotted in behind
+  `sources.parse_source` with zero downstream changes — the same pattern a future
+  HTML/Docling/code parser follows (add a parser module + a dispatch case).
 - All file I/O is UTF-8 with `ensure_ascii=False` — sample content is German and
   non-ASCII round-tripping is asserted in `tests/test_pdf_parser.py`.
 - Table extraction uses `page.find_tables()` (heuristic; failures are caught

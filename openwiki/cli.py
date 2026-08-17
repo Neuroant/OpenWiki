@@ -187,7 +187,8 @@ def _build_argparser() -> argparse.ArgumentParser:
     eval_p = sub.add_parser("eval", parents=[common],
                             help="Evaluate retrieval quality (RAG vs GraphRAG) over a ground-truth question set.")
     eval_p.add_argument("--eval-set", type=Path, default=None,
-                        help="JSONL of {\"question\", \"pages\"} lines (default: <project>/eval.jsonl).")
+                        help="JSONL of {\"question\", \"pages\"} lines; a bare name resolves against "
+                             "the project root (default: <project>/eval.jsonl).")
     eval_p.add_argument("-i", "--index", type=Path, default=None, help="Index dir (default: project's).")
     eval_p.add_argument("--graph", type=Path, default=None,
                         help="Graph dir; enables the GraphRAG column (default: project's graph).")
@@ -1099,10 +1100,28 @@ def _cmd_search(args: argparse.Namespace) -> int:
     return 0
 
 
+def _resolve_eval_set(spec, project: Optional[Project]) -> Path:
+    """Resolve the ``--eval-set`` argument to a path.
+
+    An explicit path (absolute, or relative to the CWD) that exists is honored as
+    given; otherwise a bare/relative name is resolved against the project root —
+    matching the web UI's ``WikiWebApp.eval_set_path``. Default (no ``--eval-set``):
+    ``<project>/eval.jsonl`` (or ``./eval.jsonl`` with no project). A path that
+    resolves to nothing is returned unchanged so the caller can report it.
+    """
+    root = project.root if project is not None else Path.cwd()
+    if spec is None:
+        return root / "eval.jsonl"
+    spec = Path(spec)
+    if spec.is_file() or spec.is_absolute():
+        return spec
+    return root / spec
+
+
 def _cmd_eval(args: argparse.Namespace) -> int:
     project = getattr(args, "project_obj", None)
-    path = args.eval_set or ((project.root / "eval.jsonl") if project else Path("eval.jsonl"))
-    if not Path(path).is_file():
+    path = _resolve_eval_set(args.eval_set, project)
+    if not path.is_file():
         print(f"error: eval set not found: {path}\n"
               '  create a JSONL of {"question": "...", "pages": ["slug", ...]} lines.',
               file=sys.stderr)

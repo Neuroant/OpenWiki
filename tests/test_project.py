@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -194,6 +195,31 @@ def test_resolve_source_specs_url_repo_and_file(tmp_path):
     assert by_type["code"].endswith("repo")                    # repo referenced (absolute here)
     assert by_type["markdown"] == "sources/notes.md"
     assert (sources_dir / "notes.md").is_file()                # only the file was copied
+
+
+def test_resolve_eval_set_defaults_to_project_root(tmp_path):
+    assert cli._resolve_eval_set(None, SimpleNamespace(root=tmp_path)) == tmp_path / "eval.jsonl"
+    assert cli._resolve_eval_set(None, None) == Path.cwd() / "eval.jsonl"   # no project → CWD
+
+
+def test_resolve_eval_set_bare_name_uses_project_root(tmp_path, monkeypatch):
+    proj = SimpleNamespace(root=tmp_path)
+    (tmp_path / "eval_relational.jsonl").write_text("{}", encoding="utf-8")
+    elsewhere = tmp_path / "cwd"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)                               # run from outside the project
+    # a bare name missing in the CWD resolves against the project root (matches the web UI)
+    assert cli._resolve_eval_set(Path("eval_relational.jsonl"), proj) == tmp_path / "eval_relational.jsonl"
+
+
+def test_resolve_eval_set_honors_explicit_existing_path(tmp_path, monkeypatch):
+    proj = SimpleNamespace(root=tmp_path / "proj")
+    here = tmp_path / "cwd"
+    here.mkdir()
+    (here / "custom.jsonl").write_text("{}", encoding="utf-8")
+    monkeypatch.chdir(here)
+    # an existing CWD-relative path is honored as-is (back-compat)
+    assert cli._resolve_eval_set(Path("custom.jsonl"), proj) == Path("custom.jsonl")
 
 
 def test_source_paths_resolves_url_absolute_and_relative(tmp_path):

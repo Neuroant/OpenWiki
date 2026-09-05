@@ -23,6 +23,7 @@ except ImportError as exc:  # pragma: no cover
 import numpy as np
 
 from .builder import CHUNK_VECTOR_INDEX
+from .community import REFERENCE_WEIGHT, SHARED_ENTITY_WEIGHT
 
 
 class GraphStore:
@@ -337,6 +338,90 @@ class GraphStore:
                             "CREATE (a)-[:SIMILAR_TO {score:$sc}]->(b);", {"a": a, "b": b, "sc": score})
                     n_sim += 1
         return {"slug": slug, "title": title, "chunks": len(chunks), "similar": n_sim}
+
+    # -- communities (consolidation layer) -----------------------------
+
+    def ensure_community_schema(self) -> None:
+        """Create the Community / IN_COMMUNITY tables if a pre-existing graph lacks
+        them (built before this layer). New builds create them empty in the schema."""
+        for ddl in (
+            "CREATE NODE TABLE IF NOT EXISTS Community("
+            "id INT64, label STRING, summary STRING, size INT64, PRIMARY KEY(id));",
+            "CREATE REL TABLE IF NOT EXISTS IN_COMMUNITY(FROM Page TO Community);",
+        ):
+            try:
+                self._exec(ddl)
+            except Exception:  # pragma: no cover - already exists / older syntax
+                pass
+
+    def has_communities(self) -> bool:
+        try:
+            return self._rows("MATCH (c:Community) RETURN count(c);")[0][0] > 0
+        except Exception:
+            return False   # table absent on graphs built before this layer
+
+    def communities(self) -> list:
+        """All communities with their LLM summaries (largest first)."""
+        try:
+            rows = self._rows("MATCH (c:Community) "
+                              "RETURN c.id, c.label, c.summary, c.size "
+                              "ORDER BY c.size DESC, c.id;")
+        except Exception:
+            return []
+        return [{"id": r[0], "label": r[1], "summary": r[2], "size": r[3]} for r in rows]
+
+    def page_graph(self) -> dict:
+        """The undirected, weighted Page↔Page graph for community detection:
+        SIMILAR_TO (by score) ∪ REFERENCES ∪ shared-entity, folded per unordered pair.
+        Returns ``{"pages": {slug: title}, "edges": [(a, b, weight), ...]}``."""
+        pages = {r[0]: r[1] for r in self._rows("MATCH (p:Page) RETURN p.slug, p.title;")}
+        weights: dict = {}
+
+        def add(a, b, w):
+            if a == b or w <= 0:
+                return
+            key = (a, b) if a < b else (b, a)
+            weights[key] = weights.get(key, 0.0) + float(w)
+
+        for a, b, s in self._rows(
+                "MATCH (a:Page)-[r:SIMILAR_TO]->(b:Page) WHERE a.slug < b.slug "
+                "RETURN a.slug, b.slug, r.score;"):
+            add(a, b, s)
+        for a, b in self._rows("MATCH (a:Page)-[:REFERENCES]->(b:Page) RETURN a.slug, b.slug;"):
+            add(a, b, REFERENCE_WEIGHT)
+        if self.has_entities():
+            for a, b, n in self._rows(
+                    "MATCH (a:Page)-[:MENTIONS]->(:Entity)<-[:MENTIONS]-(b:Page) "
+                    "WHERE a.slug < b.slug RETURN a.slug, b.slug, count(*);"):
+                add(a, b, min(int(n), 3) * SHARED_ENTITY_WEIGHT)
+        return {"pages": pages, "edges": [(a, b, w) for (a, b), w in weights.items()]}
+
+    def page_snippet(self, slug: str, max_chars: int = 400) -> str:
+        """A short text excerpt for a page (its first chunks), for summarization."""
+        rows = self._rows("MATCH (c:Chunk {page_slug:$s}) RETURN c.text LIMIT 3;", {"s": slug})
+        return " ".join(r[0] for r in rows)[:max_chars]
+
+    def upsert_communities(self, assignment: dict, summaries: dict, labels: dict) -> dict:
+        """Replace the community layer: (re)create Community nodes + IN_COMMUNITY edges
+        from ``{page_slug: community_id}`` plus per-community ``summaries``/``labels``."""
+        if not self.writable:
+            raise RuntimeError("GraphStore is read-only; open it writable to write communities.")
+        self.ensure_community_schema()
+        sizes: dict = {}
+        for cid in assignment.values():
+            sizes[cid] = sizes.get(cid, 0) + 1
+        with self._lock:
+            self._exec("MATCH (c:Community) DETACH DELETE c;")   # clear the old layer
+            for cid in sorted(sizes):
+                self._exec(
+                    "CREATE (:Community {id:$id, label:$l, summary:$s, size:$n});",
+                    {"id": int(cid), "l": labels.get(cid, ""), "s": summaries.get(cid, ""),
+                     "n": int(sizes[cid])})
+            for slug, cid in assignment.items():
+                self._exec(
+                    "MATCH (p:Page {slug:$s}),(c:Community {id:$id}) "
+                    "CREATE (p)-[:IN_COMMUNITY]->(c);", {"s": slug, "id": int(cid)})
+        return {"communities": len(sizes), "pages": len(assignment)}
 
     def hybrid_search(self, vector, k: int = 5) -> list[dict]:
         """Vector k-NN over chunks, then hop to the owning page (GraphRAG)."""

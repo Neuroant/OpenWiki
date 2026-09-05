@@ -112,6 +112,11 @@ class GraphBuilder:
         conn.execute("CREATE REL TABLE REFERENCES(FROM Page TO Page);")
         conn.execute("CREATE NODE TABLE Entity(key STRING, name STRING, type STRING, PRIMARY KEY(key));")
         conn.execute("CREATE REL TABLE MENTIONS(FROM Page TO Entity);")
+        # Consolidation layer (populated by `openwiki communities`, empty otherwise),
+        # so store code degrades gracefully — as with Entity/MENTIONS above.
+        conn.execute("CREATE NODE TABLE Community("
+                     "id INT64, label STRING, summary STRING, size INT64, PRIMARY KEY(id));")
+        conn.execute("CREATE REL TABLE IN_COMMUNITY(FROM Page TO Community);")
 
     # -- nodes / structural edges --------------------------------------
 

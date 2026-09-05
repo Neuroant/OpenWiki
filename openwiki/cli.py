@@ -30,8 +30,8 @@ from .chat_agent import WikiAgent, summarize_wiki
 from .claude_code_template import scaffold_claude_code
 from .opencode_template import scaffold_opencode
 from .graph import (
-    GraphStore, build_graph, detect_page_offset, extract_entities,
-    extract_references, extract_references_multi,
+    GraphStore, answer_global, build_graph, detect_communities, detect_page_offset,
+    extract_entities, extract_references, extract_references_multi, summarize_community,
 )
 from .embeddings import OllamaEmbedder
 from .llm import OllamaChat
@@ -228,6 +228,9 @@ def _build_argparser() -> argparse.ArgumentParser:
     ask_p.add_argument("--host", default=None, help="Ollama host URL.")
     ask_p.add_argument("--temperature", type=float, default=0.2, help="Sampling temperature (default: 0.2).")
     ask_p.add_argument("--show-context", action="store_true", help="Also print the retrieved excerpts.")
+    ask_p.add_argument("--global", dest="global_search", action="store_true",
+                       help="Answer a thematic/overview question from community summaries "
+                            "(run `openwiki communities` first).")
 
     chat_p = sub.add_parser("chat", parents=[common], help="Multi-turn agent that can search, read, and edit wiki pages.")
     chat_p.add_argument(
@@ -313,6 +316,16 @@ def _build_argparser() -> argparse.ArgumentParser:
                          help="Chars of each page sent to the entity model (default: 8000).")
     graph_p.add_argument("--host", default=None, help="Ollama host URL (for --entities).")
     graph_p.add_argument("-v", "--verbose", action="store_true", help="Verbose progress logging.")
+
+    comm_p = sub.add_parser("communities", parents=[common],
+                            help="Consolidate the graph into topical communities + LLM summaries (enables `ask --global`).")
+    comm_p.add_argument("--graph", type=Path, default=None,
+                        help="Graph database dir (default: project's graph, else ./output/graph).")
+    comm_p.add_argument("--max-pages", type=int, default=12,
+                        help="Max member pages summarized per community (default: 12).")
+    comm_p.add_argument("--model", default=None,
+                        help="Chat model for the summaries (default: manifest models.chat).")
+    comm_p.add_argument("--host", default=None, help="Ollama host URL.")
     return parser
 
 
@@ -980,6 +993,10 @@ def _apply_project(args: argparse.Namespace, project: Optional[Project],
         val("similar_k", "graph", "similar_k", 6)
         val("entity_model", "models", "chat", DEFAULT_CHAT)
         val("host", "models", "host", DEFAULT_HOST)
+    elif cmd == "communities":
+        path("graph", p.graph_path if p else None, Path("output") / "graph")
+        val("model", "models", "chat", DEFAULT_CHAT)
+        val("host", "models", "host", DEFAULT_HOST)
 
 
 def _cmd_ingest(args: argparse.Namespace) -> int:
@@ -1202,7 +1219,34 @@ def _answer_eval(items, index, graph, args, top_k: int, expand_k: int) -> None:
               f"RAG {t['RAG']}  ·  tie {t['tie']}")
 
 
+def _ask_global(args: argparse.Namespace, graph) -> int:
+    """Global search: answer a thematic question from the community summaries."""
+    if graph is None or not graph.has_communities():
+        print("error: no communities in the graph. Run `openwiki communities` first.",
+              file=sys.stderr)
+        return 2
+    comms = graph.communities()
+    chat = OllamaChat(model=args.model, host=args.host, temperature=args.temperature)
+    print(f"answering globally from {len(comms)} communities with {chat.name} …", file=sys.stderr)
+    answer = answer_global(chat, args.question, [(c["label"], c["summary"]) for c in comms])
+    print(answer)
+    cited = {int(m) for m in re.findall(r"\[(\d+)\]", answer)}
+    print("\nCommunities  (* = cited):")
+    for i, c in enumerate(comms, 1):
+        mark = "*" if i in cited else " "
+        print(f" {mark}[{i}] {c['label']}  ({c['size']} pages)")
+    return 0
+
+
 def _cmd_ask(args: argparse.Namespace) -> int:
+    if getattr(args, "global_search", False):
+        graph = _open_graph(args.graph, writable=False)
+        try:
+            return _ask_global(args, graph)
+        finally:
+            if graph is not None:
+                graph.close()
+
     index = SemanticIndex.load(args.index)
     if isinstance(index.embedder, OllamaEmbedder):
         index.embedder.host = args.host.rstrip("/")
@@ -1361,6 +1405,56 @@ def _cmd_graph_build(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_communities(args: argparse.Namespace) -> int:
+    """Consolidation pass: detect topical communities over the built graph and write
+    an LLM summary per community (Page-[:IN_COMMUNITY]->Community), powering `ask --global`."""
+    from collections import defaultdict
+
+    graph = _open_graph(args.graph, writable=True)
+    if graph is None:
+        print(f"error: no graph at {args.graph} (run `openwiki graph-build` first).", file=sys.stderr)
+        return 2
+    if not getattr(graph, "writable", False):
+        print("error: graph is locked by another process (stop `serve`/`chat` first).", file=sys.stderr)
+        graph.close()
+        return 2
+    try:
+        pg = graph.page_graph()
+        if len(pg["pages"]) < 2:
+            print("error: graph has too few pages for communities.", file=sys.stderr)
+            return 2
+
+        assignment = detect_communities(pg["edges"], list(pg["pages"]))
+        members: dict = defaultdict(list)
+        for slug, cid in assignment.items():
+            members[cid].append(slug)
+        degree: dict = defaultdict(float)
+        for a, b, w in pg["edges"]:
+            degree[a] += w
+            degree[b] += w
+        titles = pg["pages"]
+
+        chat = OllamaChat(model=args.model, host=args.host, temperature=0.2)
+        print(f"Detected {len(members)} communities over {len(titles)} pages. "
+              f"Summarizing with {chat.name} …", file=sys.stderr)
+
+        summaries, labels = {}, {}
+        for cid in sorted(members):
+            ranked = sorted(members[cid], key=lambda s: (-degree.get(s, 0.0), s))
+            fallback = titles.get(ranked[0], f"Community {cid}")   # hub title if the model gives none
+            mem = [(titles.get(s, s), graph.page_snippet(s)) for s in ranked[: args.max_pages]]
+            labels[cid], summaries[cid] = summarize_community(chat, mem, fallback_label=fallback)
+            print(f"  [{cid}] {len(members[cid]):>3} pages — {labels[cid]}", file=sys.stderr)
+
+        result = graph.upsert_communities(assignment, summaries, labels)
+    finally:
+        graph.close()
+
+    print(f"Wrote {result['communities']} communities over {result['pages']} pages → {args.graph}")
+    print('  now try:  openwiki ask --global "<a thematic question>"')
+    return 0
+
+
 def _cmd_serve(args: argparse.Namespace) -> int:
     index = None
     if (args.index / "index.json").is_file():
@@ -1428,6 +1522,7 @@ _DISPATCH = {
     "serve": _cmd_serve,
     "mcp": _cmd_mcp,
     "graph-build": _cmd_graph_build,
+    "communities": _cmd_communities,
 }
 
 

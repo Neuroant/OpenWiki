@@ -307,6 +307,31 @@ pipeline. **Direction B (relations)** is the higher-ceiling bet: it's the most l
 to make the graph finally win on *retrieval*, not just answer quality — which would be the
 project's next real finding.
 
+## In progress — a "second brain" consolidation layer
+
+A separate exploration (borrowing Microsoft GraphRAG's best ideas natively rather than
+adopting the library) toward using the graph as agent memory. Framed as two paths:
+
+- **Path A — in-repo consolidation layer.** Community detection + LLM community summaries
+  + global search + (later) time-decayed edges. Native, local, dependency-free, measurable.
+- **Path B — pivot to an agent-memory store.** Invert the data flow (sessions in),
+  authoritative mutable graph, session→subgraph→merge, time/decay + contradiction
+  versioning + a "sleep" consolidation job. The novel surface (nobody ships decay +
+  contradiction) — the real second brain.
+
+**Landed (Path A, first slice, v0.39):** `openwiki communities` runs a re-runnable
+consolidation over the built graph — a compact, dependency-free weighted-modularity
+**Louvain** (`graph/community.py`) partitions the Page↔Page graph
+(SIMILAR_TO∪REFERENCES∪shared-entity), then a *local* chat model writes one summary per
+community (cheap: a handful of calls, not one per page), stored as `Community` nodes +
+`IN_COMMUNITY` edges. **`ask --global`** answers thematic "what are the main themes / how do
+they relate" questions from those summaries — global sensemaking that chunk-RAG can't do.
+Verified live on the informatik corpus (78 pages → 7 communities → a coherent 7-theme
+overview). Rough edges / next: community **labels** use the hub page's title (weak when the
+hub is front/back-matter — derive from the summary instead); no **time/decay** yet;
+surface communities in the **Graph/Projekt tabs** and as an **MCP** `wiki_global` tool; add
+a **thematic eval set** (fuzzy ground truth — lean on the LLM judge).
+
 ## Related docs
 
 - `docs/projects.md` — the projects layer design + phase roadmap.

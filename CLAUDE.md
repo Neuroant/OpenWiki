@@ -139,6 +139,21 @@ wiki), `--similar-k N`, `--no-references` (skip the page + section cross-ref edg
 call/page), `--entity-model NAME`, `--entity-types "A,B,C"` (the domain ontology;
 overrides the default), `--entity-max-chars N`, `-v`.
 
+**Consolidate the graph into communities** — a re-runnable "sleep pass" over an
+already-built graph: detect topical communities (weighted-modularity Louvain over
+SIMILAR_TO/REFERENCES/shared-entity) and write one **LLM summary per community**
+(`Page-[:IN_COMMUNITY]->Community`). Cheap (a handful of communities, not one call
+per page). Enables **global search** — thematic "what are the main themes / how do
+they relate" questions that chunk-RAG can't answer (`ask --global`):
+```
+.venv\Scripts\python -m openwiki communities                # writes Community nodes
+.venv\Scripts\python -m openwiki ask --global "Was sind die Hauptthemen und wie hängen sie zusammen?"
+```
+`communities` options: `--graph DIR`, `--max-pages N` (member pages summarized per
+community; default 12), `--model NAME`, `--host URL`. This is Path A of the
+"second brain" direction (borrows Microsoft GraphRAG's community-summary +
+global-search ideas, native/local/dependency-free); design in `docs/roadmap.md`.
+
 **Web UI** — browse + search + chat/edit + graph in the browser (stdlib server):
 ```
 .venv\Scripts\python -m openwiki serve --port 8137        # http://127.0.0.1:8137
@@ -277,7 +292,19 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   HNSW index self-maintains on insert/delete — recompute `SIMILAR_TO`). Opened
   read-only by default, `RLock`-guarded (an upsert holds the lock across a batch;
   the threaded web server shares one connection). Only `builder`/`store` import
-  `kuzu`; `references`/`entities` do not.
+  `kuzu`; `references`/`entities`/`community` do not.
+  `community.py` is the **consolidation layer** (Path A of the "second brain"
+  direction): a pure, dependency-free weighted-modularity **Louvain**
+  (`detect_communities`) that partitions the Page↔Page graph
+  (`GraphStore.page_graph`: SIMILAR_TO∪REFERENCES∪shared-entity), plus
+  chat-injected `summarize_community` / `answer_global` helpers. The `communities`
+  CLI command detects + summarizes (one LLM call per community, not per page) and
+  `GraphStore.upsert_communities` writes `Community` nodes + `IN_COMMUNITY` edges
+  (always-created empty tables, like Entity/MENTIONS). `ask --global` then answers
+  thematic questions from the summaries (`GraphStore.communities()`) — global
+  search over a corpus that chunk-RAG can't do. (Known rough edge: community
+  *labels* use the hub page's title, weak when the hub is front/back-matter;
+  deriving the label from the summary is a follow-up.)
 - **`openwiki/web/`** — the web UI. `server.py` = `WikiWebApp` (state) + a
   `ThreadingHTTPServer` handler exposing a JSON API (`/api/wiki`,
   `/api/pages/{slug}`, `/api/search`, `/api/chat`, `/api/graph/{slug}` = explore,
@@ -393,7 +420,8 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   `render_files`/`scaffold_claude_code` shape; shares `cli._mcp_command()`.
 - **`openwiki/cli.py`** — argparse CLI with `init`, `build`, `status`, `project`
   (`list`/`use`/`add`/`remove`/`add-source`), `opencode`, `claude-code`, `ontology`, `ingest`,
-  `build-wiki`, `index`, `search`, `eval`, `ask`, `chat`, `graph-build`, `serve`, and `mcp`
+  `build-wiki`, `index`, `search`, `eval`, `ask` (`--global` = global search),
+  `chat`, `graph-build`, `communities`, `serve`, and `mcp`
   subcommands. A shared
   `--project` (parent parser) + `_apply_project(args, project)` fill unset
   path/model/host/split-level args from the active project before dispatch (flags

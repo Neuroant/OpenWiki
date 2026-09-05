@@ -6,6 +6,7 @@ Hand-rolled with the standard library only, in the same spirit as the web server
 
 Tools (all read-only; advertised only when their backing artifact is present):
   wiki_ask            grounded, cited answer over the wiki (RAG, graph-augmented)
+  wiki_global         thematic answer over the whole corpus (community summaries)
   wiki_search         semantic search -> ranked page excerpts
   wiki_read_page      full Markdown of a page
   wiki_list_pages     every page slug + title
@@ -20,6 +21,7 @@ else (logs, errors) must go to stderr.
 from __future__ import annotations
 
 import json
+import re
 import sys
 from typing import Callable, Optional
 
@@ -164,6 +166,16 @@ def build_server(wiki_dir, index=None, graph=None, agent=None, name="openwiki",
                 "Parameter, …).", {"name": {"type": "string"}}, ["name"]))
             handlers["wiki_find_entity"] = lambda a: tools_impl.find_entity(str(a["name"]))
 
+        # Global search needs a chat model (from the agent) + community summaries.
+        if agent is not None and _graph_has_communities(graph):
+            specs.append(_tool(
+                "wiki_global",
+                "Answer a high-level, thematic question about the WHOLE corpus from its "
+                "topical community summaries (global search). Prefer this for 'what are the "
+                "main themes' / 'how do X and Y relate across the corpus' questions; use "
+                "wiki_ask for a specific fact on a page.", {"question": {"type": "string"}}, ["question"]))
+            handlers["wiki_global"] = lambda a: _global_answer(agent.chat, graph, str(a["question"]))
+
     def call_tool(tool_name: str, args: dict) -> str:
         handler = handlers.get(tool_name)
         if handler is None:
@@ -171,6 +183,29 @@ def build_server(wiki_dir, index=None, graph=None, agent=None, name="openwiki",
         return handler(args)
 
     return MCPStdioServer(name, version, specs, call_tool)
+
+
+def _graph_has_communities(graph) -> bool:
+    try:
+        return bool(graph.has_communities())
+    except Exception:
+        return False
+
+
+def _global_answer(chat, graph, question: str) -> str:
+    """Global search for MCP: a thematic answer from the community summaries, with the
+    cited communities listed (mirrors the CLI ``ask --global`` / web ``ask_global``)."""
+    from .graph.community import answer_global
+
+    comms = graph.communities()
+    if not comms:
+        return "No communities in the graph. Run `openwiki communities` first."
+    answer = answer_global(chat, question, [(c["label"], c["summary"]) for c in comms])
+    cited = {int(m) for m in re.findall(r"\[(\d+)\]", answer)}
+    lines = [answer, "", "Communities (* = cited):"]
+    for i, c in enumerate(comms, 1):
+        lines.append(f" {'*' if i in cited else ' '}[{i}] {c['label']}  ({c['size']} pages)")
+    return "\n".join(lines).strip()
 
 
 def _format_answer(ans) -> str:

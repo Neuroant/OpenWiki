@@ -166,9 +166,10 @@ up automatically if `--graph` (default `output/graph`) exists.
 ```
 .venv\Scripts\python -m openwiki mcp --wiki output\wiki -i output\index --graph output\graph
 ```
-Read-only tools (`wiki_ask`/`wiki_search`/`wiki_read_page`/`wiki_list_pages`/
+Read-only tools (`wiki_ask`/`wiki_global`/`wiki_search`/`wiki_read_page`/`wiki_list_pages`/
 `wiki_graph_neighbors`/`wiki_find_path`/`wiki_find_entity`), advertised by
-availability. Options: `--model`, `--host`, `--no-ask`. Coding-agent setup is in
+availability (`wiki_global` needs a chat model + community summaries). Options:
+`--model`, `--host`, `--no-ask`. Coding-agent setup is in
 `docs/coding-agents.md` (+ `examples/coding-agents/`).
 
 **Test** — the suite parses the first 5 pages of the sample PDF and skips
@@ -358,7 +359,9 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   (newline-delimited JSON-RPC 2.0: `initialize`/`tools/list`/`tools/call`), like
   the web layer but for coding agents. `build_server(...)` wraps
   `WikiTools`/`RAGAgent` as read-only `wiki_*` tools; `MCPStdioServer.handle()` is
-  pure (unit-tested without stdio).
+  pure (unit-tested without stdio). `wiki_global` (thematic answer over the community
+  summaries, via `agent.chat` + `answer_global`) is advertised only when the graph has
+  communities *and* a chat model is available — the MCP twin of the CLI `ask --global`.
 - **`openwiki/project.py`** — the **project** layer: `Project` (discover via
   `find`, `load`, `resolve`; `out_dir`/`wiki_dir`/`index_dir`/`graph_path`; manifest
   `setting()` lookup) + a hand-rolled `render_manifest` (stdlib `tomllib` *reads*

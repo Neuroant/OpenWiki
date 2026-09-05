@@ -36,8 +36,10 @@ description: Ask the OpenWiki knowledge base (RAG + GraphRAG)
 argument-hint: <question>
 ---
 Use the `openwiki` MCP server's `wiki_ask` tool to answer the following, and cite
-the wiki pages it returns. If the answer isn't in the wiki, say so plainly instead
-of guessing — do not fall back on prior knowledge of some other product.
+the wiki pages it returns. For a broad, thematic question ("main themes", "how do X
+and Y relate across the whole corpus"), use `wiki_global` instead. If the answer
+isn't in the wiki, say so plainly instead of guessing — do not fall back on prior
+knowledge of some other product.
 
 $ARGUMENTS
 """
@@ -78,8 +80,8 @@ Project-aware (run inside the project folder):
 - `ask "question"` — RAG + citations; GraphRAG when a graph exists.
 - `ontology` — propose a domain entity-type ontology (review, then `--write`).
 
-MCP tools (this wiki): `wiki_ask`, `wiki_search`, `wiki_read_page`, `wiki_list_pages`,
-`wiki_graph_neighbors`, `wiki_find_path`, `wiki_find_entity`. Full docs: `README.md`,
+MCP tools (this wiki): `wiki_ask`, `wiki_global`, `wiki_search`, `wiki_read_page`,
+`wiki_list_pages`, `wiki_graph_neighbors`, `wiki_find_path`, `wiki_find_entity`. Full docs: `README.md`,
 `CLAUDE.md`, `docs/coding-agents.md`, or the web UI **Hilfe** tab.
 """
 
@@ -102,6 +104,9 @@ MCP tools rather than guessing:
 - **`wiki_ask`** — start here for "what / how / why" questions. It returns a
   grounded answer with citations (RAG, graph-augmented). If it says the answer
   isn't in the wiki, relay that instead of inventing one.
+- **`wiki_global`** — for high-level, *thematic* questions about the whole corpus
+  ("what are the main themes", "how do X and Y relate across the wiki"); answers
+  from topical community summaries rather than a few pages.
 - **`wiki_search`** — find relevant pages by meaning; returns page slugs.
 - **`wiki_read_page`** — read a page's full Markdown (pass a slug).
 - **`wiki_graph_neighbors`** / **`wiki_find_path`** / **`wiki_find_entity`** —

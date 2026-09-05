@@ -119,6 +119,8 @@ read-only tools over guessing when a question is about the wiki's content:
 
 - **`wiki_ask`** — grounded, cited answer over the wiki (RAG + GraphRAG). Use this
   for "what/how/why" questions; always relay the citations it returns.
+- **`wiki_global`** — thematic answer over the *whole* corpus from topical community
+  summaries. Use for "what are the main themes / how do X and Y relate across the wiki".
 - **`wiki_search`** — semantic search, returns the top matching chunks/pages.
 - **`wiki_read_page` / `wiki_list_pages`** — read a page by slug / list all pages.
 - **`wiki_graph_neighbors` / `wiki_find_path`** — explore the graph: a page's
@@ -179,7 +181,7 @@ Lower-level pipeline stages:
 - `chat` — multi-turn editing agent; `--dry-run`, `-m "msg"`.
 - `mcp` — expose the wiki to coding agents (the `wiki_*` tools; this command backs the agent you're using now).
 
-MCP query tools: `wiki_ask`, `wiki_search`, `wiki_read_page`, `wiki_list_pages`,
+MCP query tools: `wiki_ask`, `wiki_global`, `wiki_search`, `wiki_read_page`, `wiki_list_pages`,
 `wiki_graph_neighbors`, `wiki_find_path`, `wiki_find_entity`. Full docs: the in-app
 **Hilfe** tab, `README.md`, `CLAUDE.md`, `docs/coding-agents.md`.
 """
@@ -233,9 +235,9 @@ Use the project's `owiki` CLI from inside the project folder. Needs a running
   ontology you review and `--write` into `openwiki.toml`.
 - **mcp** — the server exposing the `wiki_*` tools you're using now.
 
-MCP tools you can call live: `wiki_ask` (RAG+GraphRAG, cited), `wiki_search`,
-`wiki_read_page`, `wiki_list_pages`, `wiki_graph_neighbors`, `wiki_find_path`,
-`wiki_find_entity`.
+MCP tools you can call live: `wiki_ask` (RAG+GraphRAG, cited), `wiki_global`
+(thematic, over community summaries), `wiki_search`, `wiki_read_page`,
+`wiki_list_pages`, `wiki_graph_neighbors`, `wiki_find_path`, `wiki_find_entity`.
 
 ## Curriculum
 0. **Orientation** — what OpenWiki is and the pipeline (documents → IR → wiki →

@@ -330,9 +330,11 @@ Verified live on the informatik corpus (78 pages → 7 communities → a coheren
 overview). The **Projekt tab** shows a *Themen (Communities)* section (label + size + summary cards,
 `/api/communities`) with a **global-search box** (`/api/global` → `ask_global`) that answers
 a thematic question from the summaries and highlights the cited themes; community labels are
-the model's own theme (not the hub page's title). Next: no **time/decay** yet; surface
-communities in the **Graph tab** (colour nodes by community) and expose global search as an
-**MCP** `wiki_global` tool; add a **thematic eval set** (fuzzy ground truth — lean on the LLM judge).
+the model's own theme (not the hub page's title). Global search is also an **MCP**
+`wiki_global` tool (advertised when the graph has communities + a chat model), so coding
+agents get whole-corpus sensemaking alongside `wiki_ask`. Next: no **time/decay** yet;
+surface communities in the **Graph tab** (colour nodes by community); add a **thematic eval
+set** (fuzzy ground truth — lean on the LLM judge).
 
 ## Related docs
 

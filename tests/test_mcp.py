@@ -114,3 +114,54 @@ def test_build_server_advertises_tools_by_availability(tmp_path):
     found = server.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
                            "params": {"name": "wiki_search", "arguments": {"query": "alpha"}}})
     assert "000-a" in found["result"]["content"][0]["text"]
+
+
+def test_wiki_global_gated_on_communities_and_agent(tmp_path):
+    import types
+
+    import pytest
+    pytest.importorskip("kuzu")
+    from openwiki.graph import GraphBuilder, GraphStore, detect_communities
+
+    pages = [WikiPage(slug=f"00{i}-p", title=t, level=1, order=i, pdf_page_start=i + 1,
+                      pdf_page_end=i + 1, text=txt)
+             for i, (t, txt) in enumerate(
+                 [("Alpha", "alpha beta"), ("Beta", "beta gamma"), ("Gamma", "alpha gamma")])]
+    wiki = Wiki(title="T", pages=pages, source="x.pdf", split_level=1)
+    wdir = tmp_path / "wiki"
+    write_wiki(wiki, wdir)
+    index = SemanticIndex.build(wiki, _FakeEmbedder(), size_words=50, overlap_words=10)
+    GraphBuilder(tmp_path / "graph", similar_k=3).build(wiki, index)
+
+    class _Chat:
+        name = "fake"
+
+        def chat(self, messages):
+            return "Überblick [1]."
+
+    store = GraphStore(tmp_path / "graph", writable=True)
+    try:
+        agent = types.SimpleNamespace(chat=_Chat())
+        # no communities yet → wiki_global not advertised even with an agent
+        names0 = {t["name"] for t in build_server(wdir, index=index, graph=store, agent=agent).tools}
+        assert "wiki_global" not in names0
+
+        pg = store.page_graph()
+        assignment = detect_communities(pg["edges"], list(pg["pages"]))
+        cids = set(assignment.values())
+        store.upsert_communities(assignment, {c: f"summary {c}" for c in cids},
+                                 {c: f"Thema {c}" for c in cids})
+
+        # with communities + an agent → advertised, and callable
+        server = build_server(wdir, index=index, graph=store, agent=agent)
+        assert "wiki_global" in {t["name"] for t in server.tools}
+        # ...but not without an agent (no chat model)
+        assert "wiki_global" not in {t["name"] for t in build_server(wdir, index=index, graph=store, agent=None).tools}
+
+        r = server.handle({"jsonrpc": "2.0", "id": 9, "method": "tools/call",
+                           "params": {"name": "wiki_global", "arguments": {"question": "Themen?"}}})
+        text = r["result"]["content"][0]["text"]
+        assert r["result"]["isError"] is False
+        assert "[1]" in text and "* = cited" in text   # answer + cited-community list
+    finally:
+        store.close()

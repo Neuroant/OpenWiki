@@ -35,6 +35,7 @@ artifact exists):
 | Tool | Needs | Purpose |
 | --- | --- | --- |
 | `wiki_ask` | index + graph + Ollama | Grounded, **cited** answer (RAG, graph-augmented) — best for what/how/why |
+| `wiki_global` | graph + communities + Ollama | Thematic answer over the **whole** corpus (community summaries) — best for "main themes / how do X and Y relate" |
 | `wiki_search` | index | Semantic search → ranked page excerpts |
 | `wiki_read_page` | wiki | Full Markdown of a page (by slug) |
 | `wiki_list_pages` | wiki | Every page slug + title |
@@ -42,8 +43,9 @@ artifact exists):
 | `wiki_find_path` | graph | Shortest relationship chain between two pages |
 | `wiki_find_entity` | graph `--entities` | Pages that mention a named concept |
 
-Flags: `--model` (chat model for `wiki_ask`), `--host` (Ollama URL),
-`--no-ask` (disable `wiki_ask`, e.g. when you don't want a chat model loaded).
+Flags: `--model` (chat model for `wiki_ask`/`wiki_global`), `--host` (Ollama URL),
+`--no-ask` (disable `wiki_ask` — and `wiki_global`, which also needs a chat model —
+when you don't want one loaded).
 
 **Prerequisites**
 
@@ -134,6 +136,7 @@ description: Consult the OpenWiki knowledge base (the manual this wiki was built
 ---
 Use the `openwiki` MCP tools rather than guessing:
 - `wiki_ask` first for what/how/why questions (returns a cited answer).
+- `wiki_global` for broad, thematic questions about the whole corpus.
 - `wiki_search` to find pages, `wiki_read_page` to read one.
 - `wiki_graph_neighbors` / `wiki_find_path` / `wiki_find_entity` to explore
   relationships. Always cite the page slugs you used.

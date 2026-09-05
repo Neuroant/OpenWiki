@@ -154,6 +154,19 @@ community; default 12), `--model NAME`, `--host URL`. This is Path A of the
 "second brain" direction (borrows Microsoft GraphRAG's community-summary +
 global-search ideas, native/local/dependency-free); design in `docs/roadmap.md`.
 
+**Decay the usage-memory edges** — the graph learns which connections are *used*:
+GraphRAG expansion on a **writable** graph (serve/chat) strengthens a `REINFORCES`
+edge from the answer's seed to each page it pulls in (Hebbian). Those edges carry a
+`weight` + `last_seen` and decay by a half-life; `openwiki decay` ages them and prunes
+the faded ones (the "forgetting" half). Reinforced neighbors surface in
+`neighborhood`/GraphRAG expansion ranked by *effective* (decayed) weight — so useful
+connections persist and stale ones vanish (first step toward Path B agent memory):
+```
+.venv\Scripts\python -m openwiki decay --half-life 30 --floor 0.1
+```
+Options: `--graph DIR`, `--half-life DAYS` (default 30), `--floor F` (prune below;
+default 0.1). Pure decay math in `openwiki/graph/decay.py`.
+
 **Web UI** — browse + search + chat/edit + graph in the browser (stdlib server):
 ```
 .venv\Scripts\python -m openwiki serve --port 8137        # http://127.0.0.1:8137
@@ -301,7 +314,15 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   chat-injected `summarize_community` / `answer_global` helpers. The `communities`
   CLI command detects + summarizes (one LLM call per community, not per page) and
   `GraphStore.upsert_communities` writes `Community` nodes + `IN_COMMUNITY` edges
-  (always-created empty tables, like Entity/MENTIONS). Each community's label is the
+  (always-created empty tables, like Entity/MENTIONS).
+  `decay.py` is the **usage-memory** core (Path B's first step): pure exponential
+  decay (`effective_weight`) + capped reinforcement (`reinforced_weight`). The graph
+  gains a `REINFORCES(weight, last_seen)` edge (always-created empty); `GraphStore`
+  `reinforce(a,b)` strengthens+stamps it (Hebbian), `decay()` ages every edge to now
+  and prunes below a floor (forgetting), and `neighborhood`'s `reinforced` group ranks
+  them by decayed weight. `RAGAgent._expand` reinforces seed→related edges when the
+  graph is **writable** (serve/chat) — retrieval teaches the graph; read-only `ask`/MCP
+  never write. `openwiki decay` runs the maintenance pass. Each community's label is the
   model's own theme (`summarize_community` asks for a `Thema:` line via `parse_summary`,
   hub-title fallback), not a page title. `ask --global` (CLI) and the Projekt tab's
   global-search box (`/api/global` → `WikiWebApp.ask_global`) answer thematic questions
@@ -431,7 +452,7 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
 - **`openwiki/cli.py`** — argparse CLI with `init`, `build`, `status`, `project`
   (`list`/`use`/`add`/`remove`/`add-source`), `opencode`, `claude-code`, `ontology`, `ingest`,
   `build-wiki`, `index`, `search`, `eval`, `ask` (`--global` = global search),
-  `chat`, `graph-build`, `communities`, `serve`, and `mcp`
+  `chat`, `graph-build`, `communities`, `decay`, `serve`, and `mcp`
   subcommands. A shared
   `--project` (parent parser) + `_apply_project(args, project)` fill unset
   path/model/host/split-level args from the active project before dispatch (flags

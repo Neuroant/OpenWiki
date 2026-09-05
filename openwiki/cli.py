@@ -326,6 +326,15 @@ def _build_argparser() -> argparse.ArgumentParser:
     comm_p.add_argument("--model", default=None,
                         help="Chat model for the summaries (default: manifest models.chat).")
     comm_p.add_argument("--host", default=None, help="Ollama host URL.")
+
+    decay_p = sub.add_parser("decay", parents=[common],
+                             help="Age the graph's reinforced (usage-memory) edges and prune stale ones.")
+    decay_p.add_argument("--graph", type=Path, default=None,
+                         help="Graph database dir (default: project's graph, else ./output/graph).")
+    decay_p.add_argument("--half-life", type=float, default=30.0,
+                         help="Days after which an unused edge's weight halves (default: 30).")
+    decay_p.add_argument("--floor", type=float, default=0.1,
+                         help="Prune edges whose effective weight falls below this (default: 0.1).")
     return parser
 
 
@@ -997,6 +1006,8 @@ def _apply_project(args: argparse.Namespace, project: Optional[Project],
         path("graph", p.graph_path if p else None, Path("output") / "graph")
         val("model", "models", "chat", DEFAULT_CHAT)
         val("host", "models", "host", DEFAULT_HOST)
+    elif cmd == "decay":
+        path("graph", p.graph_path if p else None, Path("output") / "graph")
 
 
 def _cmd_ingest(args: argparse.Namespace) -> int:
@@ -1455,6 +1466,27 @@ def _cmd_communities(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_decay(args: argparse.Namespace) -> int:
+    """Maintenance pass over the usage-memory edges: age each REINFORCES edge to now
+    (persisting its decayed weight) and prune those below the floor."""
+    graph = _open_graph(args.graph, writable=True)
+    if graph is None:
+        print(f"error: no graph at {args.graph} (run `openwiki graph-build` first).", file=sys.stderr)
+        return 2
+    if not getattr(graph, "writable", False):
+        print("error: graph is locked by another process (stop `serve`/`chat` first).", file=sys.stderr)
+        graph.close()
+        return 2
+    try:
+        result = graph.decay(half_life_days=args.half_life, floor=args.floor)
+    finally:
+        graph.close()
+    print(f"Decayed {result['edges']} reinforced edge(s): "
+          f"{result['decayed']} kept, {result['pruned']} pruned "
+          f"(half-life {args.half_life}d, floor {args.floor}) → {args.graph}")
+    return 0
+
+
 def _cmd_serve(args: argparse.Namespace) -> int:
     index = None
     if (args.index / "index.json").is_file():
@@ -1523,6 +1555,7 @@ _DISPATCH = {
     "mcp": _cmd_mcp,
     "graph-build": _cmd_graph_build,
     "communities": _cmd_communities,
+    "decay": _cmd_decay,
 }
 
 

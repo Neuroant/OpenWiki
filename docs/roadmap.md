@@ -332,9 +332,19 @@ overview). The **Projekt tab** shows a *Themen (Communities)* section (label + s
 a thematic question from the summaries and highlights the cited themes; community labels are
 the model's own theme (not the hub page's title). Global search is also an **MCP**
 `wiki_global` tool (advertised when the graph has communities + a chat model), so coding
-agents get whole-corpus sensemaking alongside `wiki_ask`. Next: no **time/decay** yet;
-surface communities in the **Graph tab** (colour nodes by community); add a **thematic eval
-set** (fuzzy ground truth — lean on the LLM judge).
+agents get whole-corpus sensemaking alongside `wiki_ask`.
+
+**Time/decay usage-memory (v0.43, Path B's first step):** the graph now has a decaying
+`REINFORCES` edge overlay (`graph/decay.py` — pure exponential decay + capped
+reinforcement). GraphRAG expansion on a **writable** graph (serve/chat) strengthens a
+seed→pulled-in edge (Hebbian); `neighborhood`/expansion rank reinforced neighbors by
+*effective* (time-decayed) weight; `openwiki decay` ages every edge to now and prunes the
+faded ones (forgetting). Read-only `ask`/MCP never write. Verified live on informatik:
+repeated retrieval accumulated weight (2.0 for a twice-used edge vs 1.0), and an aggressive
+decay pruned all of it. Next: surface communities in the **Graph tab** (colour nodes by
+community); a **thematic eval set** (fuzzy ground truth — LLM judge); and toward Path B
+proper — reinforcement on the read-path (needs a writable-safe model), **contradiction
+versioning**, and inverting the ingest to sessions/experiences.
 
 ## Related docs
 

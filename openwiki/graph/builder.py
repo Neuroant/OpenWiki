@@ -117,6 +117,9 @@ class GraphBuilder:
         conn.execute("CREATE NODE TABLE Community("
                      "id INT64, label STRING, summary STRING, size INT64, PRIMARY KEY(id));")
         conn.execute("CREATE REL TABLE IN_COMMUNITY(FROM Page TO Community);")
+        # Usage-memory overlay: reinforced page↔page edges that decay over time
+        # (empty until `reinforce()` runs; see openwiki/graph/decay.py).
+        conn.execute("CREATE REL TABLE REINFORCES(FROM Page TO Page, weight DOUBLE, last_seen INT64);")
 
     # -- nodes / structural edges --------------------------------------
 

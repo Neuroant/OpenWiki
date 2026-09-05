@@ -69,8 +69,9 @@ def build_messages(question: str, sources: list[Source]) -> list[Message]:
     ]
 
 
-# Edges worth expanding along: cross-refs, semantic neighbors, shared concepts.
-_EXPAND_RELS = ("references", "referenced_by", "similar", "shared_entity")
+# Edges worth expanding along: cross-refs, semantic neighbors, shared concepts,
+# and reinforced (usage-memory) connections.
+_EXPAND_RELS = ("references", "referenced_by", "similar", "shared_entity", "reinforced")
 
 
 class RAGAgent:
@@ -118,6 +119,15 @@ class RAGAgent:
             return []
 
         related = self.index.best_chunk_per_page(question, candidates)[: self.expand_k]
+        # Hebbian memory: if the graph is writable (serve/chat), strengthen the edge
+        # from the top seed to each page we actually pulled in. Best-effort — never
+        # let a memory write break retrieval, and a no-op on read-only `ask`/MCP.
+        if related and seed_slugs and getattr(self.graph, "writable", False):
+            for r in related:
+                try:
+                    self.graph.reinforce(seed_slugs[0], r.page_slug)
+                except Exception:
+                    pass
         base = len(seeds)
         return [self._source(r, base + i + 1, "related") for i, r in enumerate(related)]
 

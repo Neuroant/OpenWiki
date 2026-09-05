@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 import threading
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -24,6 +25,10 @@ import numpy as np
 
 from .builder import CHUNK_VECTOR_INDEX
 from .community import REFERENCE_WEIGHT, SHARED_ENTITY_WEIGHT
+from .decay import (
+    DEFAULT_BOOST, DEFAULT_FLOOR, DEFAULT_HALF_LIFE_DAYS,
+    effective_weight, reinforced_weight,
+)
 
 
 class GraphStore:
@@ -44,6 +49,7 @@ class GraphStore:
         self._conn = kuzu.Connection(self._db)
         # Re-entrant: an upsert holds the lock across a batch and calls _rows within.
         self._lock = threading.RLock()
+        self._reinforce_ensured = False   # lazy REINFORCES-table check (old graphs)
 
     def close(self) -> None:
         self._conn.close()
@@ -161,6 +167,8 @@ class GraphStore:
                 f"MATCH (:Page {{slug:$s}})-[r:SIMILAR_TO]->(p:Page) "
                 f"RETURN {self._P}, r.score ORDER BY r.score DESC LIMIT $k;",
                 {"s": slug, "k": similar_k}),
+            # Usage-memory neighbors, ranked by time-decayed weight (may be empty).
+            "reinforced": self._reinforced_neighbors(slug, int(time.time()), k=similar_k),
         }
 
         nodes = {slug: {**self._node(center[0]), "rel": "center"}}
@@ -170,7 +178,7 @@ class GraphStore:
                 node = self._node(row)
                 nodes.setdefault(node["slug"], {**node, "rel": rel})
                 edge = {"source": slug, "target": node["slug"], "type": rel}
-                if rel == "similar":
+                if rel in ("similar", "reinforced"):
                     edge["score"] = round(float(row[5]), 3)
                 edges.append(edge)
 
@@ -422,6 +430,90 @@ class GraphStore:
                     "MATCH (p:Page {slug:$s}),(c:Community {id:$id}) "
                     "CREATE (p)-[:IN_COMMUNITY]->(c);", {"s": slug, "id": int(cid)})
         return {"communities": len(sizes), "pages": len(assignment)}
+
+    # -- usage memory: reinforced, time-decaying edges -----------------
+
+    def _ensure_reinforce(self) -> None:
+        """Create the REINFORCES table if a pre-existing graph lacks it (once)."""
+        if self._reinforce_ensured:
+            return
+        try:
+            self._exec("CREATE REL TABLE IF NOT EXISTS REINFORCES("
+                       "FROM Page TO Page, weight DOUBLE, last_seen INT64);")
+        except Exception:  # pragma: no cover - already exists / older syntax
+            pass
+        self._reinforce_ensured = True
+
+    def _reinforced_neighbors(self, slug: str, now: int, k: int = 6,
+                              floor: float = DEFAULT_FLOOR) -> list:
+        """Reinforced neighbors of ``slug`` (either direction), ranked by effective
+        (time-decayed) weight, dropping any below ``floor``. Rows match the ``similar``
+        shape (slug, title, level, pdf_start, pdf_end, score) so the caller reuses them."""
+        try:
+            rows = self._rows(
+                "MATCH (:Page {slug:$s})-[r:REINFORCES]-(p:Page) WHERE p.slug <> $s "
+                "RETURN p.slug, p.title, p.level, p.pdf_start, p.pdf_end, r.weight, r.last_seen;",
+                {"s": slug})
+        except Exception:
+            return []   # table absent on graphs built before this layer
+        best: dict = {}
+        for row in rows:
+            eff = effective_weight(float(row[5] or 0.0), int(row[6] or 0), now)
+            if eff >= floor and eff > best.get(row[0], (None, -1.0))[1]:
+                best[row[0]] = ([row[0], row[1], row[2], row[3], row[4], eff], eff)
+        ranked = sorted((v[0] for v in best.values()), key=lambda x: -x[5])
+        return ranked[:k]
+
+    def reinforce(self, from_slug: str, to_slug: str, now: Optional[int] = None,
+                  boost: float = DEFAULT_BOOST) -> Optional[dict]:
+        """Strengthen (or create) the ``from_slug -> to_slug`` usage edge and stamp it
+        ``now`` — the Hebbian half of the memory model. No-op for a self-edge."""
+        if not self.writable:
+            raise RuntimeError("GraphStore is read-only; open it writable to reinforce.")
+        if from_slug == to_slug:
+            return None
+        now = int(now if now is not None else time.time())
+        self._ensure_reinforce()
+        with self._lock:
+            existing = self._rows(
+                "MATCH (:Page {slug:$a})-[r:REINFORCES]->(:Page {slug:$b}) RETURN r.weight;",
+                {"a": from_slug, "b": to_slug})
+            if existing:
+                w = reinforced_weight(float(existing[0][0] or 0.0), boost)
+                self._exec("MATCH (:Page {slug:$a})-[r:REINFORCES]->(:Page {slug:$b}) "
+                           "SET r.weight=$w, r.last_seen=$t;",
+                           {"a": from_slug, "b": to_slug, "w": w, "t": now})
+            else:
+                w = reinforced_weight(0.0, boost)
+                self._exec("MATCH (a:Page {slug:$a}),(b:Page {slug:$b}) "
+                           "CREATE (a)-[:REINFORCES {weight:$w, last_seen:$t}]->(b);",
+                           {"a": from_slug, "b": to_slug, "w": w, "t": now})
+        return {"from": from_slug, "to": to_slug, "weight": w}
+
+    def decay(self, now: Optional[int] = None,
+              half_life_days: float = DEFAULT_HALF_LIFE_DAYS,
+              floor: float = DEFAULT_FLOOR) -> dict:
+        """Age every REINFORCES edge to ``now`` (persist its decayed weight, reset the
+        clock) and prune those that fall below ``floor``. The 'forgetting' half."""
+        if not self.writable:
+            raise RuntimeError("GraphStore is read-only; open it writable to decay.")
+        now = int(now if now is not None else time.time())
+        self._ensure_reinforce()
+        with self._lock:
+            rows = self._rows("MATCH (a:Page)-[r:REINFORCES]->(b:Page) "
+                              "RETURN a.slug, b.slug, r.weight, r.last_seen;")
+            decayed = pruned = 0
+            for a, b, w, seen in rows:
+                eff = effective_weight(float(w or 0.0), int(seen or 0), now, half_life_days)
+                if eff < floor:
+                    self._exec("MATCH (:Page {slug:$a})-[r:REINFORCES]->(:Page {slug:$b}) DELETE r;",
+                               {"a": a, "b": b})
+                    pruned += 1
+                else:
+                    self._exec("MATCH (:Page {slug:$a})-[r:REINFORCES]->(:Page {slug:$b}) "
+                               "SET r.weight=$w, r.last_seen=$t;", {"a": a, "b": b, "w": eff, "t": now})
+                    decayed += 1
+        return {"edges": len(rows), "decayed": decayed, "pruned": pruned}
 
     def hybrid_search(self, vector, k: int = 5) -> list[dict]:
         """Vector k-NN over chunks, then hop to the owning page (GraphRAG)."""

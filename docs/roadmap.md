@@ -2,21 +2,24 @@
 
 What has been built, in the order it was built — and where it could go next. OpenWiki
 went from a single straight PDF→wiki pipeline to a project-aware, multi-format,
-graph-augmented knowledge platform with a rigorously measured RAG-vs-GraphRAG story.
-The first half of this doc records what shipped; the second half turns forward —
-[open topics](#open-topics--known-limitations) and
+graph-augmented knowledge platform with a rigorously measured RAG-vs-GraphRAG story,
+a **community consolidation layer** (global search), and the first step of a decaying
+**usage-memory** graph. The first half of this doc records what shipped; the second
+half turns forward — [open topics](#open-topics--known-limitations) and
 [prioritized directions](#future-directions-prioritized) for what to build next.
 
-*Provenance:* reconstructed from the git history — 62 commits / 30 tags,
-2026-08-01 → 2026-08-17, v0.6.0 → v0.38.2. Version tags mark the milestones; a few
+*Provenance:* reconstructed from the git history — 70 commits / 37 tags,
+2026-08-01 → 2026-09-05, v0.6.0 → v0.45.0. Version tags mark the milestones; a few
 patch versions between them are omitted here for readability.
 
 ## The arc in one line
 
 A linear IR-based pipeline (**ingest → wiki → index → RAG → edit**) grew a
 **knowledge-graph** layer, a **browser UI**, a **projects** system, **multi-format
-ingestion**, **coding-agent access**, and finally an **evaluation harness** that turned
-"is the graph worth it?" from opinion into numbers.
+ingestion**, **coding-agent access**, an **evaluation harness** that turned
+"is the graph worth it?" from opinion into numbers, a **community consolidation layer**
+(global search over the whole corpus), and a decaying **usage-memory** overlay — the
+first step from "document mirror" toward agent memory.
 
 ---
 
@@ -35,6 +38,7 @@ ingestion**, **coding-agent access**, and finally an **evaluation harness** that
 | 9 | **Source parsers** | v0.33.0–v0.36.0 | Aug 17 | Markdown/text, web (URL/HTML), code-repo parsers behind one dispatch + project wiring |
 | 10 | **Answer-quality eval + the finding** | v0.37.0–v0.38.0 | Aug 17 | `owiki eval --answers/--judge`; surfaced as an async job in the Evaluation tab |
 | 11 | **CLI polish** | v0.38.1–v0.38.2 | Aug 17 | `--eval-set` project-root resolution; `--version` |
+| 12 | **Consolidation layer + usage-memory + measurement (Path A/B)** | v0.39.0–v0.45.0 | Sep 5 | Community detection + LLM summaries + global search across CLI / browser / MCP; time/decay `REINFORCES` memory edges; thematic eval (Global beats RAG 9–1); Graph-tab community colouring |
 
 ---
 
@@ -307,10 +311,11 @@ pipeline. **Direction B (relations)** is the higher-ceiling bet: it's the most l
 to make the graph finally win on *retrieval*, not just answer quality — which would be the
 project's next real finding.
 
-## In progress — a "second brain" consolidation layer
+## Consolidation layer + usage-memory (Path A/B) — era 12 detail
 
-A separate exploration (borrowing Microsoft GraphRAG's best ideas natively rather than
-adopting the library) toward using the graph as agent memory. Framed as two paths:
+Toward using the graph as agent memory, borrowing Microsoft GraphRAG's best ideas natively
+rather than adopting the library. **Path A is complete and validated across CLI/browser/MCP
+(v0.39–v0.45); Path B is opened** (v0.43). Framed as two paths:
 
 - **Path A — in-repo consolidation layer.** Community detection + LLM community summaries
   + global search + (later) time-decayed edges. Native, local, dependency-free, measurable.

@@ -109,6 +109,41 @@ optimising the answer says keep it.
 
 ---
 
+## Finding 3 — global search: the community layer wins on thematic questions
+
+Findings 1–2 are about *local* questions (a fact on a page, or a link between two pages).
+The consolidation layer (`openwiki communities`) targets a different class entirely:
+**thematic / whole-corpus** questions — "what are the main themes", "how do X and Y relate
+across the wiki" — that chunk-RAG structurally can't answer (it retrieves a few chunks and
+answers narrowly). **Global search** answers them instead by synthesizing over the LLM
+community summaries.
+
+To test it we built a 10-question **thematic** set (`eval_thematic.jsonl`, same
+`{"question","pages"}` format but broad questions; `pages` = pages the answering themes
+should cover). `owiki eval --global` generates a global answer and scores its `[n]`
+**community** citations against the ground-truth communities — those containing an expected
+page (mapped via `IN_COMMUNITY`). Metrics: **cite-hit** (cited any relevant theme),
+**community-recall** (fraction of relevant themes cited), **community-precision** (fraction
+of cited themes that are relevant — penalises citing everything). With `--judge`, a
+position-balanced **Global vs plain-RAG** verdict.
+
+| Metric (10 thematic questions) | Global search |
+|---|---:|
+| cite-hit | **100%** |
+| community-recall | **95%** |
+| community-precision | 56.7% |
+| **LLM judge — Global vs RAG** | **9 – 1** |
+
+Global search cites the relevant themes almost perfectly (95% recall) and an LLM judge
+preferred it to plain RAG **9–1**. The moderate precision (56.7%) is expected and honest:
+broad thematic questions legitimately span several communities, so citing 4–5 of 7 is
+reasonable — precision penalises that breadth, recall rewards the coverage. The headline is
+the judge: on the question class it was built for, the community layer decisively beats
+local retrieval — the mirror image of Finding 1 (where the graph *didn't* help local
+retrieval). Same caveats apply (small N, one corpus, judge verbosity/self-preference bias).
+
+---
+
 ## Caveats / threats to validity
 
 - **Small N** (12–14 questions per set), one corpus, one embedder. The result is robust
@@ -153,14 +188,20 @@ Retrieval **+ answer quality** (slow — 2–3 chat calls/question):
 
 ```
 owiki eval --project <proj> --answers --judge
-owiki eval --project <proj> --answers --judge --eval-set <proj>/eval_relational.jsonl
+owiki eval --project <proj> --answers --judge --eval-set eval_relational.jsonl
 ```
 
-Note: the CLI `--eval-set` takes a path relative to the **current directory**, not the
-project root — pass an absolute or project-relative path for a non-default set. (The
-web UI's Evaluation tab resolves bare set names against the project and runs the same
+**Global search** on the thematic set (needs `owiki communities` first):
+
+```
+owiki eval --project <proj> --global --judge --eval-set eval_thematic.jsonl
+```
+
+Note: `--eval-set` accepts a bare name (resolved against the project root) or a path.
+(The web UI's Evaluation tab resolves bare set names against the project and runs the same
 benchmark live, including the answer-quality job as an async background task.)
 
 Implementation: `openwiki/eval.py` (pure metrics + `evaluate` driver + `run_answer_eval`
-/ `grounding` / `judge_pairwise`), wired into the CLI (`owiki eval`) and the web UI
-(`/api/eval`, `/api/compare`, `/api/answer-eval`).
+/ `grounding` / `judge_pairwise` + `run_global_eval` / `community_grounding`), wired into
+the CLI (`owiki eval`, `--answers`/`--global`) and the web UI (`/api/eval`, `/api/compare`,
+`/api/answer-eval`).

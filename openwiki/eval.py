@@ -209,6 +209,66 @@ def judge_pairwise(chat, question: str, answer_a: str, answer_b: str) -> str:
     return match.group(1).lower() if match else "tie"
 
 
+_CITE = re.compile(r"\[(\d+)\]")
+
+
+def community_grounding(cited, gt) -> dict:
+    """Score a global answer's community citations against the ground-truth communities
+    (those containing an expected page). ``cite_hit`` = cited any relevant theme;
+    ``recall`` = fraction of relevant themes cited; ``precision`` = fraction of cited
+    themes that are relevant (penalizes citing everything)."""
+    cited, gt = set(cited), set(gt)
+    return {
+        "cite_hit": bool(cited & gt),
+        "recall": len(cited & gt) / len(gt) if gt else 0.0,
+        "precision": len(cited & gt) / len(cited) if cited else 0.0,
+    }
+
+
+def run_global_eval(items, communities, member_by_marker, chat, index=None,
+                    judge=None, on_progress=None) -> dict:
+    """Evaluate **global search** on a thematic question set. ``communities`` is the
+    ``[(label, summary), …]`` list (marker = 1-based index); ``member_by_marker`` maps
+    each marker to its member page slugs. For each item the ground-truth communities are
+    those containing an expected page; we generate a global answer and score its
+    ``[n]`` community citations (grounding). With ``judge`` (+ ``index``) we also generate
+    a plain-RAG answer and get a position-balanced verdict — does the community layer beat
+    local RAG on thematic questions? Backend-agnostic (chat/index injected)."""
+    from .agent import RAGAgent
+    from .graph.community import answer_global
+
+    items = list(items)
+    acc = {"cite_hit": 0.0, "recall": 0.0, "precision": 0.0}
+    tally = {"Global": 0, "RAG": 0, "tie": 0}
+    rag_agent = RAGAgent(index, chat, graph=None) if (judge is not None and index is not None) else None
+    for i, item in enumerate(items):
+        expected = set(item.expected)
+        gt = {m for m, pages in member_by_marker.items() if expected & set(pages)}
+        global_answer = answer_global(chat, item.question, communities)
+        cited = {int(m) for m in _CITE.findall(global_answer)}
+        g = community_grounding(cited, gt)
+        for key in acc:
+            acc[key] += g[key]
+        if rag_agent is not None:
+            rag_answer = rag_agent.answer(item.question).answer
+            if i % 2 == 0:      # alternate A/B to cancel position bias
+                verdict = judge_pairwise(judge, item.question, global_answer, rag_answer)
+                winner = {"a": "Global", "b": "RAG", "tie": "tie"}[verdict]
+            else:
+                verdict = judge_pairwise(judge, item.question, rag_answer, global_answer)
+                winner = {"a": "RAG", "b": "Global", "tie": "tie"}[verdict]
+            tally[winner] += 1
+        if on_progress:
+            on_progress(i + 1, len(items))
+    div = len(items) or 1
+    return {
+        "questions": len(items),
+        "judged": judge is not None and index is not None,
+        "grounding": {key: acc[key] / div for key in acc},
+        "tally": tally,
+    }
+
+
 def run_answer_eval(items, index, graph, chat, top_k: int = 5, expand_k: int = 3,
                     judge=None, on_progress=None) -> dict:
     """Generate a RAG and a GraphRAG answer per item and score answer quality:

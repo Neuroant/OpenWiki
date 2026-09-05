@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Optional, Sequence
 
 from .agent import RAGAgent
-from .eval import evaluate, load_eval_set, make_retrievers
+from .eval import evaluate, load_eval_set, make_retrievers, run_global_eval
 from .chat_agent import WikiAgent, summarize_wiki
 from .claude_code_template import scaffold_claude_code
 from .opencode_template import scaffold_opencode
@@ -202,7 +202,10 @@ def _build_argparser() -> argparse.ArgumentParser:
     eval_p.add_argument("--answers", action="store_true",
                         help="Also generate RAG & GraphRAG answers and score citation grounding (slow).")
     eval_p.add_argument("--judge", action="store_true",
-                        help="With --answers, an LLM judge picks the better answer per question (slower).")
+                        help="With --answers/--global, an LLM judge picks the better answer per question (slower).")
+    eval_p.add_argument("--global", dest="global_search", action="store_true",
+                        help="Evaluate global search on a thematic set: community grounding "
+                             "(+ --judge = Global vs RAG). Needs a graph with communities.")
     eval_p.add_argument("--limit", type=int, default=None, help="Only evaluate the first N questions.")
     eval_p.add_argument("--model", default=None, help="Chat model for --answers (default: project's models.chat).")
     eval_p.add_argument("--host", default=None, help="Ollama host URL.")
@@ -1160,6 +1163,8 @@ def _cmd_eval(args: argparse.Namespace) -> int:
     if not items:
         print(f"error: eval set is empty: {path}", file=sys.stderr)
         return 2
+    if getattr(args, "global_search", False):
+        return _global_eval(items, path, args)
     if not (args.index / "index.json").is_file():
         print(f"error: no index at {args.index} (run `openwiki index` first).", file=sys.stderr)
         return 2
@@ -1201,6 +1206,50 @@ def _cmd_eval(args: argparse.Namespace) -> int:
 
     if graph is not None:
         graph.close()
+    return 0
+
+
+def _global_eval(items, path, args: argparse.Namespace) -> int:
+    """Thematic eval of global search: generate a global answer per question and score its
+    community citations against the ground-truth communities (those covering an expected
+    page). With --judge, also compare Global vs plain-RAG answers."""
+    graph = _open_graph(args.graph, writable=False)
+    if graph is None or not graph.has_communities():
+        print("error: no communities in the graph. Run `openwiki communities` first.", file=sys.stderr)
+        if graph is not None:
+            graph.close()
+        return 2
+    comms = graph.communities()                                  # size-desc; marker = i+1
+    members = graph.community_members()                          # {id: [slug]}
+    member_by_marker = {i + 1: set(members.get(c["id"], [])) for i, c in enumerate(comms)}
+    community_pairs = [(c["label"], c["summary"]) for c in comms]
+
+    index = None
+    if args.judge:
+        if (args.index / "index.json").is_file():
+            index = SemanticIndex.load(args.index)
+            if isinstance(index.embedder, OllamaEmbedder):
+                index.embedder.host = args.host.rstrip("/")
+        else:
+            print("(--judge needs an index for the RAG comparison; skipping judge)", file=sys.stderr)
+    chat = OllamaChat(model=args.model, host=args.host, temperature=0.2)
+    judge = OllamaChat(model=args.model, host=args.host, temperature=0.0) if (args.judge and index) else None
+
+    subset = items[: args.limit] if args.limit else items
+    print(f"Global eval: {path.name}  ({len(subset)} thematic questions, {len(comms)} communities) "
+          f"— generating answers with {chat.name}{' + judge' if judge else ''} …", file=sys.stderr)
+    result = run_global_eval(subset, community_pairs, member_by_marker, chat, index=index, judge=judge,
+                             on_progress=lambda done, total: print(f"  {done}/{total} done", file=sys.stderr))
+    graph.close()
+
+    g = result["grounding"]
+    print(f"\nGlobal search — community grounding   [{result['questions']} questions]")
+    print(f"  cite-hit {g['cite_hit']:.1%}   ·   community-recall {g['recall']:.1%}   "
+          f"·   community-precision {g['precision']:.1%}")
+    if result["judged"]:
+        t = result["tally"]
+        print(f"\nLLM judge (Global vs RAG, position-balanced):  "
+              f"Global {t['Global']}  ·  RAG {t['RAG']}  ·  tie {t['tie']}")
     return 0
 
 

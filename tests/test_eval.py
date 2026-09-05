@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from openwiki.agent import RAGAnswer, Source
 from openwiki.eval import (
-    EvalItem, cited_page_slugs, evaluate, grounding, hit_at_k, judge_pairwise,
-    load_eval_set, recall_at_k, reciprocal_rank,
+    EvalItem, cited_page_slugs, community_grounding, evaluate, grounding, hit_at_k,
+    judge_pairwise, load_eval_set, recall_at_k, reciprocal_rank, run_global_eval,
 )
 
 RANKED = ["a", "b", "c", "d"]
@@ -77,6 +77,45 @@ def test_run_answer_eval_aggregates(monkeypatch):
     # both answers cite 'a': q1 (expected 'a') hits, q2 (expected 'b') doesn't → 50%
     assert result["grounding"]["RAG"]["cite_hit"] == 0.5
     assert result["tally"]["tie"] == 2
+
+
+# -- global (thematic) eval ----------------------------------------------------
+
+class _GlobalChat:
+    name = "fake:global"
+
+    def __init__(self, reply):
+        self.reply = reply
+
+    def chat(self, messages):
+        return self.reply
+
+
+def test_community_grounding_precision_and_recall():
+    assert community_grounding({1, 2}, {2, 3}) == {"cite_hit": True, "recall": 0.5, "precision": 0.5}
+    assert community_grounding({1}, set())["cite_hit"] is False          # no relevant themes exist
+    assert community_grounding(set(), {1})["precision"] == 0.0           # cited nothing
+
+
+def test_run_global_eval_grounding_only():
+    items = [EvalItem("q1", ["a1"]), EvalItem("q2", ["b1", "c1"])]
+    communities = [("A", "sa"), ("B", "sb"), ("C", "sc")]                # markers 1,2,3
+    members = {1: {"a1", "a2"}, 2: {"b1"}, 3: {"c1"}}
+    chat = _GlobalChat("Antwort [1] [2].")                              # cites themes 1 & 2 every time
+    r = run_global_eval(items, communities, members, chat)
+    assert r["questions"] == 2 and r["judged"] is False
+    assert r["grounding"]["cite_hit"] == 1.0                            # each hits a relevant theme
+    assert r["grounding"]["recall"] == 0.75                             # q1 1/1, q2 1/2
+    assert r["grounding"]["precision"] == 0.5                           # 1 of 2 cited themes relevant
+
+
+def test_run_global_eval_judges_global_vs_rag():
+    items = [EvalItem("q1", ["a"]), EvalItem("q2", ["b"])]
+    communities = [("A", "sa"), ("B", "sb")]
+    members = {1: {"a"}, 2: {"b"}}
+    index = _FakeIndex(["a", "b", "c"])
+    r = run_global_eval(items, communities, members, _FakeChat(), index=index, judge=_Judge("tie"))
+    assert r["judged"] is True and r["tally"]["tie"] == 2
 
 
 def test_reciprocal_rank():

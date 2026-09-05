@@ -422,6 +422,14 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   answer cite a ground-truth page? — objective, from the eval set); `--judge` adds an
   **LLM-as-judge** pairwise verdict (`eval.judge_pairwise`, position-balanced across questions
   to cancel A/B bias). Slow (2–3 chat calls/question); `--limit N` for a subset.
+  **`owiki eval --global`** evaluates **global search** on a *thematic* question set
+  (`eval_thematic.jsonl`: same `{"question","pages"}` format, but broad "how do X and Y
+  relate / what are the themes" questions): `eval.run_global_eval` generates a global
+  answer per question and scores its `[n]` **community** citations against the
+  ground-truth communities (those covering an expected page, via `IN_COMMUNITY` /
+  `GraphStore.community_members`) — `eval.community_grounding` = cite-hit / community-recall
+  / community-precision. `--judge` adds a position-balanced **Global vs RAG** verdict — the
+  honest test of whether the community layer beats local RAG on the question class it's for.
 - **`openwiki/merge.py`** — `combine_documents(docs, names)` merges several
   `ParsedDocument`s into one corpus (concatenate pages with a running offset, shift
   table/image page numbers, wrap each source under a synthetic level-1 outline node

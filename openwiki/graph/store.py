@@ -378,6 +378,18 @@ class GraphStore:
             return []
         return [{"id": r[0], "label": r[1], "summary": r[2], "size": r[3]} for r in rows]
 
+    def community_members(self) -> dict:
+        """``{community_id: [page_slug, …]}`` from the IN_COMMUNITY edges (for the
+        thematic eval: map a cited community back to the pages it covers)."""
+        try:
+            rows = self._rows("MATCH (p:Page)-[:IN_COMMUNITY]->(c:Community) RETURN c.id, p.slug;")
+        except Exception:
+            return {}
+        out: dict = {}
+        for cid, slug in rows:
+            out.setdefault(int(cid), []).append(slug)
+        return out
+
     def page_graph(self) -> dict:
         """The undirected, weighted Page↔Page graph for community detection:
         SIMILAR_TO (by score) ∪ REFERENCES ∪ shared-entity, folded per unordered pair.

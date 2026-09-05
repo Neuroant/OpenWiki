@@ -341,10 +341,21 @@ seed→pulled-in edge (Hebbian); `neighborhood`/expansion rank reinforced neighb
 *effective* (time-decayed) weight; `openwiki decay` ages every edge to now and prunes the
 faded ones (forgetting). Read-only `ask`/MCP never write. Verified live on informatik:
 repeated retrieval accumulated weight (2.0 for a twice-used edge vs 1.0), and an aggressive
-decay pruned all of it. Next: surface communities in the **Graph tab** (colour nodes by
-community); a **thematic eval set** (fuzzy ground truth — LLM judge); and toward Path B
-proper — reinforcement on the read-path (needs a writable-safe model), **contradiction
-versioning**, and inverting the ingest to sessions/experiences.
+decay pruned all of it.
+
+**Thematic eval (v0.44) — the community layer pays off, measured.** `owiki eval --global`
+scores **global search** on a thematic question set (`eval_thematic.jsonl`: broad "how do X
+and Y relate / what are the themes" questions): it generates a global answer and scores its
+`[n]` **community** citations against the ground-truth communities (those covering an
+expected page, via `IN_COMMUNITY`) — cite-hit / community-recall / community-precision
+(`eval.run_global_eval` / `community_grounding`). On informatik (10 questions): cite-hit
+**100%**, community-recall **95%**, precision **56.7%** (broad questions legitimately span
+themes), and — the headline — an LLM judge preferred **Global over plain RAG 9–1**. So the
+community layer earns its keep on exactly the question class it was built for, the way
+GraphRAG earns its on answer quality. Next: surface communities in the **Graph tab** (colour
+nodes by community); and toward Path B proper — reinforcement on the read-path (needs a
+writable-safe model), **contradiction versioning**, and inverting the ingest to
+sessions/experiences.
 
 ## Related docs
 

@@ -341,9 +341,13 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   (served `no-cache`); `serve()` runs it.
   The Graph tab is a hand-rolled **force-directed explorer** (`app.js`: `physicsTick`
   spring/charge sim, click-to-expand / double-click-to-collapse via a `parent`
-  (introducer) pointer + `descendantsOf`, drag, edge-type filters, active-subgraph
-  focus highlight (selected node's subtree emphasised, rest dimmed), greedy
-  `declutterLabels` collision culling using real `getBBox` widths) — no JS libraries. `static/` = a no-build vanilla-JS SPA with client-side Markdown via a
+  (introducer) pointer + `descendantsOf`, drag, edge-type filters (incl. the
+  `reinforced` usage edges), active-subgraph focus highlight (selected node's subtree
+  emphasised, rest dimmed), greedy `declutterLabels` collision culling using real
+  `getBBox` widths). Page nodes are **coloured by community** (`communityFill` +
+  `COMMUNITY_PALETTE`, keyed by the node's `community` id from `_page_gnode` →
+  `GraphStore._community_of`), with a swatch legend + a "Themenfarben" toggle
+  (fetched from `/api/communities`; neutral blue when off or no communities) — no JS libraries. `static/` = a no-build vanilla-JS SPA with client-side Markdown via a
   vendored `marked.min.js`. The center pane has six tabs (**Projekt / Wiki /
   Graph / Evaluation / Tutorial / Hilfe**). The **Evaluation tab** (`renderEval`,
   backed by `/api/eval` → `WikiWebApp.run_eval()`, reusing `eval.make_retrievers`)

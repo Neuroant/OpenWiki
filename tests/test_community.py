@@ -164,6 +164,36 @@ def test_community_layer_roundtrip_in_graph(tmp_path):
         store.close()
 
 
+def test_graph_page_nodes_carry_community(tmp_path):
+    import pytest
+    pytest.importorskip("kuzu")
+    from openwiki.graph import GraphBuilder, GraphStore
+    from openwiki.search import SemanticIndex
+    from openwiki.wiki import Wiki, WikiPage
+
+    pages = [WikiPage(slug=f"00{i}-p", title=t, level=1, order=i, pdf_page_start=i + 1,
+                      pdf_page_end=i + 1, text=txt)
+             for i, (t, txt) in enumerate(
+                 [("Alpha", "alpha nautilus"), ("Beta", "beta nautilus"), ("Gamma", "gamma nautilus")])]
+    wiki = Wiki(title="T", pages=pages, source="x.pdf", split_level=2)
+    index = SemanticIndex.build(wiki, _FakeEmbedder(), size_words=50, overlap_words=10)
+    GraphBuilder(tmp_path / "graph", similar_k=3).build(wiki, index)
+
+    store = GraphStore(tmp_path / "graph", writable=True)
+    try:
+        assert store.explore("000-p")["nodes"][0]["community"] is None   # none before consolidation
+        pg = store.page_graph()
+        assignment = detect_communities(pg["edges"], list(pg["pages"]))
+        cids = set(assignment.values())
+        store.upsert_communities(assignment, {c: "s" for c in cids}, {c: "l" for c in cids})
+        store._page_comm = None                                          # drop the lazy cache
+
+        root = store.explore("000-p")["nodes"][0]
+        assert root["root"] and root["community"] == assignment["000-p"]  # colored by its community
+    finally:
+        store.close()
+
+
 def test_webapp_surfaces_communities(tmp_path):
     import pytest
     pytest.importorskip("kuzu")

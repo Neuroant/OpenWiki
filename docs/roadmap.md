@@ -352,10 +352,15 @@ expected page, via `IN_COMMUNITY`) — cite-hit / community-recall / community-p
 **100%**, community-recall **95%**, precision **56.7%** (broad questions legitimately span
 themes), and — the headline — an LLM judge preferred **Global over plain RAG 9–1**. So the
 community layer earns its keep on exactly the question class it was built for, the way
-GraphRAG earns its on answer quality. Next: surface communities in the **Graph tab** (colour
-nodes by community); and toward Path B proper — reinforcement on the read-path (needs a
-writable-safe model), **contradiction versioning**, and inverting the ingest to
-sessions/experiences.
+GraphRAG earns its on answer quality.
+
+**Graph-tab community colouring (v0.45)** completes Path A's UI: the explorer colours page
+nodes by their community (`_page_gnode` carries the id → `communityFill`/`COMMUNITY_PALETTE`),
+with a swatch legend + a "Themenfarben" toggle, and the `reinforced` usage edges got a filter
+chip too. **Path A is now complete and validated across CLI/browser/MCP.** Next, toward Path B
+proper: reinforcement on the read-path (needs a writable-safe concurrency model),
+**contradiction versioning** (time-versioned edges so newer facts supersede older ones — the
+novel, unshipped-anywhere piece), and inverting the ingest to sessions/experiences.
 
 ## Related docs
 

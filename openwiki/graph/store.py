@@ -50,6 +50,7 @@ class GraphStore:
         # Re-entrant: an upsert holds the lock across a batch and calls _rows within.
         self._lock = threading.RLock()
         self._reinforce_ensured = False   # lazy REINFORCES-table check (old graphs)
+        self._page_comm: Optional[dict] = None   # lazy {slug: community_id} for coloring
 
     def close(self) -> None:
         self._conn.close()
@@ -190,9 +191,17 @@ class GraphStore:
     # entity key — the two never collide). Edges are typed. The frontend keeps an
     # accumulating graph and expands nodes on click.
 
+    def _community_of(self, slug: str):
+        """The community id a page belongs to (or None) — for Graph-tab coloring."""
+        if self._page_comm is None:
+            self._page_comm = {s: cid for cid, slugs in self.community_members().items()
+                               for s in slugs}
+        return self._page_comm.get(slug)
+
     def _page_gnode(self, row) -> dict:
         return {"id": row[0], "kind": "page", "label": row[1],
-                "pdf_start": row[3], "pdf_end": row[4]}
+                "pdf_start": row[3], "pdf_end": row[4],
+                "community": self._community_of(row[0])}
 
     def _page_entities(self, slug: str, k: int) -> list[list]:
         # A page's entities, most cross-cutting first (by how many pages mention them).

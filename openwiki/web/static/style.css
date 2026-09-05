@@ -74,6 +74,12 @@ header {
 .graph-filter i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
 .graph-filter.off { opacity: 0.4; text-decoration: line-through; }
 
+/* community (theme) colour legend */
+.graph-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-bottom: 8px; }
+.graph-legend:empty { display: none; }
+.legend-item { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; }
+.legend-item i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+
 .graph-svg { width: 100%; height: auto; border: 1px solid var(--line);
   border-radius: 10px; background: #fbfcfd; touch-action: none; }
 .gnode { cursor: pointer; }

@@ -646,7 +646,7 @@ function renderAnswerEvalJob(job) {
 const SVG_NS = "http://www.w3.org/2000/svg";
 const EDGE_COLOR = { parent: "#7048e8", child: "#7048e8", prev: "#868e96", next: "#868e96",
                      similar: "#2f9e44", references: "#e8590c", referenced_by: "#e8590c",
-                     shared_entity: "#0c8599", mentions: "#f08c00" };
+                     shared_entity: "#0c8599", mentions: "#f08c00", reinforced: "#c2255c" };
 // Legend/filter groups (a click toggles a whole relationship kind on/off).
 const FILTERS = [
   { key: "hier",    label: "Hierarchie",          types: ["parent", "child"],          color: "#7048e8" },
@@ -655,15 +655,30 @@ const FILTERS = [
   { key: "ref",     label: "Verweise",            types: ["references", "referenced_by"], color: "#e8590c" },
   { key: "shared",  label: "Gemeinsame Begriffe", types: ["shared_entity"],            color: "#0c8599" },
   { key: "entity",  label: "Begriffe (Entitäten)", types: ["mentions"],                color: "#f08c00" },
+  { key: "reinforced", label: "Verstärkt (Nutzung)", types: ["reinforced"],            color: "#c2255c" },
 ];
 const TYPE_FILTER = {};
 FILTERS.forEach((f) => f.types.forEach((t) => (TYPE_FILTER[t] = f.key)));
+
+// Distinct fills for community (theme) coloring of page nodes, by community id.
+const COMMUNITY_PALETTE = [
+  "#4dabf7", "#38d9a9", "#ffa94d", "#da77f2", "#ff8787", "#a9e34b", "#3bc9db",
+  "#ffd43b", "#748ffc", "#f783ac", "#63e6be", "#ffc078",
+];
 
 const GW = 900, GH = 600;   // SVG viewBox
 // The live explorer graph (accumulates as you expand nodes).
 const graph = { nodes: new Map(), edges: [], root: null, selected: null,
                 hidden: new Set(), svg: null, raf: 0, alpha: 0,
+                communities: [], communityColor: {}, colorByTheme: true,
                 _nodeEls: new Map(), _edgeEls: [] };
+
+// Page-node fill: by community (theme) when enabled, else the default blue.
+function communityFill(n) {
+  if (graph.colorByTheme && n.community != null && graph.communityColor[n.community])
+    return graph.communityColor[n.community];
+  return n.root ? "#3b5bdb" : "#4dabf7";
+}
 
 function svgEl(tag, attrs) {
   const el = document.createElementNS(SVG_NS, tag);
@@ -679,13 +694,24 @@ async function renderGraph() {
   }
   content.innerHTML = `<p class="muted">Graph wird geladen…</p>`;
   try {
-    const data = await getJSON("/api/graph/" + encodeURIComponent(state.currentSlug));
+    const [data, comm] = await Promise.all([
+      getJSON("/api/graph/" + encodeURIComponent(state.currentSlug)),
+      getJSON("/api/communities").catch(() => ({ communities: [] })),
+    ]);
+    setCommunityColors(comm.communities || []);
     initGraph(content, data);
   } catch (e) {
     content.innerHTML = `<p class="muted">Graph nicht verfügbar: ${escapeHtml(e.message)}` +
       `<br><span class="muted">Erzeuge ihn mit <code>openwiki graph-build</code> ` +
       `(Entitäten mit <code>--entities</code>).</span></p>`;
   }
+}
+
+function setCommunityColors(list) {
+  graph.communities = list;
+  graph.communityColor = {};
+  list.forEach((c) => (graph.communityColor[c.id] = COMMUNITY_PALETTE[c.id % COMMUNITY_PALETTE.length]));
+  graph.colorByTheme = list.length > 0;   // on by default when the graph has communities
 }
 
 function initGraph(content, data) {
@@ -728,6 +754,28 @@ function isEdgeHidden(e) {
   const fk = TYPE_FILTER[e.type];
   if (fk && graph.hidden.has(fk)) return true;
   return isNodeHidden(graph.nodes.get(e.source)) || isNodeHidden(graph.nodes.get(e.target));
+}
+
+// A "Themenfarben" toggle + a swatch-per-community legend (empty when none).
+function buildThemeLegend(content) {
+  const legend = document.createElement("div");
+  legend.className = "graph-legend";
+  if (!graph.communities.length) return legend;
+  const toggle = document.createElement("button");
+  toggle.className = "graph-filter" + (graph.colorByTheme ? "" : " off");
+  toggle.textContent = "Themenfarben";
+  toggle.addEventListener("click", () => { graph.colorByTheme = !graph.colorByTheme; buildGraphDom(content); });
+  legend.appendChild(toggle);
+  if (graph.colorByTheme) {
+    graph.communities.forEach((c) => {
+      const item = document.createElement("span");
+      item.className = "legend-item";
+      item.innerHTML = `<i style="background:${graph.communityColor[c.id]}"></i>` +
+        `${escapeHtml(c.label)} <span class="muted">(${c.size})</span>`;
+      legend.appendChild(item);
+    });
+  }
+  return legend;
 }
 
 function buildGraphDom(content) {
@@ -818,7 +866,7 @@ function buildGraphDom(content) {
         transform: "rotate(45)", fill: "#f08c00", stroke: "#fff", "stroke-width": 2 }));
     } else {
       g.appendChild(svgEl("circle", { r: n.root ? 13 : 9,
-        fill: n.root ? "#3b5bdb" : "#4dabf7", stroke: "#fff", "stroke-width": 2 }));
+        fill: communityFill(n), stroke: "#fff", "stroke-width": 2 }));
     }
     const label = svgEl("text", { y: -14, "text-anchor": "middle", class: "graph-label" });
     label.textContent = n.label.length > 24 ? n.label.slice(0, 24) + "…" : n.label;
@@ -834,7 +882,7 @@ function buildGraphDom(content) {
     n._lw = undefined;  // real width measured lazily via getBBox() once rendered
   });
 
-  content.append(bar, filters, svg);
+  content.append(bar, filters, buildThemeLegend(content), svg);
   content.scrollTop = 0;
 }
 

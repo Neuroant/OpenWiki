@@ -119,6 +119,11 @@ def test_communities_without_graph(app):
     assert app.communities() == []                   # no graph → no communities
 
 
+def test_ask_global_needs_communities(app):
+    with pytest.raises(RuntimeError):                 # app fixture has no graph/communities
+        app.ask_global("Was sind die Hauptthemen?")
+
+
 def test_answer_eval_needs_a_graph(app):
     assert app.answer_eval_status() == {"status": "idle"}
     result = app.start_answer_eval()                 # app fixture has no graph
@@ -218,6 +223,15 @@ def test_http_api_project(base_url):
 def test_http_api_communities(base_url):
     status, body = _get(base_url + "/api/communities")
     assert status == 200 and json.loads(body)["communities"] == []  # no graph in the fixture
+
+
+def test_http_api_global_no_communities(base_url):
+    req = urllib.request.Request(
+        base_url + "/api/global", data=json.dumps({"question": "Themen?"}).encode(),
+        headers={"Content-Type": "application/json"})
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        urllib.request.urlopen(req, timeout=5)
+    assert exc.value.code == 503                      # no communities → service unavailable
 
 
 def test_http_static_help_doc(base_url):

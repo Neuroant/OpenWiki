@@ -9,6 +9,7 @@ Ollama; a lock serializes the (stateful, single-user) agent.
 from __future__ import annotations
 
 import json
+import re
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -213,6 +214,29 @@ class WikiWebApp:
             return self.graph.communities()
         except Exception:
             return []
+
+    def ask_global(self, question: str) -> dict:
+        """Global search: answer a thematic question from the community summaries
+        (one chat call). The answer's ``[n]`` markers index the returned communities
+        (same size-desc order as the CLI ``ask --global``). Read-only."""
+        from ..graph.community import answer_global
+
+        question = (question or "").strip()
+        if not question:
+            raise RuntimeError("empty question")
+        comms = self.communities()
+        if not comms:
+            raise RuntimeError("No communities in the graph. Run `openwiki communities` first.")
+        chat = getattr(self.agent, "chat", None)
+        if chat is None:
+            raise RuntimeError("No chat model is available.")
+        answer = answer_global(chat, question, [(c["label"], c["summary"]) for c in comms])
+        cited = sorted({int(m) for m in re.findall(r"\[(\d+)\]", answer)})
+        return {
+            "question": question, "answer": answer, "cited": cited,
+            "communities": [{"marker": i + 1, "label": c["label"], "size": c["size"]}
+                            for i, c in enumerate(comms)],
+        }
 
     def _eval_root(self) -> Path:
         return self.project.root if self.project is not None else self.wiki_dir.parent
@@ -484,6 +508,11 @@ def make_handler(app: WikiWebApp):
                     return self._json(app.compare(
                         question, int(data.get("top_k", 5)), int(data.get("expand_k", 3)),
                         bool(data.get("answers", False))))
+                if path == "/api/global":
+                    question = (data.get("question") or "").strip()
+                    if not question:
+                        return self._json({"error": "empty question"}, 400)
+                    return self._json(app.ask_global(question))
                 if path == "/api/answer-eval":
                     return self._json(app.start_answer_eval(
                         int(data.get("top_k", 5)), int(data.get("expand_k", 3)),

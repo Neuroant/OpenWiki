@@ -300,11 +300,12 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   chat-injected `summarize_community` / `answer_global` helpers. The `communities`
   CLI command detects + summarizes (one LLM call per community, not per page) and
   `GraphStore.upsert_communities` writes `Community` nodes + `IN_COMMUNITY` edges
-  (always-created empty tables, like Entity/MENTIONS). `ask --global` then answers
-  thematic questions from the summaries (`GraphStore.communities()`) — global
-  search over a corpus that chunk-RAG can't do. (Known rough edge: community
-  *labels* use the hub page's title, weak when the hub is front/back-matter;
-  deriving the label from the summary is a follow-up.)
+  (always-created empty tables, like Entity/MENTIONS). Each community's label is the
+  model's own theme (`summarize_community` asks for a `Thema:` line via `parse_summary`,
+  hub-title fallback), not a page title. `ask --global` (CLI) and the Projekt tab's
+  global-search box (`/api/global` → `WikiWebApp.ask_global`) answer thematic questions
+  from the summaries (`GraphStore.communities()`) — global search over a corpus that
+  chunk-RAG can't do.
 - **`openwiki/web/`** — the web UI. `server.py` = `WikiWebApp` (state) + a
   `ThreadingHTTPServer` handler exposing a JSON API (`/api/wiki`,
   `/api/pages/{slug}`, `/api/search`, `/api/chat`, `/api/graph/{slug}` = explore,
@@ -312,7 +313,9 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   `/api/eval?top_k=&expand_k=&eval_set=` = the retrieval benchmark, `/api/eval-sets`
   = the project's `*.jsonl` eval sets, `/api/compare` (POST) = one question through
   RAG + GraphRAG side by side, `/api/answer-eval` (GET status / POST start) = the
-  async answer-quality job, `/api/health` = KB quality metrics) plus static files
+  async answer-quality job, `/api/health` = KB quality metrics, `/api/communities` =
+  the graph's topical communities, `/api/global` (POST) = a thematic answer from the
+  community summaries) plus static files
   (served `no-cache`); `serve()` runs it.
   The Graph tab is a hand-rolled **force-directed explorer** (`app.js`: `physicsTick`
   spring/charge sim, click-to-expand / double-click-to-collapse via a `parent`
@@ -343,7 +346,9 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   settings (build/models/graph/serve), the entity **ontology**, live graph stats
   from `GraphStore.stats()` (node/edge counts + an entity-type distribution bar
   chart), a **Themen (Communities)** section (label + size + LLM summary cards, from
-  `WikiWebApp.communities()` → `GraphStore.communities()`, also at `/api/communities`),
+  `WikiWebApp.communities()` → `GraphStore.communities()`, also at `/api/communities`) —
+  with a **global-search box** (`runGlobalAsk` → `/api/global` → `WikiWebApp.ask_global`)
+  answering a thematic question from those summaries and highlighting the cited themes,
   the semantic-index summary (model/dim/chunks), and the registered-project
   list — it renders `{"project": null}` gracefully when served outside a project.
   Tutorial actions are `run:<kind>:<arg>` links (`page`/`search`/`ask`/`tab`) that

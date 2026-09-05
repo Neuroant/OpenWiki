@@ -204,6 +204,27 @@ header {
 .comm-size { color: var(--muted); font-size: 12px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .comm-summary { margin: 4px 0 0; font-size: 13px; line-height: 1.45; }
 
+/* global search box (thematic question over the community summaries) */
+.global-ask { margin: 10px 0 2px; max-width: 760px; }
+.global-ask-row { display: flex; gap: 8px; }
+.global-ask-row input {
+  flex: 1; padding: 7px 10px; border: 1px solid var(--line); border-radius: 6px;
+  font-size: 13px; background: var(--bg); color: inherit;
+}
+.global-ask-row button {
+  padding: 7px 14px; border: 0; border-radius: 6px; background: var(--accent); color: #fff;
+  font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap;
+}
+.global-ask-row button:disabled { opacity: .55; cursor: default; }
+.global-hint { margin: 4px 0 0; font-size: 12px; }
+.global-result { margin-top: 10px; }
+.global-answer {
+  border: 1px solid var(--line); border-radius: 8px; padding: 4px 14px;
+  background: var(--bg); font-size: 14px; line-height: 1.55;
+}
+.gc-list { margin-top: 4px; }
+.gc-marker { color: var(--muted); font-variant-numeric: tabular-nums; }
+
 /* -- evaluation tab -- */
 .eval-view h3 { margin: 20px 0 6px; font-size: 15px; }
 .eval-view h4 { margin: 14px 0 4px; font-size: 12px; color: var(--muted); font-weight: 700;

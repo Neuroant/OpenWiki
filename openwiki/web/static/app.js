@@ -243,6 +243,16 @@ async function renderProject() {
           `<p class="comm-summary">${esc(c.summary || "")}</p></div>`).join("")}</div>`
       : `<p class="muted">Keine Communities — mit <code>openwiki communities</code> erzeugen ` +
         `(ermöglicht <code>openwiki ask --global</code>).</p>`;
+    // Global search: a thematic question answered from the community summaries.
+    const askBox = comms.length ? `<div class="global-ask">
+        <div class="global-ask-row">
+          <input id="global-q" type="text" autocomplete="off"
+                 placeholder="Thematische Frage über das gesamte Wissen…" />
+          <button id="global-ask-btn">Global fragen</button>
+        </div>
+        <p class="muted global-hint">Beantwortet aus den Themen-Zusammenfassungen oben (ein Chat-Aufruf).</p>
+        <div id="global-result" class="global-result"></div>
+      </div>` : "";
 
     const registry = (data.registry || []).map((r) =>
       `<li>${r.active ? "★" : "•"} <code>${esc(r.name)}</code> <span class="muted">${esc(r.path)}</span></li>`
@@ -269,15 +279,44 @@ async function renderProject() {
 
       <h3>Wissensgraph</h3>${graphHtml}
 
-      <h3>Themen <span class="muted">(Communities · ${comms.length})</span></h3>${commHtml}
+      <h3>Themen <span class="muted">(Communities · ${comms.length})</span></h3>${commHtml}${askBox}
 
       <h3>Semantischer Index</h3>${indexHtml}
 
       <h3>Registrierte Projekte</h3><ul class="proj-list">${registry}</ul>
     </div>`;
+    const askBtn = $("#global-ask-btn");
+    if (askBtn) {
+      askBtn.addEventListener("click", runGlobalAsk);
+      $("#global-q").addEventListener("keydown", (e) => { if (e.key === "Enter") runGlobalAsk(); });
+    }
     content.scrollTop = 0;
   } catch (e) {
     content.innerHTML = `<p class="muted">Projekt nicht verfügbar: ${escapeHtml(e.message)}</p>`;
+  }
+}
+
+// Global search: a thematic question answered from the community summaries.
+async function runGlobalAsk() {
+  const input = $("#global-q");
+  const q = (input && input.value || "").trim();
+  if (!q) return;
+  const btn = $("#global-ask-btn"), out = $("#global-result");
+  if (btn) btn.disabled = true;
+  if (out) out.innerHTML = `<p class="muted">Antwort wird generiert… (kann 10–30 s dauern)</p>`;
+  try {
+    const d = await postJSON("/api/global", { question: q });
+    const cited = new Set(d.cited || []);
+    const comms = (d.communities || []).map((c) =>
+      `<li>${cited.has(c.marker) ? "★" : "•"} <span class="gc-marker">[${c.marker}]</span> ` +
+      `${escapeHtml(c.label)} <span class="muted">(${c.size} Seiten)</span></li>`).join("");
+    out.innerHTML = `<div class="global-answer">${marked.parse(d.answer || "")}</div>` +
+      `<h4>Communities <span class="muted">(★ = zitiert)</span></h4>` +
+      `<ul class="proj-list gc-list">${comms}</ul>`;
+  } catch (e) {
+    if (out) out.innerHTML = `<p class="muted">Global-Suche fehlgeschlagen: ${escapeHtml(e.message)}</p>`;
+  } finally {
+    if (btn) btn.disabled = false;
   }
 }
 

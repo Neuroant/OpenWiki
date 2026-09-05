@@ -199,9 +199,20 @@ class WikiWebApp:
                 "ontology": ontology,
                 "index": index_info,
                 "graph": graph_stats,
+                "communities": self.communities(),
             },
             "registry": registry,
         }
+
+    def communities(self) -> list:
+        """The graph's topical communities + LLM summaries (empty without a graph or
+        before ``openwiki communities`` has run). For the Projekt tab / ``/api/communities``."""
+        if self.graph is None:
+            return []
+        try:
+            return self.graph.communities()
+        except Exception:
+            return []
 
     def _eval_root(self) -> Path:
         return self.project.root if self.project is not None else self.wiki_dir.parent
@@ -432,6 +443,8 @@ def make_handler(app: WikiWebApp):
                     return self._json(app.run_eval(top_k, expand_k, eval_set))
                 if path == "/api/health":
                     return self._json(app.health_stats())
+                if path == "/api/communities":
+                    return self._json({"communities": app.communities()})
                 if path == "/api/answer-eval":
                     return self._json(app.answer_eval_status())
                 if path.startswith("/api/pages/"):

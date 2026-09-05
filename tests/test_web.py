@@ -115,6 +115,10 @@ def test_health_stats_without_graph(app):
     assert app.health_stats() == {"graph": False}   # app fixture has no graph
 
 
+def test_communities_without_graph(app):
+    assert app.communities() == []                   # no graph → no communities
+
+
 def test_answer_eval_needs_a_graph(app):
     assert app.answer_eval_status() == {"status": "idle"}
     result = app.start_answer_eval()                 # app fixture has no graph
@@ -209,6 +213,11 @@ def test_http_index_html_has_tabs(base_url):
 def test_http_api_project(base_url):
     status, body = _get(base_url + "/api/project")
     assert status == 200 and json.loads(body)["project"] is None  # app fixture has no project
+
+
+def test_http_api_communities(base_url):
+    status, body = _get(base_url + "/api/communities")
+    assert status == 200 and json.loads(body)["communities"] == []  # no graph in the fixture
 
 
 def test_http_static_help_doc(base_url):

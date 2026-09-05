@@ -234,6 +234,16 @@ async function renderProject() {
       graphHtml = `<p class="muted">Kein Graph geladen (mit <code>openwiki build</code> erzeugen).</p>`;
     }
 
+    const comms = p.communities || [];
+    const commHtml = comms.length
+      ? `<div class="comm-list">${comms.map((c) =>
+          `<div class="comm-card"><div class="comm-head">` +
+          `<span class="comm-label">${esc(c.label)}</span>` +
+          `<span class="comm-size">${c.size} Seiten</span></div>` +
+          `<p class="comm-summary">${esc(c.summary || "")}</p></div>`).join("")}</div>`
+      : `<p class="muted">Keine Communities — mit <code>openwiki communities</code> erzeugen ` +
+        `(ermöglicht <code>openwiki ask --global</code>).</p>`;
+
     const registry = (data.registry || []).map((r) =>
       `<li>${r.active ? "★" : "•"} <code>${esc(r.name)}</code> <span class="muted">${esc(r.path)}</span></li>`
     ).join("") || `<li class="muted">(keine registrierten Projekte)</li>`;
@@ -258,6 +268,8 @@ async function renderProject() {
       <h3>Ontologie <span class="muted">(Entitätstypen)</span></h3>${ontHtml}
 
       <h3>Wissensgraph</h3>${graphHtml}
+
+      <h3>Themen <span class="muted">(Communities · ${comms.length})</span></h3>${commHtml}
 
       <h3>Semantischer Index</h3>${indexHtml}
 

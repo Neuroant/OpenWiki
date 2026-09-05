@@ -342,7 +342,9 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   project's knowledge model: sources, per-stage build status, **all** pipeline
   settings (build/models/graph/serve), the entity **ontology**, live graph stats
   from `GraphStore.stats()` (node/edge counts + an entity-type distribution bar
-  chart), the semantic-index summary (model/dim/chunks), and the registered-project
+  chart), a **Themen (Communities)** section (label + size + LLM summary cards, from
+  `WikiWebApp.communities()` → `GraphStore.communities()`, also at `/api/communities`),
+  the semantic-index summary (model/dim/chunks), and the registered-project
   list — it renders `{"project": null}` gracefully when served outside a project.
   Tutorial actions are `run:<kind>:<arg>` links (`page`/`search`/`ask`/`tab`) that
   `app.js` intercepts and drives against the live UI. Reuses

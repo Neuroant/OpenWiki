@@ -327,10 +327,11 @@ community (cheap: a handful of calls, not one per page), stored as `Community` n
 `IN_COMMUNITY` edges. **`ask --global`** answers thematic "what are the main themes / how do
 they relate" questions from those summaries — global sensemaking that chunk-RAG can't do.
 Verified live on the informatik corpus (78 pages → 7 communities → a coherent 7-theme
-overview). Rough edges / next: community **labels** use the hub page's title (weak when the
-hub is front/back-matter — derive from the summary instead); no **time/decay** yet;
-surface communities in the **Graph/Projekt tabs** and as an **MCP** `wiki_global` tool; add
-a **thematic eval set** (fuzzy ground truth — lean on the LLM judge).
+overview). The **Projekt tab** now shows a *Themen (Communities)* section (label + size +
+summary cards, `/api/communities`), and community labels are the model's own theme (not
+the hub page's title). Next: no **time/decay** yet; surface communities in the **Graph tab**
+(colour nodes by community) and expose global search in the **browser** + as an **MCP**
+`wiki_global` tool; add a **thematic eval set** (fuzzy ground truth — lean on the LLM judge).
 
 ## Related docs
 

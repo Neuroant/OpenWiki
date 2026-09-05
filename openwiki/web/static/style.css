@@ -196,6 +196,14 @@ header {
 .ent-count { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
 @media (max-width: 720px) { .proj-cols { grid-template-columns: 1fr; } }
 
+/* community (theme) cards on the project tab */
+.comm-list { display: flex; flex-direction: column; gap: 8px; margin: 4px 0; max-width: 760px; }
+.comm-card { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; background: var(--bg); }
+.comm-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.comm-label { font-weight: 600; }
+.comm-size { color: var(--muted); font-size: 12px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.comm-summary { margin: 4px 0 0; font-size: 13px; line-height: 1.45; }
+
 /* -- evaluation tab -- */
 .eval-view h3 { margin: 20px 0 6px; font-size: 15px; }
 .eval-view h4 { margin: 14px 0 4px; font-size: 12px; color: var(--muted); font-weight: 700;

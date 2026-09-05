@@ -164,6 +164,42 @@ def test_community_layer_roundtrip_in_graph(tmp_path):
         store.close()
 
 
+def test_webapp_surfaces_communities(tmp_path):
+    import pytest
+    pytest.importorskip("kuzu")
+    from openwiki.graph import GraphBuilder, GraphStore
+    from openwiki.search import SemanticIndex
+    from openwiki.web.server import WikiWebApp
+    from openwiki.wiki import Wiki, WikiPage
+
+    pages = [WikiPage(slug=f"00{i}-p", title=t, level=1, order=i, pdf_page_start=i + 1,
+                      pdf_page_end=i + 1, text=txt)
+             for i, (t, txt) in enumerate(
+                 [("Alpha", "alpha nautilus"), ("Beta", "beta nautilus"), ("Gamma", "gamma nautilus")])]
+    wiki = Wiki(title="T", pages=pages, source="x.pdf", split_level=2)
+    index = SemanticIndex.build(wiki, _FakeEmbedder(), size_words=50, overlap_words=10)
+    GraphBuilder(tmp_path / "graph", similar_k=3).build(wiki, index)
+
+    store = GraphStore(tmp_path / "graph", writable=True)
+    try:
+        pg = store.page_graph()
+        assignment = detect_communities(pg["edges"], list(pg["pages"]))
+        cids = set(assignment.values())
+        store.upsert_communities(assignment, {c: f"summary {c}" for c in cids},
+                                 {c: f"Thema {c}" for c in cids})
+    finally:
+        store.close()
+
+    ro = GraphStore(tmp_path / "graph")           # read-only, as `serve` opens it
+    try:
+        app = WikiWebApp(tmp_path, graph=ro)      # wiki_dir irrelevant for this query
+        comms = app.communities()
+        assert comms and sum(c["size"] for c in comms) == 3
+        assert all("label" in c and "summary" in c for c in comms)
+    finally:
+        ro.close()
+
+
 def test_upsert_communities_requires_writable(tmp_path):
     import pytest
     pytest.importorskip("kuzu")

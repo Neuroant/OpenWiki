@@ -5,8 +5,9 @@ This is the architecture documentation for **OpenWiki**, structured after the
 into 12 sections, from goals and constraints down to building blocks, runtime, decisions,
 quality, and risks.
 
-> **Status: DRAFT.** All 12 chapters exist as first-pass drafts. They are being completed
-> incrementally — see the status table below. Diagrams use Mermaid (rendered by GitHub).
+> **Status: COMPLETE.** All 12 chapters are complete (a first full pass). Diagrams use Mermaid
+> (rendered by GitHub) and have been validated. Maintain alongside the code — Path B will
+> re-open ADR-3/ADR-8 (§9) and the §11 debt items D1/D2/D6.
 
 ## Audience & relationship to the other docs
 
@@ -34,9 +35,9 @@ cross-references `CLAUDE.md` for exhaustive module detail rather than duplicatin
 | 7 | [Deployment View](07-deployment-view.md) | **complete** |
 | 8 | [Cross-cutting Concepts](08-crosscutting-concepts.md) | **complete** |
 | 9 | [Architecture Decisions](09-architecture-decisions.md) | **complete** |
-| 10 | [Quality Requirements](10-quality-requirements.md) | draft |
-| 11 | [Risks and Technical Debt](11-risks-and-technical-debt.md) | draft |
-| 12 | [Glossary](12-glossary.md) | draft |
+| 10 | [Quality Requirements](10-quality-requirements.md) | **complete** |
+| 11 | [Risks and Technical Debt](11-risks-and-technical-debt.md) | **complete** |
+| 12 | [Glossary](12-glossary.md) | **complete** |
 
 ## Conventions in this doc
 

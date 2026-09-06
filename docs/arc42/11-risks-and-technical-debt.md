@@ -1,6 +1,6 @@
 # 11. Risks and Technical Debt
 
-> arc42 §11 — Known risks and technical debt, stated honestly. **Status: draft.**
+> arc42 §11 — Known risks and technical debt, stated honestly. **Status: complete.**
 > Cross-references the candid "open topics" in `docs/roadmap.md`.
 
 ## 11.1 Risks
@@ -13,6 +13,7 @@
 | R4 | **Entity extraction is slow + non-deterministic** | Medium | Medium | ~1 LLM call/page; mitigated by greedy+seed determinism, output bounding, retry-on-empty — still opt-in and slow. |
 | R5 | **Findings rest on small N / one corpus / one embedder** | Medium (generalization) | — | Two aligned signals (objective + judge); flagged as a caveat in `RAG-vs-GraphRAG.md`. |
 | R6 | **Windows-primary, no CI** | Medium | Medium | Cross-platform is intended but unverified; no automated cross-OS test run. |
+| R7 | **Licensing before redistribution** | High if redistributed | Low (not yet redistributed) | PyMuPDF is **AGPL-3.0** and there is **no project LICENSE** yet (§2 LC1/LC3). Must pick an AGPL-compatible license — or swap to a non-AGPL PDF backend behind the parser boundary — before any release. |
 
 ## 11.2 Technical Debt
 
@@ -33,6 +34,29 @@
 - No feature-flag sprawl for optional layers (ADR-7: empty tables).
 - No hidden cloud dependency or key management (ADR-2).
 
+## 11.4 Risk posture — accept vs. track
+
+For a single-user, local, learning project the sensible posture is:
+
+- **Accepted (by design, given the local-first scope):** R1 (no auth — mitigated by
+  localhost-only, §7.4), R2 (local-model quality), D1 (graph-as-mirror, ADR-3), D5 (community
+  precision). These are consequences of decisions in §9, not defects.
+- **Tracked (address if the project's goals expand):**
+  - *Scale* → R3 / D3 (brute-force retrieval) — back `SemanticIndex.search` with an ANN index.
+  - *Redistribution* → **R7** (licensing) — the gating item before any release.
+  - *Portability* → R6 / D8 (Windows-only, no CI) — add PyPI/Docker/cross-OS CI.
+  - *Agent memory (Path B)* → D1 / D2 / D6 — the deliberate re-opening of ADR-3 / ADR-8.
+
+## 11.5 Debt → roadmap direction
+
+| Debt | Addressed by (see `docs/roadmap.md` "Future directions") |
+|---|---|
+| D1 authoritative graph, D6 contradiction versioning, D2 read-path reinforcement | Path B — invert to sessions/experiences + time-versioned edges |
+| D3 brute-force retrieval | Direction A — hybrid retrieval / ANN / re-ranking |
+| D4 partial incremental upsert | Direction E — full incremental graph |
+| D7 observability | Direction F — deployment/observability |
+| D8 packaging | Direction F — PyPI/Docker/CI |
+
 ---
-TODO (completion steps): assign owners/priorities; link each debt item to the roadmap
-direction that addresses it; add a "risk we accept vs. risk we track" split.
+*Chapter complete. R7/D-items are honest and specific rather than reassuring; the two Path-B
+debts (D1, D2) trace directly back to the ADRs that flagged themselves "revisit for Path B".*

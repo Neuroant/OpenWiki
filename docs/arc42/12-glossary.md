@@ -1,6 +1,6 @@
 # 12. Glossary
 
-> arc42 §12 — Domain and technical terms, so everyone means the same thing. **Status: draft.**
+> arc42 §12 — Domain and technical terms, so everyone means the same thing. **Status: complete.**
 
 ## 12.1 Domain terms
 
@@ -48,6 +48,25 @@
 | **Fingerprint chain** | Per-stage input+param hashes in `.openwiki/state.json` enabling incremental builds. |
 | **bge-m3 / qwen3** | Default embedding / chat models (multilingual, strong on the German corpora). |
 
+## 12.5 Acronyms
+
+| Acronym | Expansion |
+|---|---|
+| **ADR** | Architecture Decision Record (see §9) |
+| **AGPL** | Affero General Public License (PyMuPDF's license; §2 LC1) |
+| **ANN** | Approximate Nearest Neighbor (search — a scale option, §11 D3) |
+| **arc42** | The architecture-documentation template these docs follow |
+| **HNSW** | Hierarchical Navigable Small World (Kuzu's vector index; mirrored, not used for retrieval) |
+| **HTTP / JSON** | HyperText Transfer Protocol / JavaScript Object Notation (the web API) |
+| **IR** | Intermediate Representation (`ParsedDocument`) |
+| **JSON-RPC** | JSON Remote Procedure Call (the MCP wire protocol, over stdio) |
+| **KB** | Knowledge Base (a built wiki + index + graph) |
+| **MCP** | Model Context Protocol (coding-agent tool interface) |
+| **MoE** | Mixture of Experts (the default chat model's architecture) |
+| **RAG / GraphRAG** | Retrieval-Augmented Generation / its graph-expanded variant |
+| **SPA** | Single-Page Application (the no-build browser UI) |
+| **TOML** | Tom's Obvious Minimal Language (`openwiki.toml`, config files) |
+
 ---
-TODO (completion steps): keep in sync as Path B lands new terms (session, sub-graph merge,
-contradiction/versioned edge); add acronym expansions (HNSW, ANN, ADR).
+*Chapter complete. Keep in sync as Path B lands new terms (session, sub-graph merge,
+time-versioned / contradiction edge).*

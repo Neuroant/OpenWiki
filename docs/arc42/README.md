@@ -31,8 +31,8 @@ cross-references `CLAUDE.md` for exhaustive module detail rather than duplicatin
 | 4 | [Solution Strategy](04-solution-strategy.md) | **complete** |
 | 5 | [Building Block View](05-building-block-view.md) | **complete** |
 | 6 | [Runtime View](06-runtime-view.md) | **complete** |
-| 7 | [Deployment View](07-deployment-view.md) | draft |
-| 8 | [Cross-cutting Concepts](08-crosscutting-concepts.md) | draft |
+| 7 | [Deployment View](07-deployment-view.md) | **complete** |
+| 8 | [Cross-cutting Concepts](08-crosscutting-concepts.md) | **complete** |
 | 9 | [Architecture Decisions](09-architecture-decisions.md) | **complete** |
 | 10 | [Quality Requirements](10-quality-requirements.md) | draft |
 | 11 | [Risks and Technical Debt](11-risks-and-technical-debt.md) | draft |

@@ -1,7 +1,7 @@
 # 8. Cross-cutting Concepts
 
 > arc42 §8 — Principles and patterns that apply across many building blocks.
-> **Status: draft.**
+> **Status: complete.**
 
 ## 8.1 Domain model — the IR
 
@@ -74,7 +74,39 @@ Optional layers are always-created (possibly empty) tables and best-effort queri
 (try/except → empty), so store/agent/UI code works whether or not entities, communities, or
 reinforcement edges exist — and on graphs built before a layer was added.
 
+## 8.11 Error handling (model / network)
+
+Calls to Ollama go through stdlib `urllib`; a `URLError`/`HTTPError` is turned into a
+`RuntimeError` carrying a "is Ollama running / is the model pulled?" hint. It surfaces per
+entry point (detail in §6.7): CLI → stderr + non-zero exit; web API → HTTP **503**; editing
+agent → `WikiTools.dispatch` catches per-tool exceptions and returns an `ERROR: …` string the
+model can react to, keeping the loop alive. Table extraction and graph-hiccups during an
+agent write are caught and logged, never raised (a failed graph sync must not fail the edit).
+This is distinct from §8.10, which is about *optional layers* being absent.
+
+## 8.12 Security posture
+
+The system assumes a **trusted local host** (§3.3, §11 R1):
+
+- **No authentication / authorization** on `serve` (including its *write* paths) or MCP.
+  Safe on `127.0.0.1`; exposing beyond localhost requires adding authN/authZ first (§7.4).
+- **Path confinement** — `WikiTools` validates slugs against a strict pattern and refuses any
+  resolved path outside `pages/` (`_page_path`), so `read/edit/create` can't escape the wiki.
+- **MCP is read-only** — coding-agent tools never write; `edit`/`create` are not exposed there.
+- **`--dry-run`** — edits can be previewed (no file write, no graph sync) before committing.
+- **No secrets** — no API keys anywhere (local Ollama, ADR-2); nothing to leak.
+
+## 8.13 Extensibility recipes
+
+The boundaries (§5, §8.2/§8.3) exist so common extensions are local, single-file changes:
+
+| To add… | Do this | Nothing else changes because… |
+|---|---|---|
+| **A source format** | New parser module with `parse() -> ParsedDocument` (reuse `markdown_parser.sections_to_document` for heading-based formats); add a case to `sources.parse_source` + `source_type`/`is_supported`/`SUPPORTED_SUFFIXES`. | downstream depends only on the IR (ADR-1). |
+| **An embedding / chat backend** | Implement the `Embedder` / `ChatModel` protocol; select it via `get_embedder` / config. | search/agent/eval depend on the protocol (ADR-2). |
+| **A CLI capability** | Add an argparse subcommand + a `_cmd_*` handler + a `_DISPATCH` entry + an `_apply_project` branch. | capabilities are subcommands, not flags (ADR-13). |
+| **An optional graph layer** | Add an always-created (empty) table in `GraphBuilder._create_schema` + best-effort `GraphStore` methods + a lazy `IF NOT EXISTS` migration for old graphs. | store/UI code treats layers as best-effort (ADR-7). |
+
 ---
-TODO (completion steps): add "error handling" (Ollama unreachable messages, table-absent
-fallbacks) as an explicit concept; add "security" cross-ref to §11 (no auth); add a small
-"extensibility recipe" (how to add a parser / a backend / a subcommand).
+*Chapter complete. Cross-refs: runtime error paths → §6.7; the no-auth risk → §11 R1;
+the boundaries these concepts rest on → §5.1 + ADR-1/2/7/13.*

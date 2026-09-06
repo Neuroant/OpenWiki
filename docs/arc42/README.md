@@ -33,7 +33,7 @@ cross-references `CLAUDE.md` for exhaustive module detail rather than duplicatin
 | 6 | [Runtime View](06-runtime-view.md) | **complete** |
 | 7 | [Deployment View](07-deployment-view.md) | draft |
 | 8 | [Cross-cutting Concepts](08-crosscutting-concepts.md) | draft |
-| 9 | [Architecture Decisions](09-architecture-decisions.md) | draft |
+| 9 | [Architecture Decisions](09-architecture-decisions.md) | **complete** |
 | 10 | [Quality Requirements](10-quality-requirements.md) | draft |
 | 11 | [Risks and Technical Debt](11-risks-and-technical-debt.md) | draft |
 | 12 | [Glossary](12-glossary.md) | draft |

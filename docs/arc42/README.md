@@ -30,7 +30,7 @@ cross-references `CLAUDE.md` for exhaustive module detail rather than duplicatin
 | 3 | [Context and Scope](03-context-and-scope.md) | draft |
 | 4 | [Solution Strategy](04-solution-strategy.md) | draft |
 | 5 | [Building Block View](05-building-block-view.md) | **complete** |
-| 6 | [Runtime View](06-runtime-view.md) | draft |
+| 6 | [Runtime View](06-runtime-view.md) | **complete** |
 | 7 | [Deployment View](07-deployment-view.md) | draft |
 | 8 | [Cross-cutting Concepts](08-crosscutting-concepts.md) | draft |
 | 9 | [Architecture Decisions](09-architecture-decisions.md) | draft |

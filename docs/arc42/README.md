@@ -25,10 +25,10 @@ cross-references `CLAUDE.md` for exhaustive module detail rather than duplicatin
 
 | # | Chapter | Status |
 |---|---|---|
-| 1 | [Introduction and Goals](01-introduction-and-goals.md) | draft |
-| 2 | [Architecture Constraints](02-architecture-constraints.md) | draft |
+| 1 | [Introduction and Goals](01-introduction-and-goals.md) | **complete** |
+| 2 | [Architecture Constraints](02-architecture-constraints.md) | **complete** |
 | 3 | [Context and Scope](03-context-and-scope.md) | **complete** |
-| 4 | [Solution Strategy](04-solution-strategy.md) | draft |
+| 4 | [Solution Strategy](04-solution-strategy.md) | **complete** |
 | 5 | [Building Block View](05-building-block-view.md) | **complete** |
 | 6 | [Runtime View](06-runtime-view.md) | **complete** |
 | 7 | [Deployment View](07-deployment-view.md) | draft |

@@ -1,20 +1,24 @@
 # 4. Solution Strategy
 
 > arc42 §4 — The fundamental decisions and approaches that shape the architecture, and how
-> they serve the quality goals. **Status: draft.**
+> they serve the quality goals. **Status: complete.**
 
-A short summary; the reasoning is recorded as [Architecture Decisions](09-architecture-decisions.md).
+A short summary; each strategy's full reasoning (context, alternatives, consequences) is the
+ADR referenced in the last column — see [Architecture Decisions](09-architecture-decisions.md).
 
-| Strategy | What it means | Serves |
-|---|---|---|
-| **IR-centric staged pipeline** | A single intermediate representation (`ParsedDocument` in `models.py`) sits between ingestion and everything downstream. Each stage is a pure-ish transform reading the previous stage's artifact. | Q4 modularity, Q3 testability |
-| **Local-first via Ollama + protocols** | All inference runs on a local Ollama; access is behind the `Embedder`/`ChatModel` protocols so backends are swappable and the corpus never leaves the machine. | Q1 privacy, Q4 extensibility |
-| **Stdlib-leaning, deps isolated** | Web server, MCP server, and 3 of 4 source parsers are stdlib-only; PyMuPDF and Kuzu are confined to single modules and imported lazily. | Q2 minimal deps |
-| **Additive knowledge graph (a mirror)** | The Kuzu graph is layered *over* the wiki + index without mutating them; embeddings are mirrored in so traversal + vector search share one query. The index stays authoritative. | Q4, avoids lock-in |
-| **Optional layers as empty-by-default tables** | Entities, communities, and reinforcement edges are always-created (possibly empty) tables, so all store/agent code works with or without them. | Q4, robustness |
-| **Project manifest + settings precedence** | `openwiki.toml` groups a KB; unset settings resolve `flag > manifest > ~/.openwiki config > built-in default`. | usability, reproducibility |
-| **Evaluation-driven design** | A backend-agnostic eval harness (pure metrics + injected retrievers/chat) turns "is the graph worth it?" into measured findings (RAG vs GraphRAG vs Global). | Q5 measurability |
-| **Grounded agents** | RAG/editing agents answer only from provided excerpts and cite provenance (page slugs / PDF pages); the graph adds context, never ungrounded claims. | correctness, trust |
+| Strategy | What it means | Serves | ADR |
+|---|---|---|---|
+| **IR-centric staged pipeline** | A single intermediate representation (`ParsedDocument` in `models.py`) sits between ingestion and everything downstream. Each stage is a pure-ish transform reading the previous stage's artifact. | Q4, Q3 | ADR-1 |
+| **Local-first via Ollama + protocols** | All inference runs on a local Ollama; access is behind the `Embedder`/`ChatModel` protocols so backends are swappable and the corpus never leaves the machine. | Q1, Q4 | ADR-2 |
+| **Stdlib-leaning, deps isolated** | Web server, MCP server, and 3 of 4 source parsers are stdlib-only; PyMuPDF and Kuzu are confined to single modules and imported lazily. | Q2 | ADR-4, ADR-5 |
+| **Additive knowledge graph (a mirror)** | The Kuzu graph is layered *over* the wiki + index without mutating them; embeddings are mirrored in so traversal + vector search share one query. The index stays authoritative. | Q4 | ADR-3 |
+| **Optional layers as empty-by-default tables** | Entities, communities, and reinforcement edges are always-created (possibly empty) tables, so all store/agent code works with or without them. | Q4 | ADR-7 |
+| **Read-mostly graph, writable for edits** | Read-only by default (concurrent readers); writable (exclusive) only for `serve`/`chat` edits + usage-memory. | correctness | ADR-8 |
+| **Borrow GraphRAG ideas, not the library** | Community detection + summaries + global search reimplemented natively/locally. | Q2, Q5 | ADR-6 |
+| **Project manifest + settings precedence** | `openwiki.toml` groups a KB; unset settings resolve `flag > manifest > ~/.openwiki config > built-in default`. | usability | ADR-10 |
+| **Incremental, fingerprinted builds** | Per-stage input+param fingerprints skip unchanged stages. | performance | ADR-11 |
+| **Evaluation-driven design** | A backend-agnostic eval harness turns "is the graph worth it?" into measured findings (RAG vs GraphRAG vs Global). | Q5 | ADR-9 |
+| **Grounded agents** | RAG/editing agents answer only from provided excerpts and cite provenance; the graph adds context, never ungrounded claims. | correctness, trust | §8.4 |
 
 ## 4.1 How the strategy maps to the top quality goals
 
@@ -47,5 +51,5 @@ source ──parse_source──▶ ParsedDocument (IR) ──▶ JSON / Markdown
 ```
 
 ---
-TODO (completion steps): add a short rationale paragraph per strategy row; explicitly link
-each strategy to the ADR that records it once §9 is complete.
+*Chapter complete. Each strategy row links to its ADR in §9 (full context/alternatives/
+consequences there); the strategy→quality-goal mapping refines the goals from §1.2.*

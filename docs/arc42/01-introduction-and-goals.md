@@ -1,7 +1,7 @@
 # 1. Introduction and Goals
 
-> arc42 §1 — What OpenWiki does, its top quality goals, and its stakeholders.
-> **Status: draft.**
+> arc42 §1 — What OpenWiki does, its top quality goals, its stakeholders, and its non-goals.
+> **Status: complete.**
 
 ## 1.1 Requirements Overview
 
@@ -24,18 +24,20 @@ The system is a straight, staged pipeline built around an intermediate represent
 8. **Consolidation layer** — LLM community summaries over the graph → **global search**.
 9. **Usage-memory** — decaying `REINFORCES` edges that learn which connections are used.
 
-Core use cases (see [Runtime View](06-runtime-view.md) for detail):
+Core use cases (each maps to a runtime scenario in §6):
 
-- **U1 Build a knowledge base** from one or more sources (`openwiki build`).
-- **U2 Ask a grounded question** with citations (`ask`, RAG / GraphRAG).
-- **U3 Ask a thematic question** across the whole corpus (`ask --global`).
-- **U4 Explore & edit** the wiki in a browser (`serve`).
-- **U5 Consult the wiki from a coding agent** via MCP tools.
-- **U6 Measure retrieval/answer quality** (`eval`, RAG vs GraphRAG vs Global).
+| # | Use case | Entry point | Runtime scenario |
+|---|---|---|---|
+| U1 | Build a knowledge base from one or more sources | `openwiki build` | §6.1 |
+| U2 | Ask a grounded question with citations (RAG / GraphRAG) | `ask` | §6.2 |
+| U3 | Ask a thematic, whole-corpus question | `ask --global` | §6.3 |
+| U4 | Explore & edit the wiki in a browser | `serve` | §6.4 |
+| U5 | Consult the wiki from a coding agent | MCP (`wiki_*`) | §6.2/§6.3 via MCP |
+| U6 | Measure retrieval / answer / global quality | `eval [--answers/--global]` | §6 + `docs/RAG-vs-GraphRAG.md` |
 
 ## 1.2 Quality Goals
 
-The top architectural quality goals, in priority order (drives most decisions):
+The top architectural quality goals, in priority order (they drive most decisions in §9):
 
 | # | Quality goal | Motivation / concrete meaning |
 |---|---|---|
@@ -45,7 +47,7 @@ The top architectural quality goals, in priority order (drives most decisions):
 | Q4 | **Modularity / extensibility** | New source parsers, backends, and capabilities slot in behind stable boundaries (the IR, the `Embedder`/`ChatModel` protocols, `sources.parse_source`, CLI subcommands). |
 | Q5 | **Measurability** | Design claims (esp. "is the graph worth it?") are backed by a reproducible eval harness, not opinion. |
 
-See [Quality Requirements](10-quality-requirements.md) for the quality tree + scenarios.
+See §10 for the quality tree + concrete quality scenarios.
 
 ## 1.3 Stakeholders
 
@@ -55,9 +57,19 @@ See [Quality Requirements](10-quality-requirements.md) for the quality tree + sc
 | **End user** (CLI / browser) | Build a KB from their docs and get grounded answers + exploration, fully offline. |
 | **AI coding agent** (via MCP) | Read-only, grounded access to the wiki as MCP tools (`wiki_ask`, `wiki_global`, …). |
 | **Evaluator** | Reproduce the RAG-vs-GraphRAG-vs-Global findings on their own corpus. |
-| **Future contributor** | Clear extension points and decision records to build on (e.g. Path B agent memory). |
+| **Future contributor** | Clear extension points and decision records (§9) to build on — e.g. Path B agent memory. |
+
+## 1.4 Non-goals
+
+OpenWiki deliberately does **not** aim to be (see §3.3 for the scope boundary and §11 for the
+matching risks):
+
+- a **hosted / multi-tenant service** — it targets one machine, one user; there is no auth;
+- a **general-purpose vector database** — retrieval is brute-force over a small corpus (ADR-3);
+- an **authentication / authorization** system — `serve` and MCP assume a trusted local host;
+- a **source-document editor** — it edits the *derived* wiki, not the originals;
+- a **cloud-AI application** — all inference is local by design (ADR-2).
 
 ---
-TODO (completion steps): tighten U-case list to trace into §6 scenarios; add an explicit
-"non-goals" subsection (not a hosted/multi-tenant service; not a general vector DB); confirm
-stakeholder list with the project owner.
+*Chapter complete. The quality goals here are refined into the quality tree + scenarios in §10;
+the decisions that realize them are recorded in §9.*

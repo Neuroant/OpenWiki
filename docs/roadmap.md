@@ -369,6 +369,8 @@ novel, unshipped-anywhere piece), and inverting the ingest to sessions/experienc
 
 ## Related docs
 
+- `docs/arc42/` — full **architecture documentation** (arc42: goals, constraints, context,
+  building blocks, runtime, deployment, concepts, ADRs, quality, risks).
 - `docs/projects.md` — the projects layer design + phase roadmap.
 - `docs/RAG-vs-GraphRAG.md` — the full evaluation writeup (methodology + numbers).
 - `docs/coding-agents.md` — MCP / OpenCode / Claude Code setup.

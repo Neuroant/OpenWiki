@@ -33,7 +33,9 @@ embedded chunks → a graph of 51 pages / 815 chunks / 306 SIMILAR_TO + 122
 REFERENCES edges, plus 801 entities / 1431 MENTIONS with `--entities`).
 
 A chronological feature roadmap of everything built so far (by release) is in
-`docs/roadmap.md`.
+`docs/roadmap.md`. Full **architecture documentation** (arc42: goals, constraints,
+context, building blocks, runtime, deployment, concepts, decisions/ADRs, quality,
+risks) is in `docs/arc42/`.
 
 ## Environment & commands
 

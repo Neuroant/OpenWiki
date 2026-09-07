@@ -18,6 +18,7 @@
 8. [Risks & open decisions](#8-risks--open-decisions)
 9. [Relationship to the current code](#9-relationship-to-the-current-code)
 10. [Recommended first slice](#10-recommended-first-slice)
+11. [Prior art & learnings — "Cognitive Substrate"](#11-prior-art--learnings--cognitive-substrate)
 
 ---
 
@@ -120,11 +121,18 @@ one place. New edges:
 | `ABOUT` | Assertion → Entity | link an assertion to its subject/object entities |
 | `SUPERSEDES` | Assertion → Assertion | contradiction/versioning (newer over older) |
 
-`REINFORCES(weight, last_seen)` (v0.43) is reused unchanged for usage-memory. **Reified
-assertions** are the key design choice: representing a fact as a node (not a bare typed edge)
-is what lets B4 mark it superseded, time-scope it, and carry provenance/confidence — the price is
-an extra hop in queries. (Alternative — typed `Entity→Entity` edges with validity props — is
-lighter but harder to version cleanly; see §8.)
+`REINFORCES(weight, last_seen)` (v0.43) is reused unchanged for usage-memory. A `MergeRun` /
+`ConsolidationRun` audit node (per §11) records each merge/sleep pass (counts, model, cost,
+provenance) so a run is traceable and reversible.
+
+**Reified assertions** are the key design choice: representing a fact as a node (not a bare typed
+edge) is what lets B4 mark it superseded, time-scope it, and carry provenance/confidence — the
+price is an extra hop in queries. Two alternatives, both considered:
+- typed `Entity→Entity` edges with validity props — lighter, but versioning/provenance are awkward;
+- a **single `FACT` edge with `predicate` as a property** (Cognitive Substrate's choice — §11):
+  one index set, no per-predicate migration, but "predicate is a filter not a traversal" and
+  provenance can't attach to an edge (they add a separate run node). Our reified choice pays one
+  hop to get native versioning + provenance — exactly what B4/B5 need. Revisit if traversal cost bites (§8).
 
 ## 5. The core algorithm: session → world-model merge
 
@@ -154,6 +162,9 @@ to matter but late enough to de-risk. Each stage lists an **exit criterion** (ho
 - **Hard part:** the derived-vs-remembered split; a wrong boundary means rebuilds destroy memory or
   accumulate garbage.
 - **Exit:** rebuild the doc-graph and prove (test) the remembered subgraph survives untouched.
+- **Learned (§11):** make the split a **tiered write-authority** model — CANONICAL (docs;
+  authoritative, never pruned) vs SEMANTIC / PROCEDURAL / EPISODIC (remembered) — where a role can
+  only write *its* tier, so the agent's guesses can't forge ground truth.
 
 ### B1 — Read-path reinforcement (writable-safe)
 - **Goal:** ordinary use (`ask`, MCP `wiki_ask`) strengthens memory, not only `serve`/`chat`.
@@ -171,6 +182,10 @@ to matter but late enough to de-risk. Each stage lists an **exit criterion** (ho
 - **Builds on:** entity extraction (typed ontology, normalization); the pure-module + fake-chat pattern.
 - **Hard part:** deciding *what's worth remembering* (signal vs chit-chat).
 - **Exit:** precision/recall of extracted facts vs a hand-labeled session clears a set bar.
+- **Learned (§11):** gate every captured fact — entity-dedup by vector similarity,
+  controlled-vocabulary predicates, **source-support required** (a claim must be grounded in the
+  turn — the anti-hallucination gate), anti-vagueness (reject "the system"). Trigger capture on the
+  host `Stop` hook (end of turn), **fail-soft**.
 
 ### B3 — Merge operator (Phases 1–2)
 - **Goal:** fold the session sub-graph into the world model without duplicating.
@@ -180,6 +195,8 @@ to matter but late enough to de-risk. Each stage lists an **exit criterion** (ho
 - **Hard part:** resolution errors compound permanently → confidence threshold + provenance so a
   merge is auditable/reversible.
 - **Exit:** merge precision on a curated set clears a set bar; every merge is traceable to a session.
+- **Learned (§11):** record each merge as a reversible `MergeRun` audit node (counts, model, cost,
+  provenance); rollback = close validity on its outputs (append-only, no destructive undo).
 
 ### B4 — Contradiction / time-versioning (Phase 3) — the novel piece
 - **Goal:** a newer fact supersedes an older one without losing history.
@@ -192,6 +209,9 @@ to matter but late enough to de-risk. Each stage lists an **exit criterion** (ho
   "simulate-for-chaos" scheme.
 - **Exit:** on a "fact changed" scenario, the agent answers the current fact, not the stale one,
   and the superseded history is still queryable.
+- **Learned (§11):** make append-only an **invariant on every remembered edge** (`valid_from` /
+  `valid_to`), not only on conflict — any change closes the old + appends the new. Contradiction
+  becomes one case, and time-travel + reversible consolidation come for free.
 
 ### B5 — Sleep: cross-session consolidation job (Phase 4)
 - **Goal:** periodically compress accumulated memory into structure.
@@ -201,6 +221,11 @@ to matter but late enough to de-risk. Each stage lists an **exit criterion** (ho
   *re-targeting* them at session-memory + scheduling.
 - **Hard part:** incrementality (don't re-summarize the whole graph); density tuning ("edge of chaos").
 - **Exit:** graph size stays bounded over many sessions while global-search quality holds.
+- **Learned (§11):** **stability risk** — modularity clustering (our Louvain) admits many
+  near-optimal partitions, so communities can *shift under incremental edits*; evaluate **k-core
+  decomposition** (deterministic, stable nested hierarchy) for the evolving graph (open decision, §8).
+  Also adopt **per-tier decay half-lives** and a **source-invalidation cascade** (a changed source
+  flags everything `derived_from` it for re-validation).
 
 ### B6 — Three-tier context assembly
 - **Goal:** the payoff — build a new session's context from memory, cheaply.
@@ -209,6 +234,9 @@ to matter but late enough to de-risk. Each stage lists an **exit criterion** (ho
 - **Builds on:** GraphRAG expansion, community summaries, the project/identity doc.
 - **Hard part:** budgeting three tiers into a fixed context window; beating "just paste the transcript."
 - **Exit:** the cross-session metric (§7) shows assembled memory beats both cold-start and raw-log.
+- **Learned (§11):** assemble + inject on the host `UserPromptSubmit` hook, rescue on `PreCompact`;
+  weight the activation tier by decayed **confidence**; keep it **fail-soft** (degrade to
+  no-memory, never block the session).
 
 ## 7. Evaluation strategy
 
@@ -231,18 +259,30 @@ If "assembled" doesn't beat "raw-log", Path B isn't paying for its complexity �
 
 **Decisions to make (genuine forks):**
 - **Assertion representation** — reified `Assertion` nodes (versionable, provenance-rich, extra hop)
-  vs typed `Entity→Entity` edges with validity props (lighter, harder to version). *Leaning reified.*
+  vs typed `Entity→Entity` edges with validity props (lighter, harder to version) vs a single
+  `FACT` edge with `predicate` as a property (Cognitive Substrate's choice — one index, no
+  per-predicate migration, but provenance/versioning are awkward on an edge). *Leaning reified* (§4/§11).
+- **Abstraction: communities vs k-core** — Louvain communities can *shift under incremental edits*
+  (§11's critique); evaluate **k-core decomposition** (deterministic, stable nested hierarchy) for
+  the evolving graph, or a stability-preserving community-update strategy. *Open — B5.*
 - **Capture trigger** — end-of-session batch vs streaming during the turn loop. *Leaning batch (a
-  "sleep" pass), matching the biology and avoiding write-on-every-turn.*
+  "sleep" pass), matching the biology and the host `Stop` hook (§11); avoids write-on-every-turn.*
 - **Identity (DNA) storage** — a manifest field vs a dedicated identity doc vs a special graph node.
 - **Retention / privacy** — remembered content is sensitive; needs a forget/redact story and a
   clear on-disk location (a session may contain things the user doesn't want persisted).
+
+**Principles (adopted from prior art — §11):**
+- **Fail-soft** — memory hooks degrade to "no memory" on error, never block a session.
+- **Cost governance** — a per-session budget cap checked before each paid LLM call; cheap model for
+  capture/distil, expensive only for reasoning.
+- **Real embeddings only** — session sub-graph vectors use the real embedder (bge-m3), never a stub.
 
 **Risks:**
 - **Memory poisoning / drift** — bad captures or wrong merges corrupt memory permanently → provenance
   + confidence + reversibility (B3) and superseding-not-deleting (B4) are mitigations.
 - **Contradiction is belief revision** — a decades-old hard problem; scope it to the tractable rule
-  above, don't chase generality.
+  above, don't chase generality. (Even Cognitive Substrate left the "fact-has-changed" trigger open.)
+- **Community instability** — see the k-core decision above; matters more as the graph evolves.
 - **Complexity vs payoff** — the honest kill-switch is §7: if assembled context doesn't beat a pasted
   transcript, stop.
 - **Concurrency** — B1's writable-safe model is load-bearing; get it wrong and memory writes corrupt
@@ -275,6 +315,50 @@ reframes:
 This yields a measurable answer to *"does assembled memory help the next session?"* (§7) fastest.
 If yes → commit to B0 (authoritative graph) and B4 (contradictions), the hard, high-value stages.
 If no → we've learned it cheaply, before touching ADR-3.
+
+## 11. Prior art & learnings — "Cognitive Substrate"
+
+A concurrent sibling project (**Cognitive Substrate** — a neuroscience-structured agent-memory
+substrate for a cyber-physical / UI agent) independently converged on nearly this design and is
+**further along** (a built four-tier graph substrate + consolidation service). Its founding problem
+differs (grounding UI *locators*, not knowledge Q&A) and its stack is heavier (Neo4j +
+MCP-everything + multiple orchestration strategies), so we take the **ideas, not the weight**
+(cf. arc42 ADR-6). Analysis distilled below; the specific refinements are folded into the stages
+above as **"Learned (§11)"** notes and into §4/§8.
+
+**Validated (our bets, independently confirmed).** Capture/distil split; consolidation as a
+standalone *service*; single-engine graph+vector with fused retrieval (they *retired* a dual-DB
+design to reach it); append-only temporal for versioning; a confidence reinforce/decay/retire
+lifecycle; "concentrate, don't replay" retrieval.
+
+**Refinements folded in.**
+
+| Learning | Where folded |
+|---|---|
+| **Tier write-authority** — a role can only write its tier; the agent's guesses can't forge ground truth. Their CANONICAL (authoritative, never pruned) ≈ our doc-derived graph; EPISODIC/SEMANTIC/PROCEDURAL ≈ remembered. | B0 |
+| **Append-only for *every* remembered edge** (not just on conflict) → time-travel + reversible consolidation for free. | B4, §4 |
+| **Write-time validation gates** — dedup, controlled-vocab predicates, source-support (anti-hallucination), anti-vagueness, near-dup merge, cross-tier contradiction rejection. | B2/B3 |
+| **`ConsolidationRun`/`MergeRun` audit node**; rollback = close validity on its outputs. | B3/B5, §4 |
+| **Tier-aware confidence** (per-tier half-lives; retrieval weighted by confidence; reset on re-emergence) + **source-invalidation cascade**. | B5, B6 |
+| **Host-lifecycle triggers** — `UserPromptSubmit`→recall/inject, `Stop`→capture, `PreCompact`→flush — and **fail-soft** hooks. | B2/B6, §8 |
+| **Cost governance** — per-session budget cap; cheap model for distil, expensive for reasoning. | §8 |
+| **Real embeddings only** — a parallel project's hash-stub embeddings returned garbage; use bge-m3. | §8 |
+
+**A real critique of Path A (→ B5, open).** They **reject modularity clustering** (our
+Louvain/Leiden family) for hierarchical abstraction: on sparse graphs modularity has exponentially
+many near-optimal partitions, so community assignments *shift between runs / under small edits* —
+unstable "attractors" an agent can't navigate predictably. They use **k-core decomposition**
+(deterministic, stable nested hierarchy). Our Louvain is deterministic *per run* but not *stable
+across the continuous edits* Path B implies — so B5's incremental communities may churn. Tracked as
+the communities-vs-k-core decision in §8.
+
+**What deliberately does *not* transfer.** UI/locator grounding + executor self-check; sensor /
+OPC-UA / PLC multi-modal fusion; the heavyweight Neo4j-plus-MCP-everything stack. Their honest risk
+list is a caution, not a blocker: validated only on a **24-fact toy UI**; **2 of 5 consolidation
+pipelines** built; k-core **blocked by missing tooling** — i.e. *consolidation is the perennially
+unfinished part*, which is exactly why our plan front-loads a measurable thin vertical (§10).
+
+*Source: `G:\Claude\Cognitive Substrate\docs\ARCHITECTURE.md` + `ROADMAP.md` (v3), read 2026-09.*
 
 ---
 

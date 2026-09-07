@@ -99,6 +99,38 @@ Two invariants define the reframe:
    (`ask`, MCP) must be able to record usage and, on consolidation, fold in new memory — without
    the exclusive-writer bottleneck.
 
+### 3.1 Modes — Wiki and Second Brain (coexistence, not replacement)
+
+Path B does **not** replace Path A; it adds a **remembered tier on top of** the authoritative
+document tier, on **one substrate** (arc42 **ADR-14**). Path A and Path B are two *kinds of
+knowledge* — authoritative documents vs evolving experience — with different trust and lifecycle,
+so they coexist as tiers rather than compete. **"Mode" is a per-project policy** over which tiers
+reads fuse and whether memory writes/consolidation run — not a fork in the code:
+
+| | **Wiki Mode** (= today + Path A) | **Second Brain Mode** (Path B) |
+|---|---|---|
+| Substrate (tiers read) | document tier only (CANONICAL) | document **+** remembered tiers |
+| Reads | RAG / GraphRAG / global over docs | fused over both, authority × confidence weighted |
+| Writes | none (rebuild from sources) | capture → merge → decay → consolidate |
+| Trust / lifecycle | authoritative, reproducible, shareable | interpreted, evolving, personal |
+| Enabled by | default (memory tier empty) | `[memory] enabled` on the project |
+
+Second Brain is a **superset** of Wiki: the remembered tiers are additive tables (ADR-7), so Wiki
+Mode is literally "memory tier off," and the document tier is the ground-truth **anchor** memory
+resolves and cites against. The payoff is using them **together** — global search spanning docs +
+remembered summaries; the agent answering grounded in docs but *informed by* accumulated memory.
+
+**Chosen defaults for the coexistence sub-decisions** (revisable):
+- **Mode granularity** — per **project** (a manifest flag), with per-query tier filters for control.
+- **Global search** — in Second Brain Mode, **fused** (docs + memory summaries), authority-weighted.
+- **Sharing** — the document tier is shareable/publishable; the **memory tier stays private**
+  (serves the retention/privacy concern in §8).
+- **Trust weighting** — a read ranks by **authority tier × decayed confidence** (a canonical doc
+  fact outranks a distilled memory fact outranks a low-confidence raw one).
+
+Lifecycles are **independent**: `graph-build` rebuilds the document tier but **preserves** the
+remembered tier (B0's exit criterion); consolidation touches memory, never documents.
+
 ## 4. Proposed data model
 
 *(Design sketch — names/shapes will firm up during B0/B2. Additive, following ADR-7: new tables,
@@ -152,12 +184,14 @@ Ordered so each stage is shippable and measurable, with the riskiest reframes pl
 to matter but late enough to de-risk. Each stage lists an **exit criterion** (how we know it's done).
 
 ### B0 — Reframe: authoritative graph + a "session" source type
-- **Goal:** make the graph a store of record; let experience flow in.
-- **Build:** split the schema/logic into *derived-from-docs* vs *remembered-from-experience*; make
-  `graph-build` preserve the remembered subgraph; add a **session/experience** source type beside
-  pdf/md/html/code.
+- **Goal:** make the graph a store of record with a **document tier and a memory tier** (§3.1); let
+  experience flow in *alongside* documents, not replacing them.
+- **Build:** add the **remembered tier alongside** the document tier — split *derived-from-docs* vs
+  *remembered-from-experience*; make `graph-build` preserve the remembered subgraph; add a
+  **session/experience** source type beside pdf/md/html/code; gate memory behind a per-project
+  **mode** (`[memory] enabled` → Wiki vs Second Brain — §3.1, ADR-14).
 - **Builds on:** the `parse_source` dispatch pattern; the project layer (a project now owns an
-  evolving memory).
+  evolving memory + its mode); the additive-table pattern (ADR-7 — Wiki Mode = memory tier off).
 - **Re-opens:** ADR-3 (debt D1).
 - **Hard part:** the derived-vs-remembered split; a wrong boundary means rebuilds destroy memory or
   accumulate garbage.

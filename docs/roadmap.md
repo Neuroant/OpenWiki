@@ -443,7 +443,9 @@ Ordered so each stage is shippable and measurable (the project's discipline — 
 directions*). Stages re-open the decisions that flagged themselves for exactly this.
 
 - **B0 — Reframe (re-opens ADR-3, debt D1).** Make the graph *authoritative* (not a rebuildable
-  mirror) and add a **session/experience** source type beside documents. Highest leverage, highest risk.
+  mirror) and add a **session/experience** source type *alongside* documents — a remembered tier on
+  top of the doc tier, not a replacement (**Wiki** vs **Second-Brain** modes; arc42 ADR-14 /
+  `path-b-memory.md` §3.1). Highest leverage, highest risk.
 - **B1 — Read-path reinforcement (re-opens ADR-8, debt D2).** A writable-safe concurrency model so
   plain `ask` reinforces, not just `serve`/`chat`. Unblocks memory where it actually happens.
 - **B2 — Session capture → sub-graph.** An LLM turns a conversation into a typed sub-graph

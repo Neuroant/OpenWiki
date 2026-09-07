@@ -21,6 +21,7 @@
 | [11](#adr-11) | Incremental builds via a per-stage fingerprint chain | Accepted | performance |
 | [12](#adr-12) | Bounded-deterministic, normalized entity extraction | Accepted | Q3, quality |
 | [13](#adr-13) | New capabilities as subcommands, not more flags | Accepted | Q4 |
+| [14](#adr-14) | Wiki & Second-Brain coexist as tiers of one substrate (not replacement) | Accepted (Path B) | Q4, modularity |
 
 ---
 
@@ -161,7 +162,34 @@
 - **Consequences:** + Discoverable (`--help` per command); clean per-command project resolution.
   − More subcommands to document; some conceptual overlap (e.g. `ask --global` vs a command).
 
+### ADR-14
+**Wiki and Second-Brain coexist as tiers of one substrate — not replacement.** *(Path B direction)*
+- **Context:** Path B (agent memory) could either *replace* Path A (the document wiki + consolidation
+  / global search) as a "more advanced" system, or *coexist* with it. The framing question: are they
+  the same concern? They are not — Path A is sensemaking over **authoritative documents** (ground
+  truth, shared, reproducible); Path B is accumulating/reconciling **personal experience** (evolving,
+  mutable, private). Different substrate, trust, and lifecycle.
+- **Decision:** Coexist on **one tiered substrate**. Path A is the **authoritative document tier**
+  (CANONICAL); Path B adds the **remembered tiers on top** (episodic/semantic/procedural), with
+  separate write authority and lifecycle (per `docs/path-b-memory.md` §3.1/B0). **"Mode" is a
+  per-project policy**, not a codebase fork: **Wiki Mode** = document tier only, read-mostly, no
+  memory writes/consolidation (today's behavior); **Second Brain Mode** = document + remembered tiers,
+  reads fuse both (authority × confidence weighted), capture/merge/decay/consolidation active. Second
+  Brain is a *superset* of Wiki; the memory tiers are additive (ADR-7), so Wiki Mode is literally
+  "memory tier off."
+- **Alternatives:** (a) **Replace** Path A with Path B — rejected: throws away a working, measured,
+  reproducible pipeline; forces memory machinery onto documents that don't need it; couples the
+  shareable-wiki use case to personal-memory (hurts both); breaks reproducibility (Q5/ADR-9);
+  migration risk; and Path B *anchors on* the document graph, so it can't replace its own foundation.
+  (b) **Two separate systems/stores** — rejected: loses fused retrieval + a shared entity vocabulary;
+  the payoff is querying documents and memory *together*.
+- **Consequences:** + Wiki Mode is unchanged and stays deterministic/shareable; documents are the
+  ground-truth anchor memory cites; global search can span both tiers; you can share the document tier
+  while keeping memory private; re-ingesting documents preserves memory (independent lifecycles).
+  − A tier-authority + trust-weighting model to maintain; retrieval must be tier-aware; two lifecycles
+  to keep independent. Reframes (consistently with) ADR-3/ADR-8's "revisit for Path B."
+
 ---
 *Chapter complete. ADR-3 and ADR-8 are the decisions the Path-B agent-memory direction
-(§11 D1/D2) will re-open — see the design in `docs/path-b-memory.md`. New significant decisions
-should be appended here with the next id.*
+(§11 D1/D2) will re-open, and ADR-14 sets how Path A/B coexist — see the design in
+`docs/path-b-memory.md`. New significant decisions should be appended here with the next id.*

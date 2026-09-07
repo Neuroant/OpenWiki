@@ -362,10 +362,107 @@ GraphRAG earns its on answer quality.
 **Graph-tab community colouring (v0.45)** completes Path A's UI: the explorer colours page
 nodes by their community (`_page_gnode` carries the id → `communityFill`/`COMMUNITY_PALETTE`),
 with a swatch legend + a "Themenfarben" toggle, and the `reinforced` usage edges got a filter
-chip too. **Path A is now complete and validated across CLI/browser/MCP.** Next, toward Path B
-proper: reinforcement on the read-path (needs a writable-safe concurrency model),
-**contradiction versioning** (time-versioned edges so newer facts supersede older ones — the
-novel, unshipped-anywhere piece), and inverting the ingest to sessions/experiences.
+chip too. **Path A is now complete and validated across CLI/browser/MCP.** **Path B** — turning
+the graph from a document *mirror* into agent *memory* — is designed from first principles in
+the next section.
+
+## Path B — the second-brain memory model
+
+*Distilled from a design discussion on memory evolution (Kauffman networks → DNA/epigenetics →
+brain consolidation → human+LLM systems) and the architecture analysis in `docs/arc42/`
+(ADR-3, ADR-8; §11 D1/D2/D6). This is the North-Star design for turning OpenWiki's graph from a
+document **mirror** into agent **memory**. Framing is inspiration; the engineering is in the
+tables and stages.*
+
+### The frame: memory as a self-organizing model of the world
+
+One pattern recurs across scales — a system persists by building an internal model of its
+environment and holding it at the **edge of chaos**: ordered enough to remember, plastic enough
+to adapt.
+
+- **Kauffman / Boolean networks** — genes self-organize into **attractors** (stable cycles)
+  without a controller; each attractor is a cell type. Order emerges near K≈2, the edge of chaos.
+- **The cell** — attractors are compressed imprints of environmental regularities; **epigenetics**
+  (methylation/histones) are the *locks* deciding which genes are read **right now** — memory as
+  selective activation, not just storage.
+- **The brain** — a fast, capacity-bounded buffer (**hippocampus** ≈ the context window)
+  consolidates during **sleep** into slow, structural long-term memory (**cortex** weights); it
+  survives by **forgetting** ~99% and keeping the *structure* of experience, not the transcript.
+- **The next layer** — humans (analog sensors + will) coupled with LLMs (a crystallized digital
+  model of human knowledge) as an **exocortex**, whose central unsolved problem is *memory
+  between sessions*.
+
+Path B takes this literally: **the graph is the cortex; a session is a day; consolidation is sleep.**
+
+### Biological blueprint → OpenWiki realization
+
+| Biological mechanism | Role | OpenWiki realization | Status |
+|---|---|---|---|
+| Attractor (stable state) | a consolidated "concept" | `Community` node + LLM summary | ✅ Path A |
+| DNA (stable code) | identity / invariants | project manifest + agent-identity grounding | ⚠️ partial |
+| Epigenetics (methylation) | selective activation of context | per-query subgraph activation (GraphRAG expansion) + decay-weighted ranking | ⚠️ partial |
+| Hebbian "fire together, wire together" | reinforce what's used | `GraphStore.reinforce()` on retrieval | ✅ v0.43 (writable-only) |
+| Synaptic decay / pruning | forgetting | `GraphStore.decay()` (exp. half-life + prune) | ✅ v0.43 |
+| Hippocampus | short-term / working buffer | the session + context window | ❌ not modeled |
+| Cortex | long-term structural memory | the persistent Kuzu graph | ⚠️ a *mirror*, not authoritative (ADR-3) |
+| Sleep consolidation | compress day → structure | the offline "sleep pass" (`communities`) | ⚠️ runs over docs, not sessions |
+
+### The three-tier memory (what a new session's context is assembled from)
+
+1. **DNA tier — identity.** Small, stable: who the user/agent is, invariants, global instructions
+   (≈ the manifest + a persistent identity doc).
+2. **Epigenetic tier — activation.** Per query, "methylate" (hide) the irrelevant sub-graph and
+   "demethylate" (surface) the relevant one, weighted by *decayed usage* (≈ GraphRAG expansion
+   over `SIMILAR_TO`/`REINFORCES`, ranked by effective weight).
+3. **Attractor tier — consolidated memory.** The compressed meta-nodes (community summaries) that
+   carry the *structure* of past experience, not its transcript (≈ Path A communities).
+
+Assembling a session's context = identity (always) + the activated sub-graph (epigenetic) + the
+relevant attractor summaries — **concentrate, don't replay**.
+
+### The core algorithm: merge a session sub-graph into the world model
+
+Each session becomes a small typed sub-graph; consolidation merges it into the persistent
+macro-graph in four phases. **Phases 3–4 are where every off-the-shelf store — Neo4j, Kùzu, even
+Microsoft GraphRAG — stops**, so they are Path B's real contribution.
+
+| Phase | What it does | OpenWiki today | Path B work |
+|---|---|---|---|
+| 1. **Entity resolution** | anchor session nodes to existing ones (semantic + name) | entity normalization + `hybrid_search` | wire in as an explicit merge step |
+| 2. **Hebbian weighting + decay** | strengthen confirmed links, fade unused | `reinforce()` / `decay()` | apply on merge; extend past the read-path |
+| 3. **Contradiction harmonization** | new facts supersede old (non-monotonic) | — | **the novel piece**: time-versioned edges (`valid_from` / `superseded_by`); retrieval prefers the latest valid assertion |
+| 4. **Abstraction / compression** | collapse detail into meta-nodes | `communities` (Louvain + summaries) | run over the *merged* graph, incrementally |
+
+### Staged plan
+
+Ordered so each stage is shippable and measurable (the project's discipline — see *Future
+directions*). Stages re-open the decisions that flagged themselves for exactly this.
+
+- **B0 — Reframe (re-opens ADR-3, debt D1).** Make the graph *authoritative* (not a rebuildable
+  mirror) and add a **session/experience** source type beside documents. Highest leverage, highest risk.
+- **B1 — Read-path reinforcement (re-opens ADR-8, debt D2).** A writable-safe concurrency model so
+  plain `ask` reinforces, not just `serve`/`chat`. Unblocks memory where it actually happens.
+- **B2 — Session capture → sub-graph.** An LLM turns a conversation into a typed sub-graph
+  (entities + relations + provenance + timestamp).
+- **B3 — Merge operator.** Phases 1–2 (entity resolution + Hebbian) into the world model.
+- **B4 — Contradiction / time-versioning (debt D6).** Phase 3 — the belief-revision layer; the
+  genuinely novel, unshipped-anywhere contribution.
+- **B5 — Sleep job.** Phase 4 over the merged graph (communities + decay + abstraction) as a
+  scheduled consolidation pass.
+- **B6 — Three-tier context assembly.** Build a session's context from identity + activation +
+  attractors — the payoff: *load the concentrate, not the log*.
+
+### Honest guardrails
+
+- **Contradiction (Phase 3 / B4) is belief revision** — a decades-old AI problem, not a graph
+  feature. The tractable version is boring and real: version edges by time/validity and prefer the
+  newest valid assertion; skip the "simulate the network until it goes chaotic" metaphor.
+- **Kauffman is inspiration, not an algorithm.** The operationalizable residue is one knob:
+  **keep the graph at useful density** (decay + pruning) = the "edge of chaos".
+- **Measure every step.** The graph's value has been counter-intuitive before (it does *not* help
+  local recall; it *does* help answer quality + global search). Path B's claim — "does memory make
+  the agent better in the *next* session?" — must be measured the same way, or it's just poetry.
+  This likely needs a new eval axis (cross-session task success), not the current single-shot sets.
 
 ## Related docs
 

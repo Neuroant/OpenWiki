@@ -24,6 +24,10 @@ The system is a straight, staged pipeline built around an intermediate represent
 8. **Consolidation layer** — LLM community summaries over the graph → **global search**.
 9. **Usage-memory** — decaying `REINFORCES` edges that learn which connections are used.
 
+These stages run inside a **project** — an `openwiki.toml` folder that is the top-level unit
+grouping sources, artifacts, settings, and build state, so several knowledge bases coexist and
+persist between commands (the key organizing concept — §8.14; deep design in `docs/projects.md`).
+
 Core use cases (each maps to a runtime scenario in §6):
 
 | # | Use case | Entry point | Runtime scenario |

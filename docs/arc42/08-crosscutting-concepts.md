@@ -107,6 +107,42 @@ The boundaries (§5, §8.2/§8.3) exist so common extensions are local, single-f
 | **A CLI capability** | Add an argparse subcommand + a `_cmd_*` handler + a `_DISPATCH` entry + an `_apply_project` branch. | capabilities are subcommands, not flags (ADR-13). |
 | **An optional graph layer** | Add an always-created (empty) table in `GraphBuilder._create_schema` + best-effort `GraphStore` methods + a lazy `IF NOT EXISTS` migration for old graphs. | store/UI code treats layers as best-effort (ADR-7). |
 
+## 8.14 The project — the organizing unit
+
+A **project** (an `openwiki.toml` in a folder) is OpenWiki's top-level structural concept:
+the unit that groups sources, generated artifacts, settings, and build state so several
+knowledge bases sit side by side and persist between commands. It mirrors familiar build
+tools (full analogy + phase history in `docs/projects.md`):
+
+| Classical tool | OpenWiki |
+|---|---|
+| `git init` / `cargo new` | `openwiki init` |
+| `pyproject.toml` / `Cargo.toml` | `openwiki.toml` (identity + declarative config) |
+| `src/` | `sources/` (files copied in; URLs/repos referenced in place) |
+| `target/` · `build/` | `output/` (`wiki/`, `index/`, `graph`) — gitignored |
+| `Cargo.lock` | `.openwiki/state.json` (build provenance + staleness) |
+| `cargo build` / `make` | `openwiki build` (runs the pipeline from the manifest) |
+| find `.git` upward | discover `openwiki.toml` upward |
+| `conda activate` | `openwiki project use <name>` (registry) |
+
+Its parts and where they live:
+
+- **Discovery & identity** (`project.py`) — find the manifest upward from the CWD (or
+  `--project` / `$OPENWIKI_PROJECT`); expose `out_dir` / `wiki_dir` / `index_dir` / `graph_path`.
+- **Settings precedence** (§8.7, ADR-10) — flag > manifest > `~/.openwiki/config.toml` > default.
+- **Registry** (`userconfig.py`) — a user-global list of named projects + an active pointer; a
+  *from-anywhere* fallback used only when you're **not** inside a project (location always wins).
+- **Multi-source corpus** (`merge.py`) — several `[[sources]]` (file / URL / repo) merged into one
+  `ParsedDocument` (`combine_documents`), with per-source cross-references.
+- **Incremental build state** (`pipeline.py`, ADR-11) — the per-stage fingerprint chain in
+  `.openwiki/state.json` that drives `build` / `status`.
+
+The pipeline itself stays **project-agnostic**: only `project.py` + `cli.py` know about
+projects, every stage still takes explicit paths, and with no manifest the historical `./output`
+defaults apply (back-compat). This keeps the project a thin *organizing* layer over an unchanged
+pipeline. Deep design + roadmap: `docs/projects.md`; layout on disk: §7.
+
 ---
 *Chapter complete. Cross-refs: runtime error paths → §6.7; the no-auth risk → §11 R1;
+the project concept → §5 (project/pipeline/userconfig/merge), ADR-10/11, §7, `docs/projects.md`;
 the boundaries these concepts rest on → §5.1 + ADR-1/2/7/13.*

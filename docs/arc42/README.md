@@ -17,7 +17,8 @@ quality, and risks.
 | `CLAUDE.md` (repo root) | Claude Code / AI coding agents | Operational guide: commands, module map, conventions, gotchas |
 | `docs/roadmap.md` | Anyone | What was built (history) + prioritized future directions |
 | `docs/RAG-vs-GraphRAG.md` | Evaluators | The measured findings behind the graph design |
-| `docs/projects.md`, `docs/coding-agents.md` | Users | Feature-level design for the project layer / MCP setup |
+| `docs/projects.md` | Architects, users | Deep design of the **project** concept (§8.14): manifest, discovery, registry, layout, multi-source merge |
+| `docs/coding-agents.md` | Users | MCP / OpenCode / Claude Code setup |
 
 The arc42 docs and `CLAUDE.md` overlap by design (both describe the architecture); this doc
 cross-references `CLAUDE.md` for exhaustive module detail rather than duplicating it.

@@ -18,6 +18,7 @@ quality, and risks.
 | `docs/roadmap.md` | Anyone | What was built (history) + prioritized future directions |
 | `docs/RAG-vs-GraphRAG.md` | Evaluators | The measured findings behind the graph design |
 | `docs/projects.md` | Architects, users | Deep design of the **project** concept (§8.14): manifest, discovery, registry, layout, multi-source merge |
+| `docs/path-b-memory.md` | Architects | **Path B (agent memory)** design — re-opens ADR-3/ADR-8, addresses §11 D1/D2/D6 |
 | `docs/coding-agents.md` | Users | MCP / OpenCode / Claude Code setup |
 
 The arc42 docs and `CLAUDE.md` overlap by design (both describe the architecture); this doc

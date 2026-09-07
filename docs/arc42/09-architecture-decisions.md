@@ -163,4 +163,5 @@
 
 ---
 *Chapter complete. ADR-3 and ADR-8 are the decisions the Path-B agent-memory direction
-(§11 D1/D2) will re-open. New significant decisions should be appended here with the next id.*
+(§11 D1/D2) will re-open — see the design in `docs/path-b-memory.md`. New significant decisions
+should be appended here with the next id.*

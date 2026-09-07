@@ -374,6 +374,10 @@ brain consolidation → human+LLM systems) and the architecture analysis in `doc
 document **mirror** into agent **memory**. Framing is inspiration; the engineering is in the
 tables and stages.*
 
+> **Deep design:** this section is the overview. The full design base — target architecture,
+> proposed data model, per-stage detail (goal / build / builds-on / hard part / exit criterion),
+> the evaluation strategy, and the open decisions — is in **[`docs/path-b-memory.md`](path-b-memory.md)**.
+
 ### The frame: memory as a self-organizing model of the world
 
 One pattern recurs across scales — a system persists by building an internal model of its
@@ -468,6 +472,7 @@ directions*). Stages re-open the decisions that flagged themselves for exactly t
 
 - `docs/arc42/` — full **architecture documentation** (arc42: goals, constraints, context,
   building blocks, runtime, deployment, concepts, ADRs, quality, risks).
+- `docs/path-b-memory.md` — the **Path B (agent memory)** deep design base.
 - `docs/projects.md` — the projects layer design + phase roadmap.
 - `docs/RAG-vs-GraphRAG.md` — the full evaluation writeup (methodology + numbers).
 - `docs/coding-agents.md` — MCP / OpenCode / Claude Code setup.

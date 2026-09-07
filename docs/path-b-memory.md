@@ -1,0 +1,284 @@
+# Path B — Agent Memory (design)
+
+> **Status: PROPOSED / design.** Nothing here is implemented yet. This is the detailed design
+> base for Path B — turning OpenWiki's knowledge graph from a document **mirror** into agent
+> **memory**. The roadmap-level overview lives in [`docs/roadmap.md`](roadmap.md#path-b--the-second-brain-memory-model);
+> this document is the deep design (concepts → target architecture → data model → staged plan →
+> evaluation → open decisions). It re-opens arc42 **ADR-3** and **ADR-8** and addresses debts
+> **D1/D2/D6** (see [`docs/arc42/`](arc42/)).
+
+## Contents
+1. [Motivation & main idea](#1-motivation--main-idea)
+2. [Conceptual model](#2-conceptual-model)
+3. [Target architecture](#3-target-architecture)
+4. [Proposed data model](#4-proposed-data-model)
+5. [The core algorithm: session → world-model merge](#5-the-core-algorithm-session--world-model-merge)
+6. [Staged delivery plan (B0–B6)](#6-staged-delivery-plan-b0b6)
+7. [Evaluation strategy](#7-evaluation-strategy)
+8. [Risks & open decisions](#8-risks--open-decisions)
+9. [Relationship to the current code](#9-relationship-to-the-current-code)
+10. [Recommended first slice](#10-recommended-first-slice)
+
+---
+
+## 1. Motivation & main idea
+
+**In one sentence:** stop treating the graph as a disposable *mirror* of static documents, and
+make it the agent's *living memory* — something that accumulates from what actually happens
+(conversations/sessions), strengthens what gets used, forgets what doesn't, and reconciles new
+facts against old.
+
+Today OpenWiki ingests **documents** → builds a wiki → mirrors it into a graph that is a *pure
+function of its inputs* (arc42 ADR-3). The graph is disposable and rebuildable; it has no memory
+of use beyond the v0.43 `REINFORCES` overlay, and it can't hold anything that didn't come from a
+source file. Path B inverts this: **experience** (sessions) becomes a first-class input, and the
+graph becomes the **authoritative, evolving store** of what the agent has learned.
+
+Why this is the frontier: Path A (communities / global search) and v0.43 (reinforce / decay)
+already built the *attractor* tier and the Hebbian-plus-forgetting mechanics. What's missing is
+(a) getting experience **in**, (b) an **authoritative** place to keep it, and (c) the two things
+no off-the-shelf system ships — automatic **contradiction handling** and true **cross-session
+consolidation**.
+
+**The payoff — "concentrate, don't replay":** a new session's context is *assembled from memory*
+(identity + the activated sub-graph + consolidated summaries) instead of by pasting prior chat
+logs. The agent starts a new session already oriented, without re-reading everything.
+
+## 2. Conceptual model
+
+The North Star (from the memory-evolution discussion) mapped **literally** onto OpenWiki:
+
+- **the graph = the cortex** — long-term structural memory;
+- **a session = a day** — fresh experience in a bounded buffer (the context window ≈ hippocampus);
+- **consolidation = sleep** — compress the day into structure, integrate it, forget the noise;
+- held at the **edge of chaos** — dense enough to remember, decayed enough to stay plastic.
+
+### 2.1 Three-tier memory (how a session's context is assembled)
+
+| Tier | Biological analogue | Content | OpenWiki realization |
+|---|---|---|---|
+| **DNA / identity** | genome (stable code) | who the user/agent is; invariants; standing instructions | project manifest + a persistent identity doc |
+| **Epigenetic / activation** | methylation (which genes are read now) | the sub-graph relevant to *this* query, weighted by decayed usage | GraphRAG expansion over `SIMILAR_TO`/`REINFORCES`, ranked by effective weight |
+| **Attractor / consolidated** | stable cell state | compressed meta-nodes carrying the *structure* of past experience | Path A community summaries |
+
+Retrieval = identity (always) + activated sub-graph (epigenetic) + relevant attractor summaries.
+The transcript is **not** replayed; its *structure* is.
+
+### 2.2 The engineering residue of the metaphor
+
+The biology is inspiration, not an algorithm. What it concretely yields:
+
+- **Attractors → meta-nodes** (already: communities).
+- **Epigenetics → selective, decayed activation** (already: expansion + decay).
+- **Edge of chaos → one operational knob**: keep the graph at useful density via decay + pruning.
+- **Sleep → a scheduled consolidation job** (compress / integrate / forget).
+
+Anything not reducible to those (e.g. "simulate the network until it self-organizes") is left as
+metaphor and **not** built.
+
+## 3. Target architecture
+
+The pipeline gains a second inflow and the graph changes role:
+
+```
+documents ──parse_source──▶ ParsedDocument ──▶ wiki ──▶ index ──▶ graph  (derived-from-docs)
+                                                                    ▲
+sessions ──capture──▶ session sub-graph ──merge──▶  world-model graph  (remembered-from-experience)
+                                                          │  (authoritative; survives doc rebuilds)
+                                          sleep/consolidation (communities + decay + abstraction)
+                                                          │
+                                    context_for(query) = DNA + activation + attractors
+```
+
+Two invariants define the reframe:
+
+1. **The graph is authoritative** for remembered content (re-opens ADR-3). A `graph-build` from
+   documents may rebuild the *derived* subgraph but must **preserve** the *remembered* subgraph.
+2. **The graph is read-mostly but continuously updated** (re-opens ADR-8). Ordinary reads
+   (`ask`, MCP) must be able to record usage and, on consolidation, fold in new memory — without
+   the exclusive-writer bottleneck.
+
+## 4. Proposed data model
+
+*(Design sketch — names/shapes will firm up during B0/B2. Additive, following ADR-7: new tables,
+empty until used, so existing code degrades gracefully.)*
+
+New node tables:
+
+| Node | Purpose | Key fields (proposed) |
+|---|---|---|
+| `Session` | one "day" of experience | `id`, `started_at`, `source` (chat / event), `summary` |
+| `Assertion` | a reified fact (so it can be versioned/contradicted) | `id`, `subject`, `predicate`, `object`, `valid_from`, `superseded_by` (nullable), `confidence`, `session_id` |
+
+Reusing existing `Entity` nodes as the subjects/objects of assertions keeps entity resolution in
+one place. New edges:
+
+| Edge | From → To | Purpose |
+|---|---|---|
+| `FROM_SESSION` | Assertion / Entity → Session | provenance (which day produced this) |
+| `ASSERTS` | Session → Assertion | what a session claimed |
+| `ABOUT` | Assertion → Entity | link an assertion to its subject/object entities |
+| `SUPERSEDES` | Assertion → Assertion | contradiction/versioning (newer over older) |
+
+`REINFORCES(weight, last_seen)` (v0.43) is reused unchanged for usage-memory. **Reified
+assertions** are the key design choice: representing a fact as a node (not a bare typed edge)
+is what lets B4 mark it superseded, time-scope it, and carry provenance/confidence — the price is
+an extra hop in queries. (Alternative — typed `Entity→Entity` edges with validity props — is
+lighter but harder to version cleanly; see §8.)
+
+## 5. The core algorithm: session → world-model merge
+
+Each session becomes a small typed sub-graph, merged into the macro-graph in four phases. **Phases
+3–4 are where Neo4j / Kùzu / Microsoft GraphRAG stop** — they're Path B's real contribution.
+
+| Phase | What it does | Method |
+|---|---|---|
+| **1. Entity resolution** | anchor session nodes to existing ones | normalized name (`_normalize`, ADR-12) + `hybrid_search` vector match above a confidence threshold; else create |
+| **2. Hebbian weighting + decay** | strengthen confirmed links, fade unused | `reinforce()` on confirmed edges; `decay()` ages the rest |
+| **3. Contradiction harmonization** | newer facts supersede older | same `(subject, predicate)` with a different `object` and a later timestamp → mark the old `Assertion.superseded_by`; keep both (history preserved) |
+| **4. Abstraction / compression** | collapse settled detail into meta-nodes | re-run community detection + summaries incrementally over the merged graph |
+
+## 6. Staged delivery plan (B0–B6)
+
+Ordered so each stage is shippable and measurable, with the riskiest reframes placed early enough
+to matter but late enough to de-risk. Each stage lists an **exit criterion** (how we know it's done).
+
+### B0 — Reframe: authoritative graph + a "session" source type
+- **Goal:** make the graph a store of record; let experience flow in.
+- **Build:** split the schema/logic into *derived-from-docs* vs *remembered-from-experience*; make
+  `graph-build` preserve the remembered subgraph; add a **session/experience** source type beside
+  pdf/md/html/code.
+- **Builds on:** the `parse_source` dispatch pattern; the project layer (a project now owns an
+  evolving memory).
+- **Re-opens:** ADR-3 (debt D1).
+- **Hard part:** the derived-vs-remembered split; a wrong boundary means rebuilds destroy memory or
+  accumulate garbage.
+- **Exit:** rebuild the doc-graph and prove (test) the remembered subgraph survives untouched.
+
+### B1 — Read-path reinforcement (writable-safe)
+- **Goal:** ordinary use (`ask`, MCP `wiki_ask`) strengthens memory, not only `serve`/`chat`.
+- **Build:** a concurrency model where reads record usage — most likely an append-only usage log a
+  background writer folds in (sidesteps Kuzu's exclusive-writer lock).
+- **Builds on:** v0.43 `reinforce()`/`decay()` (mechanics already exist + tested).
+- **Re-opens:** ADR-8 (debt D2).
+- **Hard part:** concurrent readers + a writer under Kuzu's exclusive lock.
+- **Exit:** after a scripted set of asks, useful edges are measurably heavier than noise; no lock contention errors.
+
+### B2 — Session capture → typed sub-graph
+- **Goal:** turn a conversation into a small typed knowledge sub-graph (the day's trace).
+- **Build:** an LLM pass (shape of `entities.py`/`community.py` — pure, chat-injected,
+  fake-testable) → entities + typed relations + provenance + timestamp.
+- **Builds on:** entity extraction (typed ontology, normalization); the pure-module + fake-chat pattern.
+- **Hard part:** deciding *what's worth remembering* (signal vs chit-chat).
+- **Exit:** precision/recall of extracted facts vs a hand-labeled session clears a set bar.
+
+### B3 — Merge operator (Phases 1–2)
+- **Goal:** fold the session sub-graph into the world model without duplicating.
+- **Build:** `merge(subgraph)` = entity resolution (name + vector, confidence-thresholded) +
+  Hebbian reinforcement of confirmed links.
+- **Builds on:** `_normalize` (ADR-12), `hybrid_search`, `reinforce()`.
+- **Hard part:** resolution errors compound permanently → confidence threshold + provenance so a
+  merge is auditable/reversible.
+- **Exit:** merge precision on a curated set clears a set bar; every merge is traceable to a session.
+
+### B4 — Contradiction / time-versioning (Phase 3) — the novel piece
+- **Goal:** a newer fact supersedes an older one without losing history.
+- **Build:** `Assertion` validity (`valid_from`, `superseded_by`); conflict → mark old superseded;
+  retrieval prefers the latest valid assertion.
+- **Builds on:** the `REINFORCES.last_seen` timestamp pattern → validity intervals.
+- **Addresses:** debt D6.
+- **Hard part:** genuinely unshipped-anywhere; keep detection **boring & tractable** (same
+  subject+predicate, different object, later timestamp → supersede), explicitly *not* a
+  "simulate-for-chaos" scheme.
+- **Exit:** on a "fact changed" scenario, the agent answers the current fact, not the stale one,
+  and the superseded history is still queryable.
+
+### B5 — Sleep: cross-session consolidation job (Phase 4)
+- **Goal:** periodically compress accumulated memory into structure.
+- **Build:** a scheduled job over the merged graph: re-detect communities + regenerate summaries,
+  run `decay()`, collapse settled detail into higher meta-nodes — incrementally.
+- **Builds on:** `communities` (Louvain + summaries) and `decay()` already exist — mostly
+  *re-targeting* them at session-memory + scheduling.
+- **Hard part:** incrementality (don't re-summarize the whole graph); density tuning ("edge of chaos").
+- **Exit:** graph size stays bounded over many sessions while global-search quality holds.
+
+### B6 — Three-tier context assembly
+- **Goal:** the payoff — build a new session's context from memory, cheaply.
+- **Build:** `context_for(query)` = identity (DNA) + decay-weighted activated sub-graph
+  (epigenetic) + relevant attractor summaries; exposed via the agent + a new MCP capability.
+- **Builds on:** GraphRAG expansion, community summaries, the project/identity doc.
+- **Hard part:** budgeting three tiers into a fixed context window; beating "just paste the transcript."
+- **Exit:** the cross-session metric (§7) shows assembled memory beats both cold-start and raw-log.
+
+## 7. Evaluation strategy
+
+Path B lives or dies by measurement, same as the graph did (arc42 ADR-9). The current eval sets
+are **single-shot** (one question → pages/communities); Path B needs a **new axis**:
+
+- **Per-stage objective checks** (reuse the harness shape): B2 fact P/R; B3 merge precision; B4 the
+  "fact changed" scenario (current-vs-stale); B5 graph-size-vs-quality over N sessions.
+- **The headline metric — cross-session task success:** a scripted **multi-session** scenario where
+  session *k* establishes facts and session *k+1* depends on them. Compare three conditions:
+  1. **cold** — no memory,
+  2. **raw-log** — previous transcript pasted into context,
+  3. **assembled** — B6 three-tier context.
+  Assembled should beat cold (it remembers) *and* raw-log (it's concentrated, not noisy), judged by
+  task success + an LLM judge, position-balanced like the existing answer eval.
+
+If "assembled" doesn't beat "raw-log", Path B isn't paying for its complexity — and we'll know early.
+
+## 8. Risks & open decisions
+
+**Decisions to make (genuine forks):**
+- **Assertion representation** — reified `Assertion` nodes (versionable, provenance-rich, extra hop)
+  vs typed `Entity→Entity` edges with validity props (lighter, harder to version). *Leaning reified.*
+- **Capture trigger** — end-of-session batch vs streaming during the turn loop. *Leaning batch (a
+  "sleep" pass), matching the biology and avoiding write-on-every-turn.*
+- **Identity (DNA) storage** — a manifest field vs a dedicated identity doc vs a special graph node.
+- **Retention / privacy** — remembered content is sensitive; needs a forget/redact story and a
+  clear on-disk location (a session may contain things the user doesn't want persisted).
+
+**Risks:**
+- **Memory poisoning / drift** — bad captures or wrong merges corrupt memory permanently → provenance
+  + confidence + reversibility (B3) and superseding-not-deleting (B4) are mitigations.
+- **Contradiction is belief revision** — a decades-old hard problem; scope it to the tractable rule
+  above, don't chase generality.
+- **Complexity vs payoff** — the honest kill-switch is §7: if assembled context doesn't beat a pasted
+  transcript, stop.
+- **Concurrency** — B1's writable-safe model is load-bearing; get it wrong and memory writes corrupt
+  the store or serialize everything.
+
+## 9. Relationship to the current code
+
+| Path B needs | Current code to reuse | New work |
+|---|---|---|
+| usage memory (B1/B3/B5) | `GraphStore.reinforce()` / `decay()` (v0.43) | read-path safe writes |
+| capture (B2) | `entities.py` pattern (typed, normalized, fake-testable) | session → sub-graph pass |
+| entity resolution (B3) | `_normalize` (ADR-12) + `hybrid_search` | confidence-thresholded merge |
+| abstraction / sleep (B5) | `community.py` (Louvain + summaries) | incremental, over merged graph |
+| activation + attractors (B6) | GraphRAG expansion + `communities()` | three-tier `context_for` + MCP tool |
+| everything measurable (B*) | the `eval.py` harness | a multi-session eval axis |
+| session ingest (B0) | `sources.parse_source` dispatch shape | authoritative graph + session source |
+
+**Genuinely new:** B0 (authoritative graph + session ingest), B4 (contradiction/versioning), and
+B6's cross-session eval. Everything else is largely *re-wiring proven parts*.
+
+## 10. Recommended first slice
+
+To de-risk the whole path for the least spend, build a **thin vertical** before the load-bearing
+reframes:
+
+> **B2 (capture) → B3 (merge) → B6 (assemble)** on a tiny scripted **two-session** scenario, with
+> the graph still doc-derived (defer B0's authoritative reframe) and no contradiction handling
+> (defer B4).
+
+This yields a measurable answer to *"does assembled memory help the next session?"* (§7) fastest.
+If yes → commit to B0 (authoritative graph) and B4 (contradictions), the hard, high-value stages.
+If no → we've learned it cheaply, before touching ADR-3.
+
+---
+
+*Cross-refs: overview → [`docs/roadmap.md`](roadmap.md#path-b--the-second-brain-memory-model);
+decisions this re-opens → arc42 [ADR-3, ADR-8](arc42/09-architecture-decisions.md); debts it
+addresses → arc42 [§11 D1/D2/D6](arc42/11-risks-and-technical-debt.md); the project unit it extends
+→ arc42 [§8.14](arc42/08-crosscutting-concepts.md); the memory concepts → arc42 [§8.1 (IR)].*

@@ -58,5 +58,6 @@ For a single-user, local, learning project the sensible posture is:
 | D8 packaging | Direction F — PyPI/Docker/CI |
 
 ---
-*Chapter complete. R7/D-items are honest and specific rather than reassuring; the two Path-B
-debts (D1, D2) trace directly back to the ADRs that flagged themselves "revisit for Path B".*
+*Chapter complete. R7/D-items are honest and specific rather than reassuring; the Path-B debts
+(D1, D2, D6) trace directly back to the ADRs that flagged themselves "revisit for Path B" and
+are designed out in `docs/path-b-memory.md`.*

@@ -399,4 +399,5 @@ unfinished part*, which is exactly why our plan front-loads a measurable thin ve
 *Cross-refs: overview → [`docs/roadmap.md`](roadmap.md#path-b--the-second-brain-memory-model);
 decisions this re-opens → arc42 [ADR-3, ADR-8](arc42/09-architecture-decisions.md); debts it
 addresses → arc42 [§11 D1/D2/D6](arc42/11-risks-and-technical-debt.md); the project unit it extends
-→ arc42 [§8.14](arc42/08-crosscutting-concepts.md); the memory concepts → arc42 [§8.1 (IR)].*
+→ arc42 [§8.14](arc42/08-crosscutting-concepts.md); the memory concepts → arc42
+[§8.1 (IR)](arc42/08-crosscutting-concepts.md).*

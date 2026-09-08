@@ -30,8 +30,9 @@ from .chat_agent import WikiAgent, summarize_wiki
 from .claude_code_template import scaffold_claude_code
 from .opencode_template import scaffold_opencode
 from .graph import (
-    GraphStore, answer_global, build_graph, detect_communities, detect_page_offset,
-    extract_entities, extract_references, extract_references_multi, summarize_community,
+    GraphStore, answer_global, build_graph, capture_session, detect_communities,
+    detect_page_offset, extract_entities, extract_references, extract_references_multi,
+    format_memory, summarize_community,
 )
 from .embeddings import OllamaEmbedder
 from .llm import OllamaChat
@@ -338,6 +339,23 @@ def _build_argparser() -> argparse.ArgumentParser:
                          help="Days after which an unused edge's weight halves (default: 30).")
     decay_p.add_argument("--floor", type=float, default=0.1,
                          help="Prune edges whose effective weight falls below this (default: 0.1).")
+
+    rem_p = sub.add_parser("remember", parents=[common],
+                           help="Capture a session transcript into the graph's remembered tier (Path B).")
+    rem_p.add_argument("transcript", type=Path, help="A text/markdown file with the session transcript.")
+    rem_p.add_argument("--session", default=None, help="Session id (default: the transcript file stem).")
+    rem_p.add_argument("-i", "--index", type=Path, default=None, help="Index dir (for the embedder; default: project's).")
+    rem_p.add_argument("--graph", type=Path, default=None, help="Graph dir (default: project's graph).")
+    rem_p.add_argument("--model", default=None, help="Chat model for fact extraction (default: manifest models.chat).")
+    rem_p.add_argument("--host", default=None, help="Ollama host URL.")
+
+    rec_p = sub.add_parser("recall", parents=[common],
+                           help="Show the remembered facts most relevant to a query (Path B activation tier).")
+    rec_p.add_argument("query", help="What to recall.")
+    rec_p.add_argument("-k", "--top-k", type=int, default=5, help="Facts to return (default: 5).")
+    rec_p.add_argument("-i", "--index", type=Path, default=None, help="Index dir (for the embedder; default: project's).")
+    rec_p.add_argument("--graph", type=Path, default=None, help="Graph dir (default: project's graph).")
+    rec_p.add_argument("--host", default=None, help="Ollama host URL.")
     return parser
 
 
@@ -1011,6 +1029,15 @@ def _apply_project(args: argparse.Namespace, project: Optional[Project],
         val("host", "models", "host", DEFAULT_HOST)
     elif cmd == "decay":
         path("graph", p.graph_path if p else None, Path("output") / "graph")
+    elif cmd == "remember":
+        path("index", p.index_dir if p else None, Path("output") / "index")
+        path("graph", p.graph_path if p else None, Path("output") / "graph")
+        val("model", "models", "chat", DEFAULT_CHAT)
+        val("host", "models", "host", DEFAULT_HOST)
+    elif cmd == "recall":
+        path("index", p.index_dir if p else None, Path("output") / "index")
+        path("graph", p.graph_path if p else None, Path("output") / "graph")
+        val("host", "models", "host", DEFAULT_HOST)
 
 
 def _cmd_ingest(args: argparse.Namespace) -> int:
@@ -1536,6 +1563,70 @@ def _cmd_decay(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_remember(args: argparse.Namespace) -> int:
+    """Path B (B2/B3): capture a session transcript into the graph's remembered tier."""
+    if not (args.index / "index.json").is_file():
+        print(f"error: no index at {args.index} (run `openwiki index` — needed for the embedder).",
+              file=sys.stderr)
+        return 2
+    if not args.transcript.is_file():
+        print(f"error: transcript not found: {args.transcript}", file=sys.stderr)
+        return 2
+    index = SemanticIndex.load(args.index)
+    if isinstance(index.embedder, OllamaEmbedder):
+        index.embedder.host = args.host.rstrip("/")
+    session_id = args.session or args.transcript.stem
+    graph = _open_graph(args.graph, writable=True)
+    if graph is None:
+        print(f"error: no graph at {args.graph} (run `openwiki graph-build` first).", file=sys.stderr)
+        return 2
+    if not getattr(graph, "writable", False):
+        print("error: graph is locked by another process (stop `serve`/`chat` first).", file=sys.stderr)
+        graph.close()
+        return 2
+    try:
+        chat = OllamaChat(model=args.model, host=args.host, temperature=0.2)
+        print(f"Capturing session '{session_id}' with {chat.name} …", file=sys.stderr)
+        facts = capture_session(chat, args.transcript.read_text(encoding="utf-8"))
+        for f in facts:
+            print(f"  · {f.subject} {f.predicate} {f.object}", file=sys.stderr)
+        result = graph.remember(session_id, facts, index.embedder)
+    finally:
+        graph.close()
+    print(f"Remembered '{session_id}': {result['added']} new, {result['duplicates']} duplicate "
+          f"({result['facts']} captured) → {args.graph}")
+    print('  now try:  openwiki recall "<a question>"')
+    return 0
+
+
+def _cmd_recall(args: argparse.Namespace) -> int:
+    """Path B (B6): show the remembered facts most relevant to a query."""
+    if not (args.index / "index.json").is_file():
+        print(f"error: no index at {args.index} (run `openwiki index` — needed for the embedder).",
+              file=sys.stderr)
+        return 2
+    index = SemanticIndex.load(args.index)
+    if isinstance(index.embedder, OllamaEmbedder):
+        index.embedder.host = args.host.rstrip("/")
+    graph = _open_graph(args.graph, writable=False)
+    if graph is None:
+        print(f"error: no graph at {args.graph}.", file=sys.stderr)
+        return 2
+    try:
+        hits = graph.recall(args.query, index.embedder, k=args.top_k)
+    finally:
+        graph.close()
+    if not hits:
+        print("(no relevant memory — capture sessions with `openwiki remember` first)")
+        return 0
+    print(format_memory(hits))
+    print("\nscores:", file=sys.stderr)
+    for h in hits:
+        print(f"  {h['score']:.3f} (cos {h['cos']:.3f})  {h['subject']} {h['predicate']} "
+              f"{h['object']}  [{h['session_id']}]", file=sys.stderr)
+    return 0
+
+
 def _cmd_serve(args: argparse.Namespace) -> int:
     index = None
     if (args.index / "index.json").is_file():
@@ -1605,6 +1696,8 @@ _DISPATCH = {
     "graph-build": _cmd_graph_build,
     "communities": _cmd_communities,
     "decay": _cmd_decay,
+    "remember": _cmd_remember,
+    "recall": _cmd_recall,
 }
 
 

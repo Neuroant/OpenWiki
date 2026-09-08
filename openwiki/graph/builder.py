@@ -120,6 +120,14 @@ class GraphBuilder:
         # Usage-memory overlay: reinforced page↔page edges that decay over time
         # (empty until `reinforce()` runs; see openwiki/graph/decay.py).
         conn.execute("CREATE REL TABLE REINFORCES(FROM Page TO Page, weight DOUBLE, last_seen INT64);")
+        # Remembered tier (Path B, B2/B3/B6): sessions + reified assertions (empty until
+        # `remember()` runs; see openwiki/graph/memory.py). Assertions carry a mirrored
+        # embedding so `recall()` can brute-force cosine over them.
+        conn.execute("CREATE NODE TABLE Session(id STRING, created_at INT64, PRIMARY KEY(id));")
+        conn.execute(
+            f"CREATE NODE TABLE Assertion(id STRING, subject STRING, predicate STRING, "
+            f"object STRING, session_id STRING, created_at INT64, emb FLOAT[{dim}], PRIMARY KEY(id));")
+        conn.execute("CREATE REL TABLE ASSERTS(FROM Session TO Assertion);")
 
     # -- nodes / structural edges --------------------------------------
 

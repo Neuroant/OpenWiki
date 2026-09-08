@@ -449,14 +449,23 @@ directions*). Stages re-open the decisions that flagged themselves for exactly t
 - **B1 — Read-path reinforcement (re-opens ADR-8, debt D2).** A writable-safe concurrency model so
   plain `ask` reinforces, not just `serve`/`chat`. Unblocks memory where it actually happens.
 - **B2 — Session capture → sub-graph.** An LLM turns a conversation into a typed sub-graph
-  (entities + relations + provenance + timestamp).
+  (entities + relations + provenance + timestamp). *(First slice landed, v0.46: flat
+  subject–predicate–object capture into reified `Assertion`s.)*
 - **B3 — Merge operator.** Phases 1–2 (entity resolution + Hebbian) into the world model.
+  *(First slice landed, v0.46: dedup-only merge by normalized key.)*
 - **B4 — Contradiction / time-versioning (debt D6).** Phase 3 — the belief-revision layer; the
   genuinely novel, unshipped-anywhere contribution.
 - **B5 — Sleep job.** Phase 4 over the merged graph (communities + decay + abstraction) as a
   scheduled consolidation pass.
 - **B6 — Three-tier context assembly.** Build a session's context from identity + activation +
-  attractors — the payoff: *load the concentrate, not the log*.
+  attractors — the payoff: *load the concentrate, not the log*. *(First slice landed, v0.46:
+  decay-weighted `recall` — the activation tier only.)*
+
+**First slice landed (v0.46).** A thin **B2→B3→B6** vertical ships as the `remember`/`recall`
+commands: capture a transcript into `Session`/`Assertion` graph tables, dedup-merge it, and recall
+facts by decay-weighted cosine — a two-session proof-of-loop (offline tests + a live informatik run).
+Still doc-derived (B0 deferred) with no contradiction handling (B4 deferred); next is the
+cross-session eval that decides whether to commit to those hard stages. Design: `path-b-memory.md`.
 
 ### Honest guardrails
 

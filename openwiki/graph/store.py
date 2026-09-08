@@ -11,6 +11,7 @@ from __future__ import annotations
 import re
 import threading
 import time
+import uuid
 from pathlib import Path
 from typing import Optional
 
@@ -29,6 +30,7 @@ from .decay import (
     DEFAULT_BOOST, DEFAULT_FLOOR, DEFAULT_HALF_LIFE_DAYS,
     effective_weight, reinforced_weight,
 )
+from .entities import _normalize
 
 
 class GraphStore:
@@ -50,6 +52,7 @@ class GraphStore:
         # Re-entrant: an upsert holds the lock across a batch and calls _rows within.
         self._lock = threading.RLock()
         self._reinforce_ensured = False   # lazy REINFORCES-table check (old graphs)
+        self._memory_ensured = False      # lazy Session/Assertion-table check (old graphs)
         self._page_comm: Optional[dict] = None   # lazy {slug: community_id} for coloring
 
     def close(self) -> None:
@@ -535,6 +538,94 @@ class GraphStore:
                                "SET r.weight=$w, r.last_seen=$t;", {"a": a, "b": b, "w": eff, "t": now})
                     decayed += 1
         return {"edges": len(rows), "decayed": decayed, "pruned": pruned}
+
+    # -- remembered tier (Path B: session memory) ----------------------
+
+    def _ensure_memory_schema(self, dim: int) -> None:
+        """Create Session/Assertion/ASSERTS if a pre-existing graph lacks them (once)."""
+        if self._memory_ensured:
+            return
+        for ddl in (
+            "CREATE NODE TABLE IF NOT EXISTS Session(id STRING, created_at INT64, PRIMARY KEY(id));",
+            f"CREATE NODE TABLE IF NOT EXISTS Assertion(id STRING, subject STRING, predicate STRING, "
+            f"object STRING, session_id STRING, created_at INT64, emb FLOAT[{int(dim)}], PRIMARY KEY(id));",
+            "CREATE REL TABLE IF NOT EXISTS ASSERTS(FROM Session TO Assertion);",
+        ):
+            try:
+                self._exec(ddl)
+            except Exception:  # pragma: no cover - already exists / older syntax
+                pass
+        self._memory_ensured = True
+
+    def has_memory(self) -> bool:
+        try:
+            return self._rows("MATCH (a:Assertion) RETURN count(a);")[0][0] > 0
+        except Exception:
+            return False
+
+    def remember(self, session_id: str, facts, embedder, now: Optional[int] = None) -> dict:
+        """B3: merge a captured session's facts into the remembered tier — embed, dedup
+        against existing assertions (normalized triple), and persist Session + Assertion +
+        ASSERTS. No contradiction handling yet (that's B4). Returns counts."""
+        if not self.writable:
+            raise RuntimeError("GraphStore is read-only; open it writable to remember.")
+        facts = list(facts)
+        if not facts:
+            return {"facts": 0, "added": 0, "duplicates": 0}
+        if embedder is None:
+            raise ValueError("remember needs an embedder.")
+        now = int(now if now is not None else time.time())
+        emb = embedder.embed_documents([f.text() for f in facts]).astype(np.float32)
+        norms = np.linalg.norm(emb, axis=1, keepdims=True)
+        norms[norms == 0] = 1.0
+        emb = emb / norms
+        self._ensure_memory_schema(emb.shape[1])
+        added = dupes = 0
+        with self._lock:
+            self._exec("MERGE (s:Session {id:$id}) ON CREATE SET s.created_at=$t;",
+                       {"id": session_id, "t": now})
+            existing = {(_normalize(r[0]), (r[1] or "").strip().lower(), _normalize(r[2]))
+                        for r in self._rows("MATCH (a:Assertion) RETURN a.subject, a.predicate, a.object;")}
+            for fact, vec in zip(facts, emb):
+                if fact.key() in existing:      # near-duplicate → skip (B3 dedup)
+                    dupes += 1
+                    continue
+                existing.add(fact.key())
+                aid = uuid.uuid4().hex
+                self._exec(
+                    "CREATE (:Assertion {id:$id, subject:$s, predicate:$p, object:$o, "
+                    "session_id:$sid, created_at:$t, emb:$e});",
+                    {"id": aid, "s": fact.subject, "p": fact.predicate, "o": fact.object,
+                     "sid": session_id, "t": now, "e": vec.astype(float).tolist()})
+                self._exec("MATCH (s:Session {id:$sid}),(a:Assertion {id:$id}) "
+                           "CREATE (s)-[:ASSERTS]->(a);", {"sid": session_id, "id": aid})
+                added += 1
+        return {"facts": len(facts), "added": added, "duplicates": dupes}
+
+    def recall(self, query: str, embedder, k: int = 5,
+               half_life_days: float = DEFAULT_HALF_LIFE_DAYS, now: Optional[int] = None) -> list:
+        """B6 (activation tier): the remembered facts most relevant to ``query`` — cosine over
+        assertion embeddings, weighted by recency (time-decayed via `decay`). Read-only."""
+        if embedder is None:
+            raise ValueError("recall needs an embedder.")
+        try:
+            rows = self._rows("MATCH (a:Assertion) "
+                              "RETURN a.subject, a.predicate, a.object, a.session_id, a.created_at, a.emb;")
+        except Exception:
+            return []   # no memory table on graphs built before this layer
+        if not rows:
+            return []
+        now = int(now if now is not None else time.time())
+        q = np.asarray(embedder.embed_query(query), dtype=np.float32)
+        q = q / (np.linalg.norm(q) or 1.0)
+        scored = []
+        for subj, pred, obj, sid, created, emb in rows:
+            cos = float(q @ np.asarray(emb, dtype=np.float32))   # stored normalized
+            score = cos * effective_weight(1.0, int(created or 0), now, half_life_days)
+            scored.append({"subject": subj, "predicate": pred, "object": obj,
+                           "session_id": sid, "cos": round(cos, 3), "score": round(score, 3)})
+        scored.sort(key=lambda x: -x["score"])
+        return scored[:k]
 
     def hybrid_search(self, vector, k: int = 5) -> list[dict]:
         """Vector k-NN over chunks, then hop to the owning page (GraphRAG)."""

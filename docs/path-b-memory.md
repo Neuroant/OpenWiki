@@ -220,6 +220,10 @@ to matter but late enough to de-risk. Each stage lists an **exit criterion** (ho
   controlled-vocabulary predicates, **source-support required** (a claim must be grounded in the
   turn — the anti-hallucination gate), anti-vagueness (reject "the system"). Trigger capture on the
   host `Stop` hook (end of turn), **fail-soft**.
+- **First slice (v0.46):** landed a reduced form — `graph/memory.py` `capture_session()` extracts
+  flat **subject–predicate–object** triples via one chat call (pure, fake-testable), stored as
+  reified `Assertion` nodes under a `Session` (`ASSERTS`). No capture gating yet beyond key-dedup;
+  typed relations/ontology + signal-vs-chit-chat filtering are still ahead.
 
 ### B3 — Merge operator (Phases 1–2)
 - **Goal:** fold the session sub-graph into the world model without duplicating.
@@ -231,6 +235,10 @@ to matter but late enough to de-risk. Each stage lists an **exit criterion** (ho
 - **Exit:** merge precision on a curated set clears a set bar; every merge is traceable to a session.
 - **Learned (§11):** record each merge as a reversible `MergeRun` audit node (counts, model, cost,
   provenance); rollback = close validity on its outputs (append-only, no destructive undo).
+- **First slice (v0.46):** `GraphStore.remember()` folds a session in with **dedup-only merge** — a
+  normalized `(subject, predicate, object)` key (`_normalize`, ADR-12) drops repeats within and
+  across sessions (proven by a test). Vector entity-resolution, Hebbian reinforcement of confirmed
+  links, and the `MergeRun` audit node are still ahead.
 
 ### B4 — Contradiction / time-versioning (Phase 3) — the novel piece
 - **Goal:** a newer fact supersedes an older one without losing history.
@@ -271,6 +279,11 @@ to matter but late enough to de-risk. Each stage lists an **exit criterion** (ho
 - **Learned (§11):** assemble + inject on the host `UserPromptSubmit` hook, rescue on `PreCompact`;
   weight the activation tier by decayed **confidence**; keep it **fail-soft** (degrade to
   no-memory, never block the session).
+- **First slice (v0.46):** `GraphStore.recall()` + `format_memory()` assemble a session's memory as
+  a **decay-weighted** cosine ranking over assertion embeddings (`effective_weight` with a half-life
+  — the activation tier), exposed as the `recall` CLI. It proves the two-session loop: a fact stored
+  in session 1 surfaces for a session-2 query. Full three-tier assembly (identity + activated
+  sub-graph + attractor summaries) and host-hook injection are still ahead.
 
 ## 7. Evaluation strategy
 
@@ -349,6 +362,15 @@ reframes:
 This yields a measurable answer to *"does assembled memory help the next session?"* (§7) fastest.
 If yes → commit to B0 (authoritative graph) and B4 (contradictions), the hard, high-value stages.
 If no → we've learned it cheaply, before touching ADR-3.
+
+> **Landed (v0.46).** This thin vertical now exists end-to-end: `openwiki remember <transcript>`
+> (capture → dedup-merge) and `openwiki recall <query>` (decay-weighted assemble), backed by
+> additive `Session`/`Assertion`/`ASSERTS` Kuzu tables (created empty by every `graph-build`, so old
+> graphs upgrade lazily) and 9 offline tests including a two-session proof-of-loop. Verified live on
+> the informatik KB (qwen3 capture → 4 clean facts; bge-m3 recall ranks the right fact top for each
+> new query). Still **doc-derived** (B0 deferred: `graph-build` rebuilds the doc graph and drops the
+> memory tier) and **no contradiction handling** (B4 deferred). Next: build the §7 cross-session
+> eval to measure *assembled vs raw-log*, then decide whether to commit to B0/B4.
 
 ## 11. Prior art & learnings — "Cognitive Substrate"
 

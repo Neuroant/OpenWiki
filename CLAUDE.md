@@ -169,6 +169,24 @@ connections persist and stale ones vanish (first step toward Path B agent memory
 Options: `--graph DIR`, `--half-life DAYS` (default 30), `--floor F` (prune below;
 default 0.1). Pure decay math in `openwiki/graph/decay.py`.
 
+**Remember a session / recall it later** — the **Path B** agent-memory tier (first
+slice: B2→B3→B6 thin vertical). `remember` turns a conversation transcript into
+subject–predicate–object facts (one chat call) and folds them into the graph as
+reified `Assertion`s under a `Session` (dedup-only merge, normalized key); `recall`
+ranks remembered facts against a query by **decay-weighted** cosine (the activation
+tier), so a fact stored in one session surfaces in the next:
+```
+.venv\Scripts\python -m openwiki remember session.md --session 2026-09-08
+.venv\Scripts\python -m openwiki recall "which chat model did we standardize on?"
+```
+`remember` needs an index (for the embedder) + a **writable** graph; options
+`--session ID`, `-i/--index DIR`, `--graph DIR`, `--model NAME`, `--host URL`.
+`recall` is read-only: `-k N`, `-i/--index DIR`, `--graph DIR`, `--host URL`. The
+`Session`/`Assertion`/`ASSERTS` tables are created (empty) by every `graph-build`,
+so old graphs upgrade lazily. **Deferred:** `graph-build` still rebuilds the
+doc-graph and drops the memory tier (B0's authoritative-preserve reframe); no
+contradiction/time-versioning yet (B4). Design in `docs/path-b-memory.md`.
+
 **Web UI** — browse + search + chat/edit + graph in the browser (stdlib server):
 ```
 .venv\Scripts\python -m openwiki serve --port 8137        # http://127.0.0.1:8137
@@ -330,6 +348,18 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   global-search box (`/api/global` → `WikiWebApp.ask_global`) answer thematic questions
   from the summaries (`GraphStore.communities()`) — global search over a corpus that
   chunk-RAG can't do.
+  `memory.py` is the **Path B remembered tier** (first slice — B2→B3→B6 thin vertical):
+  pure, chat-injected, fake-testable capture — `capture_session(chat, transcript)` →
+  `MemoryFact` (subject/predicate/object) triples (`parse_facts` strips `<think>`, extracts
+  the first JSON array, dedups by normalized key). The graph gains `Session` +
+  reified `Assertion(subject, predicate, object, session_id, created_at, emb)` nodes +
+  `ASSERTS` (always-created empty, like Entity/Community). `GraphStore.remember(session_id,
+  facts, embedder)` (writable) embeds each fact, **dedup-merges** by normalized
+  `(subject, predicate, object)` key across all sessions, and MERGEs the `Session` +
+  CREATEs `Assertion`s; `recall(query, embedder, k)` (read-only) ranks assertions by
+  **decay-weighted** cosine (`effective_weight`, the activation tier); `has_memory()` gates
+  both. `_ensure_memory_schema` lazily creates the tables so pre-0.46 graphs upgrade.
+  Exposed as the `remember`/`recall` CLI commands. Design in `docs/path-b-memory.md`.
 - **`openwiki/web/`** — the web UI. `server.py` = `WikiWebApp` (state) + a
   `ThreadingHTTPServer` handler exposing a JSON API (`/api/wiki`,
   `/api/pages/{slug}`, `/api/search`, `/api/chat`, `/api/graph/{slug}` = explore,
@@ -466,7 +496,7 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
 - **`openwiki/cli.py`** — argparse CLI with `init`, `build`, `status`, `project`
   (`list`/`use`/`add`/`remove`/`add-source`), `opencode`, `claude-code`, `ontology`, `ingest`,
   `build-wiki`, `index`, `search`, `eval`, `ask` (`--global` = global search),
-  `chat`, `graph-build`, `communities`, `decay`, `serve`, and `mcp`
+  `chat`, `graph-build`, `communities`, `decay`, `remember`, `recall`, `serve`, and `mcp`
   subcommands. A shared
   `--project` (parent parser) + `_apply_project(args, project)` fill unset
   path/model/host/split-level args from the active project before dispatch (flags

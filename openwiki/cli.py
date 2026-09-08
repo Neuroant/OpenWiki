@@ -80,6 +80,9 @@ def _build_argparser() -> argparse.ArgumentParser:
     init_p.add_argument("--repo", action="store_true",
                         help="Treat a directory --source as one code-repository source (in place), "
                              "not a folder to scan for files.")
+    init_p.add_argument("--session", action="store_true",
+                        help="Register the --source files as session transcripts (Path B memory tier), "
+                             "not documents — enables [memory] and captures them on build.")
     init_p.add_argument("--force", action="store_true", help="Overwrite an existing openwiki.toml.")
     init_p.add_argument("--opencode", action="store_true",
                         help="Also scaffold an OpenCode agent config (opencode.json + .opencode/).")
@@ -97,7 +100,7 @@ def _build_argparser() -> argparse.ArgumentParser:
     build_p = sub.add_parser("build", parents=[common],
                              help="Run the pipeline (ingest → wiki → index → graph) from the manifest.")
     build_p.add_argument("--only", default=None, metavar="STAGES",
-                         help="Comma-separated stages to run (ingest,wiki,index,graph).")
+                         help="Comma-separated stages to run (ingest,wiki,index,graph,memory).")
     build_p.add_argument("--force", action="store_true", help="Rebuild even stages that are up to date.")
     build_p.add_argument("-v", "--verbose", action="store_true", help="Verbose progress logging.")
 
@@ -128,6 +131,8 @@ def _build_argparser() -> argparse.ArgumentParser:
                                     "or (with --repo) a code-repo directory.")
     p_src.add_argument("--repo", action="store_true",
                        help="Treat a directory as one code-repository source (referenced in place).")
+    p_src.add_argument("--session", action="store_true",
+                       help="Register the file as a session transcript (Path B memory tier), not a document.")
 
     ingest = sub.add_parser("ingest", parents=[common], help="Parse a source (PDF/Markdown/text/HTML/URL) and extract its content.")
     ingest.add_argument("pdf", metavar="source",
@@ -405,10 +410,22 @@ def _expand_sources(raw) -> "list[Path]":
     return files
 
 
-def _resolve_source_specs(raw_sources, sources_dir: Path, repo: bool = False) -> "list[dict]":
+def _resolve_source_specs(raw_sources, sources_dir: Path, repo: bool = False,
+                          session: bool = False) -> "list[dict]":
     """Turn raw ``--source`` args into ``[{type, path}]`` manifest specs. **URLs**
     (and, with ``repo=True``, **directories**) are referenced in place; other local
-    files/globs/scan-dirs are expanded and copied into ``sources_dir``."""
+    files/globs/scan-dirs are expanded and copied into ``sources_dir``. With
+    ``session=True`` every argument is a transcript file copied in as a ``session``
+    source (Path B memory tier), not a document."""
+    if session:
+        specs: "list[dict]" = []
+        for src in _expand_sources([str(x) for x in raw_sources]):
+            dest = sources_dir / src.name
+            if src.resolve() != dest.resolve():
+                sources_dir.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src, dest)
+            specs.append({"type": "session", "path": f"sources/{src.name}"})
+        return specs
     project_root = sources_dir.parent
     specs: "list[dict]" = []
     to_copy: list = []
@@ -445,7 +462,9 @@ def _cmd_init(args: argparse.Namespace) -> int:
     sources_dir = root / "sources"
     sources_dir.mkdir(exist_ok=True)
     try:
-        specs = _resolve_source_specs(args.source or [], sources_dir, repo=getattr(args, "repo", False))
+        specs = _resolve_source_specs(args.source or [], sources_dir,
+                                      repo=getattr(args, "repo", False),
+                                      session=getattr(args, "session", False))
     except FileNotFoundError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
@@ -458,7 +477,10 @@ def _cmd_init(args: argparse.Namespace) -> int:
         sources.append(spec)
 
     name = args.name or root.name
-    manifest.write_text(render_manifest(name=name, sources=sources), encoding="utf-8")
+    # A session source opts the project into Second Brain mode (Path B).
+    has_session = any(s["type"] == "session" for s in sources)
+    manifest.write_text(render_manifest(name=name, sources=sources, memory=has_session),
+                        encoding="utf-8")
 
     gitignore = root / ".gitignore"
     if not gitignore.exists():
@@ -688,7 +710,8 @@ def _cmd_project(args: argparse.Namespace) -> int:
         sources_dir = project.root / "sources"
         sources_dir.mkdir(exist_ok=True)
         try:
-            specs = _resolve_source_specs([args.path], sources_dir, repo=getattr(args, "repo", False))
+            specs = _resolve_source_specs([args.path], sources_dir, repo=getattr(args, "repo", False),
+                                          session=getattr(args, "session", False))
         except FileNotFoundError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 2
@@ -705,6 +728,16 @@ def _cmd_project(args: argparse.Namespace) -> int:
         if not added:
             print("Nothing added (all matches already declared).")
             return 0
+        # Adding a session source opts the project into Second Brain mode (Path B).
+        if any(s["type"] == "session" for s in specs) and not project.memory_enabled:
+            mpath = project.root / MANIFEST
+            text = mpath.read_text(encoding="utf-8")
+            if "[memory]" in text:
+                text = text.replace("enabled = false", "enabled = true", 1)
+            else:
+                text += "\n[memory]\nenabled = true\n"
+            mpath.write_text(text, encoding="utf-8")
+            print("note: enabled Second Brain mode ([memory] enabled = true).", file=sys.stderr)
         print(f"Added {len(added)} source(s) to '{project.name}': {', '.join(added)}")
         return 0
 
@@ -768,9 +801,13 @@ def _cmd_build(args: argparse.Namespace) -> int:
         print("error: not in an OpenWiki project — run `openwiki init` first.", file=sys.stderr)
         return 2
 
-    sources = project.source_paths()
+    sources = project.source_paths()               # document sources (session sources are separate)
     if not sources:
-        print("error: no [[sources]] declared in openwiki.toml.", file=sys.stderr)
+        if project.session_sources():
+            print("error: only session sources declared — add a document [[sources]] too "
+                  "(the memory tier anchors on the document graph).", file=sys.stderr)
+        else:
+            print("error: no [[sources]] declared in openwiki.toml.", file=sys.stderr)
         return 2
     missing = [s for s in sources if not source_exists(s)]
     if missing:
@@ -802,6 +839,7 @@ def _cmd_build(args: argparse.Namespace) -> int:
         "wiki": (project.wiki_dir / "wiki.json").is_file(),
         "index": (project.index_dir / "index.json").is_file(),
         "graph": project.graph_path.exists(),
+        "memory": project.graph_path.exists(),   # the remembered tier lives inside the graph
     }
     state = BuildState.load(project)
     todo = stale_stages(state, fps, exists, only=only, force=args.force)
@@ -899,6 +937,52 @@ def _cmd_build(args: argparse.Namespace) -> int:
         print(f"  graph → {stats['pages']} page(s) / {stats['chunks']} chunk(s) → {project.graph_path}",
               file=sys.stderr)
 
+    if "memory" in todo:
+        session_paths = project.session_paths()
+        if not project.memory_enabled or not session_paths:
+            if session_paths and not project.memory_enabled:
+                print("  memory: skipped — [memory] enabled = false (Wiki mode)", file=sys.stderr)
+            state.record("memory", fps["memory"], project.graph_path,
+                         {"remembered": 0, "sessions": len(session_paths)})
+            state.save()
+        elif not project.graph_path.exists():
+            print("error: memory stage needs a graph — build the graph first.", file=sys.stderr)
+            return 2
+        else:
+            if index is None:
+                if not (project.index_dir / "index.json").is_file():
+                    print("error: memory stage needs an index (for the embedder).", file=sys.stderr)
+                    return 2
+                index = SemanticIndex.load(project.index_dir)
+            if isinstance(index.embedder, OllamaEmbedder):
+                index.embedder.host = host.rstrip("/")
+            graph = _open_graph(project.graph_path, writable=True)
+            if graph is None or not getattr(graph, "writable", False):
+                print("error: could not open the graph writable for the memory stage "
+                      "(stop `serve`/`chat` first).", file=sys.stderr)
+                if graph is not None:
+                    graph.close()
+                return 2
+            chat = OllamaChat(model=models.get("chat", DEFAULT_CHAT), host=host, temperature=0.2)
+            total = 0
+            try:
+                print(f"  memory: capturing {len(session_paths)} session(s) with {chat.name} …",
+                      file=sys.stderr)
+                for spath in session_paths:
+                    sid = Path(spath).stem
+                    facts = capture_session(chat, Path(spath).read_text(encoding="utf-8"))
+                    res = graph.remember(sid, facts, index.embedder)
+                    total += res["added"]
+                    print(f"    · '{sid}' → {res['added']} new, {res['duplicates']} dup "
+                          f"({res['facts']} captured)", file=sys.stderr)
+            finally:
+                graph.close()
+            state.record("memory", fps["memory"], project.graph_path,
+                         {"remembered": total, "sessions": len(session_paths)})
+            state.save()
+            print(f"  memory → {total} new fact(s) from {len(session_paths)} session(s) "
+                  f"→ {project.graph_path}", file=sys.stderr)
+
     print(f"Built project '{project.name}'.")
     return 0
 
@@ -921,12 +1005,20 @@ def _cmd_status(args: argparse.Namespace) -> int:
           f"chunk={project.setting('build', 'chunk_size', 180)}w/"
           f"{project.setting('build', 'overlap', 30)}w  "
           f"entities={project.setting('graph', 'entities', False)}")
+    print(f"  memory : {'Second Brain (enabled)' if project.memory_enabled else 'Wiki (disabled)'}")
     print("  sources:")
     for src in sources:
         rel = src.relative_to(project.root) if src.is_relative_to(project.root) else src
         print(f"    {'ok     ' if src.is_file() else 'MISSING'}  {rel}")
     if not sources:
         print("    (none — add [[sources]] to openwiki.toml)")
+    session_paths = project.session_paths()
+    if session_paths:
+        print("  sessions:")
+        for spath in session_paths:
+            p = Path(spath)
+            rel = p.relative_to(project.root) if p.is_relative_to(project.root) else p
+            print(f"    {'ok     ' if p.is_file() else 'MISSING'}  {rel}")
 
     fps = compute_fingerprints(project, sources) if sources else {}
     stem = sources[0].stem if sources else ""
@@ -935,6 +1027,7 @@ def _cmd_status(args: argparse.Namespace) -> int:
         "wiki": (project.wiki_dir / "wiki.json").is_file(),
         "index": (project.index_dir / "index.json").is_file(),
         "graph": project.graph_path.exists(),
+        "memory": project.graph_path.exists(),
     }
     state = BuildState.load(project)
     print("  stages :")
@@ -1657,6 +1750,12 @@ def _cmd_decay(args: argparse.Namespace) -> int:
 
 def _cmd_remember(args: argparse.Namespace) -> int:
     """Path B (B2/B3): capture a session transcript into the graph's remembered tier."""
+    project = getattr(args, "project_obj", None)
+    if project is not None and not project.memory_enabled:
+        print(f"error: memory is disabled for project '{project.name}' (Wiki mode).\n"
+              "  enable Second Brain mode: add  enabled = true  under [memory] in openwiki.toml.",
+              file=sys.stderr)
+        return 2
     if not (args.index / "index.json").is_file():
         print(f"error: no index at {args.index} (run `openwiki index` — needed for the embedder).",
               file=sys.stderr)
@@ -1693,6 +1792,10 @@ def _cmd_remember(args: argparse.Namespace) -> int:
 
 def _cmd_recall(args: argparse.Namespace) -> int:
     """Path B (B6): show the remembered facts most relevant to a query."""
+    project = getattr(args, "project_obj", None)
+    if project is not None and not project.memory_enabled:
+        print("(memory is disabled — Wiki mode; set [memory] enabled = true to enable recall)")
+        return 0
     if not (args.index / "index.json").is_file():
         print(f"error: no index at {args.index} (run `openwiki index` — needed for the embedder).",
               file=sys.stderr)

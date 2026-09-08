@@ -41,6 +41,15 @@ def test_render_manifest_roundtrips(tmp_path):
     assert proj.sources == [Source("pdf", "sources/manual.pdf")]
 
 
+def test_memory_mode_defaults_off_and_toggles(tmp_path):
+    _write_project(tmp_path / "off")                                 # render_manifest defaults memory off
+    assert Project.load(tmp_path / "off").memory_enabled is False    # Wiki mode by default (§3.1)
+    root = tmp_path / "on"
+    root.mkdir()
+    (root / MANIFEST).write_text(render_manifest(name="on", memory=True), encoding="utf-8")
+    assert Project.load(root).memory_enabled is True                 # [memory] enabled = true
+
+
 def test_render_manifest_escapes_quotes(tmp_path):
     root = tmp_path / "q"
     root.mkdir()

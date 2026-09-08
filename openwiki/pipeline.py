@@ -12,6 +12,12 @@ The fingerprints form a chain so an upstream change invalidates everything below
     wiki    = f(ingest, split_level, tables)
     index   = f(ingest, split_level, chunk_size, overlap, embed_model)
     graph   = f(index, split_level, similar_k, references, entities[, entity_model])
+    memory  = f(session_sources, chat_model, memory_enabled)   # Path B / B0 — off the chain
+
+The **memory** stage stands apart from the derived chain: it captures ``session``
+sources into the remembered tier the graph now keeps across doc rebuilds (B0), so it
+depends on the session files + chat model + the project's memory mode — *not* on the
+document fingerprints (a doc rebuild preserves memory, so it needn't re-capture).
 """
 
 from __future__ import annotations
@@ -24,7 +30,7 @@ from typing import Iterable, Optional
 
 from .project import Project
 
-STAGES = ("ingest", "wiki", "index", "graph")
+STAGES = ("ingest", "wiki", "index", "graph", "memory")
 STATE_FILE = "state.json"
 
 
@@ -82,7 +88,11 @@ def compute_fingerprints(project: Project, sources: Iterable[Path]) -> dict:
         (models.get("chat", ""), graph.get("entity_types"), graph.get("entity_max_chars"))
         if entities else "",
     )
-    return {"ingest": ingest, "wiki": wiki, "index": index, "graph": graph_fp}
+    memory = _hash(
+        "memory", sources_signature(project.session_paths()),
+        models.get("chat", ""), project.memory_enabled,
+    )
+    return {"ingest": ingest, "wiki": wiki, "index": index, "graph": graph_fp, "memory": memory}
 
 
 class BuildState:

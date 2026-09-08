@@ -122,6 +122,7 @@ class WikiWebApp:
             "wiki": (p.wiki_dir / "wiki.json").is_file(),
             "index": (p.index_dir / "index.json").is_file(),
             "graph": p.graph_path.exists(),
+            "memory": p.graph_path.exists(),   # the remembered tier lives in the graph
         }
         stages = []
         for stage in STAGES:
@@ -156,6 +157,7 @@ class WikiWebApp:
             "serve": {"port": p.setting("serve", "port", 8000),
                       "bind": p.setting("serve", "bind", "127.0.0.1"),
                       "temperature": p.setting("serve", "temperature", 0.2)},
+            "memory": {"enabled": p.memory_enabled},
         }
 
         # The entity ontology (parsed "Name: description" list), if any.

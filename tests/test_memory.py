@@ -164,6 +164,31 @@ def test_forget_all_clears_memory(tmp_path):
         store.close()
 
 
+def test_graph_rebuild_preserves_memory(tmp_path):
+    """B0 exit criterion: a doc-graph rebuild must not destroy the remembered tier."""
+    import pytest
+    pytest.importorskip("kuzu")
+    from openwiki.graph import GraphStore
+
+    gpath = _build_graph(tmp_path)                       # first build (doc tier)
+    store = GraphStore(gpath, writable=True)
+    try:
+        store.remember("s1", [MemoryFact("the database", "is", "Kuzu")], _MemEmbedder())
+        assert store.has_memory()
+    finally:
+        store.close()
+
+    _build_graph(tmp_path)                                # rebuild the doc tier over it
+
+    store = GraphStore(gpath)
+    try:
+        assert store.has_memory()                         # survived the rebuild
+        hits = store.recall("which database do we use", _MemEmbedder(), k=3)
+        assert hits and "Kuzu" in hits[0]["object"]       # and is still recallable
+    finally:
+        store.close()
+
+
 def test_cross_session_eval_end_to_end(tmp_path):
     """The driver drives real GraphStore.forget_all/remember/recall on Kuzu."""
     import pytest

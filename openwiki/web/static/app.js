@@ -198,6 +198,7 @@ async function renderProject() {
       <div><h4>models</h4>${kv(cfg.models || {})}</div>
       <div><h4>graph</h4>${kv(cfg.graph || {})}</div>
       <div><h4>serve</h4>${kv(cfg.serve || {})}</div>
+      <div><h4>memory</h4>${kv(cfg.memory || {})}</div>
     </div>`;
 
     const ont = p.ontology || [];

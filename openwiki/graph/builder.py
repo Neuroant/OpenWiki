@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 import shutil
 from pathlib import Path
+from typing import Optional
 
 import numpy as np
 
@@ -50,8 +51,13 @@ class GraphBuilder:
             raise ValueError("The semantic index is empty; run `openwiki index` first.")
         dim = int(index.embeddings.shape[1])
 
-        # A clean rebuild each time keeps the graph a pure function of its inputs.
-        # Kuzu 0.11 stores the DB as a single file (+ a .wal sibling), but older
+        # B0 (Path B): the graph is authoritative for *remembered* content, so a rebuild
+        # from documents must preserve the remembered tier. Snapshot it before the
+        # destructive rebuild and restore it into the fresh schema afterwards.
+        preserved = self._snapshot_memory()
+
+        # A clean rebuild each time keeps the *derived* subgraph a pure function of its
+        # inputs. Kuzu 0.11 stores the DB as a single file (+ a .wal sibling), but older
         # versions used a directory — handle both.
         self._remove_existing()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -68,6 +74,7 @@ class GraphBuilder:
             n_similar = self._insert_similarities(conn, wiki, index)
             n_refs = self._insert_references(conn, references or [])
             n_entities, n_mentions = self._insert_entities(conn, entities or [])
+            n_assertions, n_reinf = self._restore_memory(conn, preserved, dim)
         finally:
             conn.close()
             db.close()
@@ -79,6 +86,8 @@ class GraphBuilder:
             "reference_edges": n_refs,
             "entities": n_entities,
             "mention_edges": n_mentions,
+            "preserved_assertions": n_assertions,
+            "preserved_reinforced": n_reinf,
             "dim": dim,
             "db": str(self.db_path),
         }
@@ -92,6 +101,91 @@ class GraphBuilder:
                 shutil.rmtree(cand, ignore_errors=True)
             elif cand.exists():
                 cand.unlink()
+
+    # -- remembered tier: preserve across a doc rebuild (B0) ------------
+
+    def _snapshot_memory(self) -> Optional[dict]:
+        """Read the remembered tier out of an existing graph so the doc rebuild can put
+        it back (B0 exit criterion). Returns ``None`` when there is no existing DB or
+        nothing remembered. Each table is read independently, so an older graph missing
+        some of them still yields whatever it does have."""
+        if not self.db_path.exists():
+            return None
+        try:
+            db = kuzu.Database(str(self.db_path))
+            conn = kuzu.Connection(db)
+        except Exception as exc:      # locked / unreadable — don't clobber, but warn loudly
+            logger.warning("could not open existing graph to preserve memory: %s", exc)
+            return None
+        try:
+            snap = {
+                "sessions": self._read_rows(conn, "MATCH (s:Session) RETURN s.id, s.created_at;"),
+                "assertions": self._read_rows(
+                    conn, "MATCH (a:Assertion) RETURN a.id, a.subject, a.predicate, a.object, "
+                          "a.session_id, a.created_at, a.emb;"),
+                "asserts": self._read_rows(
+                    conn, "MATCH (s:Session)-[:ASSERTS]->(a:Assertion) RETURN s.id, a.id;"),
+                "reinforces": self._read_rows(
+                    conn, "MATCH (a:Page)-[r:REINFORCES]->(b:Page) "
+                          "RETURN a.slug, b.slug, r.weight, r.last_seen;"),
+            }
+        finally:
+            conn.close()
+            db.close()
+        return snap if any(snap.values()) else None
+
+    def _restore_memory(self, conn, snap: Optional[dict], dim: int) -> tuple:
+        """Re-insert a snapshot into the fresh schema. Assertions whose embedding dim no
+        longer matches (the embedding model changed) are dropped with a warning;
+        reinforced edges are kept only where both endpoint pages still exist."""
+        if not snap:
+            return 0, 0
+        for sid, created in snap.get("sessions", []):
+            conn.execute("MERGE (s:Session {id:$id}) ON CREATE SET s.created_at=$t;",
+                         parameters={"id": sid, "t": created})
+        kept, skipped = set(), 0
+        for aid, subj, pred, obj, sid, created, emb in snap.get("assertions", []):
+            if emb is None or len(emb) != dim:
+                skipped += 1
+                continue
+            conn.execute(
+                "CREATE (:Assertion {id:$id, subject:$s, predicate:$p, object:$o, "
+                "session_id:$sid, created_at:$t, emb:$e});",
+                parameters={"id": aid, "s": subj, "p": pred, "o": obj, "sid": sid,
+                            "t": created, "e": [float(x) for x in emb]})
+            kept.add(aid)
+        for sid, aid in snap.get("asserts", []):
+            if aid in kept:
+                conn.execute("MATCH (s:Session {id:$sid}),(a:Assertion {id:$aid}) "
+                             "CREATE (s)-[:ASSERTS]->(a);", parameters={"sid": sid, "aid": aid})
+        page_slugs = self._existing_page_slugs(conn)
+        n_reinf = 0
+        for a_slug, b_slug, weight, last_seen in snap.get("reinforces", []):
+            if a_slug in page_slugs and b_slug in page_slugs:
+                conn.execute(
+                    "MATCH (a:Page {slug:$a}),(b:Page {slug:$b}) "
+                    "CREATE (a)-[:REINFORCES {weight:$w, last_seen:$t}]->(b);",
+                    parameters={"a": a_slug, "b": b_slug, "w": weight, "t": last_seen})
+                n_reinf += 1
+        if skipped:
+            logger.warning("dropped %d preserved assertion(s) whose embedding dim changed "
+                           "(embedding model differs); re-run `remember` to re-embed them.", skipped)
+        if kept or n_reinf:
+            logger.info("preserved remembered tier: %d assertion(s), %d reinforced edge(s)",
+                        len(kept), n_reinf)
+        return len(kept), n_reinf
+
+    @staticmethod
+    def _read_rows(conn, query: str) -> list:
+        """Run a read query, returning all rows; ``[]`` if the table doesn't exist."""
+        try:
+            res = conn.execute(query)
+        except Exception:      # table absent on an older graph
+            return []
+        rows = []
+        while res.has_next():
+            rows.append(res.get_next())
+        return rows
 
     # -- schema ---------------------------------------------------------
 

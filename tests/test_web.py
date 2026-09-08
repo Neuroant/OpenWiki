@@ -166,7 +166,7 @@ def test_project_info_with_project(tmp_path):
 
     info = WikiWebApp(tmp_path / "wiki", project=proj).project_info()
     assert info["project"]["name"] == "demo"
-    assert [s["name"] for s in info["project"]["stages"]] == ["ingest", "wiki", "index", "graph"]
+    assert [s["name"] for s in info["project"]["stages"]] == ["ingest", "wiki", "index", "graph", "memory"]
     assert all(s["status"] == "missing" for s in info["project"]["stages"])  # nothing built
     assert info["project"]["sources"][0]["exists"] is True
 

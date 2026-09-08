@@ -1,8 +1,13 @@
 # Path B — Agent Memory (design)
 
-> **Status: PROPOSED / design.** Nothing here is implemented yet. This is the detailed design
-> base for Path B — turning OpenWiki's knowledge graph from a document **mirror** into agent
-> **memory**. The roadmap-level overview lives in [`docs/roadmap.md`](roadmap.md#path-b--the-second-brain-memory-model);
+> **Status: IN PROGRESS.** First slices have landed: the remembered tier (`remember`/`recall`,
+> v0.46), the cross-session eval that validated it (v0.47), and **B0 — the authoritative-graph
+> reframe** (v0.48): the memory tier now **survives document rebuilds**, a per-project **Wiki vs
+> Second Brain mode** (`[memory] enabled`) gates it, and a **session source type** feeds it through
+> `openwiki build`. Still ahead: B1 (read-path reinforcement), B4 (contradiction/time-versioning),
+> B5 (sleep consolidation), and the full three-tier B6 assembly. This remains the living design base
+> for Path B — turning OpenWiki's knowledge graph from a document **mirror** into agent **memory**.
+> The roadmap-level overview lives in [`docs/roadmap.md`](roadmap.md#path-b--the-second-brain-memory-model);
 > this document is the deep design (concepts → target architecture → data model → staged plan →
 > evaluation → open decisions). It re-opens arc42 **ADR-3** and **ADR-8** and addresses debts
 > **D1/D2/D6** (see [`docs/arc42/`](arc42/)).
@@ -199,6 +204,18 @@ to matter but late enough to de-risk. Each stage lists an **exit criterion** (ho
 - **Learned (§11):** make the split a **tiered write-authority** model — CANONICAL (docs;
   authoritative, never pruned) vs SEMANTIC / PROCEDURAL / EPISODIC (remembered) — where a role can
   only write *its* tier, so the agent's guesses can't forge ground truth.
+- **Landed (v0.48).** The exit criterion is met: `GraphBuilder` **snapshots the remembered tier**
+  (Session/Assertion/ASSERTS, plus the `REINFORCES` usage overlay) before its destructive rebuild
+  and **restores it** into the fresh schema (dropping only assertions whose embedding dim changed) —
+  proven by a unit test *and* live (`build --only graph --force` keeps every remembered fact
+  recallable). Mode gating shipped as **`[memory] enabled`** (`Project.memory_enabled`, default off =
+  Wiki mode) — it gates `remember`/`recall` and the build memory stage, and shows in `status` /
+  the Projekt tab. The **session source type** shipped too (`init --session` / `project add-source
+  --session` → a `type = "session"` source, excluded from the doc pipeline), captured by a new
+  **`memory` build stage** (`openwiki build`, off the doc fingerprint chain since a rebuild now
+  preserves memory). **Still deferred within B0:** the full **tiered write-authority** model (roles
+  writing only their tier) — the reframe landed the *lifecycle* (preserve-on-rebuild) and the *mode*,
+  not yet the authority enforcement.
 
 ### B1 — Read-path reinforcement (writable-safe)
 - **Goal:** ordinary use (`ask`, MCP `wiki_ask`) strengthens memory, not only `serve`/`chat`.
@@ -391,13 +408,19 @@ If no → we've learned it cheaply, before touching ADR-3.
 > additive `Session`/`Assertion`/`ASSERTS` Kuzu tables (created empty by every `graph-build`, so old
 > graphs upgrade lazily) and 9 offline tests including a two-session proof-of-loop. Verified live on
 > the informatik KB (qwen3 capture → 4 clean facts; bge-m3 recall ranks the right fact top for each
-> new query). Still **doc-derived** (B0 deferred: `graph-build` rebuilds the doc graph and drops the
-> memory tier) and **no contradiction handling** (B4 deferred).
+> new query). At v0.46 this was still **doc-derived** (B0 not yet done: `graph-build` rebuilt the
+> doc graph and dropped the memory tier) with **no contradiction handling** (B4 deferred).
 >
 > **Then (v0.47) the §7 headline metric landed too** — `owiki eval --cross-session` — and the first
 > result came out in Path B's favour: assembled **100%** vs raw-log **85.7%** vs cold **0%** task
 > success, judge **3–1** assembled over raw-log (see §7). That's the green light for the hard stages
 > (B0 authoritative graph, B4 contradictions).
+>
+> **Then (v0.48) B0 landed** — the graph is now **authoritative for memory**: a doc rebuild
+> **preserves** the remembered tier (+ the `REINFORCES` overlay), gated by a per-project **Wiki vs
+> Second Brain mode** (`[memory] enabled`) and fed by a **session source type** captured through a
+> new `openwiki build` memory stage (§6/B0). Path B is no longer doc-derived — experience persists
+> across rebuilds. Still ahead: B1 (read-path reinforcement) and B4 (contradiction/versioning).
 
 ## 11. Prior art & learnings — "Cognitive Substrate"
 

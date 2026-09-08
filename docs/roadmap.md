@@ -442,10 +442,14 @@ Microsoft GraphRAG — stops**, so they are Path B's real contribution.
 Ordered so each stage is shippable and measurable (the project's discipline — see *Future
 directions*). Stages re-open the decisions that flagged themselves for exactly this.
 
-- **B0 — Reframe (re-opens ADR-3, debt D1).** Make the graph *authoritative* (not a rebuildable
-  mirror) and add a **session/experience** source type *alongside* documents — a remembered tier on
-  top of the doc tier, not a replacement (**Wiki** vs **Second-Brain** modes; arc42 ADR-14 /
-  `path-b-memory.md` §3.1). Highest leverage, highest risk.
+- **B0 — Reframe (re-opens ADR-3, debt D1). ✅ Landed (v0.48).** The graph is now *authoritative*
+  for remembered content: `graph-build`/`build` **preserve** the memory tier across a doc rebuild
+  (snapshot → rebuild → restore). A **session/experience** source type (`type = "session"`,
+  `init/add-source --session`) feeds it *alongside* documents via a new `build` **memory** stage, and
+  a per-project **Wiki vs Second-Brain mode** (`[memory] enabled`, default off) gates it — a
+  remembered tier on top of the doc tier, not a replacement (arc42 ADR-14 / `path-b-memory.md` §3.1).
+  *Still deferred within B0:* the full tiered write-authority model. Was the highest-leverage,
+  highest-risk stage.
 - **B1 — Read-path reinforcement (re-opens ADR-8, debt D2).** A writable-safe concurrency model so
   plain `ask` reinforces, not just `serve`/`chat`. Unblocks memory where it actually happens.
 - **B2 — Session capture → sub-graph.** An LLM turns a conversation into a typed sub-graph
@@ -473,6 +477,14 @@ task success, and an LLM judge preferred **assembled over raw-log 3–1** — me
 session, and *concentrating* it (recall) beats *replaying* it (raw log). Small-N caveats aside, that's
 the green light for the hard stages (B0 authoritative graph, B4 contradictions). Design + full result:
 `path-b-memory.md` §7.
+
+**B0 — authoritative graph landed (v0.48).** Acting on that green light: the memory tier now
+**survives document rebuilds** (`GraphBuilder` snapshots Session/Assertion/ASSERTS + the `REINFORCES`
+overlay and restores them into the fresh schema — unit-tested *and* verified live with
+`build --only graph --force`). A per-project **Wiki vs Second-Brain mode** (`[memory] enabled`, default
+off) gates memory, and a **session source type** (`init/add-source --session`) is captured by a new
+`openwiki build` **memory** stage. Path B is no longer doc-derived — experience persists. Next: **B1**
+(read-path reinforcement) and **B4** (contradiction/time-versioning). See `path-b-memory.md` §6/B0.
 
 ### Honest guardrails
 

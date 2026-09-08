@@ -26,6 +26,10 @@ except ModuleNotFoundError:  # Python 3.10
 MANIFEST = "openwiki.toml"
 STATE_DIR = ".openwiki"
 
+# A "session" source feeds the **memory tier** (Path B), not the document pipeline —
+# it's captured/remembered, never parsed into the wiki. Everything else is a doc source.
+SESSION_TYPE = "session"
+
 # Built-in defaults (mirror the CLI) — used when neither a flag nor the manifest
 # provides a value.
 DEFAULT_EMBED = "bge-m3"
@@ -89,11 +93,20 @@ class Project:
 
     @property
     def sources(self) -> list[Source]:
+        """Every declared ``[[sources]]`` entry (documents **and** sessions)."""
         out: list[Source] = []
         for s in self.data.get("sources", []) or []:
             if isinstance(s, dict) and s.get("path"):
                 out.append(Source(type=s.get("type", "pdf"), path=s["path"]))
         return out
+
+    def doc_sources(self) -> list[Source]:
+        """Document sources — the wiki/index/graph pipeline (excludes ``session``)."""
+        return [s for s in self.sources if s.type != SESSION_TYPE]
+
+    def session_sources(self) -> list[Source]:
+        """Session/experience sources — captured into the memory tier (Path B)."""
+        return [s for s in self.sources if s.type == SESSION_TYPE]
 
     def section(self, name: str) -> dict:
         value = self.data.get(name, {})
@@ -103,6 +116,15 @@ class Project:
         """Manifest value for ``[section] key``, else ``default``."""
         value = self.section(section).get(key)
         return default if value is None else value
+
+    @property
+    def memory_enabled(self) -> bool:
+        """Second Brain mode — whether the remembered tier (Path B) is active for this
+        project. **Off by default** (Wiki mode, §3.1 / ADR-14); turn it on with
+        ``[memory] enabled = true``. Gates the ``remember``/``recall`` writes + reads and
+        the ``build`` memory stage; the remembered tier itself is additive (ADR-7), so
+        "off" simply means the memory tables stay empty."""
+        return bool(self.setting("memory", "enabled", False))
 
     # ---------------------------------------------------------------- layout
     @property
@@ -129,18 +151,23 @@ class Project:
     def state_dir(self) -> Path:
         return self.root / STATE_DIR
 
+    def _resolve_path(self, path: str):
+        """A declared source path resolved: a URL as-is (a ``str``), an absolute path
+        as-is, a relative path joined to the project root."""
+        if str(path).lower().startswith(("http://", "https://")):
+            return path
+        p = Path(path)
+        return p if p.is_absolute() else self.root / p
+
     def source_paths(self) -> list:
-        """Declared sources resolved: a URL is returned as-is (a ``str``), an absolute
-        path as-is, and a relative path joined to the project root. Repo/URL sources
-        therefore point in place; file sources point under ``sources/``."""
-        out: list = []
-        for s in self.sources:
-            if str(s.path).lower().startswith(("http://", "https://")):
-                out.append(s.path)
-            else:
-                path = Path(s.path)
-                out.append(path if path.is_absolute() else self.root / path)
-        return out
+        """**Document** sources resolved (URL as-is, else a path). Repo/URL sources
+        point in place; file sources point under ``sources/``. Session sources are
+        excluded — they flow into the memory tier via :meth:`session_paths`."""
+        return [self._resolve_path(s.path) for s in self.doc_sources()]
+
+    def session_paths(self) -> list:
+        """Session-source transcript paths resolved (local files under ``sources/``)."""
+        return [self._resolve_path(s.path) for s in self.session_sources()]
 
 
 def _toml_str(value: str) -> str:
@@ -164,6 +191,7 @@ def render_manifest(
     similar_k: int = 6,
     references: bool = True,
     entities: bool = False,
+    memory: bool = False,
     port: int = 8137,
 ) -> str:
     """Render an ``openwiki.toml`` for our schema (stdlib has no TOML writer)."""
@@ -209,6 +237,11 @@ references = {str(references).lower()}
 entities = {str(entities).lower()}
 # entity_types = ["Concept", "Method", "Component", "Property"]   # domain ontology used when entities = true
 # entity_max_chars = 8000   # how much of each page the entity model sees
+
+[memory]
+# Second Brain mode (Path B): capture sessions into a remembered tier the graph keeps
+# across doc rebuilds, and recall them later. Off = Wiki mode (docs only).
+enabled = {str(memory).lower()}
 
 [serve]
 port = {port}

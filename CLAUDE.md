@@ -57,7 +57,7 @@ other command is **project-aware**: run inside a project (discovered from the CW
 or pass `--project DIR`) and unset paths/models/host/split-level are filled from
 the manifest — explicit flags always win, and with no manifest the historical
 `./output` defaults apply (back-compat). **`openwiki build`** runs the whole
-declared pipeline (ingest → wiki → index → graph) into the project's layout,
+declared pipeline (ingest → wiki → index → graph → memory) into the project's layout,
 incrementally — a per-stage fingerprint chain in `.openwiki/state.json` skips
 stages whose inputs+params are unchanged (`--only STAGES`, `--force`);
 **`openwiki status`** reports sources, settings, and per-stage build state. A
@@ -74,9 +74,14 @@ URL and repo sources are **referenced in place** (path = the URL, or the repo di
 relative if under the project, else absolute), so `Project.source_paths()` returns a
 URL string as-is and joins only relative paths to the root. `openwiki project
 add-source <url>` auto-registers a web source; `add-source <dir> --repo` (and
-`init … --repo`) a code source; the build fingerprint signs a URL by its string and a
-repo by its file tree (`pipeline.file_sig`). Cross-references resolve **within** each
-source (`graph.extract_references_multi`, per-source printed-page offsets). Design +
+`init … --repo`) a code source; `add-source <file> --session` (and `init … --session`) a
+**session** source (Path B — `type = "session"`, captured into the **memory tier**, not the
+doc pipeline; auto-enables Second Brain mode). The build fingerprint signs a URL by its
+string and a repo by its file tree (`pipeline.file_sig`). Cross-references resolve
+**within** each source (`graph.extract_references_multi`, per-source printed-page offsets).
+A per-project **`[memory] enabled`** flag (`Project.memory_enabled`, default off) picks the
+**mode** — **Wiki** (documents only) vs **Second Brain** (memory tier on, Path B); it gates the
+`memory` build stage + `remember`/`recall` (see the Path B section below). Design +
 roadmap in `docs/projects.md` (the project concept is complete — Phases 1–4 landed).
 
 **Run the ingestion tool** — writes `<stem>.json` + `<stem>.md` under `--out`
@@ -183,9 +188,13 @@ tier), so a fact stored in one session surfaces in the next:
 `--session ID`, `-i/--index DIR`, `--graph DIR`, `--model NAME`, `--host URL`.
 `recall` is read-only: `-k N`, `-i/--index DIR`, `--graph DIR`, `--host URL`. The
 `Session`/`Assertion`/`ASSERTS` tables are created (empty) by every `graph-build`,
-so old graphs upgrade lazily. **Deferred:** `graph-build` still rebuilds the
-doc-graph and drops the memory tier (B0's authoritative-preserve reframe); no
-contradiction/time-versioning yet (B4). Design in `docs/path-b-memory.md`.
+so old graphs upgrade lazily. Both commands are gated by the project's **mode**
+(`[memory] enabled`, below) — off (Wiki mode) they refuse/return nothing.
+**B0 landed (v0.48):** `graph-build`/`build` now **preserve** the remembered tier across a
+doc rebuild (the graph is authoritative for memory), and a **session source type**
+(`type = "session"`) is captured into it by a `build` memory stage. **Still deferred:**
+contradiction/time-versioning (B4) and read-path reinforcement (B1). Design in
+`docs/path-b-memory.md`.
 
 **Web UI** — browse + search + chat/edit + graph in the browser (stdlib server):
 ```
@@ -313,7 +322,11 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   reads a `Wiki` + `SemanticIndex` and writes a property graph to `output/graph/`
   (Page/Chunk nodes; CHILD_OF/NEXT/PART_OF/SIMILAR_TO/REFERENCES edges; an HNSW
   index on `Chunk.emb` — embeddings **mirrored** from the index, which stays
-  untouched; plus opt-in `Entity` nodes + `MENTIONS`). `references.py` extracts
+  untouched; plus opt-in `Entity` nodes + `MENTIONS`). **B0 (Path B):** before its
+  destructive rebuild it `_snapshot_memory()` (Session/Assertion/ASSERTS + the
+  `REINFORCES` overlay) and `_restore_memory()` into the fresh schema — so the graph is
+  **authoritative for remembered content** and a doc rebuild never drops it (assertions
+  whose embedding dim changed are dropped with a warning). `references.py` extracts
   page ("Seite N") + section/chapter ("Abschnitt 1.6", "Kapitel 2") cross-refs
   (see the offset note below);
   `entities.py` LLM-extracts typed entities per page (opt-in); `store.py`
@@ -422,12 +435,18 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
 - **`openwiki/project.py`** — the **project** layer: `Project` (discover via
   `find`, `load`, `resolve`; `out_dir`/`wiki_dir`/`index_dir`/`graph_path`; manifest
   `setting()` lookup) + a hand-rolled `render_manifest` (stdlib `tomllib` *reads*
-  TOML but can't *write* it). Only this module + `cli.py` know about projects; the
-  pipeline stays project-agnostic and keeps taking explicit paths.
+  TOML but can't *write* it). `doc_sources()` vs `session_sources()` split the
+  `[[sources]]` (a `type = "session"` source feeds the Path B memory tier, not the doc
+  pipeline — `source_paths()` is doc-only, `session_paths()` the rest); `memory_enabled`
+  is the Wiki-vs-Second-Brain **mode** (`[memory] enabled`, default off). Only this
+  module + `cli.py` know about projects; the pipeline stays project-agnostic.
 - **`openwiki/pipeline.py`** — Phase 2 build orchestration *state*: a per-stage
-  **fingerprint chain** (`compute_fingerprints`) + the `.openwiki/state.json`
-  lockfile (`BuildState`) + `stale_stages()`. Pure/testable; the CLI's `_cmd_build`
-  does the actual stage execution (PDFParser → WikiBuilder → SemanticIndex → GraphBuilder).
+  **fingerprint chain** (`compute_fingerprints`) over `STAGES` (ingest, wiki, index,
+  graph, **memory**) + the `.openwiki/state.json` lockfile (`BuildState`) +
+  `stale_stages()`. The **memory** stage is *off* the doc chain — it signs the session
+  files + chat model + mode (a doc rebuild preserves memory, so it needn't re-capture).
+  Pure/testable; the CLI's `_cmd_build` does the actual stage execution (PDFParser →
+  WikiBuilder → SemanticIndex → GraphBuilder → capture_session/`GraphStore.remember`).
 - **`openwiki/eval.py`** — `owiki eval`: retrieval evaluation. Pure ranking metrics
   (`reciprocal_rank`/`hit_at_k`/`recall_at_k`) + an `evaluate(items, retrieve, k)` driver
   that takes a `retrieve(question) -> ranked page slugs` callable, so it's backend-agnostic
@@ -512,8 +531,11 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   subcommands. A shared
   `--project` (parent parser) + `_apply_project(args, project)` fill unset
   path/model/host/split-level args from the active project before dispatch (flags
-  override; no project → `./output`). Add new capabilities as new subcommands, not
-  as more flags.
+  override; no project → `./output`). `init`/`project add-source` take **`--session`**
+  (register transcripts as `type = "session"` sources, auto-enabling `[memory]`);
+  `_cmd_build` runs the extra **memory** stage (capture → `remember`) when memory is
+  enabled + session sources exist; `remember`/`recall` are gated by `project.memory_enabled`.
+  Add new capabilities as new subcommands, not as more flags.
 
 ### Conventions & gotchas
 

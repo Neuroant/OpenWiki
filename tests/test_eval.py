@@ -141,6 +141,92 @@ def test_evaluate_aggregates_and_lists_misses():
     assert [m.question for m in report.misses] == ["q2"]
 
 
+# -- cross-session memory eval (Path B) ----------------------------------------
+
+class _FakeMemGraph:
+    """Minimal stand-in for GraphStore's memory tier (offline driver test)."""
+
+    def __init__(self):
+        self.stored = []            # (session_id, MemoryFact)
+        self.forgot = 0
+
+    def forget_all(self):
+        self.stored = []
+        self.forgot += 1
+
+    def remember(self, session_id, facts, embedder, now=None):
+        self.stored.extend((session_id, f) for f in facts)
+        return {"facts": len(facts), "added": len(facts), "duplicates": 0}
+
+    def recall(self, query, embedder, k=5, **kw):
+        return [{"subject": f.subject, "predicate": f.predicate, "object": f.object,
+                 "session_id": sid, "cos": 1.0, "score": 1.0} for sid, f in self.stored][:k]
+
+
+class _XChat:
+    """Capture request → a fixed fact; probe request → echo the memory context back."""
+    name = "fake:x"
+
+    def chat(self, messages):
+        if "JSON array" in messages[0]["content"]:       # CAPTURE_SYSTEM
+            return '[{"subject":"the port","predicate":"is","object":"8137"}]'
+        return messages[-1]["content"]                    # probe → echo the user content
+
+
+def test_task_success_substring_all():
+    from openwiki import eval as ev
+    assert ev.task_success("The port is 8137.", ["8137"]) is True
+    assert ev.task_success("Kuzu, a single-file DB", ["Kuzu", "single"]) is True
+    assert ev.task_success("I don't know the port.", ["8137"]) is False
+    assert ev.task_success("anything", []) is False           # no expected → not a success
+
+
+def test_build_probe_messages_cold_vs_warm():
+    from openwiki import eval as ev
+    cold = ev.build_probe_messages("q?", "")
+    assert cold[0]["role"] == "system" and "No remembered context" in cold[1]["content"]
+    warm = ev.build_probe_messages("q?", "MEMBLOCK")
+    assert "MEMBLOCK" in warm[1]["content"] and "q?" in warm[1]["content"]
+
+
+def test_load_cross_session_set(tmp_path):
+    from openwiki import eval as ev
+    path = tmp_path / "x.jsonl"
+    path.write_text(
+        '# comment\n'
+        '{"name":"n1","setup":"s only","question":"q1","expected":"tok"}\n'
+        '\n'
+        '{"setup":["a","b"],"question":"q2","answer":["x","y"]}\n',   # setup list; answer alias; no name
+        encoding="utf-8")
+    items = ev.load_cross_session_set(path)
+    assert [i.name for i in items] == ["n1", "scenario-4"]            # 2nd JSON is file line 4
+    assert items[0].setup == ["s only"] and items[0].expected == ["tok"]
+    assert items[1].setup == ["a", "b"] and items[1].expected == ["x", "y"]
+
+
+def test_run_cross_session_eval_conditions():
+    from openwiki import eval as ev
+    items = [ev.CrossSessionItem(name="port", setup=["We always run on port 8137."],
+                                 question="Which port?", expected=["8137"])]
+    graph = _FakeMemGraph()
+    r = ev.run_cross_session_eval(items, graph, embedder=None, chat=_XChat())
+    assert graph.forgot == 1                                  # scenario isolated
+    assert r["success"]["cold"] == 0.0                        # no memory → can't know
+    assert r["success"]["raw-log"] == 1.0                     # transcript holds the fact
+    assert r["success"]["assembled"] == 1.0                   # recall surfaces the fact
+    assert r["scenarios"] == 1 and r["judged"] is False
+
+
+def test_run_cross_session_eval_judge_balances_position():
+    from openwiki import eval as ev
+    items = [ev.CrossSessionItem("a", ["x runs on 8137"], "q1", ["8137"]),
+             ev.CrossSessionItem("b", ["y runs on 8137"], "q2", ["8137"])]
+    r = ev.run_cross_session_eval(items, _FakeMemGraph(), None, _XChat(), judge=_Judge("A"))
+    # judge always answers "A": i=0 A=assembled→assembled; i=1 A=raw-log→raw-log (position flipped)
+    assert r["judged"] is True
+    assert r["tally"] == {"assembled": 1, "raw-log": 1, "tie": 0}
+
+
 def test_load_eval_set(tmp_path):
     path = tmp_path / "eval.jsonl"
     path.write_text(

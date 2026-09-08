@@ -466,6 +466,18 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   `GraphStore.community_members`) — `eval.community_grounding` = cite-hit / community-recall
   / community-precision. `--judge` adds a position-balanced **Global vs RAG** verdict — the
   honest test of whether the community layer beats local RAG on the question class it's for.
+  **`owiki eval --cross-session`** is the **Path B headline metric** (docs/path-b-memory.md §7):
+  cross-session task success. A scenario set (`eval_cross_session.jsonl`:
+  `{"name","setup":[transcript,…],"question","expected":[…]}`) establishes facts in earlier
+  sessions and probes them in a later one; `eval.run_cross_session_eval` **remembers** each
+  scenario into a **throwaway** graph (isolated per scenario via `GraphStore.forget_all`, built by
+  `cli._build_stub_graph` so the real graph is untouched), then answers the probe under three
+  conditions — **cold** (no memory), **raw-log** (transcript pasted in), **assembled**
+  (decay-weighted `recall`) — scoring objective `eval.task_success` (answer contains the expected
+  fact); `--judge` adds the position-balanced **assembled vs raw-log** verdict. First result
+  (v0.47): assembled **100%** vs raw-log **85.7%** vs cold **0%**, judge **3–1** assembled — memory
+  helps the next session and concentrating it beats replaying it. `--recall-k N` sets the recalled-
+  fact budget. Pure/fake-testable core (`build_probe_messages`/`task_success`/the fake-graph driver).
 - **`openwiki/merge.py`** — `combine_documents(docs, names)` merges several
   `ParsedDocument`s into one corpus (concatenate pages with a running offset, shift
   table/image page numbers, wrap each source under a synthetic level-1 outline node

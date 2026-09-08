@@ -302,6 +302,29 @@ are **single-shot** (one question → pages/communities); Path B needs a **new a
 
 If "assembled" doesn't beat "raw-log", Path B isn't paying for its complexity — and we'll know early.
 
+**Landed (v0.47) — the headline metric now runs, and the first result is in.** `owiki eval
+--cross-session` implements exactly the three-condition comparison above (`eval.run_cross_session_eval`
++ a `eval_cross_session.jsonl` scenario set: `{"name","setup":[transcript,…],"question","expected":[…]}`).
+Each scenario is remembered into a **throwaway** graph (isolated per scenario via
+`GraphStore.forget_all`), then the probe is answered cold / raw-log / assembled; objective
+`task_success` = the answer contains the expected fact, and `--judge` adds the position-balanced
+*assembled vs raw-log* verdict. On the first 7-scenario set (qwen3 capture + bge-m3 recall):
+
+| condition | task success |
+|---|---|
+| **cold** (no memory) | **0.0%** — confirms every probe genuinely needs memory |
+| **raw-log** (paste the transcript) | **85.7%** (6/7) |
+| **assembled** (decay-weighted `recall`) | **100.0%** (7/7) |
+
+Judge (assembled vs raw-log, position-balanced): **assembled 3 · raw-log 1 · tie 3**. So assembled
+beats **cold** (it remembers) *and* **raw-log** (concentrated, not noisy) — the win shows up both
+objectively and to the judge, and is largest on the multi-session scenarios where the raw log buries
+the fact under later chatter. **Caveats:** small N (7), short transcripts (a regime where raw-log is
+already a strong baseline — the gap should widen as sessions accumulate), and the objective check is a
+substring proxy. But the direction is the one Path B needed: **memory helps the next session, and
+concentrating it helps more than replaying it.** This is the green light for the harder stages
+(B0 authoritative graph, B4 contradictions).
+
 ## 8. Risks & open decisions
 
 **Decisions to make (genuine forks):**
@@ -369,8 +392,12 @@ If no → we've learned it cheaply, before touching ADR-3.
 > graphs upgrade lazily) and 9 offline tests including a two-session proof-of-loop. Verified live on
 > the informatik KB (qwen3 capture → 4 clean facts; bge-m3 recall ranks the right fact top for each
 > new query). Still **doc-derived** (B0 deferred: `graph-build` rebuilds the doc graph and drops the
-> memory tier) and **no contradiction handling** (B4 deferred). Next: build the §7 cross-session
-> eval to measure *assembled vs raw-log*, then decide whether to commit to B0/B4.
+> memory tier) and **no contradiction handling** (B4 deferred).
+>
+> **Then (v0.47) the §7 headline metric landed too** — `owiki eval --cross-session` — and the first
+> result came out in Path B's favour: assembled **100%** vs raw-log **85.7%** vs cold **0%** task
+> success, judge **3–1** assembled over raw-log (see §7). That's the green light for the hard stages
+> (B0 authoritative graph, B4 contradictions).
 
 ## 11. Prior art & learnings — "Cognitive Substrate"
 

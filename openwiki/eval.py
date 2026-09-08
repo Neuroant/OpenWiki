@@ -308,3 +308,129 @@ def run_answer_eval(items, index, graph, chat, top_k: int = 5, expand_k: int = 3
                       for name in ("RAG", "GraphRAG")},
         "tally": tally,
     }
+
+
+# -- cross-session memory evaluation (Path B headline metric) ------------------
+#
+# The honest test of the remembered tier (docs/path-b-memory.md §7): does memory make
+# the agent better in the *next* session? A scenario establishes facts in one or more
+# earlier sessions, then asks a question that depends on them. We answer that probe under
+# three conditions and compare — **cold** (no memory; should fail), **raw-log** (the raw
+# transcripts pasted in), and **assembled** (decay-weighted `recall` → concentrated facts).
+# Assembled should beat cold (it remembers) *and* raw-log (concentrated, not noisy).
+
+@dataclass
+class CrossSessionItem:
+    name: str
+    setup: list[str]        # earlier-session transcripts, chronological
+    question: str           # asked in a later session
+    expected: list[str]     # a correct answer contains all of these (case-insensitive)
+
+
+def load_cross_session_set(path) -> list[CrossSessionItem]:
+    """Read a cross-session scenario set from JSONL — one scenario per line:
+    ``{"name", "setup": [transcript, …] | transcript, "question", "expected": [str,…] | str}``
+    (``answer`` is accepted as an alias for ``expected``; ``#`` lines and blanks skipped)."""
+    items: list[CrossSessionItem] = []
+    for n, line in enumerate(Path(path).read_text(encoding="utf-8").splitlines(), 1):
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        obj = json.loads(line)
+        setup = obj.get("setup", [])
+        if isinstance(setup, str):
+            setup = [setup]
+        expected = obj.get("expected", obj.get("answer", []))
+        if isinstance(expected, str):
+            expected = [expected]
+        items.append(CrossSessionItem(
+            name=str(obj.get("name") or f"scenario-{n}"),
+            setup=[str(s) for s in setup],
+            question=obj["question"],
+            expected=[str(e) for e in expected],
+        ))
+    return items
+
+
+def task_success(answer: str, expected: Iterable[str]) -> bool:
+    """Objective cross-session task success: does the answer contain every expected
+    substring (case-insensitive)? ``expected`` is usually a single key fact token."""
+    low = (answer or "").lower()
+    exp = [str(e).lower() for e in expected]
+    return bool(exp) and all(e in low for e in exp)
+
+
+_PROBE_SYSTEM = (
+    "You are an assistant continuing your work with a user across multiple sessions. "
+    "Answer the user's question using the remembered context from earlier sessions below. "
+    "If that context does not contain the answer, say you don't know — do not guess. "
+    "Answer in one short, specific sentence."
+)
+
+
+def build_probe_messages(question: str, context: str) -> list:
+    """Messages for a probe question under a given memory ``context`` (``""`` → cold)."""
+    if context.strip():
+        user = f"{context}\n\nQuestion: {question}"
+    else:
+        user = f"(No remembered context is available.)\n\nQuestion: {question}"
+    return [{"role": "system", "content": _PROBE_SYSTEM},
+            {"role": "user", "content": user}]
+
+
+def run_cross_session_eval(items, graph, embedder, chat, judge=None, recall_k: int = 10,
+                           on_progress=None) -> dict:
+    """The Path B headline metric — cross-session task success (path-b-memory.md §7).
+
+    For each scenario: wipe memory, **remember** its setup sessions (capture → merge into
+    ``graph``), then answer the probe under three conditions — **cold**, **raw-log**, and
+    **assembled** (decay-weighted ``recall``). Scores objective ``task_success`` per
+    condition; with ``judge`` adds a position-balanced *assembled vs raw-log* verdict — the
+    honest test of whether concentrated memory beats replaying the log. ``graph`` must be a
+    **writable** throwaway (scenarios are isolated via ``forget_all``). Backend-agnostic —
+    ``graph``/``embedder``/``chat`` injected; capture/format reused from the memory tier."""
+    from .graph.memory import capture_session, format_memory
+
+    items = list(items)
+    conditions = ("cold", "raw-log", "assembled")
+    success = {c: 0.0 for c in conditions}
+    tally = {"assembled": 0, "raw-log": 0, "tie": 0}
+    details = []
+    for i, item in enumerate(items):
+        graph.forget_all()                                  # isolate this scenario
+        for j, transcript in enumerate(item.setup):
+            facts = capture_session(chat, transcript)
+            graph.remember(f"{item.name}-s{j + 1}", facts, embedder)
+        recalled = graph.recall(item.question, embedder, k=recall_k)
+        contexts = {
+            "cold": "",
+            "raw-log": "Earlier sessions (raw transcript):\n" + "\n\n".join(item.setup),
+            "assembled": format_memory(recalled),
+        }
+        answers = {c: _THINK.sub("", chat.chat(build_probe_messages(item.question, ctx))).strip()
+                   for c, ctx in contexts.items()}
+        for c in conditions:
+            success[c] += 1.0 if task_success(answers[c], item.expected) else 0.0
+        if judge is not None:
+            if i % 2 == 0:      # alternate A/B to cancel position bias
+                verdict = judge_pairwise(judge, item.question, answers["assembled"], answers["raw-log"])
+                winner = {"a": "assembled", "b": "raw-log", "tie": "tie"}[verdict]
+            else:
+                verdict = judge_pairwise(judge, item.question, answers["raw-log"], answers["assembled"])
+                winner = {"a": "raw-log", "b": "assembled", "tie": "tie"}[verdict]
+            tally[winner] += 1
+        details.append({
+            "name": item.name, "question": item.question, "expected": item.expected,
+            "recalled": len(recalled), "answers": answers,
+            "success": {c: task_success(answers[c], item.expected) for c in conditions},
+        })
+        if on_progress:
+            on_progress(i + 1, len(items))
+    div = len(items) or 1
+    return {
+        "scenarios": len(items),
+        "judged": judge is not None,
+        "success": {c: success[c] / div for c in conditions},
+        "tally": tally,
+        "details": details,
+    }

@@ -146,3 +146,47 @@ def test_remember_requires_writable(tmp_path):
             store.remember("s", [MemoryFact("a", "b", "c")], _MemEmbedder())
     finally:
         store.close()
+
+
+def test_forget_all_clears_memory(tmp_path):
+    import pytest
+    pytest.importorskip("kuzu")
+    from openwiki.graph import GraphStore
+
+    store = GraphStore(_build_graph(tmp_path), writable=True)
+    try:
+        store.remember("s1", [MemoryFact("the project", "uses", "Python 3.13")], _MemEmbedder())
+        assert store.has_memory()
+        store.forget_all()
+        assert store.has_memory() is False
+        assert store.recall("anything", _MemEmbedder()) == []
+    finally:
+        store.close()
+
+
+def test_cross_session_eval_end_to_end(tmp_path):
+    """The driver drives real GraphStore.forget_all/remember/recall on Kuzu."""
+    import pytest
+    pytest.importorskip("kuzu")
+    from openwiki.eval import CrossSessionItem, run_cross_session_eval
+    from openwiki.graph import GraphStore
+
+    class _XChat:
+        name = "fake:x"
+
+        def chat(self, messages):
+            if "JSON array" in messages[0]["content"]:      # capture request
+                return '[{"subject":"the database","predicate":"is","object":"kuzu"}]'
+            return messages[-1]["content"]                   # probe → echo the memory context
+
+    store = GraphStore(_build_graph(tmp_path), writable=True)
+    try:
+        items = [CrossSessionItem(name="db", setup=["The database we use is kuzu."],
+                                  question="Which database do we use?", expected=["kuzu"])]
+        r = run_cross_session_eval(items, store, _MemEmbedder(), _XChat())
+        assert r["scenarios"] == 1
+        assert r["success"]["cold"] == 0.0                   # nothing remembered → no answer
+        assert r["success"]["raw-log"] == 1.0                # transcript holds the fact
+        assert r["success"]["assembled"] == 1.0              # recall surfaced it from the graph
+    finally:
+        store.close()

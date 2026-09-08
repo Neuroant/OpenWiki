@@ -627,6 +627,19 @@ class GraphStore:
         scored.sort(key=lambda x: -x["score"])
         return scored[:k]
 
+    def forget_all(self) -> None:
+        """Reset the remembered tier — delete every Session + Assertion (and their edges).
+        Writable-only; used to isolate scenarios in the cross-session eval."""
+        if not self.writable:
+            raise RuntimeError("GraphStore is read-only; open it writable to forget.")
+        with self._lock:
+            for query in ("MATCH (a:Assertion) DETACH DELETE a;",
+                          "MATCH (s:Session) DETACH DELETE s;"):
+                try:
+                    self._exec(query)
+                except Exception:      # pragma: no cover - tables may not exist yet
+                    pass
+
     def hybrid_search(self, vector, k: int = 5) -> list[dict]:
         """Vector k-NN over chunks, then hop to the owning page (GraphRAG)."""
         rows = self._rows(

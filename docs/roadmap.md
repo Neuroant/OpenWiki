@@ -464,8 +464,15 @@ directions*). Stages re-open the decisions that flagged themselves for exactly t
 **First slice landed (v0.46).** A thin **B2→B3→B6** vertical ships as the `remember`/`recall`
 commands: capture a transcript into `Session`/`Assertion` graph tables, dedup-merge it, and recall
 facts by decay-weighted cosine — a two-session proof-of-loop (offline tests + a live informatik run).
-Still doc-derived (B0 deferred) with no contradiction handling (B4 deferred); next is the
-cross-session eval that decides whether to commit to those hard stages. Design: `path-b-memory.md`.
+Still doc-derived (B0 deferred) with no contradiction handling (B4 deferred).
+
+**Headline metric landed + first result (v0.47).** `owiki eval --cross-session` implements §7's
+three-condition test (cold / raw-log / assembled) over a scenario set, isolating each scenario in a
+throwaway graph. First 7-scenario run (qwen3 + bge-m3): **assembled 100% · raw-log 85.7% · cold 0%**
+task success, and an LLM judge preferred **assembled over raw-log 3–1** — memory helps the next
+session, and *concentrating* it (recall) beats *replaying* it (raw log). Small-N caveats aside, that's
+the green light for the hard stages (B0 authoritative graph, B4 contradictions). Design + full result:
+`path-b-memory.md` §7.
 
 ### Honest guardrails
 

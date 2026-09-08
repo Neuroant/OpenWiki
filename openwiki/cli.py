@@ -207,6 +207,12 @@ def _build_argparser() -> argparse.ArgumentParser:
     eval_p.add_argument("--global", dest="global_search", action="store_true",
                         help="Evaluate global search on a thematic set: community grounding "
                              "(+ --judge = Global vs RAG). Needs a graph with communities.")
+    eval_p.add_argument("--cross-session", dest="cross_session", action="store_true",
+                        help="Evaluate the Path B memory tier: cross-session task success "
+                             "(cold vs raw-log vs assembled; + --judge = assembled vs raw-log). "
+                             "Default set: <project>/eval_cross_session.jsonl.")
+    eval_p.add_argument("--recall-k", type=int, default=10,
+                        help="Facts recalled for the 'assembled' condition (--cross-session; default 10).")
     eval_p.add_argument("--limit", type=int, default=None, help="Only evaluate the first N questions.")
     eval_p.add_argument("--model", default=None, help="Chat model for --answers (default: project's models.chat).")
     eval_p.add_argument("--host", default=None, help="Ollama host URL.")
@@ -1180,6 +1186,8 @@ def _resolve_eval_set(spec, project: Optional[Project]) -> Path:
 
 def _cmd_eval(args: argparse.Namespace) -> int:
     project = getattr(args, "project_obj", None)
+    if getattr(args, "cross_session", False):
+        return _cross_session_eval(args, project)
     path = _resolve_eval_set(args.eval_set, project)
     if not path.is_file():
         print(f"error: eval set not found: {path}\n"
@@ -1304,6 +1312,90 @@ def _answer_eval(items, index, graph, args, top_k: int, expand_k: int) -> None:
         t = result["tally"]
         print(f"\nLLM judge (position-balanced):  GraphRAG {t['GraphRAG']}  ·  "
               f"RAG {t['RAG']}  ·  tie {t['tie']}")
+
+
+def _build_stub_graph(tmp_dir: Path, embedder) -> Path:
+    """A minimal throwaway Kuzu graph (one stub page) so the cross-session eval has the
+    memory schema without touching — or depending on — the project's real graph."""
+    from .graph import GraphBuilder
+    from .wiki import Wiki, WikiPage
+
+    page = WikiPage(slug="000-stub", title="stub", level=1, order=0,
+                    pdf_page_start=1, pdf_page_end=1, text="stub")
+    wiki = Wiki(title="stub", pages=[page], source="stub", split_level=1)
+    index = SemanticIndex.build(wiki, embedder, size_words=50, overlap_words=10)
+    gpath = tmp_dir / "graph"
+    GraphBuilder(gpath).build(wiki, index)
+    return gpath
+
+
+def _cross_session_eval(args: argparse.Namespace, project) -> int:
+    """Path B headline metric: cross-session task success (docs/path-b-memory.md §7).
+    Remembers each scenario's setup sessions into a throwaway graph, then answers the probe
+    cold / raw-log / assembled and reports objective task success (+ optional judge)."""
+    import tempfile
+
+    from .eval import load_cross_session_set, run_cross_session_eval
+
+    root = project.root if project is not None else Path.cwd()
+    spec = args.eval_set
+    if spec is None:
+        path = root / "eval_cross_session.jsonl"
+    elif Path(spec).is_file() or Path(spec).is_absolute():
+        path = Path(spec)
+    else:
+        path = root / spec
+    if not path.is_file():
+        print(f"error: cross-session set not found: {path}\n"
+              '  create a JSONL of {"name","setup":[transcript,…],"question","expected":[…]} lines.',
+              file=sys.stderr)
+        return 2
+    items = load_cross_session_set(path)
+    if not items:
+        print(f"error: cross-session set is empty: {path}", file=sys.stderr)
+        return 2
+    if not (args.index / "index.json").is_file():
+        print(f"error: no index at {args.index} (run `openwiki index` — needed for the embedder).",
+              file=sys.stderr)
+        return 2
+    index = SemanticIndex.load(args.index)
+    if isinstance(index.embedder, OllamaEmbedder):
+        index.embedder.host = args.host.rstrip("/")
+
+    subset = items[: args.limit] if args.limit else items
+    chat = OllamaChat(model=args.model, host=args.host, temperature=0.2)
+    judge = OllamaChat(model=args.model, host=args.host, temperature=0.0) if args.judge else None
+    print(f"Cross-session eval: {path.name}  ({len(subset)} scenarios) — "
+          f"cold vs raw-log vs assembled with {chat.name}{' + judge' if judge else ''} …",
+          file=sys.stderr)
+
+    tmp_dir = Path(tempfile.mkdtemp(prefix="owiki-xsess-"))
+    try:
+        graph = _open_graph(_build_stub_graph(tmp_dir, index.embedder), writable=True)
+        if graph is None or not getattr(graph, "writable", False):
+            print("error: could not open a writable throwaway graph (is Kuzu installed?).",
+                  file=sys.stderr)
+            return 2
+        try:
+            result = run_cross_session_eval(
+                subset, graph, index.embedder, chat, judge=judge, recall_k=args.recall_k,
+                on_progress=lambda done, total: print(f"  {done}/{total} done", file=sys.stderr))
+        finally:
+            graph.close()
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    s = result["success"]
+    print(f"\nCross-session task success   [{result['scenarios']} scenarios]")
+    print(f"{'condition':<14}{'success':>9}")
+    print("-" * 23)
+    for cond in ("cold", "raw-log", "assembled"):
+        print(f"{cond:<14}{s[cond]:>8.1%}")
+    if result["judged"]:
+        t = result["tally"]
+        print(f"\nLLM judge (assembled vs raw-log, position-balanced):  "
+              f"assembled {t['assembled']}  ·  raw-log {t['raw-log']}  ·  tie {t['tie']}")
+    return 0
 
 
 def _ask_global(args: argparse.Namespace, graph) -> int:

@@ -184,5 +184,103 @@ def test_read_only_expansion_does_not_reinforce(tmp_path):
         RAGAgent(index, _FakeChat(), top_k=1, graph=store, expand_k=2).retrieve("alpha nautilus")
         n = store._rows("MATCH (:Page)-[r:REINFORCES]->(:Page) RETURN count(r);")[0][0]
         assert n == 0
+        assert store.pending_usage() == 0        # log_usage off by default → nothing logged either
     finally:
         store.close()
+
+
+# -- B1: read-path reinforcement via the usage log -----------------------------
+
+def test_record_usage_logs_when_read_only_and_enabled(tmp_path):
+    import pytest
+    pytest.importorskip("kuzu")
+    from openwiki.graph import GraphStore
+
+    gpath, _ = _build_graph(tmp_path)
+    store = GraphStore(gpath)          # read-only
+    store.log_usage = True             # Second Brain mode
+    try:
+        store.record_usage([("000-a", "001-b"), ("000-a", "002-c")])
+        assert store.pending_usage() == 1     # one appended record (one call)
+        # read-only: the graph itself is untouched until a writer folds in
+        assert store._rows("MATCH (:Page)-[r:REINFORCES]->(:Page) RETURN count(r);")[0][0] == 0
+    finally:
+        store.close()
+
+
+def test_fold_usage_reinforces_then_clears(tmp_path):
+    import pytest
+    pytest.importorskip("kuzu")
+    from openwiki.graph import GraphStore
+
+    gpath, _ = _build_graph(tmp_path)
+    ro = GraphStore(gpath)             # read-only ask logs usage
+    ro.log_usage = True
+    try:
+        ro.record_usage([("000-a", "001-b")])
+        assert ro.pending_usage() == 1
+    finally:
+        ro.close()
+
+    rw = GraphStore(gpath, writable=True)   # a writer folds it in
+    try:
+        folded = rw.fold_usage()
+        assert folded["records"] == 1 and folded["reinforced"] == 1
+        assert rw.pending_usage() == 0     # log cleared
+        n = rw._rows("MATCH (:Page {slug:'000-a'})-[r:REINFORCES]->(:Page {slug:'001-b'}) "
+                     "RETURN count(r);")[0][0]
+        assert n == 1
+        assert rw.fold_usage()["records"] == 0   # idempotent — nothing left
+    finally:
+        rw.close()
+
+
+def test_record_usage_writable_reinforces_immediately(tmp_path):
+    import pytest
+    pytest.importorskip("kuzu")
+    from openwiki.graph import GraphStore
+
+    gpath, _ = _build_graph(tmp_path)
+    rw = GraphStore(gpath, writable=True)
+    try:
+        rw.record_usage([("000-a", "001-b")])    # writable → reinforce now, don't log
+        assert rw.pending_usage() == 0
+        n = rw._rows("MATCH (:Page {slug:'000-a'})-[r:REINFORCES]->(:Page {slug:'001-b'}) "
+                     "RETURN count(r);")[0][0]
+        assert n == 1
+    finally:
+        rw.close()
+
+
+def test_read_path_ask_logs_then_folds_into_edges(tmp_path):
+    """B1 exit criterion: a read-only ask records usage; the next writer folds it into edges."""
+    import pytest
+    pytest.importorskip("kuzu")
+    from openwiki.agent import RAGAgent
+    from openwiki.graph import GraphStore
+    from openwiki.search import SemanticIndex
+    from openwiki.wiki import Wiki, WikiPage
+
+    gpath, _ = _build_graph(tmp_path)
+    index = SemanticIndex.build(
+        Wiki(title="T", source="x.pdf", split_level=2, pages=[
+            WikiPage(slug=f"00{i}-{c}", title=c.upper(), level=1, order=i, pdf_page_start=i + 1,
+                     pdf_page_end=i + 1, text=f"{c} nautilus {c}") for i, c in enumerate(["a", "b", "c"])]),
+        _FakeEmbedder(), size_words=50, overlap_words=10)
+
+    ro = GraphStore(gpath)             # read-only ask in Second Brain mode
+    ro.log_usage = True
+    try:
+        RAGAgent(index, _FakeChat(), top_k=1, graph=ro, expand_k=2).retrieve("alpha nautilus")
+        assert ro.pending_usage() >= 1       # reads were logged
+        assert ro._rows("MATCH (:Page)-[r:REINFORCES]->(:Page) RETURN count(r);")[0][0] == 0
+    finally:
+        ro.close()
+
+    rw = GraphStore(gpath, writable=True)   # next writer folds them in
+    try:
+        assert rw.fold_usage()["reinforced"] >= 1
+        n = rw._rows("MATCH (:Page {slug:'000-a'})-[r:REINFORCES]->(:Page) RETURN count(r);")[0][0]
+        assert n >= 1                        # the read taught the graph
+    finally:
+        rw.close()

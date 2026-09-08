@@ -1,11 +1,12 @@
 # Path B — Agent Memory (design)
 
 > **Status: IN PROGRESS.** First slices have landed: the remembered tier (`remember`/`recall`,
-> v0.46), the cross-session eval that validated it (v0.47), and **B0 — the authoritative-graph
-> reframe** (v0.48): the memory tier now **survives document rebuilds**, a per-project **Wiki vs
-> Second Brain mode** (`[memory] enabled`) gates it, and a **session source type** feeds it through
-> `openwiki build`. Still ahead: B1 (read-path reinforcement), B4 (contradiction/time-versioning),
-> B5 (sleep consolidation), and the full three-tier B6 assembly. This remains the living design base
+> v0.46), the cross-session eval that validated it (v0.47), **B0 — the authoritative-graph reframe**
+> (v0.48): the memory tier now **survives document rebuilds**, a per-project **Wiki vs Second Brain
+> mode** (`[memory] enabled`) gates it, and a **session source type** feeds it through `openwiki
+> build`; and **B1 — read-path reinforcement** (v0.49): ordinary read-only `ask`/MCP now teach the
+> graph via an append-only usage log a writer folds in. Still ahead: B4 (contradiction/time-
+> versioning), B5 (sleep consolidation), and the full three-tier B6 assembly. This remains the living design base
 > for Path B — turning OpenWiki's knowledge graph from a document **mirror** into agent **memory**.
 > The roadmap-level overview lives in [`docs/roadmap.md`](roadmap.md#path-b--the-second-brain-memory-model);
 > this document is the deep design (concepts → target architecture → data model → staged plan →
@@ -225,6 +226,16 @@ to matter but late enough to de-risk. Each stage lists an **exit criterion** (ho
 - **Re-opens:** ADR-8 (debt D2).
 - **Hard part:** concurrent readers + a writer under Kuzu's exclusive lock.
 - **Exit:** after a scripted set of asks, useful edges are measurably heavier than noise; no lock contention errors.
+- **Landed (v0.49).** Exactly the append-only-log design: `RAGAgent._expand` records the seed→related
+  pairs it retrieves via `GraphStore.record_usage` — reinforced immediately on a **writable** graph
+  (serve/chat, unchanged), or appended to a **usage-log sidecar** (`graph.usage.jsonl`, `graph/usage.py`)
+  on a **read-only** `ask`/MCP in Second Brain mode (`log_usage`), which never touches Kuzu's exclusive
+  write lock. The next writer **folds it in** (`fold_usage` → `reinforce` each pair, then clear): serve/chat
+  drain it on startup, and `openwiki decay` folds it *before* aging. Proven live — two read-only asks
+  logged their pairs (no graph write), then `decay` folded them into `REINFORCES` edges (2 records → 2
+  edges, log cleared). Reads now teach the graph, not just serve/chat. **Still deferred:** a true
+  concurrent reader-*and*-writer model (the log defers writes rather than allowing simultaneous ones) —
+  enough for the CLI/MCP usage pattern, where a writer runs between read sessions.
 
 ### B2 — Session capture → typed sub-graph
 - **Goal:** turn a conversation into a small typed knowledge sub-graph (the day's trace).

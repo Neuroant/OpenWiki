@@ -1527,6 +1527,10 @@ def _cmd_ask(args: argparse.Namespace) -> int:
     if not args.no_graph and args.graph.exists():
         try:
             graph = GraphStore(args.graph)
+            # B1: in Second Brain mode, a read-only ask records usage to the log for a
+            # later fold-in (serve/chat startup or `openwiki decay`) — reads teach the graph.
+            project = getattr(args, "project_obj", None)
+            graph.log_usage = bool(project is not None and project.memory_enabled)
         except Exception as exc:
             print(f"(graph not loaded: {exc})", file=sys.stderr)
 
@@ -1609,6 +1613,7 @@ def _cmd_chat(args: argparse.Namespace) -> int:
             index.embedder.host = args.host.rstrip("/")
     # Writable graph (+ embedder) → agent edits update the graph incrementally.
     graph = _open_graph(args.graph, writable=index is not None and not args.dry_run)
+    _fold_pending_usage(graph)   # absorb read-path usage logged since the last writer (B1)
     embedder = index.embedder if index else None
     tools = WikiTools(args.wiki, index=index, graph=graph, embedder=embedder, dry_run=args.dry_run)
     chat = OllamaChat(model=args.model, host=args.host, temperature=args.temperature)
@@ -1728,8 +1733,9 @@ def _cmd_communities(args: argparse.Namespace) -> int:
 
 
 def _cmd_decay(args: argparse.Namespace) -> int:
-    """Maintenance pass over the usage-memory edges: age each REINFORCES edge to now
-    (persisting its decayed weight) and prune those below the floor."""
+    """Maintenance pass over the usage-memory edges: first **fold in** any pending
+    read-path usage (B1), then age each REINFORCES edge to now (persisting its decayed
+    weight) and prune those below the floor."""
     graph = _open_graph(args.graph, writable=True)
     if graph is None:
         print(f"error: no graph at {args.graph} (run `openwiki graph-build` first).", file=sys.stderr)
@@ -1739,9 +1745,13 @@ def _cmd_decay(args: argparse.Namespace) -> int:
         graph.close()
         return 2
     try:
+        folded = graph.fold_usage()
         result = graph.decay(half_life_days=args.half_life, floor=args.floor)
     finally:
         graph.close()
+    if folded["records"]:
+        print(f"Folded in {folded['records']} pending read-usage record(s) "
+              f"({folded['reinforced']} reinforcement(s)).")
     print(f"Decayed {result['edges']} reinforced edge(s): "
           f"{result['decayed']} kept, {result['pruned']} pruned "
           f"(half-life {args.half_life}d, floor {args.floor}) → {args.graph}")
@@ -1822,6 +1832,20 @@ def _cmd_recall(args: argparse.Namespace) -> int:
     return 0
 
 
+def _fold_pending_usage(graph) -> None:
+    """B1: when a writable process starts, fold any read-path usage logged since the
+    last writer into the graph (best-effort). No-op on a read-only/None graph or empty log."""
+    if graph is None or not getattr(graph, "writable", False):
+        return
+    try:
+        folded = graph.fold_usage()
+        if folded["records"]:
+            print(f"(folded in {folded['records']} pending read-usage record(s) → "
+                  f"{folded['reinforced']} reinforcement(s))", file=sys.stderr)
+    except Exception:
+        pass
+
+
 def _cmd_serve(args: argparse.Namespace) -> int:
     index = None
     if (args.index / "index.json").is_file():
@@ -1831,6 +1855,7 @@ def _cmd_serve(args: argparse.Namespace) -> int:
 
     # Writable graph (+ embedder) → agent edits update the graph incrementally.
     graph = _open_graph(args.graph, writable=index is not None and not args.dry_run)
+    _fold_pending_usage(graph)   # absorb read-path usage logged since the last writer (B1)
     embedder = index.embedder if index else None
 
     tools = WikiTools(args.wiki, index=index, graph=graph, embedder=embedder, dry_run=args.dry_run)
@@ -1859,6 +1884,9 @@ def _cmd_mcp(args: argparse.Namespace) -> int:
     if args.graph.exists():
         try:
             graph = GraphStore(args.graph)   # read-only: coding agents only read
+            # B1: log read-path usage in Second Brain mode (folded in on the next writer).
+            project = getattr(args, "project_obj", None)
+            graph.log_usage = bool(project is not None and project.memory_enabled)
         except Exception as exc:
             print(f"(graph not loaded: {exc})", file=sys.stderr)
 

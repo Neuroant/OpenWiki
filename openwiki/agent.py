@@ -119,15 +119,12 @@ class RAGAgent:
             return []
 
         related = self.index.best_chunk_per_page(question, candidates)[: self.expand_k]
-        # Hebbian memory: if the graph is writable (serve/chat), strengthen the edge
-        # from the top seed to each page we actually pulled in. Best-effort — never
-        # let a memory write break retrieval, and a no-op on read-only `ask`/MCP.
-        if related and seed_slugs and getattr(self.graph, "writable", False):
-            for r in related:
-                try:
-                    self.graph.reinforce(seed_slugs[0], r.page_slug)
-                except Exception:
-                    pass
+        # Hebbian usage memory (B1): record the seed→related pairs we actually pulled in.
+        # On a writable graph (serve/chat) this reinforces immediately; on a read-only
+        # `ask`/MCP with logging enabled it appends to the usage log for a later fold-in
+        # (`GraphStore.fold_usage`). Best-effort — a memory write never breaks retrieval.
+        if related and seed_slugs:
+            self.graph.record_usage([(seed_slugs[0], r.page_slug) for r in related])
         base = len(seeds)
         return [self._source(r, base + i + 1, "related") for i, r in enumerate(related)]
 

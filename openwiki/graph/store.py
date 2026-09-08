@@ -31,6 +31,7 @@ from .decay import (
     effective_weight, reinforced_weight,
 )
 from .entities import _normalize
+from .usage import append_usage, clear_usage, read_usage, usage_log_path
 
 
 class GraphStore:
@@ -54,6 +55,10 @@ class GraphStore:
         self._reinforce_ensured = False   # lazy REINFORCES-table check (old graphs)
         self._memory_ensured = False      # lazy Session/Assertion-table check (old graphs)
         self._page_comm: Optional[dict] = None   # lazy {slug: community_id} for coloring
+        # B1 read-path reinforcement: a read-only store may append usage to a sidecar
+        # log (opt-in via log_usage) that a writable process folds in (fold_usage).
+        self.log_usage = False
+        self._usage_path = usage_log_path(self.db_path)
 
     def close(self) -> None:
         self._conn.close()
@@ -538,6 +543,49 @@ class GraphStore:
                                "SET r.weight=$w, r.last_seen=$t;", {"a": a, "b": b, "w": eff, "t": now})
                     decayed += 1
         return {"edges": len(rows), "decayed": decayed, "pruned": pruned}
+
+    def record_usage(self, pairs) -> None:
+        """B1: record ``(from_slug, to_slug)`` usage from a retrieval. On a **writable**
+        store (serve/chat) reinforce immediately; on a **read-only** store with
+        ``log_usage`` on (ask/MCP in Second Brain mode) append to the usage log for a
+        later ``fold_usage``; otherwise a no-op. Best-effort — a memory write must never
+        break retrieval."""
+        pairs = [(a, b) for a, b in pairs if a and b and a != b]
+        if not pairs:
+            return
+        try:
+            if self.writable:
+                for a, b in pairs:
+                    self.reinforce(a, b)
+            elif self.log_usage:
+                append_usage(self._usage_path, pairs)
+        except Exception:      # pragma: no cover - never surface a memory-write error
+            pass
+
+    def fold_usage(self, now: Optional[int] = None) -> dict:
+        """B1: fold the pending usage log into REINFORCES edges (reinforce each pair,
+        skipping slugs that no longer exist) and clear the log. Writable-only; a no-op
+        when the log is empty. Called on a writable open (serve/chat) and by ``decay``."""
+        if not self.writable:
+            raise RuntimeError("GraphStore is read-only; open it writable to fold usage.")
+        records = read_usage(self._usage_path)
+        if not records:
+            return {"records": 0, "pairs": 0, "reinforced": 0}
+        now = int(now if now is not None else time.time())
+        reinforced = pairs = 0
+        for rec in records:
+            for pair in rec.get("pairs", []):
+                if not (isinstance(pair, list) and len(pair) == 2):
+                    continue
+                pairs += 1
+                if self.reinforce(str(pair[0]), str(pair[1]), now=now) is not None:
+                    reinforced += 1
+        clear_usage(self._usage_path)
+        return {"records": len(records), "pairs": pairs, "reinforced": reinforced}
+
+    def pending_usage(self) -> int:
+        """How many usage records are queued in the log (0 if none)."""
+        return len(read_usage(self._usage_path))
 
     # -- remembered tier (Path B: session memory) ----------------------
 

@@ -33,7 +33,7 @@ from .tools import WikiTools
 from .web import WikiWebApp, serve
 from .wiki import Wiki, WikiBuilder, WikiPage, slugify, write_wiki
 
-__version__ = "0.48.0"
+__version__ = "0.49.0"
 
 __all__ = [
     "PDFParser",

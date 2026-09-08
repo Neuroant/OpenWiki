@@ -450,8 +450,11 @@ directions*). Stages re-open the decisions that flagged themselves for exactly t
   remembered tier on top of the doc tier, not a replacement (arc42 ADR-14 / `path-b-memory.md` §3.1).
   *Still deferred within B0:* the full tiered write-authority model. Was the highest-leverage,
   highest-risk stage.
-- **B1 — Read-path reinforcement (re-opens ADR-8, debt D2).** A writable-safe concurrency model so
-  plain `ask` reinforces, not just `serve`/`chat`. Unblocks memory where it actually happens.
+- **B1 — Read-path reinforcement (re-opens ADR-8, debt D2). ✅ Landed (v0.49).** Plain read-only
+  `ask`/MCP now reinforce usage — they append the seed→related pairs they retrieve to an append-only
+  **usage log** (`graph.usage.jsonl`) that the next writer (`serve`/`chat` startup, or `openwiki
+  decay`) folds into `REINFORCES` edges — sidestepping Kuzu's exclusive write lock. Gated by Second
+  Brain mode. Memory now grows where use actually happens, not just serve/chat.
 - **B2 — Session capture → sub-graph.** An LLM turns a conversation into a typed sub-graph
   (entities + relations + provenance + timestamp). *(First slice landed, v0.46: flat
   subject–predicate–object capture into reified `Assertion`s.)*
@@ -483,8 +486,15 @@ the green light for the hard stages (B0 authoritative graph, B4 contradictions).
 overlay and restores them into the fresh schema — unit-tested *and* verified live with
 `build --only graph --force`). A per-project **Wiki vs Second-Brain mode** (`[memory] enabled`, default
 off) gates memory, and a **session source type** (`init/add-source --session`) is captured by a new
-`openwiki build` **memory** stage. Path B is no longer doc-derived — experience persists. Next: **B1**
-(read-path reinforcement) and **B4** (contradiction/time-versioning). See `path-b-memory.md` §6/B0.
+`openwiki build` **memory** stage. Path B is no longer doc-derived — experience persists. See
+`path-b-memory.md` §6/B0.
+
+**B1 — read-path reinforcement landed (v0.49).** Ordinary read-only use now teaches the graph:
+`ask`/MCP append the seed→related pairs they retrieve to an append-only **usage log**
+(`graph.usage.jsonl`), which the next writer (`serve`/`chat` startup, or `openwiki decay`) folds into
+`REINFORCES` edges — no lock contention on the read path. Gated by Second Brain mode; verified live
+(two asks → `decay` folds 2 records into 2 edges). Next: **B4** (contradiction/time-versioning — the
+genuinely novel piece) and **B5** (sleep consolidation). See `path-b-memory.md` §6/B1.
 
 ### Honest guardrails
 

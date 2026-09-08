@@ -122,7 +122,9 @@ Options: `--model NAME` (default `qwen3:30b-a3b-instruct-2507-q4_K_M`), `-k N`,
 `--temperature T`, `--show-context`, `--host URL`, `-i DIR`, and (when a graph
 exists) `--graph DIR` / `--expand-k N` / `--no-graph` for **graph-augmented
 retrieval** — seeds are expanded along references + similar edges (sources marked
-`+`).
+`+`). In **Second Brain mode** the read path also **reinforces** usage: `ask` logs the
+seed→related pairs it pulled to `graph.usage.jsonl`, folded into `REINFORCES` edges by
+the next `serve`/`chat`/`decay` (B1) — read-only, so no lock contention.
 
 **Chat + edit the wiki (multi-turn agent)** — searches, reads, and edits pages
 via tool calls:
@@ -162,12 +164,15 @@ community; default 12), `--model NAME`, `--host URL`. This is Path A of the
 global-search ideas, native/local/dependency-free); design in `docs/roadmap.md`.
 
 **Decay the usage-memory edges** — the graph learns which connections are *used*:
-GraphRAG expansion on a **writable** graph (serve/chat) strengthens a `REINFORCES`
-edge from the answer's seed to each page it pulls in (Hebbian). Those edges carry a
-`weight` + `last_seen` and decay by a half-life; `openwiki decay` ages them and prunes
-the faded ones (the "forgetting" half). Reinforced neighbors surface in
-`neighborhood`/GraphRAG expansion ranked by *effective* (decayed) weight — so useful
-connections persist and stale ones vanish (first step toward Path B agent memory):
+GraphRAG expansion strengthens a `REINFORCES` edge from the answer's seed to each page
+it pulls in (Hebbian). On a **writable** graph (serve/chat) this happens immediately;
+on a **read-only** `ask`/MCP in Second Brain mode it's appended to a usage-log sidecar
+(`graph.usage.jsonl`) that the next writer **folds in** (B1 — `graph/usage.py`,
+`GraphStore.record_usage`/`fold_usage`; serve/chat drain it on startup). Those edges carry
+a `weight` + `last_seen` and decay by a half-life; `openwiki decay` **first folds in any
+pending read-usage**, then ages the edges and prunes the faded ones (the "forgetting"
+half). Reinforced neighbors surface in `neighborhood`/GraphRAG expansion ranked by
+*effective* (decayed) weight — so useful connections persist and stale ones vanish:
 ```
 .venv\Scripts\python -m openwiki decay --half-life 30 --floor 0.1
 ```
@@ -305,7 +310,9 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   excerpts the answer referenced. With a `GraphStore` (`graph=`), `retrieve()`
   also **expands** the semantic seeds along references/similar edges (`_expand`)
   and re-ranks the added pages by the query — GraphRAG; those `Source`s have
-  `kind="related"`.
+  `kind="related"`. `_expand` also **records usage** (`graph.record_usage`) for the
+  seed→related pairs it pulls in — reinforced live on a writable graph, or logged for
+  a later fold-in on read-only `ask`/MCP (B1).
 - **`openwiki/tools.py`** — `WikiTools`: the tools the editing agent calls
   (`search_wiki`, `list_pages`, `read_page`, `edit_page`, `append_section`,
   `create_page`), each returning a string. File access is confined to `pages/`,
@@ -353,9 +360,13 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   gains a `REINFORCES(weight, last_seen)` edge (always-created empty); `GraphStore`
   `reinforce(a,b)` strengthens+stamps it (Hebbian), `decay()` ages every edge to now
   and prunes below a floor (forgetting), and `neighborhood`'s `reinforced` group ranks
-  them by decayed weight. `RAGAgent._expand` reinforces seed→related edges when the
-  graph is **writable** (serve/chat) — retrieval teaches the graph; read-only `ask`/MCP
-  never write. `openwiki decay` runs the maintenance pass. Each community's label is the
+  them by decayed weight. **B1 (`usage.py` + `GraphStore.record_usage`/`fold_usage`):**
+  `RAGAgent._expand` records seed→related usage on *every* retrieval — reinforced
+  immediately on a **writable** graph (serve/chat), or appended to an append-only usage
+  log (`graph.usage.jsonl` sidecar) on a **read-only** `ask`/MCP in Second Brain mode
+  (`log_usage`), sidestepping Kuzu's exclusive-writer lock. The next writer **folds it
+  in** (`fold_usage`): serve/chat drain it on startup, and `openwiki decay` folds it
+  before aging. Reads teach the graph too, not just serve/chat. Each community's label is the
   model's own theme (`summarize_community` asks for a `Thema:` line via `parse_summary`,
   hub-title fallback), not a page title. `ask --global` (CLI) and the Projekt tab's
   global-search box (`/api/global` → `WikiWebApp.ask_global`) answer thematic questions

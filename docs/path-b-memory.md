@@ -4,9 +4,12 @@
 > v0.46), the cross-session eval that validated it (v0.47), **B0 — the authoritative-graph reframe**
 > (v0.48): the memory tier now **survives document rebuilds**, a per-project **Wiki vs Second Brain
 > mode** (`[memory] enabled`) gates it, and a **session source type** feeds it through `openwiki
-> build`; and **B1 — read-path reinforcement** (v0.49): ordinary read-only `ask`/MCP now teach the
-> graph via an append-only usage log a writer folds in. Still ahead: B4 (contradiction/time-
-> versioning), B5 (sleep consolidation), and the full three-tier B6 assembly. This remains the living design base
+> build`; **B1 — read-path reinforcement** (v0.49): ordinary read-only `ask`/MCP now teach the
+> graph via an append-only usage log a writer folds in; and **B4 — contradiction / time-versioning**
+> (v0.50): a newer fact **supersedes** an older one (same subject+predicate, different object) via a
+> `SUPERSEDES` edge, so recall returns the *current* fact while the superseded history stays
+> queryable — the belief-revision layer no off-the-shelf system ships. Still ahead: B5 (sleep
+> consolidation) and the full three-tier B6 assembly. This remains the living design base
 > for Path B — turning OpenWiki's knowledge graph from a document **mirror** into agent **memory**.
 > The roadmap-level overview lives in [`docs/roadmap.md`](roadmap.md#path-b--the-second-brain-memory-model);
 > this document is the deep design (concepts → target architecture → data model → staged plan →
@@ -282,6 +285,20 @@ to matter but late enough to de-risk. Each stage lists an **exit criterion** (ho
 - **Learned (§11):** make append-only an **invariant on every remembered edge** (`valid_from` /
   `valid_to`), not only on conflict — any change closes the old + appends the new. Contradiction
   becomes one case, and time-travel + reversible consolidation come for free.
+- **Landed (v0.50).** Boring & tractable, exactly as scoped. Representation: a **`SUPERSEDES`**
+  edge (Assertion→Assertion, always-created empty; snapshotted/restored by B0) — *nothing is
+  deleted*, and "current" = **no incoming `SUPERSEDES`**, so validity intervals are *derivable*
+  (`valid_from` = `created_at`, `valid_to` = the superseding assertion's time) without extra columns.
+  `remember` now dedups against **current** assertions only and, for each new fact sharing a
+  normalized subject+predicate with a current one but a **different object**, adds
+  `(new)-[:SUPERSEDES]->(old)` (append-only history). Re-asserting a superseded fact **revives** it
+  (the §11 re-emergence case — free, since dedup ignores superseded). `recall` returns **current
+  only** by default (the agent gets the live fact; `include_superseded` / `recall --all` shows the
+  history, each flagged). Proven live: `remember` port 8080 then 9090 → 1 superseded; `recall`
+  returns only 9090 **even though the stale 8080 has a higher cosine** — supersession trumps
+  similarity — and the supersession survives a `graph-build`. **Deferred:** per-fact `confidence`
+  (§11 write-time gates) and predicate-synonym matching (detection is exact-normalized-predicate —
+  conservative: it prefers a false *negative* over wrongly hiding a valid fact).
 
 ### B5 — Sleep: cross-session consolidation job (Phase 4)
 - **Goal:** periodically compress accumulated memory into structure.

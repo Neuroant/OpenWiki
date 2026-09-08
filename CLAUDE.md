@@ -179,20 +179,25 @@ half). Reinforced neighbors surface in `neighborhood`/GraphRAG expansion ranked 
 Options: `--graph DIR`, `--half-life DAYS` (default 30), `--floor F` (prune below;
 default 0.1). Pure decay math in `openwiki/graph/decay.py`.
 
-**Remember a session / recall it later** — the **Path B** agent-memory tier (first
-slice: B2→B3→B6 thin vertical). `remember` turns a conversation transcript into
-subject–predicate–object facts (one chat call) and folds them into the graph as
-reified `Assertion`s under a `Session` (dedup-only merge, normalized key); `recall`
-ranks remembered facts against a query by **decay-weighted** cosine (the activation
-tier), so a fact stored in one session surfaces in the next:
+**Remember a session / recall it later** — the **Path B** agent-memory tier.
+`remember` turns a conversation transcript into subject–predicate–object facts (one
+chat call) and folds them into the graph as reified `Assertion`s under a `Session`;
+`recall` ranks remembered facts against a query by **decay-weighted** cosine (the
+activation tier), so a fact stored in one session surfaces in the next. **B4
+contradiction handling:** a newer fact with the same normalized subject+predicate but a
+different object **supersedes** the older (a `SUPERSEDES` edge; nothing deleted), so
+`recall` returns the **current** fact — `recall --all` shows the superseded history,
+flagged:
 ```
 .venv\Scripts\python -m openwiki remember session.md --session 2026-09-08
 .venv\Scripts\python -m openwiki recall "which chat model did we standardize on?"
+.venv\Scripts\python -m openwiki recall --all "which port do we use?"   # incl. superseded history
 ```
 `remember` needs an index (for the embedder) + a **writable** graph; options
-`--session ID`, `-i/--index DIR`, `--graph DIR`, `--model NAME`, `--host URL`.
-`recall` is read-only: `-k N`, `-i/--index DIR`, `--graph DIR`, `--host URL`. The
-`Session`/`Assertion`/`ASSERTS` tables are created (empty) by every `graph-build`,
+`--session ID`, `-i/--index DIR`, `--graph DIR`, `--model NAME`, `--host URL` (it reports
+`N new, M duplicate, K superseded`). `recall` is read-only: `-k N`, `--all`,
+`-i/--index DIR`, `--graph DIR`, `--host URL`. The
+`Session`/`Assertion`/`ASSERTS`/`SUPERSEDES` tables are created (empty) by every `graph-build`,
 so old graphs upgrade lazily. Both commands are gated by the project's **mode**
 (`[memory] enabled`, below) — off (Wiki mode) they refuse/return nothing.
 **B0 landed (v0.48):** `graph-build`/`build` now **preserve** the remembered tier across a
@@ -377,13 +382,17 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   `MemoryFact` (subject/predicate/object) triples (`parse_facts` strips `<think>`, extracts
   the first JSON array, dedups by normalized key). The graph gains `Session` +
   reified `Assertion(subject, predicate, object, session_id, created_at, emb)` nodes +
-  `ASSERTS` (always-created empty, like Entity/Community). `GraphStore.remember(session_id,
-  facts, embedder)` (writable) embeds each fact, **dedup-merges** by normalized
-  `(subject, predicate, object)` key across all sessions, and MERGEs the `Session` +
-  CREATEs `Assertion`s; `recall(query, embedder, k)` (read-only) ranks assertions by
-  **decay-weighted** cosine (`effective_weight`, the activation tier); `has_memory()` gates
-  both. `_ensure_memory_schema` lazily creates the tables so pre-0.46 graphs upgrade.
-  Exposed as the `remember`/`recall` CLI commands. Design in `docs/path-b-memory.md`.
+  `ASSERTS` + **`SUPERSEDES`** (always-created empty, like Entity/Community). `GraphStore.remember(session_id,
+  facts, embedder)` (writable) embeds each fact, **dedup-merges** against the *current*
+  assertions by normalized `(subject, predicate, object)`, MERGEs the `Session` + CREATEs
+  `Assertion`s, and — **B4** — when a new fact shares a normalized subject+predicate with a
+  current one but a **different object**, adds `(new)-[:SUPERSEDES]->(old)` (nothing deleted;
+  re-asserting a superseded fact revives it). `recall(query, embedder, k, include_superseded=False)`
+  (read-only) ranks assertions by **decay-weighted** cosine (`effective_weight`, the activation
+  tier) but returns **current only** by default (`_superseded_ids` = anything with an incoming
+  `SUPERSEDES`); `has_memory()` gates both. `_ensure_memory_schema` lazily creates the tables so
+  pre-0.46 graphs upgrade; B0's `_snapshot_memory`/`_restore_memory` preserve `SUPERSEDES` across a
+  rebuild. Exposed as the `remember`/`recall` (+`--all`) CLI commands. Design in `docs/path-b-memory.md`.
 - **`openwiki/web/`** — the web UI. `server.py` = `WikiWebApp` (state) + a
   `ThreadingHTTPServer` handler exposing a JSON API (`/api/wiki`,
   `/api/pages/{slug}`, `/api/search`, `/api/chat`, `/api/graph/{slug}` = explore,

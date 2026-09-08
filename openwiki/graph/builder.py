@@ -125,6 +125,8 @@ class GraphBuilder:
                           "a.session_id, a.created_at, a.emb;"),
                 "asserts": self._read_rows(
                     conn, "MATCH (s:Session)-[:ASSERTS]->(a:Assertion) RETURN s.id, a.id;"),
+                "supersedes": self._read_rows(
+                    conn, "MATCH (n:Assertion)-[:SUPERSEDES]->(o:Assertion) RETURN n.id, o.id;"),
                 "reinforces": self._read_rows(
                     conn, "MATCH (a:Page)-[r:REINFORCES]->(b:Page) "
                           "RETURN a.slug, b.slug, r.weight, r.last_seen;"),
@@ -158,6 +160,10 @@ class GraphBuilder:
             if aid in kept:
                 conn.execute("MATCH (s:Session {id:$sid}),(a:Assertion {id:$aid}) "
                              "CREATE (s)-[:ASSERTS]->(a);", parameters={"sid": sid, "aid": aid})
+        for new_id, old_id in snap.get("supersedes", []):
+            if new_id in kept and old_id in kept:
+                conn.execute("MATCH (n:Assertion {id:$n}),(o:Assertion {id:$o}) "
+                             "CREATE (n)-[:SUPERSEDES]->(o);", parameters={"n": new_id, "o": old_id})
         page_slugs = self._existing_page_slugs(conn)
         n_reinf = 0
         for a_slug, b_slug, weight, last_seen in snap.get("reinforces", []):
@@ -222,6 +228,10 @@ class GraphBuilder:
             f"CREATE NODE TABLE Assertion(id STRING, subject STRING, predicate STRING, "
             f"object STRING, session_id STRING, created_at INT64, emb FLOAT[{dim}], PRIMARY KEY(id));")
         conn.execute("CREATE REL TABLE ASSERTS(FROM Session TO Assertion);")
+        # B4 contradiction/time-versioning: a newer assertion SUPERSEDES an older one
+        # (same subject+predicate, different object). 'Current' = no incoming SUPERSEDES;
+        # nothing is deleted, so the superseded history stays queryable.
+        conn.execute("CREATE REL TABLE SUPERSEDES(FROM Assertion TO Assertion);")
 
     # -- nodes / structural edges --------------------------------------
 

@@ -598,6 +598,7 @@ class GraphStore:
             f"CREATE NODE TABLE IF NOT EXISTS Assertion(id STRING, subject STRING, predicate STRING, "
             f"object STRING, session_id STRING, created_at INT64, emb FLOAT[{int(dim)}], PRIMARY KEY(id));",
             "CREATE REL TABLE IF NOT EXISTS ASSERTS(FROM Session TO Assertion);",
+            "CREATE REL TABLE IF NOT EXISTS SUPERSEDES(FROM Assertion TO Assertion);",   # B4
         ):
             try:
                 self._exec(ddl)
@@ -611,15 +612,25 @@ class GraphStore:
         except Exception:
             return False
 
+    def _superseded_ids(self) -> set:
+        """Ids of assertions with an incoming SUPERSEDES edge (i.e. no longer current)."""
+        try:
+            return {r[0] for r in self._rows(
+                "MATCH (:Assertion)-[:SUPERSEDES]->(o:Assertion) RETURN o.id;")}
+        except Exception:
+            return set()
+
     def remember(self, session_id: str, facts, embedder, now: Optional[int] = None) -> dict:
-        """B3: merge a captured session's facts into the remembered tier — embed, dedup
-        against existing assertions (normalized triple), and persist Session + Assertion +
-        ASSERTS. No contradiction handling yet (that's B4). Returns counts."""
+        """B3 merge + **B4 contradiction handling**: embed each fact, dedup against the
+        **current** assertions (normalized triple), persist Session + Assertion + ASSERTS,
+        and — when a new fact shares a subject+predicate with a current one but gives a
+        *different* object — mark the old one superseded via a `SUPERSEDES` edge (kept, not
+        deleted, so history survives). Re-asserting a superseded fact revives it. Returns counts."""
         if not self.writable:
             raise RuntimeError("GraphStore is read-only; open it writable to remember.")
         facts = list(facts)
         if not facts:
-            return {"facts": 0, "added": 0, "duplicates": 0}
+            return {"facts": 0, "added": 0, "duplicates": 0, "superseded": 0}
         if embedder is None:
             raise ValueError("remember needs an embedder.")
         now = int(now if now is not None else time.time())
@@ -628,17 +639,27 @@ class GraphStore:
         norms[norms == 0] = 1.0
         emb = emb / norms
         self._ensure_memory_schema(emb.shape[1])
-        added = dupes = 0
+        added = dupes = superseded = 0
         with self._lock:
             self._exec("MERGE (s:Session {id:$id}) ON CREATE SET s.created_at=$t;",
                        {"id": session_id, "t": now})
-            existing = {(_normalize(r[0]), (r[1] or "").strip().lower(), _normalize(r[2]))
-                        for r in self._rows("MATCH (a:Assertion) RETURN a.subject, a.predicate, a.object;")}
+            # Index the *current* assertions (a superseded one no longer dedups or conflicts):
+            # exact triples for dedup, and (subject, predicate) → [(id, object)] for contradiction.
+            sup = self._superseded_ids()
+            exact, current = set(), {}
+            for aid_e, s, p, o in self._rows(
+                    "MATCH (a:Assertion) RETURN a.id, a.subject, a.predicate, a.object;"):
+                if aid_e in sup:
+                    continue
+                ns, pp, no = _normalize(s), (p or "").strip().lower(), _normalize(o)
+                exact.add((ns, pp, no))
+                current.setdefault((ns, pp), []).append((aid_e, no))
             for fact, vec in zip(facts, emb):
-                if fact.key() in existing:      # near-duplicate → skip (B3 dedup)
+                key = fact.key()                       # (nsubj, npred, nobj)
+                if key in exact:                       # re-affirming a current fact → skip
                     dupes += 1
                     continue
-                existing.add(fact.key())
+                exact.add(key)
                 aid = uuid.uuid4().hex
                 self._exec(
                     "CREATE (:Assertion {id:$id, subject:$s, predicate:$p, object:$o, "
@@ -648,30 +669,47 @@ class GraphStore:
                 self._exec("MATCH (s:Session {id:$sid}),(a:Assertion {id:$id}) "
                            "CREATE (s)-[:ASSERTS]->(a);", {"sid": session_id, "id": aid})
                 added += 1
-        return {"facts": len(facts), "added": added, "duplicates": dupes}
+                # B4: this fact supersedes any current fact with the same subject+predicate
+                # but a different object.
+                nsp = (key[0], key[1])
+                for old_id, old_no in current.get(nsp, []):
+                    if old_no != key[2]:
+                        self._exec("MATCH (n:Assertion {id:$n}),(o:Assertion {id:$o}) "
+                                   "CREATE (n)-[:SUPERSEDES]->(o);", {"n": aid, "o": old_id})
+                        superseded += 1
+                current[nsp] = [(aid, key[2])]         # the new fact is now the current one
+        return {"facts": len(facts), "added": added, "duplicates": dupes, "superseded": superseded}
 
     def recall(self, query: str, embedder, k: int = 5,
-               half_life_days: float = DEFAULT_HALF_LIFE_DAYS, now: Optional[int] = None) -> list:
-        """B6 (activation tier): the remembered facts most relevant to ``query`` — cosine over
-        assertion embeddings, weighted by recency (time-decayed via `decay`). Read-only."""
+               half_life_days: float = DEFAULT_HALF_LIFE_DAYS, now: Optional[int] = None,
+               include_superseded: bool = False) -> list:
+        """B6 (activation tier) + **B4**: the remembered facts most relevant to ``query`` —
+        cosine over assertion embeddings, weighted by recency (time-decayed via `decay`).
+        **Superseded facts are excluded by default** (the agent gets the current fact);
+        pass ``include_superseded`` to also return them, each flagged ``superseded``. Read-only."""
         if embedder is None:
             raise ValueError("recall needs an embedder.")
         try:
-            rows = self._rows("MATCH (a:Assertion) "
-                              "RETURN a.subject, a.predicate, a.object, a.session_id, a.created_at, a.emb;")
+            rows = self._rows("MATCH (a:Assertion) RETURN a.id, a.subject, a.predicate, "
+                              "a.object, a.session_id, a.created_at, a.emb;")
         except Exception:
             return []   # no memory table on graphs built before this layer
         if not rows:
             return []
+        sup = self._superseded_ids()
         now = int(now if now is not None else time.time())
         q = np.asarray(embedder.embed_query(query), dtype=np.float32)
         q = q / (np.linalg.norm(q) or 1.0)
         scored = []
-        for subj, pred, obj, sid, created, emb in rows:
+        for aid, subj, pred, obj, sid, created, emb in rows:
+            is_sup = aid in sup
+            if is_sup and not include_superseded:
+                continue
             cos = float(q @ np.asarray(emb, dtype=np.float32))   # stored normalized
             score = cos * effective_weight(1.0, int(created or 0), now, half_life_days)
             scored.append({"subject": subj, "predicate": pred, "object": obj,
-                           "session_id": sid, "cos": round(cos, 3), "score": round(score, 3)})
+                           "session_id": sid, "cos": round(cos, 3), "score": round(score, 3),
+                           "superseded": is_sup})
         scored.sort(key=lambda x: -x["score"])
         return scored[:k]
 

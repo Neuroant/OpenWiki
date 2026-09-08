@@ -364,6 +364,8 @@ def _build_argparser() -> argparse.ArgumentParser:
                            help="Show the remembered facts most relevant to a query (Path B activation tier).")
     rec_p.add_argument("query", help="What to recall.")
     rec_p.add_argument("-k", "--top-k", type=int, default=5, help="Facts to return (default: 5).")
+    rec_p.add_argument("--all", dest="include_superseded", action="store_true",
+                       help="Also show superseded facts (B4 history), each marked — default is current only.")
     rec_p.add_argument("-i", "--index", type=Path, default=None, help="Index dir (for the embedder; default: project's).")
     rec_p.add_argument("--graph", type=Path, default=None, help="Graph dir (default: project's graph).")
     rec_p.add_argument("--host", default=None, help="Ollama host URL.")
@@ -1794,7 +1796,8 @@ def _cmd_remember(args: argparse.Namespace) -> int:
         result = graph.remember(session_id, facts, index.embedder)
     finally:
         graph.close()
-    print(f"Remembered '{session_id}': {result['added']} new, {result['duplicates']} duplicate "
+    sup = f", {result['superseded']} superseded" if result.get("superseded") else ""
+    print(f"Remembered '{session_id}': {result['added']} new, {result['duplicates']} duplicate{sup} "
           f"({result['facts']} captured) → {args.graph}")
     print('  now try:  openwiki recall "<a question>"')
     return 0
@@ -1818,7 +1821,8 @@ def _cmd_recall(args: argparse.Namespace) -> int:
         print(f"error: no graph at {args.graph}.", file=sys.stderr)
         return 2
     try:
-        hits = graph.recall(args.query, index.embedder, k=args.top_k)
+        hits = graph.recall(args.query, index.embedder, k=args.top_k,
+                            include_superseded=getattr(args, "include_superseded", False))
     finally:
         graph.close()
     if not hits:
@@ -1827,8 +1831,9 @@ def _cmd_recall(args: argparse.Namespace) -> int:
     print(format_memory(hits))
     print("\nscores:", file=sys.stderr)
     for h in hits:
+        mark = "  ⊘superseded" if h.get("superseded") else ""
         print(f"  {h['score']:.3f} (cos {h['cos']:.3f})  {h['subject']} {h['predicate']} "
-              f"{h['object']}  [{h['session_id']}]", file=sys.stderr)
+              f"{h['object']}  [{h['session_id']}]{mark}", file=sys.stderr)
     return 0
 
 

@@ -88,11 +88,14 @@ def capture_session(chat, transcript: str) -> list:
 
 
 def format_memory(recalled: list) -> str:
-    """B6: format recalled facts as a compact context block for injection (or ``""``)."""
+    """B6: format recalled facts as a compact context block for injection (or ``""``).
+    A fact flagged ``superseded`` (only present with ``recall(include_superseded=True)``)
+    is marked so; the default recall returns only current facts, so injection is unaffected."""
     if not recalled:
         return ""
     lines = ["Relevant memory from earlier sessions:"]
     for r in recalled:
-        lines.append(f"- {r['subject']} {r['predicate']} {r['object']}"
+        mark = "  [superseded]" if r.get("superseded") else ""
+        lines.append(f"- {r['subject']} {r['predicate']} {r['object']}{mark}"
                      f"  ({r.get('session_id', '?')})")
     return "\n".join(lines)

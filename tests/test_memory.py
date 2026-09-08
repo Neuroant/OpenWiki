@@ -215,3 +215,85 @@ def test_cross_session_eval_end_to_end(tmp_path):
         assert r["success"]["assembled"] == 1.0              # recall surfaced it from the graph
     finally:
         store.close()
+
+
+# -- B4: contradiction / time-versioning ---------------------------------------
+
+def test_contradiction_supersedes_older_fact(tmp_path):
+    """A newer fact (same subject+predicate, different object) supersedes the older one;
+    recall returns the current fact, and the superseded one is still queryable via --all."""
+    import pytest
+    pytest.importorskip("kuzu")
+    from openwiki.graph import GraphStore
+
+    store = GraphStore(_build_graph(tmp_path), writable=True)
+    try:
+        assert store.remember("s1", [MemoryFact("the database", "is", "Kuzu")], _MemEmbedder())["superseded"] == 0
+        r2 = store.remember("s2", [MemoryFact("the database", "is", "Postgres")], _MemEmbedder())
+        assert r2["added"] == 1 and r2["superseded"] == 1          # the Kuzu fact was superseded
+
+        current = store.recall("which database", _MemEmbedder(), k=5)
+        objs = [h["object"] for h in current]
+        assert "Postgres" in objs and "Kuzu" not in objs          # agent gets the current fact
+        assert all(h["superseded"] is False for h in current)
+
+        history = store.recall("which database", _MemEmbedder(), k=5, include_superseded=True)
+        kuzu = [h for h in history if h["object"] == "Kuzu"]
+        assert kuzu and kuzu[0]["superseded"] is True             # stale fact still queryable, flagged
+    finally:
+        store.close()
+
+
+def test_reasserting_a_superseded_fact_revives_it(tmp_path):
+    import pytest
+    pytest.importorskip("kuzu")
+    from openwiki.graph import GraphStore
+
+    store = GraphStore(_build_graph(tmp_path), writable=True)
+    try:
+        store.remember("s1", [MemoryFact("the database", "is", "Kuzu")], _MemEmbedder())
+        store.remember("s2", [MemoryFact("the database", "is", "Postgres")], _MemEmbedder())  # Kuzu → superseded
+        r3 = store.remember("s3", [MemoryFact("the database", "is", "Kuzu")], _MemEmbedder())  # re-assert Kuzu
+        assert r3["added"] == 1 and r3["superseded"] == 1          # revived Kuzu supersedes Postgres
+        objs = [h["object"] for h in store.recall("which database", _MemEmbedder(), k=5)]
+        assert "Kuzu" in objs and "Postgres" not in objs          # Kuzu current again
+    finally:
+        store.close()
+
+
+def test_reaffirming_current_fact_is_a_dup_not_a_supersede(tmp_path):
+    import pytest
+    pytest.importorskip("kuzu")
+    from openwiki.graph import GraphStore
+
+    store = GraphStore(_build_graph(tmp_path), writable=True)
+    try:
+        store.remember("s1", [MemoryFact("the database", "is", "Kuzu")], _MemEmbedder())
+        r2 = store.remember("s2", [MemoryFact("The Database", "IS", "kuzu")], _MemEmbedder())   # same, normalized
+        assert r2["added"] == 0 and r2["duplicates"] == 1 and r2["superseded"] == 0
+    finally:
+        store.close()
+
+
+def test_rebuild_preserves_supersedes(tmp_path):
+    """B0 × B4: a doc-graph rebuild must preserve SUPERSEDES so the stale fact stays hidden."""
+    import pytest
+    pytest.importorskip("kuzu")
+    from openwiki.graph import GraphStore
+
+    gpath = _build_graph(tmp_path)
+    store = GraphStore(gpath, writable=True)
+    try:
+        store.remember("s1", [MemoryFact("the database", "is", "Kuzu")], _MemEmbedder())
+        store.remember("s2", [MemoryFact("the database", "is", "Postgres")], _MemEmbedder())
+    finally:
+        store.close()
+
+    _build_graph(tmp_path)   # rebuild the doc tier over it
+
+    store = GraphStore(gpath)
+    try:
+        objs = [h["object"] for h in store.recall("which database", _MemEmbedder(), k=5)]
+        assert "Postgres" in objs and "Kuzu" not in objs          # supersession survived the rebuild
+    finally:
+        store.close()

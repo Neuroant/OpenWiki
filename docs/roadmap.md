@@ -460,8 +460,10 @@ directions*). Stages re-open the decisions that flagged themselves for exactly t
   subject–predicate–object capture into reified `Assertion`s.)*
 - **B3 — Merge operator.** Phases 1–2 (entity resolution + Hebbian) into the world model.
   *(First slice landed, v0.46: dedup-only merge by normalized key.)*
-- **B4 — Contradiction / time-versioning (debt D6).** Phase 3 — the belief-revision layer; the
-  genuinely novel, unshipped-anywhere contribution.
+- **B4 — Contradiction / time-versioning (debt D6). ✅ Landed (v0.50).** Phase 3 — the belief-revision
+  layer; the genuinely novel, unshipped-anywhere contribution. A newer fact (same subject+predicate,
+  different object) **supersedes** the older via a `SUPERSEDES` edge; recall returns the current fact,
+  the superseded history stays queryable (`recall --all`), and re-asserting an old fact revives it.
 - **B5 — Sleep job.** Phase 4 over the merged graph (communities + decay + abstraction) as a
   scheduled consolidation pass.
 - **B6 — Three-tier context assembly.** Build a session's context from identity + activation +
@@ -493,8 +495,17 @@ off) gates memory, and a **session source type** (`init/add-source --session`) i
 `ask`/MCP append the seed→related pairs they retrieve to an append-only **usage log**
 (`graph.usage.jsonl`), which the next writer (`serve`/`chat` startup, or `openwiki decay`) folds into
 `REINFORCES` edges — no lock contention on the read path. Gated by Second Brain mode; verified live
-(two asks → `decay` folds 2 records into 2 edges). Next: **B4** (contradiction/time-versioning — the
-genuinely novel piece) and **B5** (sleep consolidation). See `path-b-memory.md` §6/B1.
+(two asks → `decay` folds 2 records into 2 edges). See `path-b-memory.md` §6/B1.
+
+**B4 — contradiction / time-versioning landed (v0.50).** The belief-revision layer, done boring &
+tractable: a newer fact with the same normalized **subject+predicate** but a **different object**
+adds a `SUPERSEDES` edge over the old one (nothing deleted — "current" = no incoming `SUPERSEDES`, so
+validity intervals are derivable). `recall` returns **current facts only** by default (the agent gets
+the live fact, not the stale one), `recall --all` shows the superseded history flagged, and
+re-asserting a superseded fact **revives** it. Preserved across `graph-build` (B0). Verified live —
+`remember` port 8080 then 9090 supersedes the 8080; `recall` returns only 9090 *even though the stale
+fact scores a higher cosine* (supersession beats similarity). Next: **B5** (sleep consolidation) and
+the full three-tier **B6** assembly. See `path-b-memory.md` §6/B4.
 
 ### Honest guardrails
 

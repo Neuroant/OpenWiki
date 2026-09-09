@@ -19,12 +19,12 @@
 
 | # | Debt | Why it exists | Cost to address |
 |---|---|---|---|
-| D1 | **Graph is a mirror, not authoritative** | Deliberate (ADR-3) for a document wiki | High — inverting it is the Path-B "agent memory" pivot (sessions/experiences in). |
-| D2 | **Reinforcement only fires in writable contexts** | Kuzu exclusive-lock model (ADR-8) | Medium — needs a writable-safe concurrency model so plain `ask` can reinforce. |
+| D1 | **Graph is a mirror, not authoritative** | Deliberate (ADR-3) for a document wiki | ✅ **Addressed (v0.48, B0 / ADR-16)** — a remembered tier is now preserved across doc rebuilds; the doc tier stays a rebuildable mirror. |
+| D2 | **Reinforcement only fires in writable contexts** | Kuzu exclusive-lock model (ADR-8) | ✅ **Addressed (v0.49, B1 / ADR-17)** — read-only `ask`/MCP append usage to a log a writer folds in; no lock contention. |
 | D3 | **Retrieval ignores Kuzu's HNSW; brute-force cosine** | Simplicity at small scale | Medium — back `SemanticIndex.search` with an ANN index when corpora grow. |
 | D4 | **Incremental upsert recomputes only `SIMILAR_TO`** | Cheap live sync for edits | Medium — CHILD_OF/NEXT/REFERENCES/entities still need a full `graph-build`. |
 | D5 | **Community precision is moderate / labels heuristic-then-LLM** | Broad thematic questions span themes | Low — acceptable; measured (precision 56.7% on the thematic set). |
-| D6 | **No contradiction handling / time-versioning of facts** | Out of scope for a static wiki | High — the novel Path-B piece (supersede older facts). |
+| D6 | **No contradiction handling / time-versioning of facts** | Out of scope for a static wiki | ✅ **Addressed (v0.50, B4 / ADR-18)** — a newer fact SUPERSEDES the older; `recall` returns the current fact, history stays queryable. |
 | D7 | **Minimal observability** (stderr logs only) | Local single-user tool | Low–Medium — add structured logging/metrics if it grows. |
 | D8 | **Packaging is Windows/pipx-only** | Primary platform | Low — add PyPI/Docker/CI for portability. |
 
@@ -39,19 +39,21 @@
 For a single-user, local, learning project the sensible posture is:
 
 - **Accepted (by design, given the local-first scope):** R1 (no auth — mitigated by
-  localhost-only, §7.4), R2 (local-model quality), D1 (graph-as-mirror, ADR-3), D5 (community
-  precision). These are consequences of decisions in §9, not defects.
+  localhost-only, §7.4), R2 (local-model quality), D5 (community precision). These are consequences
+  of decisions in §9, not defects.
+- **Addressed (Path B landed):** D1 / D2 / D6 — the deliberate re-opening of ADR-3 / ADR-8 has now
+  shipped as B0 / B1 / B4 (ADR-16 / 17 / 18); the memory tier is authoritative, reads reinforce, and
+  facts are time-versioned. See `docs/path-b-memory.md`.
 - **Tracked (address if the project's goals expand):**
   - *Scale* → R3 / D3 (brute-force retrieval) — back `SemanticIndex.search` with an ANN index.
   - *Redistribution* → **R7** (licensing) — the gating item before any release.
   - *Portability* → R6 / D8 (Windows-only, no CI) — add PyPI/Docker/cross-OS CI.
-  - *Agent memory (Path B)* → D1 / D2 / D6 — the deliberate re-opening of ADR-3 / ADR-8.
 
 ## 11.5 Debt → roadmap direction
 
 | Debt | Addressed by (see `docs/roadmap.md` "Future directions") |
 |---|---|
-| D1 authoritative graph, D6 contradiction versioning, D2 read-path reinforcement | Path B — invert to sessions/experiences + time-versioned edges |
+| ✅ D1 authoritative graph (B0), D2 read-path reinforcement (B1), D6 contradiction versioning (B4) | Path B — **landed** (v0.48–v0.50); sessions/experiences in + time-versioned facts |
 | D3 brute-force retrieval | Direction A — hybrid retrieval / ANN / re-ranking |
 | D4 partial incremental upsert | Direction E — full incremental graph |
 | D7 observability | Direction F — deployment/observability |
@@ -59,5 +61,5 @@ For a single-user, local, learning project the sensible posture is:
 
 ---
 *Chapter complete. R7/D-items are honest and specific rather than reassuring; the Path-B debts
-(D1, D2, D6) trace directly back to the ADRs that flagged themselves "revisit for Path B" and
-are designed out in `docs/path-b-memory.md`.*
+(D1, D2, D6) that ADR-3/ADR-8 flagged "revisit for Path B" have now been **designed out and shipped**
+(B0/B1/B4, ADR-16/17/18) — see `docs/path-b-memory.md`.*

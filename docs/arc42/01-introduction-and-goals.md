@@ -23,6 +23,12 @@ The system is a straight, staged pipeline built around an intermediate represent
    similarity, reference, and usage-memory edges) with GraphRAG and a graph explorer.
 8. **Consolidation layer** — LLM community summaries over the graph → **global search**.
 9. **Usage-memory** — decaying `REINFORCES` edges that learn which connections are used.
+10. **Agent memory (Path B)** — an authoritative *remembered tier* (`Session`/`Assertion`) captured
+    from session transcripts and recalled across sessions, with newer facts **superseding** older
+    ones; gated by a per-project **Wiki vs Second Brain mode** (`[memory] enabled`).
+
+Stages 1–9 run in **Wiki Mode** (documents only, the default); stage 10 adds the remembered tier in
+**Second Brain Mode** — the two coexist as tiers of one substrate (§8.15, ADR-14).
 
 These stages run inside a **project** — an `openwiki.toml` folder that is the top-level unit
 grouping sources, artifacts, settings, and build state, so several knowledge bases coexist and
@@ -38,6 +44,7 @@ Core use cases (each maps to a runtime scenario in §6):
 | U4 | Explore & edit the wiki in a browser | `serve` | §6.4 |
 | U5 | Consult the wiki from a coding agent | MCP (`wiki_*`) | §6.2/§6.3 via MCP |
 | U6 | Measure retrieval / answer / global quality | `eval [--answers/--global]` | §6 + `docs/RAG-vs-GraphRAG.md` |
+| U7 | Remember a session & recall it in the next (agent memory) | `remember` / `recall` | §6.7 |
 
 ## 1.2 Quality Goals
 

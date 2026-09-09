@@ -29,9 +29,17 @@ sequenceDiagram
     CLI->>IX: build(wiki, embedder)
     IX->>E: embed_documents(chunks)  (HTTP → Ollama)
     CLI->>G: build(wiki, index [, refs, entities]) → Kuzu DB
+    Note over G: rebuild preserves the remembered tier (B0/ADR-16)
+    opt memory stage (Second Brain mode, session sources)
+      CLI->>G: capture_session then remember(facts) as Assertions (supersede contradictions)
+    end
   end
   CLI->>P: write .openwiki/state.json
 ```
+
+The pipeline stages are **ingest → wiki → index → graph → memory**; the `memory` stage runs only
+when `[memory] enabled` and `type = "session"` sources are declared, and stands *off* the document
+fingerprint chain (a doc rebuild preserves memory, so it needn't re-capture).
 
 ## 6.2 Scenario: Ask a grounded question (`ask`, RAG / GraphRAG)
 
@@ -48,9 +56,8 @@ sequenceDiagram
   opt graph present (GraphRAG)
     A->>GS: neighborhood(seed slugs) → candidates
     A->>IX: best_chunk_per_page(question, candidates) → related
-    opt graph writable (serve/chat)
-      A->>GS: reinforce(seed → related)  [usage memory]
-    end
+    A->>GS: record_usage(seed, related)
+    Note over A,GS: writable serve/chat reinforces now, read-only ask/MCP appends to the usage log (B1)
   end
   A->>C: chat(grounded prompt + numbered excerpts)
   C-->>A: answer with [n] citations
@@ -143,12 +150,45 @@ sequenceDiagram
 
 ## 6.6 Scenario: Decay the usage-memory (`openwiki decay`)
 
-No model calls — pure maintenance: open the graph writable, read every `REINFORCES` edge,
-recompute its `effective_weight(weight, last_seen, now, half_life)`, then **persist** the
-decayed weight (reset `last_seen = now`) or **delete** the edge if it fell below the floor.
-Returns `{edges, decayed, pruned}`.
+No model calls — pure maintenance: open the graph writable and first **fold in** any pending
+read-path usage (`fold_usage` → `reinforce` each logged pair, then clear the log — B1/ADR-17), then
+read every `REINFORCES` edge, recompute its `effective_weight(weight, last_seen, now, half_life)`,
+and **persist** the decayed weight (reset `last_seen = now`) or **delete** the edge if it fell below
+the floor. Returns `{edges, decayed, pruned}` (plus the folded-in count).
 
-## 6.7 Cross-cutting runtime aspects
+## 6.7 Scenario: Remember & recall a session (Path B)
+
+The remembered tier's write→read loop. `remember` captures a transcript into facts and merges them
+(dedup + **contradiction supersession**); `recall` returns the *current* facts most relevant to a
+query in a later session. Both require Second Brain mode (`[memory] enabled`, ADR-14).
+
+```mermaid
+sequenceDiagram
+  participant U as CLI (remember / recall)
+  participant M as memory.capture_session
+  participant C as OllamaChat
+  participant GS as GraphStore
+  participant E as OllamaEmbedder
+
+  Note over U,GS: remember (writable graph)
+  U->>M: capture_session(chat, transcript)
+  M->>C: chat(CAPTURE_SYSTEM, transcript)
+  C-->>M: JSON facts as MemoryFacts
+  U->>GS: remember(session_id, facts, embedder)
+  GS->>E: embed_documents(fact texts)
+  Note over GS: dedup vs current, then a new fact with the same subject and predicate but a different object supersedes the old one (SUPERSEDES, B4)
+
+  Note over U,GS: recall (read-only graph, a later session)
+  U->>GS: recall(query, embedder, k)
+  GS->>E: embed_query(query)
+  GS-->>U: current facts by decay-weighted cosine (superseded hidden by default)
+```
+
+A doc rebuild preserves these assertions + their `SUPERSEDES` edges (B0/ADR-16), so memory survives
+re-ingesting sources. The cross-session eval (`eval --cross-session`) measures whether this assembled
+memory beats a cold start and a raw-log paste (`docs/path-b-memory.md` §7).
+
+## 6.8 Cross-cutting runtime aspects
 
 ### Error / timeout handling (Ollama unreachable)
 Any embed or chat call goes through `urllib` to Ollama; on failure `OllamaEmbedder` /
@@ -163,11 +203,14 @@ Any embed or chat call goes through `urllib` to Ollama; on failure `OllamaEmbedd
 Note: even plain RAG retrieval needs the embedder (to embed the *query*), so a down Ollama
 fails retrieval, not just generation.
 
-### Read-only-graph fallback
-`serve`/`chat` request the graph **writable** (exclusive Kuzu lock) to enable edits +
-reinforcement. If the lock is already held, `_open_graph` falls back to **read-only** (a note
-is printed); reinforcement and `upsert_page` then become guarded no-ops (`writable=False`),
-so reads still work — the wiki simply doesn't self-update in that process.
+### Read-only-graph fallback & read-path usage (B1)
+`serve`/`chat` request the graph **writable** (exclusive Kuzu lock) to enable edits + live
+reinforcement, and **fold in** any pending read-path usage on startup (`fold_usage`). If the lock is
+already held, `_open_graph` falls back to **read-only** (a note is printed); `upsert_page` becomes a
+guarded no-op, so reads still work — the wiki simply doesn't self-update in that process.
+On the deliberately read-only paths (`ask`/MCP), reinforcement is **not** lost: in Second Brain mode
+`record_usage` **appends** the usage to `graph.usage.jsonl`, which the next writable process folds in
+(B1/ADR-17) — so reads teach the graph without ever contending for the write lock.
 
 ### Concurrency
 - The web layer is a `ThreadingHTTPServer`: requests run on separate threads that share **one**

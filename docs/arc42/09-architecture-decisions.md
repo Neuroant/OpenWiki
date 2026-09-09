@@ -2,7 +2,8 @@
 
 > arc42 §9 — The important, hard-to-reverse decisions as ADRs. **Status: complete.**
 > Format per ADR: **Status · Context · Decision · Alternatives considered · Consequences (+/−)**.
-> "Accepted (revisit for Path B)" flags decisions the agent-memory direction will re-open.
+> Decisions the agent-memory direction re-opened are marked "refined by ADR-N"; Path B has since
+> **landed** (ADR-14/15/16/17/18) — see those ADRs and §11 (debts D1/D2/D6 resolved).
 
 ## ADR index
 
@@ -10,18 +11,22 @@
 |---|---|---|---|
 | [1](#adr-1) | Intermediate representation between ingestion and the rest | Accepted | Q4, Q3 |
 | [2](#adr-2) | Local Ollama behind `Embedder`/`ChatModel` protocols; no cloud | Accepted | Q1, Q4 |
-| [3](#adr-3) | Kuzu graph is an additive *mirror*, not the source of truth | Accepted (revisit for Path B) | Q4 |
+| [3](#adr-3) | Kuzu graph is an additive *mirror*, not the source of truth | Accepted; refined by [ADR-16](#adr-16) (Path B) | Q4 |
 | [4](#adr-4) | Stdlib zero-dependency web server + no-build SPA | Accepted | Q2 |
 | [5](#adr-5) | Target Python 3.13 (not 3.14) | Accepted | — |
 | [6](#adr-6) | Borrow GraphRAG's *ideas*, not the library | Accepted | Q2, Q5 |
 | [7](#adr-7) | Optional layers as always-created, empty-by-default tables | Accepted | Q4 |
-| [8](#adr-8) | Graph read-only by default, writable only for edits | Accepted (revisit for Path B) | correctness |
+| [8](#adr-8) | Graph read-only by default, writable only for edits | Accepted; refined by [ADR-17](#adr-17) (Path B) | correctness |
 | [9](#adr-9) | Evaluation-driven claims | Accepted | Q5 |
 | [10](#adr-10) | Project manifest + settings precedence | Accepted | usability |
 | [11](#adr-11) | Incremental builds via a per-stage fingerprint chain | Accepted | performance |
 | [12](#adr-12) | Bounded-deterministic, normalized entity extraction | Accepted | Q3, quality |
 | [13](#adr-13) | New capabilities as subcommands, not more flags | Accepted | Q4 |
 | [14](#adr-14) | Wiki & Second-Brain coexist as tiers of one substrate (not replacement) | Accepted (Path B) | Q4, modularity |
+| [15](#adr-15) | Remembered facts as reified `Assertion` nodes (not typed edges) | Accepted (Path B / B2–B4) | Q4 |
+| [16](#adr-16) | Graph preserves the remembered tier across a document rebuild | Accepted (Path B / B0) | Q4 |
+| [17](#adr-17) | Read-path reinforcement via an append-only usage log | Accepted (Path B / B1) | correctness |
+| [18](#adr-18) | Contradiction as append-only supersession (`SUPERSEDES`-edge-only) | Accepted (Path B / B4) | Q4, correctness |
 
 ---
 
@@ -47,7 +52,7 @@
   − Requires a running Ollama with models pulled; quality/latency bounded by local models.
 
 ### ADR-3
-**The Kuzu graph is an additive *mirror*, not the source of truth.** *(revisit for Path B)*
+**The Kuzu graph is an additive *mirror*, not the source of truth.** *(refined by [ADR-16](#adr-16))*
 - **Context:** Want graph traversal + vector search together without a second authority.
 - **Decision:** `SemanticIndex` stays authoritative; `GraphBuilder` mirrors embeddings into
   `Chunk` nodes; the graph is a pure function of wiki+index and rebuildable.
@@ -57,6 +62,9 @@
 - **Consequences:** + No dual-write problem; graph disposable/rebuildable; reads never risk the
   index. − Embeddings duplicated; incremental upsert recomputes only `SIMILAR_TO`. − This
   mirror stance is exactly what agent memory (Path B) must invert.
+- **Update (Path B / B0):** [ADR-16](#adr-16) **refines** this — the *document* subgraph stays a
+  pure, rebuildable mirror, but a **remembered** subgraph is now preserved across a rebuild, so the
+  graph is authoritative for what it learned. The mirror stance holds for docs only.
 
 ### ADR-4
 **Stdlib zero-dependency web server + no-build SPA.**
@@ -99,7 +107,7 @@
   graphs built before a layer existed. − Slightly more schema; empty tables on minimal builds.
 
 ### ADR-8
-**Graph opened read-only by default, writable only for edits.** *(revisit for Path B)*
+**Graph opened read-only by default, writable only for edits.** *(refined by [ADR-17](#adr-17))*
 - **Context:** Kuzu writable access is an exclusive lock; multiple readers are fine.
 - **Decision:** Open read-only for `ask`/`mcp`/most reads; open writable (with a read-only
   fallback) for `serve`/`chat` where edits + incremental upsert + reinforcement happen.
@@ -107,6 +115,9 @@
   Always read-only — rejected (no live edits, no usage memory).
 - **Consequences:** + Concurrent readers; safe defaults. − "Learn from use" (reinforcement) only
   fires in writable contexts, limiting Path-B memory on the read-only `ask` path (debt D2).
+- **Update (Path B / B1):** [ADR-17](#adr-17) **resolves** D2 without weakening this decision —
+  read-only reads append usage to a log a writable process folds in, so reads reinforce without ever
+  taking the exclusive write lock.
 
 ### ADR-9
 **Evaluation-driven claims (measure the graph's value).**
@@ -189,7 +200,72 @@
   − A tier-authority + trust-weighting model to maintain; retrieval must be tier-aware; two lifecycles
   to keep independent. Reframes (consistently with) ADR-3/ADR-8's "revisit for Path B."
 
+### ADR-15
+**Remembered facts as reified `Assertion` nodes, not typed edges.** *(Path B / B2–B4)*
+- **Context:** The remembered tier must store facts that can be time-versioned, contradicted, and
+  carry provenance + a per-fact embedding for recall.
+- **Decision:** Represent each fact as a reified **`Assertion`** node (`subject`, `predicate`,
+  `object`, `session_id`, `created_at`, `emb`) linked from its `Session` (`ASSERTS`) — a fact is a
+  *node*, not a bare edge.
+- **Alternatives:** Typed `Entity→Entity` edges with validity props — lighter, but versioning /
+  provenance are awkward on an edge. A single `FACT` edge with `predicate` as a property
+  (Cognitive Substrate's choice) — one index, no per-predicate migration, but "predicate is a filter,
+  not a traversal" and provenance/versioning can't attach to an edge (they add a separate run node).
+- **Consequences:** + Native versioning ([ADR-18](#adr-18)), provenance, and a per-fact vector for
+  decay-weighted recall. − One extra hop in queries; the fact is *remembered* content that duplicates
+  nothing in the doc tier (deliberate — it didn't come from a source). Realizes §4 of `docs/path-b-memory.md`.
+
+### ADR-16
+**The graph preserves the remembered tier across a document rebuild.** *(Path B / B0 — refines [ADR-3](#adr-3))*
+- **Context:** ADR-3 makes the graph a pure, rebuildable function of the documents. Path B adds
+  content learned from experience that must **not** be lost when documents are re-ingested (debt D1).
+- **Decision:** Split the graph into a **derived** tier (rebuilt from docs each time) and a
+  **remembered** tier (preserved). `GraphBuilder` **snapshots** the remembered subgraph
+  (`Session`/`Assertion`/`ASSERTS`/`SUPERSEDES` + the `REINFORCES` usage overlay) before its
+  destructive rebuild and **restores** it into the fresh schema. The graph is now *authoritative* for
+  remembered content; the doc tier stays a pure function of its inputs.
+- **Alternatives:** Keep the graph fully rebuildable (drop memory on rebuild) — rejected (memory
+  becomes unusable the moment a source changes). A separate memory database — rejected (loses fused
+  retrieval + the shared entity vocabulary; against [ADR-14](#adr-14)).
+- **Consequences:** + Experience survives doc rebuilds; independent lifecycles (ADR-14) are real;
+  ADR-3 still holds for the *document* tier. − `GraphBuilder` is now stateful w.r.t. an existing DB;
+  assertions whose embedding dim changed are dropped (re-`remember`-able), with a warning. Addresses debt D1.
+
+### ADR-17
+**Read-path reinforcement via an append-only usage log.** *(Path B / B1 — resolves [ADR-8](#adr-8)/D2)*
+- **Context:** ADR-8 opens the graph read-only for `ask`/MCP (Kuzu's write lock is exclusive), so
+  "learn from use" only fired in the writable `serve`/`chat` paths (debt D2).
+- **Decision:** A read-only retrieval **appends** its seed→related usage to an append-only JSONL
+  sidecar (`graph.usage.jsonl`); the next **writable** process **folds it in** (`fold_usage` →
+  `reinforce`) — `serve`/`chat` on startup, or `openwiki decay`. Reads teach the graph without ever
+  taking the write lock. Gated by Second Brain mode.
+- **Alternatives:** Open the graph writable on `ask` — rejected (lock contention; serializes readers,
+  breaks ADR-8). A background writer daemon — rejected (no always-on process in a local CLI tool).
+  Skip read-path learning — rejected (that *is* the debt).
+- **Consequences:** + Usage memory grows from *all* reads, not just serve/chat; zero read-path lock
+  contention; the log survives a rebuild and folds in what still matches. − Writes are **deferred**,
+  not simultaneous (a true concurrent reader-and-writer model is still future) — acceptable for the
+  CLI/MCP pattern, where a writer runs between read sessions. Addresses debt D2.
+
+### ADR-18
+**Contradiction as append-only supersession (`SUPERSEDES`-edge-only).** *(Path B / B4)*
+- **Context:** A newer fact can contradict an older one (same subject+predicate, different object);
+  the agent must answer the *current* fact while the superseded history stays queryable (debt D6).
+- **Decision:** On `remember`, a new fact sharing a **normalized subject+predicate** with a current
+  fact but a **different object** adds `(new)-[:SUPERSEDES]->(old)`. **Nothing is deleted**; *current*
+  = no incoming `SUPERSEDES`, so validity intervals are *derivable* (`valid_from` = `created_at`,
+  `valid_to` = the superseder's time). `recall` returns current facts only by default. Detection is
+  deliberately **boring**: exact normalized subject+predicate, different object, later timestamp.
+- **Alternatives:** `valid_from`/`valid_to` columns + a `superseded_by` pointer (the §4 sketch) —
+  heavier and needs a column migration (Kuzu `ALTER`); the edge alone yields the same intervals.
+  Delete the old fact on conflict — rejected (loses history). An LLM/semantic contradiction judge —
+  rejected (non-deterministic, over-reach; a false *negative* is safer than wrongly hiding a valid fact).
+- **Consequences:** + Time-travel + **revival** (re-asserting a superseded fact revives it) come for
+  free; no column migration (one always-created edge table, [ADR-7](#adr-7)); preserved across a
+  rebuild ([ADR-16](#adr-16)). − Conservative detection misses synonym-predicate contradictions; per-fact
+  `confidence` is deferred. Addresses debt D6.
+
 ---
-*Chapter complete. ADR-3 and ADR-8 are the decisions the Path-B agent-memory direction
-(§11 D1/D2) will re-open, and ADR-14 sets how Path A/B coexist — see the design in
-`docs/path-b-memory.md`. New significant decisions should be appended here with the next id.*
+*Chapter complete. The Path-B agent-memory direction has **landed** its load-bearing decisions:
+ADR-14 (coexistence) + ADR-15/16/17/18 realize it and resolve the §11 debts D1/D2/D6 that ADR-3/ADR-8
+flagged. Deep design in `docs/path-b-memory.md`. New significant decisions should be appended here with the next id.*

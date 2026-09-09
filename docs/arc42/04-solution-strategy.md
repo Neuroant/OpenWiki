@@ -13,7 +13,8 @@ ADR referenced in the last column — see [Architecture Decisions](09-architectu
 | **Stdlib-leaning, deps isolated** | Web server, MCP server, and 3 of 4 source parsers are stdlib-only; PyMuPDF and Kuzu are confined to single modules and imported lazily. | Q2 | ADR-4, ADR-5 |
 | **Additive knowledge graph (a mirror)** | The Kuzu graph is layered *over* the wiki + index without mutating them; embeddings are mirrored in so traversal + vector search share one query. The index stays authoritative. | Q4 | ADR-3 |
 | **Optional layers as empty-by-default tables** | Entities, communities, and reinforcement edges are always-created (possibly empty) tables, so all store/agent code works with or without them. | Q4 | ADR-7 |
-| **Read-mostly graph, writable for edits** | Read-only by default (concurrent readers); writable (exclusive) only for `serve`/`chat` edits + usage-memory. | correctness | ADR-8 |
+| **Read-mostly graph, writable for edits** | Read-only by default (concurrent readers); writable (exclusive) only for `serve`/`chat` edits + usage-memory. On the read path, usage is logged and folded in by a writer, so reads reinforce without the lock. | correctness | ADR-8, ADR-17 |
+| **Coexisting document + remembered tiers (Path B)** | In Second Brain mode the graph adds an *authoritative* remembered tier — sessions → reified `Assertion`s, newer facts superseding older — preserved across document rebuilds. Wiki Mode = memory off. | Q4 | ADR-14/15/16/18 |
 | **Borrow GraphRAG ideas, not the library** | Community detection + summaries + global search reimplemented natively/locally. | Q2, Q5 | ADR-6 |
 | **Project manifest + settings precedence** | `openwiki.toml` groups a KB; unset settings resolve `flag > manifest > ~/.openwiki config > built-in default`. | usability | ADR-10 |
 | **Incremental, fingerprinted builds** | Per-stage input+param fingerprints skip unchanged stages. | performance | ADR-11 |
@@ -46,6 +47,8 @@ source ──parse_source──▶ ParsedDocument (IR) ──▶ JSON / Markdown
                                │
                     GraphBuilder ──▶ Kuzu graph ──▶ GraphStore
                                │     (+ communities, + REINFORCES memory)
+       capture_session + GraphStore.remember ──▶ remembered tier   (Path B, Second Brain)
+                               │     (Session/Assertion + SUPERSEDES; recall)
                     WikiWebApp (http.server) ──▶ browser SPA
                     MCPStdioServer ──▶ coding agents
 ```

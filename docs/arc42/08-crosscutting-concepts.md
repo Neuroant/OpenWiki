@@ -38,17 +38,24 @@ reports which excerpts were used — the basis for the grounding metrics in §10
 | Wiki | `index.md`, `wiki.json`, `pages/*.md` | `build-wiki` |
 | Index | `embeddings.npy` + `index.json` | `index` |
 | Graph | single-file Kuzu DB (+ `.wal`) | `graph-build` |
+| Usage log | `graph.usage.jsonl` (append-only sidecar) | read-path `ask`/MCP (B1) |
 | Build state | `.openwiki/state.json` (fingerprints) | `build` |
 | Config | `openwiki.toml`, `~/.openwiki/*.toml` | `init` / registry |
 
-The graph is a **mirror**: embeddings are copied into `Chunk` nodes; the NumPy index stays
-the source of truth. A rebuild is a pure function of its inputs.
+The graph has **two tiers**. The **document tier** is a *mirror*: embeddings are copied into
+`Chunk` nodes, the NumPy index stays the source of truth, and a rebuild is a pure function of its
+inputs (ADR-3). The **remembered tier** (Path B: `Session`/`Assertion`/`SUPERSEDES` + the
+`REINFORCES` usage overlay) is *authoritative* — `GraphBuilder` snapshots and restores it across a
+rebuild, so it survives re-ingesting sources (ADR-16). See §8.15.
 
 ## 8.6 Concurrency
 
 `GraphStore` guards its single Kuzu connection with a re-entrant lock (`RLock`); an upsert
 holds it across a batch. The threaded web server shares one connection. Writable access is
 exclusive (Kuzu lock) — hence one writable process at a time with a read-only fallback.
+**Read-path writes are decoupled from the lock (B1):** a read-only process records usage by
+*appending* to `graph.usage.jsonl` (no lock), and the next writable process folds it in — so reads
+"learn" without ever contending for exclusive access (ADR-17).
 
 ## 8.7 Configuration & settings resolution
 
@@ -71,14 +78,16 @@ tests are `pytest.importorskip("kuzu")`-gated. The suite runs fully offline.
 ## 8.10 Graceful degradation
 
 Optional layers are always-created (possibly empty) tables and best-effort queries
-(try/except → empty), so store/agent/UI code works whether or not entities, communities, or
-reinforcement edges exist — and on graphs built before a layer was added.
+(try/except → empty), so store/agent/UI code works whether or not entities, communities,
+reinforcement, or the Path B memory tables (`Session`/`Assertion`/`ASSERTS`/`SUPERSEDES`) exist —
+and on graphs built before a layer was added (a lazy `_ensure_memory_schema` `IF NOT EXISTS`
+migration upgrades pre-existing graphs).
 
 ## 8.11 Error handling (model / network)
 
 Calls to Ollama go through stdlib `urllib`; a `URLError`/`HTTPError` is turned into a
 `RuntimeError` carrying a "is Ollama running / is the model pulled?" hint. It surfaces per
-entry point (detail in §6.7): CLI → stderr + non-zero exit; web API → HTTP **503**; editing
+entry point (detail in §6.8): CLI → stderr + non-zero exit; web API → HTTP **503**; editing
 agent → `WikiTools.dispatch` catches per-tool exceptions and returns an `ERROR: …` string the
 model can react to, keeping the loop alive. Table extraction and graph-hiccups during an
 agent write are caught and logged, never raised (a failed graph sync must not fail the edit).
@@ -142,7 +151,32 @@ projects, every stage still takes explicit paths, and with no manifest the histo
 defaults apply (back-compat). This keeps the project a thin *organizing* layer over an unchanged
 pipeline. Deep design + roadmap: `docs/projects.md`; layout on disk: §7.
 
+## 8.15 The remembered tier (Path B agent memory)
+
+Alongside the document tier, a project in **Second Brain mode** (`[memory] enabled`, ADR-14) grows a
+**remembered tier** — the graph accumulating what the agent *learns from experience*, not only what it
+*derives from documents*. It is additive (ADR-7) and authoritative (ADR-16); Wiki Mode is literally
+"memory tier off." Four concepts span it:
+
+- **Reified facts (ADR-15).** A remembered fact is an `Assertion` node (subject · predicate · object +
+  `session_id`, `created_at`, a mirrored embedding) under a `Session`, captured from a transcript by a
+  pure, chat-injected pass (`memory.capture_session`). Reification is what makes a fact versionable + provenanced.
+- **Merge, not append (B3).** `remember` embeds each fact and **dedups** against the *current*
+  assertions by normalized `(subject, predicate, object)` (`_normalize`, ADR-12), so re-affirming a
+  fact is a no-op.
+- **Contradiction as supersession (ADR-18).** A newer fact with the same normalized subject+predicate
+  but a different object adds `(new)-[:SUPERSEDES]->(old)` — nothing deleted, "current" = no incoming
+  `SUPERSEDES`, validity intervals derivable. `recall` returns current facts only; history stays queryable (`--all`).
+- **Activation + forgetting.** `recall` ranks assertions by **decay-weighted** cosine (`effective_weight`,
+  the same half-life math as the `REINFORCES` usage overlay), and read-path `record_usage` / `fold_usage`
+  (B1) + `decay` keep the graph at a useful density — strengthen what's used, fade what isn't.
+
+The lifecycle is **independent of documents** (ADR-14/16): `graph-build` rebuilds the document tier but
+preserves the remembered tier; consolidation touches memory, never documents. The payoff metric — *does
+assembled memory make the next session better?* — is the cross-session eval (`eval --cross-session`,
+§10). Full design + the staged B0–B6 plan: `docs/path-b-memory.md`.
+
 ---
-*Chapter complete. Cross-refs: runtime error paths → §6.7; the no-auth risk → §11 R1;
-the project concept → §5 (project/pipeline/userconfig/merge), ADR-10/11, §7, `docs/projects.md`;
-the boundaries these concepts rest on → §5.1 + ADR-1/2/7/13.*
+*Chapter complete. Cross-refs: runtime error paths → §6.8; the memory tier → §8.15 + ADR-14/15/16/18;
+the no-auth risk → §11 R1; the project concept → §5 (project/pipeline/userconfig/merge), ADR-10/11, §7,
+`docs/projects.md`; the boundaries these concepts rest on → §5.1 + ADR-1/2/7/13.*

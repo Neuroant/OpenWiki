@@ -27,10 +27,11 @@ flowchart LR
 
 | Neighbor | Direction | What crosses the boundary |
 |---|---|---|
-| **CLI user** | in | Commands (`build`, `ask`, `serve`, `communities`, `decay`, `eval`, …) |
+| **CLI user** | in | Commands (`build`, `ask`, `serve`, `communities`, `decay`, `eval`, `remember`/`recall`, …) |
 | **Browser user** | in/out | HTTP requests → JSON + static SPA (browse, search, chat/edit, graph, eval) |
 | **Coding agent** | in/out | MCP JSON-RPC (stdio): `wiki_ask`, `wiki_global`, `wiki_search`, graph tools |
 | **Source documents** | in | PDF, Markdown/text, HTML file, `http(s)` URL, or a code-repo directory |
+| **Session transcripts** | in | A conversation transcript (`type = "session"` source) captured into the memory tier — Path B, Second Brain mode (§8.15) |
 | **Ollama** | in/out | Embedding requests (`/api/embed`) and chat requests (`/api/chat`) |
 | **Filesystem** | in/out | Project layout: `sources/`, `output/wiki`, `output/index`, `output/graph`, `openwiki.toml` |
 
@@ -96,7 +97,7 @@ Tools (read-only): `wiki_ask`, `wiki_global`, `wiki_search`, `wiki_read_page`,
 | **Chat** | `POST {host}/api/chat` · `{model, messages:[{role, content}], stream:false, options:{temperature, …}, tools?}` | `{message:{role, content, tool_calls?}}` |
 
 Both via stdlib `urllib`, no API key; a `URLError`/`HTTPError` becomes a `RuntimeError` with a
-"is Ollama running / model pulled?" hint (§6.7).
+"is Ollama running / model pulled?" hint (§6.8).
 
 ## 3.3 Scope boundaries (what OpenWiki is *not*)
 
@@ -108,4 +109,4 @@ Both via stdlib `urllib`, no API key; a `URLError`/`HTTPError` becomes a `Runtim
 
 ---
 *Chapter complete. Payload shapes verified against `web/server.py`, `mcp_server.py`,
-`embeddings.py`, `llm.py`. Cross-refs: interfaces used at runtime → §6; error handling → §6.7/§8.*
+`embeddings.py`, `llm.py`. Cross-refs: interfaces used at runtime → §6; error handling → §6.8/§8.*

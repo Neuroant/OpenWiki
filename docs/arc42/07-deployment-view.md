@@ -70,5 +70,5 @@ authN/authZ first (tracked as §11 R1). The MCP server is stdio-only (no network
 read-only, so it does not carry this risk.
 
 ---
-*Chapter complete. Cross-refs: process behaviour → §6.7 (concurrency/fallback); the
+*Chapter complete. Cross-refs: process behaviour → §6.8 (concurrency/fallback); the
 no-auth exposure risk → §11 R1; resource assumptions → §2 TC9.*

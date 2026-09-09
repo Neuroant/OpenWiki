@@ -16,7 +16,7 @@ flowchart LR
   Q --> U["Usability"]
   P --> P1["No cloud calls"] & P2["Data stays on disk"]
   M --> M1["Modularity (IR + boundaries)"] & M2["Testability (offline)"] & M3["Minimal dependencies"]
-  F --> F1["Grounded, cited answers"] & F2["Global sensemaking"]
+  F --> F1["Grounded, cited answers"] & F2["Global sensemaking"] & F3["Cross-session memory (Path B)"]
   E --> E1["Small-corpus latency"] & E2["Incremental builds"]
   I --> I1["CLI / HTTP / MCP"]
   U --> U1["One-command build"] & U2["Browser exploration"]
@@ -39,12 +39,14 @@ Scenarios are written as *stimulus → expected response* so they can be checked
 | QS-9 | Interop | should | A coding agent lists tools over MCP → sees only the tools its artifacts support (advertised by availability). |
 | QS-10 | Usability | should | `openwiki init … && openwiki build && openwiki serve` → a browsable, searchable wiki with no extra config. |
 | QS-11 | Observability | should | A run fails (e.g. Ollama down) → the operator gets a clear, actionable message. *(Partial: clear stderr messages, but no structured logs/metrics — §11 D7.)* |
+| QS-12 | Cross-session memory | should | In Second Brain mode, establish a fact in one session and change it in a later one → `recall` returns the **current** fact, not the stale one (contradiction handling, ADR-18); the memory survives a `graph-build` (ADR-16); `eval --cross-session` measures assembled memory beating cold-start + raw-log. |
 
 ## 10.3 Current evidence & gaps
 
-- **Met:** QS-2 (the suite — **253 tests** — runs offline); QS-5 (three findings in
+- **Met:** QS-2 (the suite — **284 tests** — runs offline); QS-5 (three findings in
   `docs/RAG-vs-GraphRAG.md`); QS-1 / QS-3 / QS-4 / QS-6 / QS-8 / QS-9 are architectural
-  (enforced by boundaries + tests); QS-7 by the fingerprint chain (ADR-11).
+  (enforced by boundaries + tests); QS-7 by the fingerprint chain (ADR-11); QS-12 by the memory
+  tests + the cross-session eval (Path B, §8.15).
 - **Not formally measured (performance):** there is no latency/throughput budget yet. Known
   scale on the reference corpus (informatik): 16 PDFs → 76 wiki pages → 2 703 chunks → a graph
   of 76 pages / 760 `SIMILAR_TO` / 32 `REFERENCES`; retrieval is brute-force O(n) (fine here,

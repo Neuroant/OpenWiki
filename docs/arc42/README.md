@@ -5,9 +5,11 @@ This is the architecture documentation for **OpenWiki**, structured after the
 into 12 sections, from goals and constraints down to building blocks, runtime, decisions,
 quality, and risks.
 
-> **Status: COMPLETE.** All 12 chapters are complete (a first full pass). Diagrams use Mermaid
-> (rendered by GitHub) and have been validated. Maintain alongside the code — Path B will
-> re-open ADR-3/ADR-8 (§9) and the §11 debt items D1/D2/D6.
+> **Status: COMPLETE** (maintained through Path B v0.50). All 12 chapters are complete; diagrams use
+> Mermaid (rendered by GitHub) and have been validated. The **Path B agent-memory** direction has
+> since **landed** its load-bearing pieces — B0 authoritative graph, B1 read-path reinforcement, B4
+> contradiction/time-versioning — recorded as ADR-15/16/17/18 (§9), which resolve the §11 debts
+> D1/D2/D6 that ADR-3/ADR-8 flagged. Design detail in `docs/path-b-memory.md`.
 
 ## Audience & relationship to the other docs
 
@@ -18,7 +20,7 @@ quality, and risks.
 | `docs/roadmap.md` | Anyone | What was built (history) + prioritized future directions |
 | `docs/RAG-vs-GraphRAG.md` | Evaluators | The measured findings behind the graph design |
 | `docs/projects.md` | Architects, users | Deep design of the **project** concept (§8.14): manifest, discovery, registry, layout, multi-source merge |
-| `docs/path-b-memory.md` | Architects | **Path B (agent memory)** design — re-opens ADR-3/ADR-8, addresses §11 D1/D2/D6 |
+| `docs/path-b-memory.md` | Architects | **Path B (agent memory)** design + staged plan — realized by ADR-15/16/17/18, resolving §11 D1/D2/D6 (B0/B1/B4 landed) |
 | `docs/coding-agents.md` | Users | MCP / OpenCode / Claude Code setup |
 
 The arc42 docs and `CLAUDE.md` overlap by design (both describe the architecture); this doc

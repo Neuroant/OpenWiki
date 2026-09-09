@@ -65,6 +65,8 @@ flowchart TB
     entities["entities.py"]
     community["community.py"]
     decay["decay.py"]
+    memory["memory.py (Path B capture)"]
+    usage["usage.py (Path B usage log)"]
     builder --> store
   end
 
@@ -120,7 +122,7 @@ files, network/Ollama, or Kuzu).
 |---|---|---|
 | `web/server.py` | I/O (http, Kuzu) | `WikiWebApp` (state + methods) + `make_handler(app)` + `serve(app, host, port)`. See §5.3. |
 | `mcp_server.py` | I/O (stdio) | `build_server(wiki_dir, index, graph, agent) -> MCPStdioServer`; `.handle(msg)` is pure. |
-| `eval.py` | pure (drivers inject I/O) | Metrics (`reciprocal_rank`, `hit_at_k`, `recall_at_k`, `grounding`, `community_grounding`, `judge_pairwise`) + drivers (`evaluate`, `make_retrievers`, `run_answer_eval`, `run_global_eval`). |
+| `eval.py` | pure (drivers inject I/O) | Metrics (`reciprocal_rank`, `hit_at_k`, `recall_at_k`, `grounding`, `community_grounding`, `judge_pairwise`, `task_success`) + drivers (`evaluate`, `make_retrievers`, `run_answer_eval`, `run_global_eval`, `run_cross_session_eval` — the Path B headline metric). |
 | `project.py` | I/O (files) | `Project.load/find/resolve`; `out_dir`/`wiki_dir`/`index_dir`/`graph_path`; `setting(section, key)`; `render_manifest`. |
 | `pipeline.py` | pure | `compute_fingerprints`, `stale_stages`, `BuildState` (incremental build state). |
 | `userconfig.py` | I/O (files) | `UserConfig` + `Registry` under `~/.openwiki/`. |
@@ -140,7 +142,8 @@ files, network/Ollama, or Kuzu).
 ## 5.2 Level 2 — the `graph/` subpackage
 
 An additive Kuzu layer over the wiki + index. Only `builder`/`store` import `kuzu`;
-`references`, `entities`, `community`, `decay` are **pure** (unit-testable without a DB).
+`references`, `entities`, `community`, `decay`, `memory`, `usage` are **pure**
+(unit-testable without a DB).
 
 ```mermaid
 flowchart TB
@@ -148,21 +151,25 @@ flowchart TB
   index2["SemanticIndex"] --> builder2
   refs2["references.py\n(cross-refs, pure)"] --> builder2
   ents2["entities.py\n(LLM entities, pure)"] --> builder2
-  builder2["builder.py\nGraphBuilder.build()"] -->|writes| kuzudb[("Kuzu DB\n(single file)")]
+  builder2["builder.py\nGraphBuilder.build()\n(preserves memory tier — B0)"] -->|writes| kuzudb[("Kuzu DB\n(single file)")]
   kuzudb --> store2["store.py\nGraphStore (read + writable)"]
   comm2["community.py\n(Louvain + summaries, pure)"] --> store2
   decay2["decay.py\n(decay math, pure)"] --> store2
+  mem2["memory.py\n(session capture, pure)"] --> store2
+  use2["usage.py\n(usage log, pure)"] --> store2
   store2 --> consumers["agent · tools · web · mcp · eval"]
 ```
 
 | Block | kind | Key interface | Notes |
 |---|---|---|---|
-| `builder.py` | I/O (kuzu) | `GraphBuilder(db_path, similar_k).build(wiki, index, references, entities) -> stats` | Clean rebuild; mirrors embeddings into `Chunk`; creates all tables (some empty). |
+| `builder.py` | I/O (kuzu) | `GraphBuilder(db_path, similar_k).build(wiki, index, references, entities) -> stats` | Clean rebuild of the *derived* tier; mirrors embeddings into `Chunk`; creates all tables (some empty). **Snapshots + restores the remembered tier** across a rebuild (B0, ADR-16). |
 | `store.py` | I/O (kuzu) | see §5.4 | Read-only by default; writable for edits/memory. |
 | `references.py` | pure | `extract_references(doc, wiki)`, `extract_references_multi(doc, wiki, meta)`, `detect_page_offset(doc)` | Page + section/chapter cross-refs → `REFERENCES` edges. |
 | `entities.py` | pure (injected chat) | `extract_entities(wiki, chat, types, …) -> [Entity]`; `coerce_types`; `DEFAULT_ENTITY_TYPES` | LLM per page + normalization; opt-in. |
 | `community.py` | pure (injected chat) | `detect_communities(edges, nodes)`; `summarize_community(chat, members)`; `answer_global(chat, q, communities)`; `parse_summary` | Consolidation layer / global search. |
 | `decay.py` | pure | `effective_weight(w, last_seen, now, half_life)`; `reinforced_weight(w, boost, cap)` | Usage-memory math. |
+| `memory.py` | pure (injected chat) | `capture_session(chat, transcript) -> [MemoryFact]`; `parse_facts`; `format_memory(recalled)` | Path B: session → subject–predicate–object facts + context formatting. |
+| `usage.py` | pure | `usage_log_path(db)`; `append_usage(path, pairs)`; `read_usage`; `clear_usage` | Path B (B1): the append-only read-path usage-log sidecar. |
 
 ## 5.3 Level 2 — the `web/` subpackage
 
@@ -191,7 +198,8 @@ for edits + memory. Responsibilities group as:
 | **Explorer (UI)** | `explore(slug)`, `expand(type, id)`, `expand_page`, `expand_entity` |
 | **Entities** | `entities_for_page(slug)`, `pages_for_entity(query)` |
 | **Communities** | `communities()`, `community_members()`, `page_graph()`, `page_snippet()`, `upsert_communities(assignment, summaries, labels)` |
-| **Usage-memory** | `reinforce(from, to, now, boost)`, `decay(now, half_life, floor)` |
+| **Usage-memory** | `reinforce(from, to, now, boost)`, `decay(now, half_life, floor)`, `record_usage(pairs)` (writable → reinforce / read-only → log), `fold_usage(now)`, `pending_usage()` |
+| **Remembered tier (Path B)** | `remember(session_id, facts, embedder)` (dedup + **supersede** contradictions), `recall(query, embedder, k, include_superseded)` (current-only by default), `has_memory()`, `forget_all()` |
 | **Incremental update** | `upsert_page(slug, text, …, embedder)` (MERGE page, replace chunks, recompute `SIMILAR_TO`) |
 | **Hybrid retrieval** | `hybrid_search(vector, k)` (vector k-NN → owning page) |
 
@@ -210,19 +218,19 @@ flowchart LR
   g -- no --> prompt
   g -- yes --> nb["graph.neighborhood(seeds)\ncandidates (_EXPAND_RELS)"]
   nb --> rr["index.best_chunk_per_page(q, candidates)\nrelated Sources"]
-  rr --> reinf{"graph writable?"}
-  reinf -- yes --> rin["graph.reinforce(seed to related)"]
-  reinf -- no --> prompt
-  rin --> prompt["build_messages(grounded)\nchat.chat()"]
+  rr --> rec["graph.record_usage(seed to related)\nwritable: reinforce now · read-only: log (B1)"]
+  rec --> prompt["build_messages(grounded)\nchat.chat()"]
   prompt --> ans["RAGAnswer\n(answer + Sources + cited_markers)"]
 ```
 
 - `_EXPAND_RELS = (references, referenced_by, similar, shared_entity, reinforced)` — the
   edge kinds GraphRAG expands along.
 - Grounding is enforced by the system prompt; `Source` carries provenance so `[n]` citations
-  resolve to pages. Reinforcement fires only when the graph is writable (serve/chat).
+  resolve to pages. `record_usage` reinforces immediately on a writable graph (serve/chat) or
+  appends to the usage log on a read-only `ask`/MCP (B1, ADR-17) — best-effort, never blocking retrieval.
 
 ---
 *Chapter complete. Cross-refs: interfaces → §8 (concepts), decisions → §9, runtime flows →
-§6. Future Path-B changes (authoritative graph, session ingest) will add/modify blocks in
-§5.2/§5.4 — update here when they land.*
+§6. Path B **landed** its blocks: `graph/memory.py` + `graph/usage.py` (§5.2), the remembered-tier
++ usage-log methods on `GraphStore` (§5.4), and read-path `record_usage` in `RAGAgent` (§5.5) —
+authoritative graph (B0/ADR-16), read-path reinforcement (B1/ADR-17), contradiction versioning (B4/ADR-18).*

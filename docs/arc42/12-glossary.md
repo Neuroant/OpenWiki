@@ -35,7 +35,12 @@
 | **Entity layer** | Opt-in LLM-extracted typed entities (`Entity` + `MENTIONS`), normalized to merge surface variants. |
 | **REINFORCES** | A usage-memory edge (weight + last_seen) strengthened when a connection is used and decayed over time. |
 | **Reinforcement / decay** | Hebbian "strengthen on use" (`reinforce`) and time-based "forget" (`decay`, exponential half-life). |
-| **Path A / Path B** | A = the consolidation layer (communities/global search, done); B = agent-memory (usage-memory started; sessions/contradiction next). |
+| **Remembered tier** | The authoritative Path B memory subgraph (`Session`/`Assertion` + `SUPERSEDES`, plus the `REINFORCES` overlay); additive, preserved across doc rebuilds (ADR-16); active only in Second Brain mode. |
+| **Session / Assertion** | A captured "day" of experience (`Session`) and a reified subject·predicate·object fact under it (`Assertion`, with a mirrored embedding) — the memory data model (ADR-15). |
+| **SUPERSEDES / supersession** | A newer `Assertion` supersedes an older one (same normalized subject+predicate, different object); "current" = no incoming `SUPERSEDES`; nothing deleted, so history stays queryable (ADR-18). |
+| **Usage log** | The append-only `graph.usage.jsonl` sidecar a read-only `ask`/MCP writes to; the next writer folds it into `REINFORCES` edges — read-path reinforcement without the write lock (B1/ADR-17). |
+| **Mode (Wiki / Second Brain)** | A per-project policy (`[memory] enabled`): Wiki = document tier only (default); Second Brain = document + remembered tiers (ADR-14). |
+| **Path A / Path B** | A = the consolidation layer (communities / global search, done); B = agent-memory — **landed** the remembered tier (B0 authoritative graph, B1 read-path reinforcement, B4 contradiction versioning); B5 sleep consolidation + B6 full context-assembly next. |
 
 ## 12.4 Platform & tooling
 
@@ -68,5 +73,5 @@
 | **TOML** | Tom's Obvious Minimal Language (`openwiki.toml`, config files) |
 
 ---
-*Chapter complete. Keep in sync as Path B lands new terms (session, sub-graph merge,
-time-versioned / contradiction edge).*
+*Chapter complete. Path B terms have landed: Session/Assertion (ADR-15), SUPERSEDES/supersession
+(ADR-18), the remembered tier + Wiki/Second-Brain mode (ADR-14/16), and the usage log (ADR-17).*

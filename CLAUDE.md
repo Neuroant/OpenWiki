@@ -200,9 +200,10 @@ flagged:
 `Session`/`Assertion`/`ASSERTS`/`SUPERSEDES` tables are created (empty) by every `graph-build`,
 so old graphs upgrade lazily. Both commands are gated by the project's **mode**
 (`[memory] enabled`, below) — off (Wiki mode) they refuse/return nothing.
-**Landed:** B0 (v0.48) preserve-the-memory-tier-on-rebuild + session source type + mode;
-B1 (v0.49) read-path reinforcement; B4 (v0.50) contradiction/supersession; B5 (v0.51)
-consolidation (below). Design in `docs/path-b-memory.md`.
+**Path B is complete (B0–B6):** B0 (v0.48) preserve-the-memory-tier-on-rebuild + session source
+type + mode; B1 (v0.49) read-path reinforcement; B4 (v0.50) contradiction/supersession; B5 (v0.51)
+consolidation (below); B6 (v0.52) three-tier context assembly (`context` below). Design in
+`docs/path-b-memory.md`.
 
 **Consolidate the memory (the "sleep" pass)** — the memory-tier analog of `communities`
 (Path B / B5): cluster the **current** remembered facts by embedding similarity, LLM-summarize
@@ -220,6 +221,19 @@ decay step), `--model NAME`, `--host URL`. Gated by `[memory] enabled`. Reuses
 `community.detect_communities` + a new `summarize_facts`; `MemoryConcept`/`CONSOLIDATES` are a
 *derived* view (recomputed each pass, not snapshotted across rebuilds — like `Community`).
 
+**Assemble a session's memory context (B6)** — the Path B payoff: build the context for a query
+from the **three memory tiers** — **identity** (the project's, or `[memory] identity`), **activation**
+(decay-weighted `recall`), and **attractors** (the B5 themes the recalled facts belong to). *Load the
+concentrate, not the log.* Read-only + fail-soft (empty tiers degrade gracefully):
+```
+.venv\Scripts\python -m openwiki context "which models do we use?"
+```
+Options: `-k N` (activation facts; default 8), `--themes N` (default 4), `--identity TEXT` (override),
+`-i/--index DIR` (embedder), `--graph DIR`, `--host URL`. Gated by `[memory] enabled`. Backed by
+`GraphStore.context_for` (→ `recall` + `relevant_concepts` + pure `memory.assemble_context`); also
+exposed to coding agents as the MCP **`wiki_memory`** tool. Scored by `eval --cross-session` (the
+"assembled" condition is now this assembler; §7 — assembled beats cold + raw-log).
+
 **Web UI** — browse + search + chat/edit + graph in the browser (stdlib server):
 ```
 .venv\Scripts\python -m openwiki serve --port 8137        # http://127.0.0.1:8137
@@ -233,8 +247,9 @@ up automatically if `--graph` (default `output/graph`) exists.
 .venv\Scripts\python -m openwiki mcp --wiki output\wiki -i output\index --graph output\graph
 ```
 Read-only tools (`wiki_ask`/`wiki_global`/`wiki_search`/`wiki_read_page`/`wiki_list_pages`/
-`wiki_graph_neighbors`/`wiki_find_path`/`wiki_find_entity`), advertised by
-availability (`wiki_global` needs a chat model + community summaries). Options:
+`wiki_graph_neighbors`/`wiki_find_path`/`wiki_find_entity`/`wiki_memory`), advertised by
+availability (`wiki_global` needs a chat model + community summaries; `wiki_memory` — the B6
+three-tier context — needs an index + a non-empty memory tier). Options:
 `--model`, `--host`, `--no-ask`. Coding-agent setup is in
 `docs/coding-agents.md` (+ `examples/coding-agents/`).
 
@@ -413,7 +428,12 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   (`upsert_memory_concepts`; `memory_concepts()`/`has_memory_concepts()` read them) — then folds usage
   + decays. Re-runnable + **bounded** (re-clustering *replaces* the themes); the summaries are the
   memory's "attractor" tier and support global search over memory (`answer_global`). `MemoryConcept`
-  is a *derived* view (recomputed each pass, not snapshotted), like `Community`. Design in `docs/path-b-memory.md`.
+  is a *derived* view (recomputed each pass, not snapshotted), like `Community`.
+  **B6 three-tier assembly:** `assemble_context(identity, facts, themes)` (pure, in `memory.py`) formats
+  the identity + activation + attractor tiers; `GraphStore.context_for(query, embedder, identity)`
+  orchestrates it (`recall` for activation + `relevant_concepts` for the themes those facts belong to),
+  read-only + fail-soft. Exposed as the `context` CLI command and the MCP `wiki_memory` tool; the
+  cross-session eval's "assembled" condition is now this assembler. Design in `docs/path-b-memory.md`.
 - **`openwiki/web/`** — the web UI. `server.py` = `WikiWebApp` (state) + a
   `ThreadingHTTPServer` handler exposing a JSON API (`/api/wiki`,
   `/api/pages/{slug}`, `/api/search`, `/api/chat`, `/api/graph/{slug}` = explore,
@@ -568,8 +588,8 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
 - **`openwiki/cli.py`** — argparse CLI with `init`, `build`, `status`, `project`
   (`list`/`use`/`add`/`remove`/`add-source`), `opencode`, `claude-code`, `ontology`, `ingest`,
   `build-wiki`, `index`, `search`, `eval`, `ask` (`--global` = global search),
-  `chat`, `graph-build`, `communities`, `decay`, `remember`, `recall`, `consolidate`, `serve`, and `mcp`
-  subcommands. A shared
+  `chat`, `graph-build`, `communities`, `decay`, `remember`, `recall`, `consolidate`, `context`,
+  `serve`, and `mcp` subcommands. A shared
   `--project` (parent parser) + `_apply_project(args, project)` fill unset
   path/model/host/split-level args from the active project before dispatch (flags
   override; no project → `./output`). `init`/`project add-source` take **`--session`**

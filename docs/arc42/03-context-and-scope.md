@@ -87,7 +87,8 @@ Newline-delimited JSON-RPC 2.0 over **stdio** (the coding agent spawns `owiki mc
 | `ping` | → `{}` |
 
 Tools (read-only): `wiki_ask`, `wiki_global`, `wiki_search`, `wiki_read_page`,
-`wiki_list_pages`, `wiki_graph_neighbors`, `wiki_find_path`, `wiki_find_entity`.
+`wiki_list_pages`, `wiki_graph_neighbors`, `wiki_find_path`, `wiki_find_entity`, `wiki_memory`
+(the B6 three-tier memory context, in Second Brain mode).
 
 ### 3.2.4 Ollama interface
 

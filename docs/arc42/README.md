@@ -5,11 +5,12 @@ This is the architecture documentation for **OpenWiki**, structured after the
 into 12 sections, from goals and constraints down to building blocks, runtime, decisions,
 quality, and risks.
 
-> **Status: COMPLETE** (maintained through Path B v0.50). All 12 chapters are complete; diagrams use
-> Mermaid (rendered by GitHub) and have been validated. The **Path B agent-memory** direction has
-> since **landed** its load-bearing pieces — B0 authoritative graph, B1 read-path reinforcement, B4
-> contradiction/time-versioning — recorded as ADR-15/16/17/18 (§9), which resolve the §11 debts
-> D1/D2/D6 that ADR-3/ADR-8 flagged. Design detail in `docs/path-b-memory.md`.
+> **Status: COMPLETE** (maintained through Path B v0.52). All 12 chapters are complete; diagrams use
+> Mermaid (rendered by GitHub) and have been validated. The **Path B agent-memory** direction is now
+> **complete (B0–B6)** — authoritative graph (B0), read-path reinforcement (B1), contradiction/time-
+> versioning (B4), sleep consolidation (B5), and three-tier context assembly (B6); its load-bearing
+> decisions are recorded as ADR-15/16/17/18 (§9), which resolve the §11 debts D1/D2/D6 that
+> ADR-3/ADR-8 flagged. Design detail in `docs/path-b-memory.md`.
 
 ## Audience & relationship to the other docs
 

@@ -389,6 +389,17 @@ def _build_argparser() -> argparse.ArgumentParser:
     rec_p.add_argument("-i", "--index", type=Path, default=None, help="Index dir (for the embedder; default: project's).")
     rec_p.add_argument("--graph", type=Path, default=None, help="Graph dir (default: project's graph).")
     rec_p.add_argument("--host", default=None, help="Ollama host URL.")
+
+    ctx_p = sub.add_parser("context", parents=[common],
+                           help="Assemble a session's memory context for a query (Path B / B6): "
+                                "identity + recalled facts + relevant themes.")
+    ctx_p.add_argument("query", help="The query/topic to assemble memory context for.")
+    ctx_p.add_argument("-k", "--top-k", type=int, default=8, help="Recalled facts (activation tier; default: 8).")
+    ctx_p.add_argument("--themes", type=int, default=4, help="Relevant themes (attractor tier; default: 4).")
+    ctx_p.add_argument("--identity", default=None, help="Override the identity tier (default: the project's).")
+    ctx_p.add_argument("-i", "--index", type=Path, default=None, help="Index dir (for the embedder; default: project's).")
+    ctx_p.add_argument("--graph", type=Path, default=None, help="Graph dir (default: project's graph).")
+    ctx_p.add_argument("--host", default=None, help="Ollama host URL.")
     return parser
 
 
@@ -1163,6 +1174,10 @@ def _apply_project(args: argparse.Namespace, project: Optional[Project],
         path("index", p.index_dir if p else None, Path("output") / "index")
         path("graph", p.graph_path if p else None, Path("output") / "graph")
         val("host", "models", "host", DEFAULT_HOST)
+    elif cmd == "context":
+        path("index", p.index_dir if p else None, Path("output") / "index")
+        path("graph", p.graph_path if p else None, Path("output") / "graph")
+        val("host", "models", "host", DEFAULT_HOST)
 
 
 def _cmd_ingest(args: argparse.Namespace) -> int:
@@ -1929,6 +1944,38 @@ def _cmd_recall(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_context(args: argparse.Namespace) -> int:
+    """Path B (B6): assemble a session's memory context for a query — identity (DNA) +
+    decay-weighted recall (activation) + relevant consolidated themes (attractors)."""
+    project = getattr(args, "project_obj", None)
+    if project is not None and not project.memory_enabled:
+        print("(memory is disabled — Wiki mode; set [memory] enabled = true to assemble context)")
+        return 0
+    if not (args.index / "index.json").is_file():
+        print(f"error: no index at {args.index} (run `openwiki index` — needed for the embedder).",
+              file=sys.stderr)
+        return 2
+    index = SemanticIndex.load(args.index)
+    if isinstance(index.embedder, OllamaEmbedder):
+        index.embedder.host = args.host.rstrip("/")
+    graph = _open_graph(args.graph, writable=False)
+    if graph is None:
+        print(f"error: no graph at {args.graph}.", file=sys.stderr)
+        return 2
+    identity = args.identity if args.identity is not None else (project.identity if project else "")
+    try:
+        context = graph.context_for(args.query, index.embedder, identity=identity,
+                                    k=args.top_k, max_themes=args.themes)
+    finally:
+        graph.close()
+    if not context.strip():
+        print("(no memory to assemble — capture sessions with `openwiki remember` "
+              "and `openwiki consolidate` first)")
+        return 0
+    print(context)
+    return 0
+
+
 def _fold_pending_usage(graph) -> None:
     """B1: when a writable process starts, fold any read-path usage logged since the
     last writer into the graph (best-effort). No-op on a read-only/None graph or empty log."""
@@ -1992,7 +2039,10 @@ def _cmd_mcp(args: argparse.Namespace) -> int:
         chat = OllamaChat(model=args.model, host=args.host, temperature=args.temperature)
         agent = RAGAgent(index, chat, graph=graph)
 
-    server = build_server(args.wiki, index=index, graph=graph, agent=agent, version=__version__)
+    project = getattr(args, "project_obj", None)
+    identity = project.identity if (project is not None and project.memory_enabled) else ""
+    server = build_server(args.wiki, index=index, graph=graph, agent=agent,
+                          version=__version__, identity=identity)
     server.serve()   # blocks on stdio (JSON-RPC)
     return 0
 
@@ -2019,6 +2069,7 @@ _DISPATCH = {
     "consolidate": _cmd_consolidate,
     "remember": _cmd_remember,
     "recall": _cmd_recall,
+    "context": _cmd_context,
 }
 
 

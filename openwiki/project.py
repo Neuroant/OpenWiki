@@ -118,6 +118,12 @@ class Project:
         return default if value is None else value
 
     @property
+    def identity(self) -> str:
+        """The stable 'who am I' text for Second Brain context assembly (B6 identity tier):
+        an explicit ``[memory] identity``, else the project description, else its name."""
+        return str(self.setting("memory", "identity", None) or self.description or self.name or "").strip()
+
+    @property
     def memory_enabled(self) -> bool:
         """Second Brain mode — whether the remembered tier (Path B) is active for this
         project. **Off by default** (Wiki mode, §3.1 / ADR-14); turn it on with

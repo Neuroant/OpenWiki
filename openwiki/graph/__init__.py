@@ -3,7 +3,7 @@
 from .builder import GraphBuilder, build_graph
 from .community import answer_global, detect_communities, summarize_community, summarize_facts
 from .entities import DEFAULT_ENTITY_TYPES, Entity, coerce_types, extract_entities
-from .memory import MemoryFact, capture_session, format_memory, parse_facts
+from .memory import MemoryFact, assemble_context, capture_session, format_memory, parse_facts
 from .references import detect_page_offset, extract_references, extract_references_multi
 from .store import GraphStore
 from .usage import append_usage, clear_usage, read_usage, usage_log_path
@@ -13,6 +13,6 @@ __all__ = [
     "extract_references", "extract_references_multi", "detect_page_offset",
     "extract_entities", "Entity", "coerce_types", "DEFAULT_ENTITY_TYPES",
     "detect_communities", "summarize_community", "summarize_facts", "answer_global",
-    "capture_session", "format_memory", "parse_facts", "MemoryFact",
+    "capture_session", "format_memory", "assemble_context", "parse_facts", "MemoryFact",
     "usage_log_path", "append_usage", "read_usage", "clear_usage",
 ]

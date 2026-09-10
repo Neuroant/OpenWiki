@@ -50,6 +50,18 @@ def test_memory_mode_defaults_off_and_toggles(tmp_path):
     assert Project.load(root).memory_enabled is True                 # [memory] enabled = true
 
 
+def test_project_identity_falls_back(tmp_path):
+    root = tmp_path / "id"
+    root.mkdir()
+    (root / MANIFEST).write_text(render_manifest(name="proj", description="A CS knowledge base."),
+                                 encoding="utf-8")
+    assert Project.load(root).identity == "A CS knowledge base."   # B6 identity = description
+    root2 = tmp_path / "id2"
+    root2.mkdir()
+    (root2 / MANIFEST).write_text(render_manifest(name="justname"), encoding="utf-8")
+    assert Project.load(root2).identity == "justname"              # else the name
+
+
 def test_render_manifest_escapes_quotes(tmp_path):
     root = tmp_path / "q"
     root.mkdir()

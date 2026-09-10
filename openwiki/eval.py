@@ -389,7 +389,7 @@ def run_cross_session_eval(items, graph, embedder, chat, judge=None, recall_k: i
     honest test of whether concentrated memory beats replaying the log. ``graph`` must be a
     **writable** throwaway (scenarios are isolated via ``forget_all``). Backend-agnostic —
     ``graph``/``embedder``/``chat`` injected; capture/format reused from the memory tier."""
-    from .graph.memory import capture_session, format_memory
+    from .graph.memory import assemble_context, capture_session
 
     items = list(items)
     conditions = ("cold", "raw-log", "assembled")
@@ -402,10 +402,14 @@ def run_cross_session_eval(items, graph, embedder, chat, judge=None, recall_k: i
             facts = capture_session(chat, transcript)
             graph.remember(f"{item.name}-s{j + 1}", facts, embedder)
         recalled = graph.recall(item.question, embedder, k=recall_k)
+        # B6: the "assembled" condition is now the three-tier context_for assembler —
+        # activation (recall) + attractors (themes the recalled facts belong to). Identity
+        # is left empty here (scenarios are generic); themes appear once the graph is consolidated.
+        themes = graph.relevant_concepts([r["id"] for r in recalled], limit=4)
         contexts = {
             "cold": "",
             "raw-log": "Earlier sessions (raw transcript):\n" + "\n\n".join(item.setup),
-            "assembled": format_memory(recalled),
+            "assembled": assemble_context("", recalled, themes, max_facts=recall_k),
         }
         answers = {c: _THINK.sub("", chat.chat(build_probe_messages(item.question, ctx))).strip()
                    for c, ctx in contexts.items()}

@@ -351,3 +351,81 @@ def test_consolidate_excludes_superseded_facts(tmp_path):
         assert not any("kuzu" in t for t in texts)                # superseded one is excluded
     finally:
         store.close()
+
+
+# -- B6: three-tier context assembly -------------------------------------------
+
+def test_assemble_context_three_tiers_and_fail_soft():
+    from openwiki.graph.memory import assemble_context
+
+    facts = [{"subject": "the db", "predicate": "is", "object": "Kuzu", "session_id": "s1"}]
+    themes = [{"label": "Storage", "summary": "Uses Kuzu."}]
+    out = assemble_context("I am the assistant.", facts, themes)
+    assert "Who I am" in out and "the assistant" in out           # identity tier
+    assert "the db is Kuzu" in out and "(s1)" in out              # activation tier
+    assert "Storage" in out and "Uses Kuzu." in out               # attractor tier
+
+    assert assemble_context("", [], []) == ""                     # fail-soft: nothing → ""
+    assert "Who I am" in assemble_context("id only", [], [])      # identity alone still assembles
+    only_facts = assemble_context("", facts, [])
+    assert "What I remember" in only_facts and "Themes" not in only_facts   # skips empty tiers
+
+
+def _consolidate(store, embedder):
+    """Cluster + label the current facts (helper — the summarizer is faked here)."""
+    from openwiki.graph import detect_communities
+    ag = store.assertion_graph(similar_k=6)
+    assignment = detect_communities(ag["edges"], list(ag["facts"]))
+    cids = set(assignment.values())
+    store.upsert_memory_concepts(assignment, {c: f"Summary {c}." for c in cids},
+                                 {c: f"Theme{c}" for c in cids})
+    return assignment
+
+
+def test_relevant_concepts_ranks_by_hits(tmp_path):
+    import pytest
+    pytest.importorskip("kuzu")
+    from openwiki.graph import GraphStore
+
+    store = GraphStore(_build_graph(tmp_path), writable=True)
+    try:
+        store.remember("s1", _PY_FACTS + _DB_FACTS, _MemEmbedder())
+        _consolidate(store, _MemEmbedder())
+        all_ids = [f[0] for f in store.current_assertions()]
+        rel = store.relevant_concepts(all_ids, limit=5)
+        assert len(rel) == 2 and sum(c["hits"] for c in rel) == 6   # both themes cover all 6 facts
+        assert store.relevant_concepts([]) == []                    # no activation → no themes
+    finally:
+        store.close()
+
+
+def test_context_for_assembles_all_three_tiers(tmp_path):
+    """B6 payoff: identity + recalled facts + the themes those facts belong to."""
+    import pytest
+    pytest.importorskip("kuzu")
+    from openwiki.graph import GraphStore
+
+    store = GraphStore(_build_graph(tmp_path), writable=True)
+    try:
+        store.remember("s1", _PY_FACTS + _DB_FACTS, _MemEmbedder())
+        _consolidate(store, _MemEmbedder())
+        ctx = store.context_for("which database do we use", _MemEmbedder(),
+                                identity="I am the project assistant.", k=5, max_themes=3)
+        assert "I am the project assistant." in ctx               # identity tier
+        assert "kuzu" in ctx.lower()                              # activation tier (a recalled fact)
+        assert "Theme" in ctx                                     # attractor tier (a relevant theme)
+    finally:
+        store.close()
+
+
+def test_context_for_fail_soft_without_memory(tmp_path):
+    import pytest
+    pytest.importorskip("kuzu")
+    from openwiki.graph import GraphStore
+
+    store = GraphStore(_build_graph(tmp_path))   # read-only, nothing remembered
+    try:
+        assert store.context_for("anything", _MemEmbedder()) == ""            # no memory → ""
+        assert "Who I am" in store.context_for("x", _MemEmbedder(), identity="Me.")  # identity survives
+    finally:
+        store.close()

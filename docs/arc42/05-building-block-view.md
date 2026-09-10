@@ -201,6 +201,7 @@ for edits + memory. Responsibilities group as:
 | **Usage-memory** | `reinforce(from, to, now, boost)`, `decay(now, half_life, floor)`, `record_usage(pairs)` (writable → reinforce / read-only → log), `fold_usage(now)`, `pending_usage()` |
 | **Remembered tier (Path B)** | `remember(session_id, facts, embedder)` (dedup + **supersede** contradictions), `recall(query, embedder, k, include_superseded)` (current-only by default), `has_memory()`, `forget_all()` |
 | **Memory consolidation (Path B / B5)** | `assertion_graph(similar_k)` (similarity over current facts), `upsert_memory_concepts(assignment, summaries, labels)` (the "sleep" pass → `MemoryConcept` themes), `memory_concepts()`, `has_memory_concepts()` |
+| **Context assembly (Path B / B6)** | `relevant_concepts(assertion_ids, limit)` (attractor themes for the activated facts), `context_for(query, embedder, identity, k, max_themes)` (the three-tier assembly → one context string, read-only + fail-soft) |
 | **Incremental update** | `upsert_page(slug, text, …, embedder)` (MERGE page, replace chunks, recompute `SIMILAR_TO`) |
 | **Hybrid retrieval** | `hybrid_search(vector, k)` (vector k-NN → owning page) |
 

@@ -39,9 +39,10 @@
 | **Session / Assertion** | A captured "day" of experience (`Session`) and a reified subject·predicate·object fact under it (`Assertion`, with a mirrored embedding) — the memory data model (ADR-15). |
 | **SUPERSEDES / supersession** | A newer `Assertion` supersedes an older one (same normalized subject+predicate, different object); "current" = no incoming `SUPERSEDES`; nothing deleted, so history stays queryable (ADR-18). |
 | **MemoryConcept / consolidation** | A theme over a cluster of related current facts, with an LLM summary (`CONSOLIDATES` edges to its members) — the "sleep" pass (`openwiki consolidate`, B5). A *derived* view (recomputed, not snapshotted), like `Community`; supports global search over memory. |
+| **Context assembly / `context_for`** | The B6 payoff: assemble a session's context from the three memory tiers — **identity** + **activation** (`recall`) + **attractors** (relevant `MemoryConcept`s) — into one block (`openwiki context` / MCP `wiki_memory`). "Load the concentrate, not the log." |
 | **Usage log** | The append-only `graph.usage.jsonl` sidecar a read-only `ask`/MCP writes to; the next writer folds it into `REINFORCES` edges — read-path reinforcement without the write lock (B1/ADR-17). |
 | **Mode (Wiki / Second Brain)** | A per-project policy (`[memory] enabled`): Wiki = document tier only (default); Second Brain = document + remembered tiers (ADR-14). |
-| **Path A / Path B** | A = the consolidation layer (communities / global search, done); B = agent-memory — **landed** the remembered tier (B0 authoritative graph, B1 read-path reinforcement, B4 contradiction versioning, B5 sleep consolidation); only B6 (full three-tier context-assembly) remains. |
+| **Path A / Path B** | A = the consolidation layer (communities / global search, done); B = agent-memory — **complete (B0–B6)**: authoritative graph (B0), read-path reinforcement (B1), contradiction versioning (B4), sleep consolidation (B5), and three-tier context assembly (B6). Remaining items are refinements, not stages. |
 
 ## 12.4 Platform & tooling
 

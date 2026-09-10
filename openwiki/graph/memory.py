@@ -88,7 +88,7 @@ def capture_session(chat, transcript: str) -> list:
 
 
 def format_memory(recalled: list) -> str:
-    """B6: format recalled facts as a compact context block for injection (or ``""``).
+    """Format recalled facts as a compact block for injection (or ``""``).
     A fact flagged ``superseded`` (only present with ``recall(include_superseded=True)``)
     is marked so; the default recall returns only current facts, so injection is unaffected."""
     if not recalled:
@@ -99,3 +99,26 @@ def format_memory(recalled: list) -> str:
         lines.append(f"- {r['subject']} {r['predicate']} {r['object']}{mark}"
                      f"  ({r.get('session_id', '?')})")
     return "\n".join(lines)
+
+
+def assemble_context(identity: str, facts: list, themes: list,
+                     max_facts: int = 8, max_themes: int = 4) -> str:
+    """B6: assemble a session's context from the **three memory tiers** — identity (DNA),
+    the activated facts (``recall`` — the epigenetic tier), and the relevant consolidated
+    themes (B5 ``MemoryConcept``s — the attractor tier). Pure + **fail-soft**: any tier may
+    be empty; returns ``""`` when nothing is available (never blocks a session)."""
+    blocks: list = []
+    if identity and identity.strip():
+        blocks.append("## Who I am\n" + identity.strip())
+    facts = list(facts)[:max_facts]
+    if facts:
+        lines = ["## What I remember (most relevant)"]
+        lines += [f"- {f['subject']} {f['predicate']} {f['object']}  ({f.get('session_id', '?')})"
+                  for f in facts]
+        blocks.append("\n".join(lines))
+    themes = list(themes)[:max_themes]
+    if themes:
+        lines = ["## Themes across my memory"]
+        lines += [f"- **{t.get('label', '')}**: {(t.get('summary') or '').strip()}" for t in themes]
+        blocks.append("\n".join(lines))
+    return "\n\n".join(blocks)

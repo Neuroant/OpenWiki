@@ -13,6 +13,7 @@ Tools (all read-only; advertised only when their backing artifact is present):
   wiki_graph_neighbors a page's related pages (hierarchy, refs, similar, concepts)
   wiki_find_path      shortest relationship chain between two pages
   wiki_find_entity    pages that mention a named concept
+  wiki_memory         assemble cross-session memory for a query (Path B, Second Brain)
 
 Run via ``openwiki mcp`` (see cli.py). stdout carries the protocol — everything
 else (logs, errors) must go to stderr.
@@ -109,12 +110,12 @@ def _tool(name, description, properties, required):
 
 
 def build_server(wiki_dir, index=None, graph=None, agent=None, name="openwiki",
-                 version="0") -> MCPStdioServer:
+                 version="0", identity="") -> MCPStdioServer:
     """Assemble the MCP server from already-loaded OpenWiki components.
 
     `index` (SemanticIndex) enables search/ask; `graph` (GraphStore) enables the
     graph tools; `agent` (RAGAgent) powers `wiki_ask`. Read-only `WikiTools` back
-    the rest.
+    the rest. `identity` seeds the B6 `wiki_memory` context (Second Brain mode).
     """
     from .tools import WikiTools
 
@@ -166,6 +167,19 @@ def build_server(wiki_dir, index=None, graph=None, agent=None, name="openwiki",
                 "Parameter, …).", {"name": {"type": "string"}}, ["name"]))
             handlers["wiki_find_entity"] = lambda a: tools_impl.find_entity(str(a["name"]))
 
+        # B6 agent memory: assemble this session's memory context (identity + recalled
+        # facts + relevant themes). Needs the embedder (index) + a non-empty memory tier.
+        if index is not None and _graph_has_memory(graph):
+            specs.append(_tool(
+                "wiki_memory",
+                "Assemble what you remember relevant to a query/topic across sessions "
+                "(Path B): your identity, the most relevant remembered facts, and the "
+                "consolidated themes. Call this at the start of a session to load memory.",
+                {"query": {"type": "string"}}, ["query"]))
+            handlers["wiki_memory"] = lambda a: (
+                graph.context_for(str(a["query"]), index.embedder, identity=identity)
+                or "(no relevant memory yet)")
+
         # Global search needs a chat model (from the agent) + community summaries.
         if agent is not None and _graph_has_communities(graph):
             specs.append(_tool(
@@ -188,6 +202,13 @@ def build_server(wiki_dir, index=None, graph=None, agent=None, name="openwiki",
 def _graph_has_communities(graph) -> bool:
     try:
         return bool(graph.has_communities())
+    except Exception:
+        return False
+
+
+def _graph_has_memory(graph) -> bool:
+    try:
+        return bool(graph.has_memory())
     except Exception:
         return False
 

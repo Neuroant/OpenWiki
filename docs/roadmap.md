@@ -469,9 +469,12 @@ directions*). Stages re-open the decisions that flagged themselves for exactly t
   `MemoryConcept` theme, then folds usage + decays — re-runnable + bounded (themes replaced, not
   accumulated), enabling global search over memory. *(Deferred: incrementality, k-core-vs-Louvain
   stability, per-tier half-lives.)*
-- **B6 — Three-tier context assembly.** Build a session's context from identity + activation +
-  attractors — the payoff: *load the concentrate, not the log*. *(First slice landed, v0.46:
-  decay-weighted `recall` — the activation tier only.)*
+- **B6 — Three-tier context assembly. ✅ Landed (v0.52).** The payoff: `context_for(query)` fuses
+  **identity** (project/`[memory] identity`) + **activation** (decay-weighted `recall`) + **attractors**
+  (the B5 themes the recalled facts belong to) into an assembled session context — *load the
+  concentrate, not the log*. Exposed as the `context` CLI + MCP `wiki_memory`; the cross-session eval's
+  "assembled" condition is now this assembler (assembled 100% > raw-log 87.5% > cold 0%). *(Deferred:
+  host-hook auto-injection, confidence weighting, a fixed-token budgeter.)*
 
 **First slice landed (v0.46).** A thin **B2→B3→B6** vertical ships as the `remember`/`recall`
 commands: capture a transcript into `Session`/`Assertion` graph tables, dedup-merge it, and recall
@@ -514,8 +517,17 @@ consolidate` clusters the current remembered facts by embedding similarity (Louv
 each cluster into a `MemoryConcept` theme, then folds usage + decays — the "compress the day into
 structure, forget the noise" pass. Re-runnable and **bounded** (themes are a derived view, replaced
 each run). Verified live: 9 facts → 3 coherent themes, `answer_global` over them produced a global
-answer over memory, and a second pass stayed at 3. Only **B6** (three-tier context assembly) remains
-— the payoff that fuses identity + activation (recall) + attractors (B5 themes). See `path-b-memory.md` §6/B5.
+answer over memory, and a second pass stayed at 3. See `path-b-memory.md` §6/B5.
+
+**B6 — three-tier context assembly landed (v0.52); Path B complete.** The payoff: `context_for(query)`
+fuses **identity** (project / `[memory] identity`) + **activation** (decay-weighted `recall`) +
+**attractors** (the B5 themes the recalled facts belong to) into one assembled session context —
+*load the concentrate, not the log*. Exposed as the `context` CLI command and the MCP `wiki_memory`
+tool, and the cross-session eval's "assembled" condition is now this assembler: **assembled 100% >
+raw-log 87.5% > cold 0%** (8 scenarios) — assembled memory beats both replaying the log and starting
+cold. **The B0–B6 staged plan is complete.** What remains are refinements, not stages: host-lifecycle
+auto-injection (`UserPromptSubmit`/`PreCompact`), per-fact confidence weighting, B5 incrementality /
+k-core stability, and B1's true concurrent reader-and-writer model. See `path-b-memory.md` §6/B6.
 
 ### Honest guardrails
 

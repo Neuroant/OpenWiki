@@ -1,18 +1,20 @@
 # Path B — Agent Memory (design)
 
-> **Status: IN PROGRESS.** First slices have landed: the remembered tier (`remember`/`recall`,
-> v0.46), the cross-session eval that validated it (v0.47), **B0 — the authoritative-graph reframe**
-> (v0.48): the memory tier now **survives document rebuilds**, a per-project **Wiki vs Second Brain
-> mode** (`[memory] enabled`) gates it, and a **session source type** feeds it through `openwiki
-> build`; **B1 — read-path reinforcement** (v0.49): ordinary read-only `ask`/MCP now teach the
-> graph via an append-only usage log a writer folds in; **B4 — contradiction / time-versioning**
-> (v0.50): a newer fact **supersedes** an older one (same subject+predicate, different object) via a
-> `SUPERSEDES` edge, so recall returns the *current* fact while the superseded history stays
-> queryable — the belief-revision layer no off-the-shelf system ships; and **B5 — sleep
-> consolidation** (v0.51): `consolidate` clusters the remembered facts into LLM-summarized
-> `MemoryConcept` themes (bounded, re-runnable) that support global search over memory. Still ahead:
-> the full three-tier **B6** assembly. This remains the living design base
-> for Path B — turning OpenWiki's knowledge graph from a document **mirror** into agent **memory**.
+> **Status: COMPLETE (B0–B6).** The full staged plan has landed: the remembered tier
+> (`remember`/`recall`, v0.46) + the cross-session eval that validated it (v0.47); **B0** (v0.48) the
+> authoritative-graph reframe — memory **survives document rebuilds**, gated by a per-project **Wiki
+> vs Second Brain mode** (`[memory] enabled`) and fed by a **session source type**; **B1** (v0.49)
+> **read-path reinforcement** via an append-only usage log a writer folds in; **B4** (v0.50)
+> **contradiction / time-versioning** — a newer fact **supersedes** an older via `SUPERSEDES`, so
+> recall returns the *current* fact while history stays queryable (the belief-revision layer no
+> off-the-shelf system ships); **B5** (v0.51) **sleep consolidation** — `consolidate` clusters facts
+> into LLM-summarized `MemoryConcept` themes (bounded, global-searchable); and **B6** (v0.52) the
+> **three-tier context assembly** — `context_for` = identity + activation + attractors, exposed as
+> `context` / MCP `wiki_memory`, scored by the cross-session eval (assembled 100% > raw-log 87.5% >
+> cold 0%). *(B1's true concurrent reader-and-writer model, B5's incrementality/k-core, and B6's
+> host-hook auto-injection + confidence weighting remain as refinements — see the per-stage notes.)*
+> This remains the living design base for Path B — turning OpenWiki's knowledge graph from a document
+> **mirror** into agent **memory**.
 > The roadmap-level overview lives in [`docs/roadmap.md`](roadmap.md#path-b--the-second-brain-memory-model);
 > this document is the deep design (concepts → target architecture → data model → staged plan →
 > evaluation → open decisions). It re-opens arc42 **ADR-3** and **ADR-8** and addresses debts
@@ -341,8 +343,20 @@ to matter but late enough to de-risk. Each stage lists an **exit criterion** (ho
 - **First slice (v0.46):** `GraphStore.recall()` + `format_memory()` assemble a session's memory as
   a **decay-weighted** cosine ranking over assertion embeddings (`effective_weight` with a half-life
   — the activation tier), exposed as the `recall` CLI. It proves the two-session loop: a fact stored
-  in session 1 surfaces for a session-2 query. Full three-tier assembly (identity + activated
-  sub-graph + attractor summaries) and host-hook injection are still ahead.
+  in session 1 surfaces for a session-2 query.
+- **Landed (v0.52) — the full three-tier assembly (Path B's payoff).** `GraphStore.context_for(query,
+  embedder, identity)` builds a session's context from **all three tiers**: **identity** (DNA — the
+  project's `[memory] identity`, else its description/name), **activation** (`recall` — the
+  decay-weighted current facts), and **attractors** (the B5 `MemoryConcept` themes the recalled facts
+  belong to, via `relevant_concepts`). The formatting is a pure `memory.assemble_context`; the whole
+  thing is **fail-soft** (any tier may be empty → degrade, never block). Exposed as the **`context`**
+  CLI command and the MCP **`wiki_memory`** tool (a coding agent loads its memory at session start).
+  The cross-session eval's **"assembled" condition is now this assembler**, and the exit criterion
+  holds: assembled **100%** vs raw-log **87.5%** vs cold **0%** (8 scenarios) — *load the concentrate,
+  not the log*. Proven live: a query assembled identity + 8 recalled facts + 3 relevant theme
+  summaries into one block. **Deferred (the §11 refinements):** host-hook auto-injection
+  (`UserPromptSubmit`/`PreCompact`), per-fact **confidence** weighting, and a fixed-token budgeter —
+  the first slice budgets by simple `-k`/`--themes` caps.
 
 ## 7. Evaluation strategy
 
@@ -465,9 +479,12 @@ If no → we've learned it cheaply, before touching ADR-3.
 > across rebuilds.
 >
 > **B1 (v0.49)** added read-path reinforcement; **B4 (v0.50)** added contradiction/time-versioning
-> (`SUPERSEDES`); **B5 (v0.51)** added the sleep pass (`consolidate` → `MemoryConcept` themes). Of the
-> B0–B6 plan only **B6** (full three-tier context assembly) remains — the payoff stage that fuses
-> identity + activation (recall) + attractors (the B5 themes) into `context_for(query)`.
+> (`SUPERSEDES`); **B5 (v0.51)** added the sleep pass (`consolidate` → `MemoryConcept` themes); and
+> **B6 (v0.52)** landed the payoff — `context_for(query)` fuses identity + activation (recall) +
+> attractors (B5 themes) into an assembled session context (the `context` CLI + MCP `wiki_memory`),
+> and the cross-session eval scores it **assembled 100% > raw-log 87.5% > cold 0%**. **The B0–B6 plan
+> is complete** — what remains are refinements (B1 true concurrency, B5 incrementality/k-core, B6
+> host-hook injection + confidence), not stages.
 
 ## 11. Prior art & learnings — "Cognitive Substrate"
 

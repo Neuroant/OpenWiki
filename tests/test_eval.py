@@ -159,8 +159,12 @@ class _FakeMemGraph:
         return {"facts": len(facts), "added": len(facts), "duplicates": 0}
 
     def recall(self, query, embedder, k=5, **kw):
-        return [{"subject": f.subject, "predicate": f.predicate, "object": f.object,
-                 "session_id": sid, "cos": 1.0, "score": 1.0} for sid, f in self.stored][:k]
+        return [{"id": f"{sid}-{i}", "subject": f.subject, "predicate": f.predicate,
+                 "object": f.object, "session_id": sid, "cos": 1.0, "score": 1.0}
+                for i, (sid, f) in enumerate(self.stored)][:k]
+
+    def relevant_concepts(self, assertion_ids, limit=4):
+        return []   # no consolidation in the offline eval fake
 
 
 class _XChat:

@@ -707,7 +707,7 @@ class GraphStore:
                 continue
             cos = float(q @ np.asarray(emb, dtype=np.float32))   # stored normalized
             score = cos * effective_weight(1.0, int(created or 0), now, half_life_days)
-            scored.append({"subject": subj, "predicate": pred, "object": obj,
+            scored.append({"id": aid, "subject": subj, "predicate": pred, "object": obj,
                            "session_id": sid, "cos": round(cos, 3), "score": round(score, 3),
                            "superseded": is_sup})
         scored.sort(key=lambda x: -x["score"])
@@ -816,6 +816,42 @@ class GraphStore:
             return self._rows("MATCH (c:MemoryConcept) RETURN count(c);")[0][0] > 0
         except Exception:
             return False
+
+    def relevant_concepts(self, assertion_ids, limit: int = 4) -> list:
+        """B6 attractor tier: the consolidated themes (`MemoryConcept`) that contain any of
+        the given (activated) assertions, ranked by how many they cover, then size. Small
+        memory, so we read the CONSOLIDATES edges and aggregate in Python (no list-param SQL)."""
+        ids = set(assertion_ids)
+        if not ids:
+            return []
+        try:
+            rows = self._rows("MATCH (c:MemoryConcept)-[:CONSOLIDATES]->(a:Assertion) "
+                              "RETURN c.id, c.label, c.summary, c.size, a.id;")
+        except Exception:
+            return []
+        agg: dict = {}
+        for cid, label, summary, size, aid in rows:
+            if aid in ids:
+                e = agg.setdefault(cid, {"id": cid, "label": label, "summary": summary,
+                                         "size": size, "hits": 0})
+                e["hits"] += 1
+        return sorted(agg.values(), key=lambda c: (-c["hits"], -(c["size"] or 0), c["id"]))[:limit]
+
+    def context_for(self, query: str, embedder, identity: str = "",
+                    k: int = 8, max_themes: int = 4) -> str:
+        """B6: assemble a session's context for ``query`` from the three memory tiers —
+        identity + decay-weighted ``recall`` (activation) + the relevant consolidated themes
+        (attractors). Read-only + **fail-soft** (missing embedder / empty memory → identity
+        only, or ``""``)."""
+        from .memory import assemble_context
+        facts = []
+        if embedder is not None:
+            try:
+                facts = self.recall(query, embedder, k=k)
+            except Exception:      # never let a memory read break the caller
+                facts = []
+        themes = self.relevant_concepts([f["id"] for f in facts], limit=max_themes) if facts else []
+        return assemble_context(identity, facts, themes, max_facts=k, max_themes=max_themes)
 
     def hybrid_search(self, vector, k: int = 5) -> list[dict]:
         """Vector k-NN over chunks, then hop to the owning page (GraphRAG)."""

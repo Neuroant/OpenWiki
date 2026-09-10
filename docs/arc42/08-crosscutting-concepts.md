@@ -175,6 +175,11 @@ Alongside the document tier, a project in **Second Brain mode** (`[memory] enabl
   **`MemoryConcept`** theme, then folds usage + decays. Like `Community` it's a *derived* view
   (recomputed, not snapshotted), so the consolidated footprint stays **bounded** as raw history grows;
   the theme summaries are the memory's "attractor" tier and support global search over memory.
+- **Three-tier context assembly (B6).** `GraphStore.context_for(query, …)` fuses the tiers into one
+  session context: **identity** (the project / `[memory] identity`) + **activation** (`recall`) +
+  **attractors** (the themes the recalled facts belong to). Read-only + **fail-soft** (any tier may be
+  empty). Exposed as the `context` CLI + MCP `wiki_memory`; the cross-session eval scores it
+  ("assembled" beats raw-log). *Load the concentrate, not the log.*
 
 The lifecycle is **independent of documents** (ADR-14/16): `graph-build` rebuilds the document tier but
 preserves the remembered tier; consolidation touches memory, never documents. The payoff metric — *does

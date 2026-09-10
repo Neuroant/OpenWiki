@@ -32,7 +32,7 @@ from .opencode_template import scaffold_opencode
 from .graph import (
     GraphStore, answer_global, build_graph, capture_session, detect_communities,
     detect_page_offset, extract_entities, extract_references, extract_references_multi,
-    format_memory, summarize_community,
+    format_memory, summarize_community, summarize_facts,
 )
 from .embeddings import OllamaEmbedder
 from .llm import OllamaChat
@@ -350,6 +350,26 @@ def _build_argparser() -> argparse.ArgumentParser:
                          help="Days after which an unused edge's weight halves (default: 30).")
     decay_p.add_argument("--floor", type=float, default=0.1,
                          help="Prune edges whose effective weight falls below this (default: 0.1).")
+
+    cons_p = sub.add_parser("consolidate", parents=[common],
+                            help="Path B 'sleep' pass: cluster remembered facts into themes + summaries, then fold usage + decay.")
+    cons_p.add_argument("--graph", type=Path, default=None,
+                        help="Graph database dir (default: project's graph, else ./output/graph).")
+    cons_p.add_argument("--min-size", type=int, default=2,
+                        help="Smallest fact cluster that becomes a theme (default: 2).")
+    cons_p.add_argument("--max-facts", type=int, default=12,
+                        help="Max member facts shown to the summarizer per theme (default: 12).")
+    cons_p.add_argument("--similar-k", type=int, default=6,
+                        help="Top-k similarity edges per fact for clustering (default: 6).")
+    cons_p.add_argument("--half-life", type=float, default=30.0,
+                        help="Half-life (days) for the decay step (default: 30).")
+    cons_p.add_argument("--floor", type=float, default=0.1,
+                        help="Prune usage edges below this effective weight in the decay step (default: 0.1).")
+    cons_p.add_argument("--no-decay", action="store_true",
+                        help="Only re-cluster/summarize; skip the fold-usage + decay 'forget' step.")
+    cons_p.add_argument("--model", default=None,
+                        help="Chat model for the theme summaries (default: manifest models.chat).")
+    cons_p.add_argument("--host", default=None, help="Ollama host URL.")
 
     rem_p = sub.add_parser("remember", parents=[common],
                            help="Capture a session transcript into the graph's remembered tier (Path B).")
@@ -1130,6 +1150,10 @@ def _apply_project(args: argparse.Namespace, project: Optional[Project],
         val("host", "models", "host", DEFAULT_HOST)
     elif cmd == "decay":
         path("graph", p.graph_path if p else None, Path("output") / "graph")
+    elif cmd == "consolidate":
+        path("graph", p.graph_path if p else None, Path("output") / "graph")
+        val("model", "models", "chat", DEFAULT_CHAT)
+        val("host", "models", "host", DEFAULT_HOST)
     elif cmd == "remember":
         path("index", p.index_dir if p else None, Path("output") / "index")
         path("graph", p.graph_path if p else None, Path("output") / "graph")
@@ -1734,6 +1758,74 @@ def _cmd_communities(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_consolidate(args: argparse.Namespace) -> int:
+    """Path B 'sleep' pass (B5): cluster the current remembered facts into topical themes,
+    LLM-summarize each (MemoryConcept + CONSOLIDATES), then fold usage + decay — compress
+    the accumulated memory into structure and forget the noise. Re-runnable + bounded."""
+    from collections import defaultdict
+
+    project = getattr(args, "project_obj", None)
+    if project is not None and not project.memory_enabled:
+        print("(memory is disabled — Wiki mode; set [memory] enabled = true to consolidate)")
+        return 0
+    graph = _open_graph(args.graph, writable=True)
+    if graph is None:
+        print(f"error: no graph at {args.graph} (run `openwiki graph-build` first).", file=sys.stderr)
+        return 2
+    if not getattr(graph, "writable", False):
+        print("error: graph is locked by another process (stop `serve`/`chat` first).", file=sys.stderr)
+        graph.close()
+        return 2
+    try:
+        if not graph.has_memory():
+            print("(no remembered facts yet — capture sessions with `openwiki remember` first)")
+            return 0
+        ag = graph.assertion_graph(similar_k=args.similar_k)
+        facts = ag["facts"]
+        assignment0 = detect_communities(ag["edges"], list(facts))
+        members: dict = defaultdict(list)
+        for aid, cid in assignment0.items():
+            members[cid].append(aid)
+        # keep only clusters that form a real theme (>= min-size), largest first, renumbered
+        kept = [cid for cid in sorted(members, key=lambda c: (-len(members[c]), min(members[c])))
+                if len(members[cid]) >= args.min_size]
+        degree: dict = defaultdict(float)
+        for a, b, w in ag["edges"]:
+            degree[a] += w
+            degree[b] += w
+
+        chat = OllamaChat(model=args.model, host=args.host, temperature=0.2)
+        if kept:
+            print(f"Consolidating {len(facts)} fact(s) into {len(kept)} theme(s). "
+                  f"Summarizing with {chat.name} …", file=sys.stderr)
+        else:
+            print(f"No themes yet — need a cluster of ≥{args.min_size} related facts "
+                  f"({len(facts)} fact(s) so far).", file=sys.stderr)
+        assignment, summaries, labels = {}, {}, {}
+        for new_id, cid in enumerate(kept):
+            ranked = sorted(members[cid], key=lambda a: (-degree.get(a, 0.0), a))
+            fact_texts = [facts[a] for a in ranked[: args.max_facts]]
+            labels[new_id], summaries[new_id] = summarize_facts(
+                chat, fact_texts, fallback_label=f"Thema {new_id}")
+            for aid in members[cid]:
+                assignment[aid] = new_id
+            print(f"  [{new_id}] {len(members[cid]):>3} facts — {labels[new_id]}", file=sys.stderr)
+
+        result = graph.upsert_memory_concepts(assignment, summaries, labels)
+        folded = decayed = None
+        if not args.no_decay:
+            folded = graph.fold_usage()
+            decayed = graph.decay(half_life_days=args.half_life, floor=args.floor)
+    finally:
+        graph.close()
+
+    print(f"Consolidated {result['assertions']} fact(s) into {result['concepts']} theme(s) → {args.graph}")
+    if decayed is not None:
+        fold_note = f"folded {folded['records']} usage record(s); " if folded and folded["records"] else ""
+        print(f"  {fold_note}decayed {decayed['edges']} usage edge(s) ({decayed['pruned']} pruned).")
+    return 0
+
+
 def _cmd_decay(args: argparse.Namespace) -> int:
     """Maintenance pass over the usage-memory edges: first **fold in** any pending
     read-path usage (B1), then age each REINFORCES edge to now (persisting its decayed
@@ -1924,6 +2016,7 @@ _DISPATCH = {
     "graph-build": _cmd_graph_build,
     "communities": _cmd_communities,
     "decay": _cmd_decay,
+    "consolidate": _cmd_consolidate,
     "remember": _cmd_remember,
     "recall": _cmd_recall,
 }

@@ -25,7 +25,8 @@ The system is a straight, staged pipeline built around an intermediate represent
 9. **Usage-memory** — decaying `REINFORCES` edges that learn which connections are used.
 10. **Agent memory (Path B)** — an authoritative *remembered tier* (`Session`/`Assertion`) captured
     from session transcripts and recalled across sessions, with newer facts **superseding** older
-    ones; gated by a per-project **Wiki vs Second Brain mode** (`[memory] enabled`).
+    ones and periodic **consolidation** into themes (the "sleep" pass); gated by a per-project
+    **Wiki vs Second Brain mode** (`[memory] enabled`).
 
 Stages 1–9 run in **Wiki Mode** (documents only, the default); stage 10 adds the remembered tier in
 **Second Brain Mode** — the two coexist as tiers of one substrate (§8.15, ADR-14).

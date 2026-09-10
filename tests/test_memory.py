@@ -297,3 +297,57 @@ def test_rebuild_preserves_supersedes(tmp_path):
         assert "Postgres" in objs and "Kuzu" not in objs          # supersession survived the rebuild
     finally:
         store.close()
+
+
+# -- B5: consolidation ("sleep") -----------------------------------------------
+
+_PY_FACTS = [MemoryFact("the project", "runs on", "python"),
+             MemoryFact("python", "powers", "the project"),
+             MemoryFact("we build the project", "in", "python")]
+_DB_FACTS = [MemoryFact("the database", "is", "kuzu"),
+             MemoryFact("kuzu", "stores", "the database"),
+             MemoryFact("we query the database", "via", "kuzu")]
+
+
+def test_consolidate_clusters_current_facts_and_is_bounded(tmp_path):
+    """The sleep pass groups related facts into themes; re-running replaces, not accumulates."""
+    import pytest
+    pytest.importorskip("kuzu")
+    from openwiki.graph import GraphStore, detect_communities
+
+    store = GraphStore(_build_graph(tmp_path), writable=True)
+    try:
+        store.remember("s1", _PY_FACTS + _DB_FACTS, _MemEmbedder())
+        ag = store.assertion_graph(similar_k=6)
+        assert len(ag["facts"]) == 6                              # all current facts
+        assignment = detect_communities(ag["edges"], list(ag["facts"]))
+        assert len(set(assignment.values())) == 2                 # two topical themes emerge
+
+        summaries = {cid: "S." for cid in set(assignment.values())}
+        labels = {cid: f"T{cid}" for cid in set(assignment.values())}
+        res = store.upsert_memory_concepts(assignment, summaries, labels)
+        assert res["concepts"] == 2 and res["assertions"] == 6
+        concepts = store.memory_concepts()
+        assert len(concepts) == 2 and store.has_memory_concepts()
+        assert sum(c["size"] for c in concepts) == 6
+
+        store.upsert_memory_concepts(assignment, summaries, labels)   # a second sleep pass
+        assert len(store.memory_concepts()) == 2                  # bounded — replaced, not doubled
+    finally:
+        store.close()
+
+
+def test_consolidate_excludes_superseded_facts(tmp_path):
+    import pytest
+    pytest.importorskip("kuzu")
+    from openwiki.graph import GraphStore
+
+    store = GraphStore(_build_graph(tmp_path), writable=True)
+    try:
+        store.remember("s1", [MemoryFact("the database", "is", "kuzu")], _MemEmbedder())
+        store.remember("s2", [MemoryFact("the database", "is", "postgres")], _MemEmbedder())  # supersedes
+        texts = list(store.assertion_graph()["facts"].values())
+        assert any("postgres" in t for t in texts)                # current fact clusters
+        assert not any("kuzu" in t for t in texts)                # superseded one is excluded
+    finally:
+        store.close()

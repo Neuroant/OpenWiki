@@ -719,12 +719,103 @@ class GraphStore:
         if not self.writable:
             raise RuntimeError("GraphStore is read-only; open it writable to forget.")
         with self._lock:
-            for query in ("MATCH (a:Assertion) DETACH DELETE a;",
+            for query in ("MATCH (c:MemoryConcept) DETACH DELETE c;",
+                          "MATCH (a:Assertion) DETACH DELETE a;",
                           "MATCH (s:Session) DETACH DELETE s;"):
                 try:
                     self._exec(query)
                 except Exception:      # pragma: no cover - tables may not exist yet
                     pass
+
+    # -- B5 consolidation ("sleep"): themes over the remembered tier -----
+
+    def ensure_consolidation_schema(self) -> None:
+        """Create the MemoryConcept / CONSOLIDATES tables if a pre-existing graph lacks them."""
+        for ddl in (
+            "CREATE NODE TABLE IF NOT EXISTS MemoryConcept(id INT64, label STRING, summary STRING, "
+            "size INT64, created_at INT64, PRIMARY KEY(id));",
+            "CREATE REL TABLE IF NOT EXISTS CONSOLIDATES(FROM MemoryConcept TO Assertion);",
+        ):
+            try:
+                self._exec(ddl)
+            except Exception:      # pragma: no cover - already exists / older syntax
+                pass
+
+    def current_assertions(self) -> list:
+        """Current (not superseded) assertions with their stored embeddings:
+        ``[(id, subject, predicate, object, emb), ...]``."""
+        try:
+            rows = self._rows("MATCH (a:Assertion) "
+                              "RETURN a.id, a.subject, a.predicate, a.object, a.emb;")
+        except Exception:
+            return []
+        sup = self._superseded_ids()
+        return [(r[0], r[1], r[2], r[3], r[4]) for r in rows if r[0] not in sup]
+
+    def assertion_graph(self, similar_k: int = 6) -> dict:
+        """Undirected similarity graph over **current** assertions (top-``k`` cosine per
+        node), for B5 consolidation. Returns ``{"facts": {id: text}, "edges": [(a, b, w), …]}``."""
+        facts = self.current_assertions()
+        texts = {aid: f"{s} {p} {o}".strip() for aid, s, p, o, _ in facts}
+        ids = [f[0] for f in facts]
+        if len(ids) < 2:
+            return {"facts": texts, "edges": []}
+        mat = np.vstack([np.asarray(f[4], dtype=np.float32) for f in facts])
+        norms = np.linalg.norm(mat, axis=1, keepdims=True)
+        norms[norms == 0] = 1.0
+        mat = mat / norms                       # defensively normalize (recall stores normalized)
+        sims = mat @ mat.T
+        np.fill_diagonal(sims, -np.inf)
+        weights: dict = {}
+        for i, aid in enumerate(ids):
+            picked = 0
+            for j in np.argsort(-sims[i]):
+                if picked >= similar_k or sims[i, j] <= 0:
+                    break
+                other = ids[j]
+                key = (aid, other) if aid < other else (other, aid)
+                weights[key] = max(weights.get(key, 0.0), float(sims[i, j]))
+                picked += 1
+        return {"facts": texts, "edges": [(a, b, w) for (a, b), w in weights.items()]}
+
+    def upsert_memory_concepts(self, assignment: dict, summaries: dict, labels: dict,
+                               now: Optional[int] = None) -> dict:
+        """Replace the consolidation layer: (re)create MemoryConcept nodes + CONSOLIDATES
+        edges from ``{assertion_id: concept_id}`` + per-concept ``summaries``/``labels``.
+        Writable-only; an empty ``assignment`` just clears the old layer."""
+        if not self.writable:
+            raise RuntimeError("GraphStore is read-only; open it writable to consolidate.")
+        self.ensure_consolidation_schema()
+        now = int(now if now is not None else time.time())
+        sizes: dict = {}
+        for cid in assignment.values():
+            sizes[cid] = sizes.get(cid, 0) + 1
+        with self._lock:
+            self._exec("MATCH (c:MemoryConcept) DETACH DELETE c;")   # clear the old layer
+            for cid in sorted(sizes):
+                self._exec(
+                    "CREATE (:MemoryConcept {id:$id, label:$l, summary:$s, size:$n, created_at:$t});",
+                    {"id": int(cid), "l": labels.get(cid, ""), "s": summaries.get(cid, ""),
+                     "n": int(sizes[cid]), "t": now})
+            for aid, cid in assignment.items():
+                self._exec("MATCH (c:MemoryConcept {id:$id}),(a:Assertion {id:$aid}) "
+                           "CREATE (c)-[:CONSOLIDATES]->(a);", {"id": int(cid), "aid": aid})
+        return {"concepts": len(sizes), "assertions": len(assignment)}
+
+    def memory_concepts(self) -> list:
+        """All consolidated memory themes with their summaries (largest first)."""
+        try:
+            rows = self._rows("MATCH (c:MemoryConcept) "
+                              "RETURN c.id, c.label, c.summary, c.size ORDER BY c.size DESC, c.id;")
+        except Exception:
+            return []
+        return [{"id": r[0], "label": r[1], "summary": r[2], "size": r[3]} for r in rows]
+
+    def has_memory_concepts(self) -> bool:
+        try:
+            return self._rows("MATCH (c:MemoryConcept) RETURN count(c);")[0][0] > 0
+        except Exception:
+            return False
 
     def hybrid_search(self, vector, k: int = 5) -> list[dict]:
         """Vector k-NN over chunks, then hop to the owning page (GraphRAG)."""

@@ -10,7 +10,7 @@ import numpy as np
 
 from openwiki.graph.community import (
     answer_global, build_global_messages, build_summary_messages,
-    detect_communities, parse_summary, summarize_community,
+    detect_communities, parse_summary, summarize_community, summarize_facts,
 )
 
 # two triangles joined by a single weak bridge — a clean two-community graph
@@ -77,6 +77,21 @@ def test_summarize_falls_back_to_hub_title_without_theme_line():
     label, summary = summarize_community(chat, [("A", "x")], fallback_label="Hub Titel")
     assert label == "Hub Titel"                        # fallback kicks in
     assert summary == "Nur eine Zusammenfassung ohne Themenzeile."
+
+
+def test_summarize_facts_labels_a_memory_cluster():
+    chat = _FakeChat("Thema: Modell-Wahl\n\nWir nutzen qwen3 und bge-m3.")
+    label, summary = summarize_facts(
+        chat, ["the chat model is qwen3", "the embedding model is bge-m3"], fallback_label="Thema 0")
+    assert label == "Modell-Wahl"                       # B5: names the shared theme
+    assert summary == "Wir nutzen qwen3 und bge-m3."
+    user = chat.seen[0][-1]["content"]
+    assert "qwen3" in user and "bge-m3" in user         # facts reach the summarizer
+
+
+def test_summarize_facts_falls_back_without_theme_line():
+    label, _ = summarize_facts(_FakeChat("Nur Text."), ["a b c"], fallback_label="Thema 0")
+    assert label == "Thema 0"
 
 
 def test_parse_summary_variants():

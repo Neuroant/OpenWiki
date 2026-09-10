@@ -464,8 +464,11 @@ directions*). Stages re-open the decisions that flagged themselves for exactly t
   layer; the genuinely novel, unshipped-anywhere contribution. A newer fact (same subject+predicate,
   different object) **supersedes** the older via a `SUPERSEDES` edge; recall returns the current fact,
   the superseded history stays queryable (`recall --all`), and re-asserting an old fact revives it.
-- **B5 — Sleep job.** Phase 4 over the merged graph (communities + decay + abstraction) as a
-  scheduled consolidation pass.
+- **B5 — Sleep job. ✅ Landed (v0.51).** Phase 4 over the memory tier: `openwiki consolidate`
+  clusters the current facts (Louvain over an assertion-similarity graph), LLM-summarizes each into a
+  `MemoryConcept` theme, then folds usage + decays — re-runnable + bounded (themes replaced, not
+  accumulated), enabling global search over memory. *(Deferred: incrementality, k-core-vs-Louvain
+  stability, per-tier half-lives.)*
 - **B6 — Three-tier context assembly.** Build a session's context from identity + activation +
   attractors — the payoff: *load the concentrate, not the log*. *(First slice landed, v0.46:
   decay-weighted `recall` — the activation tier only.)*
@@ -504,8 +507,15 @@ validity intervals are derivable). `recall` returns **current facts only** by de
 the live fact, not the stale one), `recall --all` shows the superseded history flagged, and
 re-asserting a superseded fact **revives** it. Preserved across `graph-build` (B0). Verified live —
 `remember` port 8080 then 9090 supersedes the 8080; `recall` returns only 9090 *even though the stale
-fact scores a higher cosine* (supersession beats similarity). Next: **B5** (sleep consolidation) and
-the full three-tier **B6** assembly. See `path-b-memory.md` §6/B4.
+fact scores a higher cosine* (supersession beats similarity). See `path-b-memory.md` §6/B4.
+
+**B5 — sleep consolidation landed (v0.51).** The memory-tier analog of `communities`: `openwiki
+consolidate` clusters the current remembered facts by embedding similarity (Louvain), LLM-summarizes
+each cluster into a `MemoryConcept` theme, then folds usage + decays — the "compress the day into
+structure, forget the noise" pass. Re-runnable and **bounded** (themes are a derived view, replaced
+each run). Verified live: 9 facts → 3 coherent themes, `answer_global` over them produced a global
+answer over memory, and a second pass stayed at 3. Only **B6** (three-tier context assembly) remains
+— the payoff that fuses identity + activation (recall) + attractors (B5 themes). See `path-b-memory.md` §6/B5.
 
 ### Honest guardrails
 

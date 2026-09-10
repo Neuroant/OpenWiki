@@ -200,11 +200,25 @@ flagged:
 `Session`/`Assertion`/`ASSERTS`/`SUPERSEDES` tables are created (empty) by every `graph-build`,
 so old graphs upgrade lazily. Both commands are gated by the project's **mode**
 (`[memory] enabled`, below) — off (Wiki mode) they refuse/return nothing.
-**B0 landed (v0.48):** `graph-build`/`build` now **preserve** the remembered tier across a
-doc rebuild (the graph is authoritative for memory), and a **session source type**
-(`type = "session"`) is captured into it by a `build` memory stage. **Still deferred:**
-contradiction/time-versioning (B4) and read-path reinforcement (B1). Design in
-`docs/path-b-memory.md`.
+**Landed:** B0 (v0.48) preserve-the-memory-tier-on-rebuild + session source type + mode;
+B1 (v0.49) read-path reinforcement; B4 (v0.50) contradiction/supersession; B5 (v0.51)
+consolidation (below). Design in `docs/path-b-memory.md`.
+
+**Consolidate the memory (the "sleep" pass)** — the memory-tier analog of `communities`
+(Path B / B5): cluster the **current** remembered facts by embedding similarity, LLM-summarize
+each cluster into a **theme** (`MemoryConcept` + `CONSOLIDATES`), then fold usage + decay
+(the "forget" half). Re-runnable and **bounded** (re-clustering replaces the themes, doesn't
+accumulate); the theme summaries are the memory's "attractor" tier + support global search
+over memory (`answer_global`):
+```
+.venv\Scripts\python -m openwiki consolidate            # writes MemoryConcept themes, then decays
+```
+Options: `--graph DIR`, `--min-size N` (smallest cluster that becomes a theme; default 2),
+`--max-facts N` (facts shown to the summarizer per theme; default 12), `--similar-k N`
+(clustering edges per fact; default 6), `--half-life DAYS` / `--floor F` / `--no-decay` (the
+decay step), `--model NAME`, `--host URL`. Gated by `[memory] enabled`. Reuses
+`community.detect_communities` + a new `summarize_facts`; `MemoryConcept`/`CONSOLIDATES` are a
+*derived* view (recomputed each pass, not snapshotted across rebuilds — like `Community`).
 
 **Web UI** — browse + search + chat/edit + graph in the browser (stdlib server):
 ```
@@ -392,7 +406,14 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   tier) but returns **current only** by default (`_superseded_ids` = anything with an incoming
   `SUPERSEDES`); `has_memory()` gates both. `_ensure_memory_schema` lazily creates the tables so
   pre-0.46 graphs upgrade; B0's `_snapshot_memory`/`_restore_memory` preserve `SUPERSEDES` across a
-  rebuild. Exposed as the `remember`/`recall` (+`--all`) CLI commands. Design in `docs/path-b-memory.md`.
+  rebuild. Exposed as the `remember`/`recall` (+`--all`) CLI commands.
+  **B5 consolidation ("sleep"):** the `consolidate` command clusters the *current* assertions by
+  embedding similarity (`GraphStore.assertion_graph` → `community.detect_communities`), LLM-summarizes
+  each cluster into a theme (`community.summarize_facts`), and writes `MemoryConcept` + `CONSOLIDATES`
+  (`upsert_memory_concepts`; `memory_concepts()`/`has_memory_concepts()` read them) — then folds usage
+  + decays. Re-runnable + **bounded** (re-clustering *replaces* the themes); the summaries are the
+  memory's "attractor" tier and support global search over memory (`answer_global`). `MemoryConcept`
+  is a *derived* view (recomputed each pass, not snapshotted), like `Community`. Design in `docs/path-b-memory.md`.
 - **`openwiki/web/`** — the web UI. `server.py` = `WikiWebApp` (state) + a
   `ThreadingHTTPServer` handler exposing a JSON API (`/api/wiki`,
   `/api/pages/{slug}`, `/api/search`, `/api/chat`, `/api/graph/{slug}` = explore,
@@ -547,7 +568,7 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
 - **`openwiki/cli.py`** — argparse CLI with `init`, `build`, `status`, `project`
   (`list`/`use`/`add`/`remove`/`add-source`), `opencode`, `claude-code`, `ontology`, `ingest`,
   `build-wiki`, `index`, `search`, `eval`, `ask` (`--global` = global search),
-  `chat`, `graph-build`, `communities`, `decay`, `remember`, `recall`, `serve`, and `mcp`
+  `chat`, `graph-build`, `communities`, `decay`, `remember`, `recall`, `consolidate`, `serve`, and `mcp`
   subcommands. A shared
   `--project` (parent parser) + `_apply_project(args, project)` fill unset
   path/model/host/split-level args from the active project before dispatch (flags

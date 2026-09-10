@@ -144,6 +144,32 @@ def summarize_community(chat, members, fallback_label: str = "") -> tuple:
     return (label or fallback_label, summary)
 
 
+# -- B5 consolidation: summarize a cluster of *remembered facts* (Path B "sleep") -----
+
+FACT_SUMMARY_SYSTEM = (
+    "You label and summarize a cluster of related facts an assistant has remembered across "
+    "sessions. Reply in the language of the facts, in exactly this shape:\n"
+    "Thema: <a short 2–5 word title naming what the facts are about>\n"
+    "<a 2–4 sentence summary of the theme and what is currently known>\n"
+    "Name the shared subject/theme, not a single fact. Ground it strictly in the given "
+    "facts; do not invent. No preamble, no bullet list."
+)
+
+
+def build_fact_summary_messages(facts) -> list:
+    body = "\n".join(f"- {t}" for t in facts)
+    user = f"Remembered facts:\n{body}\n\nGive the theme title and summary."
+    return [{"role": "system", "content": FACT_SUMMARY_SYSTEM},
+            {"role": "user", "content": user}]
+
+
+def summarize_facts(chat, facts, fallback_label: str = "") -> tuple:
+    """One LLM call → ``(label, summary)`` for a cluster of remembered facts (B5). Reuses
+    the ``Thema:``-line parsing; falls back to ``fallback_label`` if the model omits it."""
+    label, summary = parse_summary(chat.chat(build_fact_summary_messages(facts)))
+    return (label or fallback_label, summary)
+
+
 GLOBAL_SYSTEM = (
     "You answer high-level, thematic questions about a documentation corpus using "
     "ONLY the community summaries provided. Each summary describes one topical "

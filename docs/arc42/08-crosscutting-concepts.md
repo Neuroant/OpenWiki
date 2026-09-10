@@ -170,6 +170,11 @@ Alongside the document tier, a project in **Second Brain mode** (`[memory] enabl
 - **Activation + forgetting.** `recall` ranks assertions by **decay-weighted** cosine (`effective_weight`,
   the same half-life math as the `REINFORCES` usage overlay), and read-path `record_usage` / `fold_usage`
   (B1) + `decay` keep the graph at a useful density — strengthen what's used, fade what isn't.
+- **Consolidation — the "sleep" pass (B5).** `openwiki consolidate` clusters the current assertions by
+  embedding similarity (the doc-community Louvain, re-targeted) and LLM-summarizes each cluster into a
+  **`MemoryConcept`** theme, then folds usage + decays. Like `Community` it's a *derived* view
+  (recomputed, not snapshotted), so the consolidated footprint stays **bounded** as raw history grows;
+  the theme summaries are the memory's "attractor" tier and support global search over memory.
 
 The lifecycle is **independent of documents** (ADR-14/16): `graph-build` rebuilds the document tier but
 preserves the remembered tier; consolidation touches memory, never documents. The payoff metric — *does

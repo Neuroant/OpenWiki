@@ -5,11 +5,13 @@
 > (v0.48): the memory tier now **survives document rebuilds**, a per-project **Wiki vs Second Brain
 > mode** (`[memory] enabled`) gates it, and a **session source type** feeds it through `openwiki
 > build`; **B1 — read-path reinforcement** (v0.49): ordinary read-only `ask`/MCP now teach the
-> graph via an append-only usage log a writer folds in; and **B4 — contradiction / time-versioning**
+> graph via an append-only usage log a writer folds in; **B4 — contradiction / time-versioning**
 > (v0.50): a newer fact **supersedes** an older one (same subject+predicate, different object) via a
 > `SUPERSEDES` edge, so recall returns the *current* fact while the superseded history stays
-> queryable — the belief-revision layer no off-the-shelf system ships. Still ahead: B5 (sleep
-> consolidation) and the full three-tier B6 assembly. This remains the living design base
+> queryable — the belief-revision layer no off-the-shelf system ships; and **B5 — sleep
+> consolidation** (v0.51): `consolidate` clusters the remembered facts into LLM-summarized
+> `MemoryConcept` themes (bounded, re-runnable) that support global search over memory. Still ahead:
+> the full three-tier **B6** assembly. This remains the living design base
 > for Path B — turning OpenWiki's knowledge graph from a document **mirror** into agent **memory**.
 > The roadmap-level overview lives in [`docs/roadmap.md`](roadmap.md#path-b--the-second-brain-memory-model);
 > this document is the deep design (concepts → target architecture → data model → staged plan →
@@ -313,6 +315,18 @@ to matter but late enough to de-risk. Each stage lists an **exit criterion** (ho
   decomposition** (deterministic, stable nested hierarchy) for the evolving graph (open decision, §8).
   Also adopt **per-tier decay half-lives** and a **source-invalidation cascade** (a changed source
   flags everything `derived_from` it for re-validation).
+- **Landed (v0.51).** Exactly the "re-target communities + decay at memory" plan: `openwiki
+  consolidate` clusters the **current** assertions by embedding similarity
+  (`GraphStore.assertion_graph` → the existing `detect_communities` Louvain), LLM-summarizes each
+  cluster into a **`MemoryConcept`** theme (`summarize_facts` — the `summarize_community` shape) with
+  a `CONSOLIDATES` edge to its member facts, then folds usage + runs `decay()` (the "forget" half).
+  `MemoryConcept` is a **derived view** — recomputed each pass, not snapshotted (like `Community`),
+  so it stays **bounded**: a re-run *replaces* the themes rather than accumulating. Proven live —
+  9 facts → 3 coherent themes; `answer_global` over the theme summaries then produced a synthesized
+  **global answer over memory** (the exit criterion's "global-search quality"), and a second pass
+  stayed at 3 themes. **Deferred:** true incrementality (re-summarize only changed clusters), the
+  **k-core vs Louvain** stability question (§8), per-tier half-lives, and the source-invalidation
+  cascade — the first slice re-clusters from scratch (fine for a bounded fact set).
 
 ### B6 — Three-tier context assembly
 - **Goal:** the payoff — build a new session's context from memory, cheaply.
@@ -448,7 +462,12 @@ If no → we've learned it cheaply, before touching ADR-3.
 > **preserves** the remembered tier (+ the `REINFORCES` overlay), gated by a per-project **Wiki vs
 > Second Brain mode** (`[memory] enabled`) and fed by a **session source type** captured through a
 > new `openwiki build` memory stage (§6/B0). Path B is no longer doc-derived — experience persists
-> across rebuilds. Still ahead: B1 (read-path reinforcement) and B4 (contradiction/versioning).
+> across rebuilds.
+>
+> **B1 (v0.49)** added read-path reinforcement; **B4 (v0.50)** added contradiction/time-versioning
+> (`SUPERSEDES`); **B5 (v0.51)** added the sleep pass (`consolidate` → `MemoryConcept` themes). Of the
+> B0–B6 plan only **B6** (full three-tier context assembly) remains — the payoff stage that fuses
+> identity + activation (recall) + attractors (the B5 themes) into `context_for(query)`.
 
 ## 11. Prior art & learnings — "Cognitive Substrate"
 

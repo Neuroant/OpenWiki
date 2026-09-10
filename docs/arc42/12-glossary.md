@@ -38,9 +38,10 @@
 | **Remembered tier** | The authoritative Path B memory subgraph (`Session`/`Assertion` + `SUPERSEDES`, plus the `REINFORCES` overlay); additive, preserved across doc rebuilds (ADR-16); active only in Second Brain mode. |
 | **Session / Assertion** | A captured "day" of experience (`Session`) and a reified subject·predicate·object fact under it (`Assertion`, with a mirrored embedding) — the memory data model (ADR-15). |
 | **SUPERSEDES / supersession** | A newer `Assertion` supersedes an older one (same normalized subject+predicate, different object); "current" = no incoming `SUPERSEDES`; nothing deleted, so history stays queryable (ADR-18). |
+| **MemoryConcept / consolidation** | A theme over a cluster of related current facts, with an LLM summary (`CONSOLIDATES` edges to its members) — the "sleep" pass (`openwiki consolidate`, B5). A *derived* view (recomputed, not snapshotted), like `Community`; supports global search over memory. |
 | **Usage log** | The append-only `graph.usage.jsonl` sidecar a read-only `ask`/MCP writes to; the next writer folds it into `REINFORCES` edges — read-path reinforcement without the write lock (B1/ADR-17). |
 | **Mode (Wiki / Second Brain)** | A per-project policy (`[memory] enabled`): Wiki = document tier only (default); Second Brain = document + remembered tiers (ADR-14). |
-| **Path A / Path B** | A = the consolidation layer (communities / global search, done); B = agent-memory — **landed** the remembered tier (B0 authoritative graph, B1 read-path reinforcement, B4 contradiction versioning); B5 sleep consolidation + B6 full context-assembly next. |
+| **Path A / Path B** | A = the consolidation layer (communities / global search, done); B = agent-memory — **landed** the remembered tier (B0 authoritative graph, B1 read-path reinforcement, B4 contradiction versioning, B5 sleep consolidation); only B6 (full three-tier context-assembly) remains. |
 
 ## 12.4 Platform & tooling
 

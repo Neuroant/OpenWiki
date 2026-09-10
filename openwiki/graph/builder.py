@@ -232,6 +232,12 @@ class GraphBuilder:
         # (same subject+predicate, different object). 'Current' = no incoming SUPERSEDES;
         # nothing is deleted, so the superseded history stays queryable.
         conn.execute("CREATE REL TABLE SUPERSEDES(FROM Assertion TO Assertion);")
+        # B5 consolidation ("sleep"): topical MemoryConcept summaries over clusters of current
+        # assertions (populated by `openwiki consolidate`, empty otherwise). Like Community, a
+        # *derived* view — recomputed by the sleep pass, not snapshotted across rebuilds.
+        conn.execute("CREATE NODE TABLE MemoryConcept("
+                     "id INT64, label STRING, summary STRING, size INT64, created_at INT64, PRIMARY KEY(id));")
+        conn.execute("CREATE REL TABLE CONSOLIDATES(FROM MemoryConcept TO Assertion);")
 
     # -- nodes / structural edges --------------------------------------
 

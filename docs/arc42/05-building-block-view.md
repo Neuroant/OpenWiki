@@ -166,7 +166,7 @@ flowchart TB
 | `store.py` | I/O (kuzu) | see §5.4 | Read-only by default; writable for edits/memory. |
 | `references.py` | pure | `extract_references(doc, wiki)`, `extract_references_multi(doc, wiki, meta)`, `detect_page_offset(doc)` | Page + section/chapter cross-refs → `REFERENCES` edges. |
 | `entities.py` | pure (injected chat) | `extract_entities(wiki, chat, types, …) -> [Entity]`; `coerce_types`; `DEFAULT_ENTITY_TYPES` | LLM per page + normalization; opt-in. |
-| `community.py` | pure (injected chat) | `detect_communities(edges, nodes)`; `summarize_community(chat, members)`; `answer_global(chat, q, communities)`; `parse_summary` | Consolidation layer / global search. |
+| `community.py` | pure (injected chat) | `detect_communities(edges, nodes)`; `summarize_community(chat, members)`; `summarize_facts(chat, facts)` (B5 memory themes); `answer_global(chat, q, communities)`; `parse_summary` | Consolidation layer / global search (docs **and**, via B5, memory). |
 | `decay.py` | pure | `effective_weight(w, last_seen, now, half_life)`; `reinforced_weight(w, boost, cap)` | Usage-memory math. |
 | `memory.py` | pure (injected chat) | `capture_session(chat, transcript) -> [MemoryFact]`; `parse_facts`; `format_memory(recalled)` | Path B: session → subject–predicate–object facts + context formatting. |
 | `usage.py` | pure | `usage_log_path(db)`; `append_usage(path, pairs)`; `read_usage`; `clear_usage` | Path B (B1): the append-only read-path usage-log sidecar. |
@@ -200,6 +200,7 @@ for edits + memory. Responsibilities group as:
 | **Communities** | `communities()`, `community_members()`, `page_graph()`, `page_snippet()`, `upsert_communities(assignment, summaries, labels)` |
 | **Usage-memory** | `reinforce(from, to, now, boost)`, `decay(now, half_life, floor)`, `record_usage(pairs)` (writable → reinforce / read-only → log), `fold_usage(now)`, `pending_usage()` |
 | **Remembered tier (Path B)** | `remember(session_id, facts, embedder)` (dedup + **supersede** contradictions), `recall(query, embedder, k, include_superseded)` (current-only by default), `has_memory()`, `forget_all()` |
+| **Memory consolidation (Path B / B5)** | `assertion_graph(similar_k)` (similarity over current facts), `upsert_memory_concepts(assignment, summaries, labels)` (the "sleep" pass → `MemoryConcept` themes), `memory_concepts()`, `has_memory_concepts()` |
 | **Incremental update** | `upsert_page(slug, text, …, embedder)` (MERGE page, replace chunks, recompute `SIMILAR_TO`) |
 | **Hybrid retrieval** | `hybrid_search(vector, k)` (vector k-NN → owning page) |
 

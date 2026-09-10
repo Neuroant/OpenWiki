@@ -584,12 +584,21 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   **Claude Code** — writes a project-scoped `.mcp.json` (registers `openwiki` as an MCP
   server via `owiki mcp` discovery) plus `.claude/commands/*` (`wiki-ask`,
   `wiki-explore`, `openwiki-help`) and an auto-applied `.claude/skills/openwiki`. Same
-  `render_files`/`scaffold_claude_code` shape; shares `cli._mcp_command()`.
+  `render_files`/`scaffold_claude_code` shape; shares `cli._mcp_command()`. With
+  **`--hooks`** it also merges the **B6 host-lifecycle memory hooks** into `.claude/settings.json`
+  (`merge_hooks`/`hooks_config`: `UserPromptSubmit`→`owiki hook inject`, `SessionEnd`/`PreCompact`→
+  `owiki hook capture`), preserving other settings. `parse_claude_transcript` (pure) turns the
+  Claude Code transcript JSONL into a text transcript for capture. The hooks run `cli._cmd_hook`
+  (reads the event JSON on stdin, **always exits 0** — fail-soft — else exit 2 would reject the
+  prompt): `inject` = `GraphStore.context_for(prompt)` → stdout (Claude Code injects it), `capture`
+  = parse transcript → `capture_session` → `remember` (skipped if the graph is write-locked). Gated
+  by the project's `[memory] enabled`. Design: Path B / B6 host-hook refinement.
 - **`openwiki/cli.py`** — argparse CLI with `init`, `build`, `status`, `project`
   (`list`/`use`/`add`/`remove`/`add-source`), `opencode`, `claude-code`, `ontology`, `ingest`,
   `build-wiki`, `index`, `search`, `eval`, `ask` (`--global` = global search),
   `chat`, `graph-build`, `communities`, `decay`, `remember`, `recall`, `consolidate`, `context`,
-  `serve`, and `mcp` subcommands. A shared
+  `hook` (host-lifecycle memory hook — reads the event JSON on stdin), `serve`, and `mcp`
+  subcommands. A shared
   `--project` (parent parser) + `_apply_project(args, project)` fill unset
   path/model/host/split-level args from the active project before dispatch (flags
   override; no project → `./output`). `init`/`project add-source` take **`--session`**

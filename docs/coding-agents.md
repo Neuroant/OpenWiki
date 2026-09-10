@@ -155,6 +155,29 @@ Two more commands teach OpenWiki *itself* (copy from
 - **`/openwiki-help [question]`** — a quick command cheat-sheet and one-off
   "how do I …" answers.
 
+### 5. Agent memory hooks (Second Brain — optional)
+
+If the project runs in **Second Brain mode** (`[memory] enabled` in `openwiki.toml`), you can wire
+OpenWiki's cross-session memory into Claude Code's session lifecycle:
+
+```bash
+owiki claude-code --hooks     # merges memory hooks into .claude/settings.json
+```
+
+This adds three hooks (`owiki hook` reads the event JSON on stdin, and is **fail-soft** — it never
+blocks a prompt):
+
+- **`UserPromptSubmit` → `owiki hook inject`** — assembles the three-tier memory context
+  (identity + recalled facts + relevant themes) for your prompt and injects it, so the agent starts
+  each turn already oriented. Also available on demand as `owiki context "<query>"` and the
+  `wiki_memory` MCP tool.
+- **`SessionEnd` / `PreCompact` → `owiki hook capture`** — captures the conversation transcript into
+  memory (`remember`), so what you discussed persists into the next session.
+
+Memory only accumulates if you also **capture + consolidate** (`owiki remember` / `owiki consolidate`,
+or let the capture hook do it) and the project has a built graph. In Wiki mode (the default) the hooks
+are no-ops. See `docs/path-b-memory.md` for the full agent-memory design.
+
 ---
 
 ## OpenCode

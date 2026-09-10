@@ -158,6 +158,16 @@ def test_apply_project_backcompat_no_project():
     assert ns.split_level == 2
 
 
+def test_cmd_hook_is_fail_soft(monkeypatch, tmp_path):
+    import io
+    import json as _json
+    ns = _ns("hook", event="inject")
+    monkeypatch.setattr("sys.stdin", io.StringIO("not json at all"))
+    assert cli._cmd_hook(ns) == 0                                  # garbage stdin → never blocks
+    monkeypatch.setattr("sys.stdin", io.StringIO(_json.dumps({"prompt": "hi", "cwd": str(tmp_path)})))
+    assert cli._cmd_hook(ns) == 0                                  # no project at cwd → exit 0
+
+
 def test_cmd_init_scaffold(tmp_path):
     src = tmp_path / "manual.pdf"
     src.write_bytes(b"%PDF-1.4 x")

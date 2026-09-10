@@ -525,9 +525,16 @@ fuses **identity** (project / `[memory] identity`) + **activation** (decay-weigh
 *load the concentrate, not the log*. Exposed as the `context` CLI command and the MCP `wiki_memory`
 tool, and the cross-session eval's "assembled" condition is now this assembler: **assembled 100% >
 raw-log 87.5% > cold 0%** (8 scenarios) — assembled memory beats both replaying the log and starting
-cold. **The B0–B6 staged plan is complete.** What remains are refinements, not stages: host-lifecycle
-auto-injection (`UserPromptSubmit`/`PreCompact`), per-fact confidence weighting, B5 incrementality /
-k-core stability, and B1's true concurrent reader-and-writer model. See `path-b-memory.md` §6/B6.
+cold. **The B0–B6 staged plan is complete.** See `path-b-memory.md` §6/B6.
+
+**Host-lifecycle auto-injection landed (v0.53).** The first B6 refinement: `owiki claude-code --hooks`
+wires memory into the Claude Code session lifecycle — **`UserPromptSubmit` → `owiki hook inject`**
+(assemble `context_for` for the prompt → injected via stdout) and **`SessionEnd`/`PreCompact` →
+`owiki hook capture`** (parse the transcript → `remember`). The `hook` command is strictly **fail-soft**
+(always exits 0 — exit 2 would reject the prompt; degrades to no-op without memory). So memory now flows
+automatically: recalled *into* each turn, captured *out of* each session. Verified live end-to-end.
+**Still open (refinements, not stages):** per-fact confidence weighting, B5 incrementality / k-core
+stability, and B1's true concurrent reader-and-writer model.
 
 ### Honest guardrails
 

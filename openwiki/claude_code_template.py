@@ -118,6 +118,73 @@ or build OpenWiki itself, see the **`/openwiki-help`** command.
 """
 
 
+def _text_of(content) -> str:
+    """Plain text of a Claude message ``content`` — a string, or a list of blocks
+    (keep ``{"type": "text"}`` blocks; skip tool_use/tool_result)."""
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block.strip())
+            elif isinstance(block, dict) and block.get("type") == "text" and block.get("text"):
+                parts.append(str(block["text"]).strip())
+        return " ".join(p for p in parts if p).strip()
+    return ""
+
+
+def parse_claude_transcript(text: str, max_chars: int = 20000) -> str:
+    """Convert a Claude Code transcript (JSONL — one message per line) into a plain
+    ``User: … / Assistant: …`` transcript for memory capture (B6 host hook). Lenient:
+    skips lines it can't parse and non-text content (tool calls/results); returns the
+    **last** ``max_chars`` (the most recent conversation, bounded)."""
+    turns: list = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(obj, dict):
+            continue
+        msg = obj.get("message") if isinstance(obj.get("message"), dict) else obj
+        role = str(msg.get("role") or obj.get("type") or "").lower()
+        if role not in ("user", "assistant"):
+            continue
+        body = _text_of(msg.get("content"))
+        if body:
+            turns.append(f"{role.capitalize()}: {body}")
+    transcript = "\n\n".join(turns).strip()
+    return transcript[-max_chars:] if len(transcript) > max_chars else transcript
+
+
+def hooks_config(inject_command: str, capture_command: str) -> dict:
+    """The Claude Code ``hooks`` block wiring OpenWiki memory into the session lifecycle
+    (B6): inject recalled context on every prompt, capture the session on end/compaction.
+    Capture is best-effort; inject must be fast + fail-soft (it never exits non-zero)."""
+    return {
+        "UserPromptSubmit": [
+            {"hooks": [{"type": "command", "command": inject_command, "timeout": 30}]}],
+        "SessionEnd": [
+            {"hooks": [{"type": "command", "command": capture_command, "timeout": 120}]}],
+        "PreCompact": [
+            {"hooks": [{"type": "command", "command": capture_command, "timeout": 120}]}],
+    }
+
+
+def merge_hooks(existing: dict, inject_command: str, capture_command: str) -> dict:
+    """Merge the OpenWiki memory hooks into an existing ``.claude/settings.json`` dict,
+    preserving other settings and other hook events (our three events are overwritten)."""
+    settings = dict(existing) if isinstance(existing, dict) else {}
+    hooks = dict(settings.get("hooks") or {}) if isinstance(settings.get("hooks"), dict) else {}
+    hooks.update(hooks_config(inject_command, capture_command))
+    settings["hooks"] = hooks
+    return settings
+
+
 def render_files(chat_model: str, embed_model: str, mcp_command: list) -> dict:
     """Return ``{relative_path: content}`` for the Claude Code setup."""
     command, *args = list(mcp_command)
@@ -130,10 +197,13 @@ def render_files(chat_model: str, embed_model: str, mcp_command: list) -> dict:
     }
 
 
-def scaffold_claude_code(root, *, chat_model: str, embed_model: str,
-                         mcp_command: list, force: bool = False) -> tuple[list, list]:
+def scaffold_claude_code(root, *, chat_model: str, embed_model: str, mcp_command: list,
+                         force: bool = False, inject_command: str = "",
+                         capture_command: str = "") -> tuple[list, list]:
     """Write the Claude Code config into ``root``. Existing files are left untouched
-    unless ``force``. Returns ``(written, skipped)`` as lists of ``Path``."""
+    unless ``force``. When ``inject_command``/``capture_command`` are given, also **merge**
+    the B6 memory hooks into ``.claude/settings.json`` (preserving other settings — always
+    applied, so a re-run refreshes the commands). Returns ``(written, skipped)``."""
     root = Path(root)
     written: list = []
     skipped: list = []
@@ -145,4 +215,16 @@ def scaffold_claude_code(root, *, chat_model: str, embed_model: str,
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
         written.append(target)
+    if inject_command and capture_command:
+        settings = root / ".claude" / "settings.json"
+        existing: dict = {}
+        if settings.is_file():
+            try:
+                existing = json.loads(settings.read_text(encoding="utf-8"))
+            except ValueError:
+                existing = {}
+        merged = merge_hooks(existing, inject_command, capture_command)
+        settings.parent.mkdir(parents=True, exist_ok=True)
+        settings.write_text(json.dumps(merged, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        written.append(settings)
     return written, skipped

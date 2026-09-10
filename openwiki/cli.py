@@ -96,6 +96,10 @@ def _build_argparser() -> argparse.ArgumentParser:
     cc_p = sub.add_parser("claude-code", parents=[common],
                           help="Scaffold a Claude Code config (.mcp.json + .claude/) wiring the project's MCP server.")
     cc_p.add_argument("--force", action="store_true", help="Overwrite existing Claude Code files.")
+    cc_p.add_argument("--hooks", action="store_true",
+                      help="Also wire Path B memory hooks into .claude/settings.json — auto-inject "
+                           "recalled memory on each prompt + capture the session on end/compaction "
+                           "(Second Brain mode; runs `owiki hook` per prompt).")
 
     build_p = sub.add_parser("build", parents=[common],
                              help="Run the pipeline (ingest → wiki → index → graph) from the manifest.")
@@ -400,6 +404,13 @@ def _build_argparser() -> argparse.ArgumentParser:
     ctx_p.add_argument("-i", "--index", type=Path, default=None, help="Index dir (for the embedder; default: project's).")
     ctx_p.add_argument("--graph", type=Path, default=None, help="Graph dir (default: project's graph).")
     ctx_p.add_argument("--host", default=None, help="Ollama host URL.")
+
+    hook_p = sub.add_parser("hook",
+                            help="Host-lifecycle memory hook (reads the event JSON on stdin) — wired "
+                                 "into Claude Code by `claude-code --hooks`, not run by hand.")
+    hook_p.add_argument("event", choices=["inject", "capture"],
+                        help="inject = UserPromptSubmit (recall → inject context); "
+                             "capture = SessionEnd/PreCompact (remember the session).")
     return parser
 
 
@@ -543,6 +554,15 @@ def _mcp_command() -> list:
     return [Path(sys.executable).as_posix(), "-m", "openwiki", "mcp"]
 
 
+def _hook_command(event: str) -> str:
+    """The shell command string a Claude Code hook runs for OpenWiki memory
+    (``inject``/``capture``). Prefer the portable `owiki`; else the current interpreter
+    (quoted — its path may contain spaces on Windows)."""
+    if shutil.which("owiki"):
+        return f"owiki hook {event}"
+    return f'"{Path(sys.executable).as_posix()}" -m openwiki hook {event}'
+
+
 def _scaffold_opencode_for(project: Project, force: bool,
                            model: Optional[str] = None, host: Optional[str] = None) -> None:
     userconfig = UserConfig.load()
@@ -592,14 +612,22 @@ def _cmd_claude_code(args: argparse.Namespace) -> int:
     embed = (project.setting("models", "embed", None)
              or userconfig.setting("models", "embed", None) or DEFAULT_EMBED)
     command = _mcp_command()
+    hooks = getattr(args, "hooks", False)
+    inject_cmd = _hook_command("inject") if hooks else ""
+    capture_cmd = _hook_command("capture") if hooks else ""
     print(f"Scaffolding Claude Code config into project '{project.name}' ({project.root})")
     written, skipped = scaffold_claude_code(
-        project.root, chat_model=chat, embed_model=embed, mcp_command=command, force=args.force)
+        project.root, chat_model=chat, embed_model=embed, mcp_command=command, force=args.force,
+        inject_command=inject_cmd, capture_command=capture_cmd)
     for path in written:
         print(f"  wrote    {path.relative_to(project.root)}")
     for path in skipped:
         print(f"  skipped  {path.relative_to(project.root)}  (exists; --force to overwrite)")
     print(f"  MCP server 'openwiki' via `{' '.join(command)}`")
+    if hooks:
+        mode = "on" if project.memory_enabled else "OFF — enable [memory] to use them"
+        print(f"  memory hooks: UserPromptSubmit→inject, SessionEnd/PreCompact→capture "
+              f"(`{inject_cmd}`); Second Brain mode is {mode}")
     if not shutil.which("owiki"):
         print("  note: `owiki` is not on PATH; the MCP uses this Python. Install it globally "
               "(install-openwiki.ps1 / .sh) for a portable `owiki mcp`.", file=sys.stderr)
@@ -1976,6 +2004,86 @@ def _cmd_context(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_hook(args: argparse.Namespace) -> int:
+    """Host-lifecycle memory hook (B6): reads the Claude Code event JSON on stdin and either
+    **injects** recalled memory (UserPromptSubmit → stdout) or **captures** the session
+    (SessionEnd/PreCompact → remember). **Always exits 0** — a hook must never block the
+    session (exit 2 on UserPromptSubmit would reject the prompt). Fail-soft throughout."""
+    try:
+        raw = sys.stdin.read()
+        payload = json.loads(raw) if raw.strip() else {}
+        if isinstance(payload, dict):
+            _run_hook(args.event, payload)
+    except Exception as exc:      # fail-soft: stderr goes to the host's debug log only
+        print(f"openwiki hook '{getattr(args, 'event', '?')}': {exc}", file=sys.stderr)
+    return 0
+
+
+def _run_hook(event: str, payload: dict) -> None:
+    project = Project.find(payload.get("cwd") or None)
+    if project is None or not project.memory_enabled:
+        return   # no project / Wiki mode → nothing to inject or capture
+    if event == "inject":
+        _hook_inject(project, payload)
+    elif event == "capture":
+        _hook_capture(project, payload)
+
+
+def _hook_embedder(project: Project):
+    """Load the project's index embedder with its host set (or None if no index)."""
+    if not (project.index_dir / "index.json").is_file():
+        return None
+    index = SemanticIndex.load(project.index_dir)
+    if isinstance(index.embedder, OllamaEmbedder):
+        index.embedder.host = project.setting("models", "host", DEFAULT_HOST).rstrip("/")
+    return index.embedder
+
+
+def _hook_inject(project: Project, payload: dict) -> None:
+    """UserPromptSubmit → assemble the three-tier memory context for the prompt and print
+    it (Claude Code adds a hook's stdout to the prompt context)."""
+    prompt = str(payload.get("prompt") or "").strip()
+    embedder = _hook_embedder(project) if prompt else None
+    if not embedder or not project.graph_path.exists():
+        return
+    graph = GraphStore(project.graph_path)   # read-only
+    try:
+        context = graph.context_for(prompt, embedder, identity=project.identity)
+    finally:
+        graph.close()
+    if context.strip():
+        sys.stdout.write(
+            "Relevant memory from earlier sessions (OpenWiki Second Brain) — use if helpful; "
+            "this is not the user's current message:\n\n" + context + "\n")
+
+
+def _hook_capture(project: Project, payload: dict) -> None:
+    """SessionEnd/PreCompact → capture the transcript into the remembered tier (best-effort;
+    skips silently if the graph is locked by a running serve/chat)."""
+    from .claude_code_template import parse_claude_transcript
+
+    tpath = payload.get("transcript_path")
+    embedder = _hook_embedder(project)
+    if not tpath or not Path(tpath).is_file() or embedder is None or not project.graph_path.exists():
+        return
+    transcript = parse_claude_transcript(Path(tpath).read_text(encoding="utf-8", errors="ignore"))
+    if not transcript.strip():
+        return
+    graph = _open_graph(project.graph_path, writable=True)
+    if graph is None:
+        return
+    if not getattr(graph, "writable", False):
+        graph.close()
+        return   # locked (serve/chat) — skip; the next session end will capture
+    try:
+        chat = OllamaChat(model=project.setting("models", "chat", DEFAULT_CHAT),
+                          host=project.setting("models", "host", DEFAULT_HOST), temperature=0.2)
+        facts = capture_session(chat, transcript)
+        graph.remember(str(payload.get("session_id") or "session"), facts, embedder)
+    finally:
+        graph.close()
+
+
 def _fold_pending_usage(graph) -> None:
     """B1: when a writable process starts, fold any read-path usage logged since the
     last writer into the graph (best-effort). No-op on a read-only/None graph or empty log."""
@@ -2070,6 +2178,7 @@ _DISPATCH = {
     "remember": _cmd_remember,
     "recall": _cmd_recall,
     "context": _cmd_context,
+    "hook": _cmd_hook,
 }
 
 

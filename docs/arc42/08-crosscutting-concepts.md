@@ -178,7 +178,9 @@ Alongside the document tier, a project in **Second Brain mode** (`[memory] enabl
 - **Three-tier context assembly (B6).** `GraphStore.context_for(query, …)` fuses the tiers into one
   session context: **identity** (the project / `[memory] identity`) + **activation** (`recall`) +
   **attractors** (the themes the recalled facts belong to). Read-only + **fail-soft** (any tier may be
-  empty). Exposed as the `context` CLI + MCP `wiki_memory`; the cross-session eval scores it
+  empty). Exposed as the `context` CLI, the MCP `wiki_memory` tool, and — via `claude-code --hooks` —
+  **Claude Code host hooks** (`UserPromptSubmit`→inject, `SessionEnd`/`PreCompact`→capture, through the
+  fail-soft `owiki hook` command), so memory flows automatically. The cross-session eval scores it
   ("assembled" beats raw-log). *Load the concentrate, not the log.*
 
 The lifecycle is **independent of documents** (ADR-14/16): `graph-build` rebuilds the document tier but

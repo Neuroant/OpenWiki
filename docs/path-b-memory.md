@@ -11,8 +11,10 @@
 > into LLM-summarized `MemoryConcept` themes (bounded, global-searchable); and **B6** (v0.52) the
 > **three-tier context assembly** — `context_for` = identity + activation + attractors, exposed as
 > `context` / MCP `wiki_memory`, scored by the cross-session eval (assembled 100% > raw-log 87.5% >
-> cold 0%). *(B1's true concurrent reader-and-writer model, B5's incrementality/k-core, and B6's
-> host-hook auto-injection + confidence weighting remain as refinements — see the per-stage notes.)*
+> cold 0%). **Host-lifecycle auto-injection** then landed (v0.53): `claude-code --hooks` wires memory
+> into the Claude Code session lifecycle (`UserPromptSubmit`→inject, `SessionEnd`/`PreCompact`→capture),
+> so memory flows automatically. *(B1's true concurrent reader-and-writer model, B5's incrementality/
+> k-core, and B6's per-fact confidence weighting remain as refinements — see the per-stage notes.)*
 > This remains the living design base for Path B — turning OpenWiki's knowledge graph from a document
 > **mirror** into agent **memory**.
 > The roadmap-level overview lives in [`docs/roadmap.md`](roadmap.md#path-b--the-second-brain-memory-model);
@@ -354,9 +356,19 @@ to matter but late enough to de-risk. Each stage lists an **exit criterion** (ho
   The cross-session eval's **"assembled" condition is now this assembler**, and the exit criterion
   holds: assembled **100%** vs raw-log **87.5%** vs cold **0%** (8 scenarios) — *load the concentrate,
   not the log*. Proven live: a query assembled identity + 8 recalled facts + 3 relevant theme
-  summaries into one block. **Deferred (the §11 refinements):** host-hook auto-injection
-  (`UserPromptSubmit`/`PreCompact`), per-fact **confidence** weighting, and a fixed-token budgeter —
-  the first slice budgets by simple `-k`/`--themes` caps.
+  summaries into one block.
+- **Host-lifecycle auto-injection landed (v0.53) — the §11 refinement.** OpenWiki now wires memory
+  into the Claude Code session lifecycle: `owiki claude-code --hooks` merges hooks into
+  `.claude/settings.json` — **`UserPromptSubmit` → `owiki hook inject`** (assemble `context_for` for the
+  prompt → stdout, which Claude Code injects) and **`SessionEnd`/`PreCompact` → `owiki hook capture`**
+  (parse the transcript → `capture_session` → `remember`). The `hook` command reads the event JSON on
+  stdin and is **strictly fail-soft** — it *always* exits 0 (exit 2 on `UserPromptSubmit` would reject
+  the prompt), degrades to no-op without a project / memory / graph, and skips capture when the graph
+  is write-locked. Proven live end-to-end: a `UserPromptSubmit` payload injected the three-tier block;
+  a `SessionEnd` payload captured two new facts from a transcript (surfaced by the next `recall`). So
+  memory now flows automatically — recalled *into* each turn, captured *out of* each session. **Still
+  deferred:** per-fact **confidence** weighting and a fixed-token budgeter (the first slice budgets by
+  simple `-k`/`--themes` caps).
 
 ## 7. Evaluation strategy
 
@@ -510,7 +522,7 @@ lifecycle; "concentrate, don't replay" retrieval.
 | **Write-time validation gates** — dedup, controlled-vocab predicates, source-support (anti-hallucination), anti-vagueness, near-dup merge, cross-tier contradiction rejection. | B2/B3 |
 | **`ConsolidationRun`/`MergeRun` audit node**; rollback = close validity on its outputs. | B3/B5, §4 |
 | **Tier-aware confidence** (per-tier half-lives; retrieval weighted by confidence; reset on re-emergence) + **source-invalidation cascade**. | B5, B6 |
-| **Host-lifecycle triggers** — `UserPromptSubmit`→recall/inject, `Stop`→capture, `PreCompact`→flush — and **fail-soft** hooks. | B2/B6, §8 |
+| **Host-lifecycle triggers** — `UserPromptSubmit`→recall/inject, `Stop`→capture, `PreCompact`→flush — and **fail-soft** hooks. | B6 (**landed v0.53**: `claude-code --hooks` → `owiki hook inject`/`capture`) |
 | **Cost governance** — per-session budget cap; cheap model for distil, expensive for reasoning. | §8 |
 | **Real embeddings only** — a parallel project's hash-stub embeddings returned garbage; use bge-m3. | §8 |
 

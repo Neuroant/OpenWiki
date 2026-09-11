@@ -101,24 +101,63 @@ def format_memory(recalled: list) -> str:
     return "\n".join(lines)
 
 
-def assemble_context(identity: str, facts: list, themes: list,
-                     max_facts: int = 8, max_themes: int = 4) -> str:
+_FACT_BUDGET_SHARE = 0.6   # facts (activation) get the majority of the char budget; themes the rest
+
+
+def _fit_section(header: str, lines: list, budget) -> tuple:
+    """Header + as many ``lines`` as fit within ``budget`` chars → ``(block, chars_used)``.
+    ``budget=None`` is unbounded; ``("", 0)`` if nothing beyond the header fits."""
+    if not lines:
+        return "", 0
+    out, used = [header], len(header)
+    for line in lines:
+        need = len(line) + 1                       # + newline
+        if budget is not None and used + need > budget:
+            break
+        out.append(line)
+        used += need
+    return ("\n".join(out), used) if len(out) > 1 else ("", 0)
+
+
+def assemble_context(identity: str, facts: list, themes: list, max_facts: int = 8,
+                     max_themes: int = 4, max_chars=None) -> str:
     """B6: assemble a session's context from the **three memory tiers** — identity (DNA),
     the activated facts (``recall`` — the epigenetic tier), and the relevant consolidated
     themes (B5 ``MemoryConcept``s — the attractor tier). Pure + **fail-soft**: any tier may
-    be empty; returns ``""`` when nothing is available (never blocks a session)."""
-    blocks: list = []
-    if identity and identity.strip():
-        blocks.append("## Who I am\n" + identity.strip())
+    be empty; returns ``""`` when nothing is available (never blocks a session).
+
+    With ``max_chars`` set, fit within an approximate budget (~4 chars/token): **identity**
+    first (truncated if it alone overflows), then **facts** (the majority share — the primary
+    signal), then **themes** (whatever remains). Graceful truncation, facts prioritized over
+    themes; ``max_chars=None`` keeps the prior count-only behavior."""
     facts = list(facts)[:max_facts]
-    if facts:
-        lines = ["## What I remember (most relevant)"]
-        lines += [f"- {f['subject']} {f['predicate']} {f['object']}  ({f.get('session_id', '?')})"
-                  for f in facts]
-        blocks.append("\n".join(lines))
     themes = list(themes)[:max_themes]
-    if themes:
-        lines = ["## Themes across my memory"]
-        lines += [f"- **{t.get('label', '')}**: {(t.get('summary') or '').strip()}" for t in themes]
-        blocks.append("\n".join(lines))
+    fact_lines = [f"- {f['subject']} {f['predicate']} {f['object']}  ({f.get('session_id', '?')})"
+                  for f in facts]
+    theme_lines = [f"- **{t.get('label', '')}**: {(t.get('summary') or '').strip()}" for t in themes]
+
+    blocks: list = []
+    remaining = None if max_chars is None else max(0, int(max_chars))
+
+    ident = (identity or "").strip()
+    if ident:
+        block = "## Who I am\n" + ident
+        if remaining is not None and len(block) > remaining:
+            block = block[:remaining].rstrip()     # identity is small + always useful → keep, truncate
+        if block.strip():
+            blocks.append(block)
+            if remaining is not None:
+                remaining = max(0, remaining - len(block) - 2)   # -2 ≈ the blank-line separator
+
+    fact_budget = None if remaining is None else int(remaining * _FACT_BUDGET_SHARE)
+    fact_block, fact_used = _fit_section("## What I remember (most relevant)", fact_lines, fact_budget)
+    if fact_block:
+        blocks.append(fact_block)
+        if remaining is not None:
+            remaining = max(0, remaining - fact_used - 2)
+
+    theme_block, _ = _fit_section("## Themes across my memory", theme_lines, remaining)
+    if theme_block:
+        blocks.append(theme_block)
+
     return "\n\n".join(blocks)

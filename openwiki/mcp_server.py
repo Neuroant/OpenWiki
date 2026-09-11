@@ -110,12 +110,12 @@ def _tool(name, description, properties, required):
 
 
 def build_server(wiki_dir, index=None, graph=None, agent=None, name="openwiki",
-                 version="0", identity="") -> MCPStdioServer:
+                 version="0", identity="", context_budget=None) -> MCPStdioServer:
     """Assemble the MCP server from already-loaded OpenWiki components.
 
     `index` (SemanticIndex) enables search/ask; `graph` (GraphStore) enables the
     graph tools; `agent` (RAGAgent) powers `wiki_ask`. Read-only `WikiTools` back
-    the rest. `identity` seeds the B6 `wiki_memory` context (Second Brain mode).
+    the rest. `identity` + `context_budget` seed/bound the B6 `wiki_memory` context.
     """
     from .tools import WikiTools
 
@@ -177,7 +177,8 @@ def build_server(wiki_dir, index=None, graph=None, agent=None, name="openwiki",
                 "consolidated themes. Call this at the start of a session to load memory.",
                 {"query": {"type": "string"}}, ["query"]))
             handlers["wiki_memory"] = lambda a: (
-                graph.context_for(str(a["query"]), index.embedder, identity=identity)
+                graph.context_for(str(a["query"]), index.embedder, identity=identity,
+                                  max_chars=context_budget)
                 or "(no relevant memory yet)")
 
         # Global search needs a chat model (from the agent) + community summaries.

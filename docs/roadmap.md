@@ -541,8 +541,16 @@ confidence lift (`confidence_weight`: conf 1→1.0, 3→1.16, 10→1.33) **decay
 *tie-breaker* among similarly-relevant facts, not a relevance override — a first cut used the raw
 confidence as the multiplier and let a thrice-affirmed fact hijack an unrelated query; the log-scaled
 version keeps cosine dominant (a one-off fact is unchanged at weight 1.0). Migrated on old graphs
-(`ALTER`) + preserved across rebuild (B0). **Still open (refinements, not stages):** a fixed-token
-context budgeter, B5 incrementality / k-core stability, and B1's true concurrent reader-and-writer model.
+(`ALTER`) + preserved across rebuild (B0).
+
+**Fixed-token context budgeter landed (v0.55).** The last B6 "hard part": `assemble_context` /
+`context_for` now fit the three tiers to a **char budget** (~4/token, dependency-free — no tokenizer):
+identity first (truncated if it alone overflows), then facts (the majority share), then themes (the
+remainder), with graceful truncation — **facts prioritized over themes** under pressure. Defaults to
+`[memory] context_budget` (2000 chars) and bounds the `context` CLI (`--max-chars`), the auto-inject
+hook, and the MCP `wiki_memory` tool. Verified live (default 819 chars; `--max-chars 200` → identity +
+top fact, themes dropped). **Still open (refinements, not stages):** B5 incrementality / k-core
+stability, and B1's true concurrent reader-and-writer model.
 
 ### Honest guardrails
 

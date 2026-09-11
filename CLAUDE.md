@@ -228,11 +228,14 @@ concentrate, not the log.* Read-only + fail-soft (empty tiers degrade gracefully
 ```
 .venv\Scripts\python -m openwiki context "which models do we use?"
 ```
-Options: `-k N` (activation facts; default 8), `--themes N` (default 4), `--identity TEXT` (override),
-`-i/--index DIR` (embedder), `--graph DIR`, `--host URL`. Gated by `[memory] enabled`. Backed by
-`GraphStore.context_for` (→ `recall` + `relevant_concepts` + pure `memory.assemble_context`); also
-exposed to coding agents as the MCP **`wiki_memory`** tool. Scored by `eval --cross-session` (the
-"assembled" condition is now this assembler; §7 — assembled beats cold + raw-log).
+Options: `-k N` (activation facts; default 8), `--themes N` (default 4), `--max-chars N` (fit within
+~a char budget, ~4/token; default the project's `[memory] context_budget`, 2000; `0` = unbounded),
+`--identity TEXT` (override), `-i/--index DIR` (embedder), `--graph DIR`, `--host URL`. Gated by
+`[memory] enabled`. Backed by `GraphStore.context_for` (→ `recall` + `relevant_concepts` + pure
+`memory.assemble_context`, which **budgets** the tiers: identity → facts (majority) → themes
+(remainder), graceful truncation); also exposed to coding agents as the MCP **`wiki_memory`** tool
+(bounded by the same budget). Scored by `eval --cross-session` (the "assembled" condition is this
+assembler; §7 — assembled beats cold + raw-log).
 
 **Web UI** — browse + search + chat/edit + graph in the browser (stdlib server):
 ```
@@ -435,11 +438,15 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   + decays. Re-runnable + **bounded** (re-clustering *replaces* the themes); the summaries are the
   memory's "attractor" tier and support global search over memory (`answer_global`). `MemoryConcept`
   is a *derived* view (recomputed each pass, not snapshotted), like `Community`.
-  **B6 three-tier assembly:** `assemble_context(identity, facts, themes)` (pure, in `memory.py`) formats
-  the identity + activation + attractor tiers; `GraphStore.context_for(query, embedder, identity)`
-  orchestrates it (`recall` for activation + `relevant_concepts` for the themes those facts belong to),
-  read-only + fail-soft. Exposed as the `context` CLI command and the MCP `wiki_memory` tool; the
-  cross-session eval's "assembled" condition is now this assembler. Design in `docs/path-b-memory.md`.
+  **B6 three-tier assembly:** `assemble_context(identity, facts, themes, max_chars=None)` (pure, in
+  `memory.py`) formats the identity + activation + attractor tiers and — with `max_chars` — **fits them
+  to a char budget** (~4/token): identity first (truncated if needed), then facts (the majority share,
+  `_FACT_BUDGET_SHARE`), then themes (the remainder) via `_fit_section`, so a tight budget keeps
+  identity + top facts and drops themes gracefully. `GraphStore.context_for(query, embedder, identity,
+  max_chars)` orchestrates it (`recall` for activation + `relevant_concepts` for the themes those facts
+  belong to), read-only + fail-soft. The budget defaults to `Project.context_budget` (`[memory]
+  context_budget`, 2000). Exposed as the `context` CLI (`--max-chars`) and the MCP `wiki_memory` tool
+  (both budgeted); the cross-session eval's "assembled" condition is this assembler. Design in `docs/path-b-memory.md`.
 - **`openwiki/web/`** — the web UI. `server.py` = `WikiWebApp` (state) + a
   `ThreadingHTTPServer` handler exposing a JSON API (`/api/wiki`,
   `/api/pages/{slug}`, `/api/search`, `/api/chat`, `/api/graph/{slug}` = explore,

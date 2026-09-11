@@ -13,9 +13,10 @@
 > `context` / MCP `wiki_memory`, scored by the cross-session eval (assembled 100% > raw-log 87.5% >
 > cold 0%). **Host-lifecycle auto-injection** then landed (v0.53): `claude-code --hooks` wires memory
 > into the Claude Code session lifecycle (`UserPromptSubmit`→inject, `SessionEnd`/`PreCompact`→capture),
-> so memory flows automatically; and **per-fact confidence** (v0.54): re-affirming a fact reinforces its
-> confidence, a gentle log-scaled tie-breaker on recall. *(B1's true concurrent reader-and-writer model,
-> B5's incrementality/k-core, and a fixed-token context budgeter remain as refinements — see the notes.)*
+> so memory flows automatically; **per-fact confidence** (v0.54): re-affirming a fact reinforces its
+> confidence, a gentle log-scaled tie-breaker on recall; and a **fixed-token context budgeter** (v0.55):
+> the assembly fits the three tiers to a char budget (identity → facts → themes, graceful truncation).
+> *(B1's true concurrent reader-and-writer model and B5's incrementality/k-core remain as refinements — see the notes.)*
 > This remains the living design base for Path B — turning OpenWiki's knowledge graph from a document
 > **mirror** into agent **memory**.
 > The roadmap-level overview lives in [`docs/roadmap.md`](roadmap.md#path-b--the-second-brain-memory-model);
@@ -378,8 +379,18 @@ to matter but late enough to de-risk. Each stage lists an **exit criterion** (ho
   the raw confidence (up to 10×) and let a thrice-affirmed *chat-model* fact hijack a *"which
   database?"* query; the log-scaled tie-breaker fixed it (relevance/cosine still dominates; a one-off
   fact keeps its prior weight of exactly 1.0, so single-stated memory is unchanged). Columns are
-  `ALTER`-migrated on pre-0.54 graphs and preserved across a rebuild (B0). **Still deferred:** a
-  fixed-token context budgeter (the assembly budgets by simple `-k`/`--themes` caps).
+  `ALTER`-migrated on pre-0.54 graphs and preserved across a rebuild (B0).
+- **Fixed-token context budgeter landed (v0.55) — the last B6 "hard part."** `assemble_context` (and
+  `context_for`) now fit the three tiers to a **char budget** (~4 chars/token — dependency-free, no
+  tokenizer): identity first (truncated if it alone overflows), then facts (the majority share,
+  `_FACT_BUDGET_SHARE`), then themes (the remainder), each filled greedily by `_fit_section` with
+  graceful truncation — **facts prioritized over themes** under pressure. The budget defaults to
+  `Project.context_budget` (`[memory] context_budget`, 2000) and bounds the `context` CLI
+  (`--max-chars`, `0`=unbounded), the auto-inject hook, and the MCP `wiki_memory` tool. Proven live: a
+  default-budget context was 819 chars; `--max-chars 200` returned identity + the top fact and dropped
+  the (larger) theme summaries. This resolves B6's stated hard part — *"budgeting three tiers into a
+  fixed context window."* **Deferred:** a real tokenizer (the char proxy is intentional given the
+  minimal-deps constraint).
 
 ## 7. Evaluation strategy
 

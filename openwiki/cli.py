@@ -400,6 +400,9 @@ def _build_argparser() -> argparse.ArgumentParser:
     ctx_p.add_argument("query", help="The query/topic to assemble memory context for.")
     ctx_p.add_argument("-k", "--top-k", type=int, default=8, help="Recalled facts (activation tier; default: 8).")
     ctx_p.add_argument("--themes", type=int, default=4, help="Relevant themes (attractor tier; default: 4).")
+    ctx_p.add_argument("--max-chars", type=int, default=None,
+                       help="Fit the context within ~this many chars (~4/token); default: the "
+                            "project's [memory] context_budget (2000). Use 0 for unbounded.")
     ctx_p.add_argument("--identity", default=None, help="Override the identity tier (default: the project's).")
     ctx_p.add_argument("-i", "--index", type=Path, default=None, help="Index dir (for the embedder; default: project's).")
     ctx_p.add_argument("--graph", type=Path, default=None, help="Graph dir (default: project's graph).")
@@ -1991,9 +1994,14 @@ def _cmd_context(args: argparse.Namespace) -> int:
         print(f"error: no graph at {args.graph}.", file=sys.stderr)
         return 2
     identity = args.identity if args.identity is not None else (project.identity if project else "")
+    # default the budget to the project's; --max-chars overrides; 0 means unbounded
+    if args.max_chars is not None:
+        max_chars = None if args.max_chars <= 0 else args.max_chars
+    else:
+        max_chars = project.context_budget if project else None
     try:
         context = graph.context_for(args.query, index.embedder, identity=identity,
-                                    k=args.top_k, max_themes=args.themes)
+                                    k=args.top_k, max_themes=args.themes, max_chars=max_chars)
     finally:
         graph.close()
     if not context.strip():
@@ -2048,7 +2056,8 @@ def _hook_inject(project: Project, payload: dict) -> None:
         return
     graph = GraphStore(project.graph_path)   # read-only
     try:
-        context = graph.context_for(prompt, embedder, identity=project.identity)
+        context = graph.context_for(prompt, embedder, identity=project.identity,
+                                    max_chars=project.context_budget)
     finally:
         graph.close()
     if context.strip():
@@ -2149,8 +2158,9 @@ def _cmd_mcp(args: argparse.Namespace) -> int:
 
     project = getattr(args, "project_obj", None)
     identity = project.identity if (project is not None and project.memory_enabled) else ""
+    budget = project.context_budget if (project is not None and project.memory_enabled) else None
     server = build_server(args.wiki, index=index, graph=graph, agent=agent,
-                          version=__version__, identity=identity)
+                          version=__version__, identity=identity, context_budget=budget)
     server.serve()   # blocks on stdio (JSON-RPC)
     return 0
 

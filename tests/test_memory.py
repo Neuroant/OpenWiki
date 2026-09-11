@@ -409,6 +409,31 @@ def test_assemble_context_three_tiers_and_fail_soft():
     assert "What I remember" in only_facts and "Themes" not in only_facts   # skips empty tiers
 
 
+def test_assemble_context_char_budget_bounds_and_prioritizes_facts():
+    from openwiki.graph.memory import assemble_context
+
+    facts = [{"subject": "fact", "predicate": "number", "object": str(i), "session_id": "s"}
+             for i in range(20)]
+    themes = [{"label": f"Theme{i}", "summary": "x" * 300} for i in range(5)]   # big themes
+    unbounded = assemble_context("I am the assistant.", facts, themes, max_facts=20, max_themes=5)
+    tight = assemble_context("I am the assistant.", facts, themes, max_facts=20, max_themes=5, max_chars=600)
+    assert len(tight) <= 700 < len(unbounded)                      # bounded well under the full block
+    assert "Who I am" in tight                                     # identity kept
+    assert "- fact number" in tight                                # facts prioritized (present under budget)
+
+
+def test_assemble_context_identity_truncated_to_fit():
+    from openwiki.graph.memory import assemble_context
+    out = assemble_context("X" * 500, [], [], max_chars=100)
+    assert "Who I am" in out and 0 < len(out) <= 100              # identity kept but truncated
+
+
+def test_assemble_context_zero_budget_is_empty():
+    from openwiki.graph.memory import assemble_context
+    facts = [{"subject": "a", "predicate": "b", "object": "c", "session_id": "s"}]
+    assert assemble_context("Me.", facts, [], max_chars=0) == ""  # fail-soft under a zero budget
+
+
 def _consolidate(store, embedder):
     """Cluster + label the current facts (helper — the summarizer is faked here)."""
     from openwiki.graph import detect_communities

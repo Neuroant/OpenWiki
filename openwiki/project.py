@@ -124,6 +124,15 @@ class Project:
         return str(self.setting("memory", "identity", None) or self.description or self.name or "").strip()
 
     @property
+    def context_budget(self) -> int:
+        """Char budget for an assembled memory context (B6, ~4 chars/token). Bounds what the
+        auto-inject hook / `wiki_memory` put into a prompt. ``[memory] context_budget``, else 2000."""
+        try:
+            return max(0, int(self.setting("memory", "context_budget", 2000)))
+        except (TypeError, ValueError):
+            return 2000
+
+    @property
     def memory_enabled(self) -> bool:
         """Second Brain mode — whether the remembered tier (Path B) is active for this
         project. **Off by default** (Wiki mode, §3.1 / ADR-14); turn it on with
@@ -248,6 +257,7 @@ entities = {str(entities).lower()}
 # Second Brain mode (Path B): capture sessions into a remembered tier the graph keeps
 # across doc rebuilds, and recall them later. Off = Wiki mode (docs only).
 enabled = {str(memory).lower()}
+# context_budget = 2000   # chars (~4/token) for an assembled memory context (B6 / hooks)
 
 [serve]
 port = {port}

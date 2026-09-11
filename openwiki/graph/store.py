@@ -868,11 +868,11 @@ class GraphStore:
         return sorted(agg.values(), key=lambda c: (-c["hits"], -(c["size"] or 0), c["id"]))[:limit]
 
     def context_for(self, query: str, embedder, identity: str = "",
-                    k: int = 8, max_themes: int = 4) -> str:
+                    k: int = 8, max_themes: int = 4, max_chars=None) -> str:
         """B6: assemble a session's context for ``query`` from the three memory tiers —
         identity + decay-weighted ``recall`` (activation) + the relevant consolidated themes
-        (attractors). Read-only + **fail-soft** (missing embedder / empty memory → identity
-        only, or ``""``)."""
+        (attractors), optionally fit within a ``max_chars`` budget. Read-only + **fail-soft**
+        (missing embedder / empty memory → identity only, or ``""``)."""
         from .memory import assemble_context
         facts = []
         if embedder is not None:
@@ -881,7 +881,8 @@ class GraphStore:
             except Exception:      # never let a memory read break the caller
                 facts = []
         themes = self.relevant_concepts([f["id"] for f in facts], limit=max_themes) if facts else []
-        return assemble_context(identity, facts, themes, max_facts=k, max_themes=max_themes)
+        return assemble_context(identity, facts, themes, max_facts=k, max_themes=max_themes,
+                                max_chars=max_chars)
 
     def hybrid_search(self, vector, k: int = 5) -> list[dict]:
         """Vector k-NN over chunks, then hop to the owning page (GraphRAG)."""

@@ -43,6 +43,14 @@ def test_reinforced_weight_bumps_and_caps():
     assert reinforced_weight(-3.0, 1.0) == 1.0                    # negative floored to 0 first
 
 
+def test_confidence_weight_is_a_gentle_monotonic_tiebreaker():
+    from openwiki.graph.decay import confidence_weight
+    assert confidence_weight(1.0) == 1.0                          # a one-off fact is unchanged
+    assert confidence_weight(0.5) == 1.0                          # clamped at 1 below
+    assert 1.0 < confidence_weight(2.0) < confidence_weight(3.0) < confidence_weight(10.0)
+    assert confidence_weight(10.0) < 1.5                          # stays gentle — relevance dominates
+
+
 # -- store round-trips (gated on Kuzu) -----------------------------------------
 
 class _FakeEmbedder:

@@ -390,7 +390,8 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   `GraphStore.upsert_communities` writes `Community` nodes + `IN_COMMUNITY` edges
   (always-created empty tables, like Entity/MENTIONS).
   `decay.py` is the **usage-memory** core (Path B's first step): pure exponential
-  decay (`effective_weight`) + capped reinforcement (`reinforced_weight`). The graph
+  decay (`effective_weight`) + capped reinforcement (`reinforced_weight`) + the gentle
+  log-scaled `confidence_weight` (B6 per-fact confidence → recall tie-breaker). The graph
   gains a `REINFORCES(weight, last_seen)` edge (always-created empty); `GraphStore`
   `reinforce(a,b)` strengthens+stamps it (Hebbian), `decay()` ages every edge to now
   and prunes below a floor (forgetting), and `neighborhood`'s `reinforced` group ranks
@@ -416,12 +417,17 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   assertions by normalized `(subject, predicate, object)`, MERGEs the `Session` + CREATEs
   `Assertion`s, and — **B4** — when a new fact shares a normalized subject+predicate with a
   current one but a **different object**, adds `(new)-[:SUPERSEDES]->(old)` (nothing deleted;
-  re-asserting a superseded fact revives it). `recall(query, embedder, k, include_superseded=False)`
-  (read-only) ranks assertions by **decay-weighted** cosine (`effective_weight`, the activation
-  tier) but returns **current only** by default (`_superseded_ids` = anything with an incoming
-  `SUPERSEDES`); `has_memory()` gates both. `_ensure_memory_schema` lazily creates the tables so
-  pre-0.46 graphs upgrade; B0's `_snapshot_memory`/`_restore_memory` preserve `SUPERSEDES` across a
-  rebuild. Exposed as the `remember`/`recall` (+`--all`) CLI commands.
+  re-asserting a superseded fact revives it). **Per-fact confidence (B6 refinement):** each
+  `Assertion` carries `confidence` (starts 1.0) + `last_seen`; **re-affirming** a current fact (a
+  dedup hit) *reinforces* its confidence (`reinforced_weight`) + stamps `last_seen` instead of a plain
+  skip. `recall(query, embedder, k, include_superseded=False)` (read-only) scores by
+  `cos × effective_weight(confidence_weight(confidence), last_seen, now)` — a **gentle, log-scaled**
+  confidence lift (`decay.confidence_weight`: a *tie-breaker* among similar-relevance facts, so a
+  restated fact outranks a one-off, but relevance still dominates) **decayed by recency**; returns
+  **current only** by default (`_superseded_ids`). `has_memory()` gates both. `_ensure_memory_schema`
+  lazily creates the tables + `ALTER`s in `confidence`/`last_seen` on pre-0.54 graphs; B0's
+  `_snapshot_memory`/`_restore_memory` preserve `SUPERSEDES` + confidence across a rebuild. Exposed as
+  the `remember`/`recall` (+`--all`) CLI commands.
   **B5 consolidation ("sleep"):** the `consolidate` command clusters the *current* assertions by
   embedding similarity (`GraphStore.assertion_graph` → `community.detect_communities`), LLM-summarizes
   each cluster into a theme (`community.summarize_facts`), and writes `MemoryConcept` + `CONSOLIDATES`

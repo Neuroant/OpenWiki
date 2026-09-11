@@ -28,7 +28,7 @@ from .builder import CHUNK_VECTOR_INDEX
 from .community import REFERENCE_WEIGHT, SHARED_ENTITY_WEIGHT
 from .decay import (
     DEFAULT_BOOST, DEFAULT_FLOOR, DEFAULT_HALF_LIFE_DAYS,
-    effective_weight, reinforced_weight,
+    confidence_weight, effective_weight, reinforced_weight,
 )
 from .entities import _normalize
 from .usage import append_usage, clear_usage, read_usage, usage_log_path
@@ -596,7 +596,8 @@ class GraphStore:
         for ddl in (
             "CREATE NODE TABLE IF NOT EXISTS Session(id STRING, created_at INT64, PRIMARY KEY(id));",
             f"CREATE NODE TABLE IF NOT EXISTS Assertion(id STRING, subject STRING, predicate STRING, "
-            f"object STRING, session_id STRING, created_at INT64, emb FLOAT[{int(dim)}], PRIMARY KEY(id));",
+            f"object STRING, session_id STRING, created_at INT64, confidence DOUBLE, last_seen INT64, "
+            f"emb FLOAT[{int(dim)}], PRIMARY KEY(id));",
             "CREATE REL TABLE IF NOT EXISTS ASSERTS(FROM Session TO Assertion);",
             "CREATE REL TABLE IF NOT EXISTS SUPERSEDES(FROM Assertion TO Assertion);",   # B4
         ):
@@ -604,6 +605,15 @@ class GraphStore:
                 self._exec(ddl)
             except Exception:  # pragma: no cover - already exists / older syntax
                 pass
+        # B6 confidence: migrate pre-0.54 Assertion tables that lack the columns (idempotent —
+        # ALTER errors "already has property", which we swallow). Writable connections only.
+        if self.writable:
+            for ddl in ("ALTER TABLE Assertion ADD confidence DOUBLE DEFAULT 1.0;",
+                        "ALTER TABLE Assertion ADD last_seen INT64 DEFAULT 0;"):
+                try:
+                    self._exec(ddl)
+                except Exception:  # pragma: no cover - column already present
+                    pass
         self._memory_ensured = True
 
     def has_memory(self) -> bool:
@@ -644,26 +654,28 @@ class GraphStore:
             self._exec("MERGE (s:Session {id:$id}) ON CREATE SET s.created_at=$t;",
                        {"id": session_id, "t": now})
             # Index the *current* assertions (a superseded one no longer dedups or conflicts):
-            # exact triples for dedup, and (subject, predicate) → [(id, object)] for contradiction.
+            # by_key {triple → (id, confidence)} for dedup/reinforce, (subj,pred) → [(id, obj)] for contradiction.
             sup = self._superseded_ids()
-            exact, current = set(), {}
-            for aid_e, s, p, o in self._rows(
-                    "MATCH (a:Assertion) RETURN a.id, a.subject, a.predicate, a.object;"):
+            by_key, current = {}, {}
+            for aid_e, s, p, o, conf in self._rows(
+                    "MATCH (a:Assertion) RETURN a.id, a.subject, a.predicate, a.object, a.confidence;"):
                 if aid_e in sup:
                     continue
                 ns, pp, no = _normalize(s), (p or "").strip().lower(), _normalize(o)
-                exact.add((ns, pp, no))
+                by_key[(ns, pp, no)] = (aid_e, float(conf if conf is not None else 1.0))
                 current.setdefault((ns, pp), []).append((aid_e, no))
             for fact, vec in zip(facts, emb):
                 key = fact.key()                       # (nsubj, npred, nobj)
-                if key in exact:                       # re-affirming a current fact → skip
+                if key in by_key:                      # re-affirming a current fact → B6: raise its confidence
+                    aid_e, conf = by_key[key]
+                    self._exec("MATCH (a:Assertion {id:$id}) SET a.confidence=$c, a.last_seen=$t;",
+                               {"id": aid_e, "c": reinforced_weight(conf, DEFAULT_BOOST), "t": now})
                     dupes += 1
                     continue
-                exact.add(key)
                 aid = uuid.uuid4().hex
                 self._exec(
                     "CREATE (:Assertion {id:$id, subject:$s, predicate:$p, object:$o, "
-                    "session_id:$sid, created_at:$t, emb:$e});",
+                    "session_id:$sid, created_at:$t, confidence:1.0, last_seen:$t, emb:$e});",
                     {"id": aid, "s": fact.subject, "p": fact.predicate, "o": fact.object,
                      "sid": session_id, "t": now, "e": vec.astype(float).tolist()})
                 self._exec("MATCH (s:Session {id:$sid}),(a:Assertion {id:$id}) "
@@ -677,6 +689,7 @@ class GraphStore:
                         self._exec("MATCH (n:Assertion {id:$n}),(o:Assertion {id:$o}) "
                                    "CREATE (n)-[:SUPERSEDES]->(o);", {"n": aid, "o": old_id})
                         superseded += 1
+                by_key[key] = (aid, 1.0)               # so a repeat in the same batch reinforces it
                 current[nsp] = [(aid, key[2])]         # the new fact is now the current one
         return {"facts": len(facts), "added": added, "duplicates": dupes, "superseded": superseded}
 
@@ -689,11 +702,20 @@ class GraphStore:
         pass ``include_superseded`` to also return them, each flagged ``superseded``. Read-only."""
         if embedder is None:
             raise ValueError("recall needs an embedder.")
+        # B6 per-fact confidence: score = cos × decayed confidence (base weight = the stored
+        # confidence, aged from last_seen). Read them if present; a pre-0.54 / read-only graph
+        # without the columns falls back to confidence 1.0 (the prior recency-only behavior).
         try:
-            rows = self._rows("MATCH (a:Assertion) RETURN a.id, a.subject, a.predicate, "
-                              "a.object, a.session_id, a.created_at, a.emb;")
+            rows = self._rows("MATCH (a:Assertion) RETURN a.id, a.subject, a.predicate, a.object, "
+                              "a.session_id, a.created_at, a.emb, a.confidence, a.last_seen;")
+            has_conf = True
         except Exception:
-            return []   # no memory table on graphs built before this layer
+            try:
+                rows = self._rows("MATCH (a:Assertion) RETURN a.id, a.subject, a.predicate, "
+                                  "a.object, a.session_id, a.created_at, a.emb;")
+                has_conf = False
+            except Exception:
+                return []   # no memory table on graphs built before this layer
         if not rows:
             return []
         sup = self._superseded_ids()
@@ -701,15 +723,23 @@ class GraphStore:
         q = np.asarray(embedder.embed_query(query), dtype=np.float32)
         q = q / (np.linalg.norm(q) or 1.0)
         scored = []
-        for aid, subj, pred, obj, sid, created, emb in rows:
+        for row in rows:
+            if has_conf:
+                aid, subj, pred, obj, sid, created, emb, conf, seen = row
+            else:
+                aid, subj, pred, obj, sid, created, emb = row
+                conf, seen = 1.0, 0
             is_sup = aid in sup
             if is_sup and not include_superseded:
                 continue
+            conf = float(conf if conf is not None else 1.0)
+            ref = int(seen) if seen else int(created or 0)      # last affirmed, else first stated
             cos = float(q @ np.asarray(emb, dtype=np.float32))   # stored normalized
-            score = cos * effective_weight(1.0, int(created or 0), now, half_life_days)
+            # gentle, log-scaled confidence lift, decayed by recency — relevance (cos) still dominates
+            score = cos * effective_weight(confidence_weight(conf), ref, now, half_life_days)
             scored.append({"id": aid, "subject": subj, "predicate": pred, "object": obj,
-                           "session_id": sid, "cos": round(cos, 3), "score": round(score, 3),
-                           "superseded": is_sup})
+                           "session_id": sid, "cos": round(cos, 3), "confidence": round(conf, 3),
+                           "score": round(score, 3), "superseded": is_sup})
         scored.sort(key=lambda x: -x["score"])
         return scored[:k]
 

@@ -118,11 +118,18 @@ class GraphBuilder:
             logger.warning("could not open existing graph to preserve memory: %s", exc)
             return None
         try:
+            # Assertions carry a confidence + last_seen since v0.54; read them if present,
+            # else fall back and default (pre-0.54 graphs) so the rebuild migrates them.
+            assertions = self._read_rows(
+                conn, "MATCH (a:Assertion) RETURN a.id, a.subject, a.predicate, a.object, "
+                      "a.session_id, a.created_at, a.emb, a.confidence, a.last_seen;")
+            if not assertions:
+                assertions = [list(r) + [1.0, 0] for r in self._read_rows(
+                    conn, "MATCH (a:Assertion) RETURN a.id, a.subject, a.predicate, a.object, "
+                          "a.session_id, a.created_at, a.emb;")]
             snap = {
                 "sessions": self._read_rows(conn, "MATCH (s:Session) RETURN s.id, s.created_at;"),
-                "assertions": self._read_rows(
-                    conn, "MATCH (a:Assertion) RETURN a.id, a.subject, a.predicate, a.object, "
-                          "a.session_id, a.created_at, a.emb;"),
+                "assertions": assertions,
                 "asserts": self._read_rows(
                     conn, "MATCH (s:Session)-[:ASSERTS]->(a:Assertion) RETURN s.id, a.id;"),
                 "supersedes": self._read_rows(
@@ -146,15 +153,16 @@ class GraphBuilder:
             conn.execute("MERGE (s:Session {id:$id}) ON CREATE SET s.created_at=$t;",
                          parameters={"id": sid, "t": created})
         kept, skipped = set(), 0
-        for aid, subj, pred, obj, sid, created, emb in snap.get("assertions", []):
+        for aid, subj, pred, obj, sid, created, emb, conf, seen in snap.get("assertions", []):
             if emb is None or len(emb) != dim:
                 skipped += 1
                 continue
             conn.execute(
                 "CREATE (:Assertion {id:$id, subject:$s, predicate:$p, object:$o, "
-                "session_id:$sid, created_at:$t, emb:$e});",
-                parameters={"id": aid, "s": subj, "p": pred, "o": obj, "sid": sid,
-                            "t": created, "e": [float(x) for x in emb]})
+                "session_id:$sid, created_at:$t, confidence:$c, last_seen:$ls, emb:$e});",
+                parameters={"id": aid, "s": subj, "p": pred, "o": obj, "sid": sid, "t": created,
+                            "c": float(conf if conf is not None else 1.0), "ls": int(seen or 0),
+                            "e": [float(x) for x in emb]})
             kept.add(aid)
         for sid, aid in snap.get("asserts", []):
             if aid in kept:
@@ -226,7 +234,8 @@ class GraphBuilder:
         conn.execute("CREATE NODE TABLE Session(id STRING, created_at INT64, PRIMARY KEY(id));")
         conn.execute(
             f"CREATE NODE TABLE Assertion(id STRING, subject STRING, predicate STRING, "
-            f"object STRING, session_id STRING, created_at INT64, emb FLOAT[{dim}], PRIMARY KEY(id));")
+            f"object STRING, session_id STRING, created_at INT64, "
+            f"confidence DOUBLE, last_seen INT64, emb FLOAT[{dim}], PRIMARY KEY(id));")
         conn.execute("CREATE REL TABLE ASSERTS(FROM Session TO Assertion);")
         # B4 contradiction/time-versioning: a newer assertion SUPERSEDES an older one
         # (same subject+predicate, different object). 'Current' = no incoming SUPERSEDES;

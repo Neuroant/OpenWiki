@@ -13,8 +13,9 @@
 > `context` / MCP `wiki_memory`, scored by the cross-session eval (assembled 100% > raw-log 87.5% >
 > cold 0%). **Host-lifecycle auto-injection** then landed (v0.53): `claude-code --hooks` wires memory
 > into the Claude Code session lifecycle (`UserPromptSubmit`→inject, `SessionEnd`/`PreCompact`→capture),
-> so memory flows automatically. *(B1's true concurrent reader-and-writer model, B5's incrementality/
-> k-core, and B6's per-fact confidence weighting remain as refinements — see the per-stage notes.)*
+> so memory flows automatically; and **per-fact confidence** (v0.54): re-affirming a fact reinforces its
+> confidence, a gentle log-scaled tie-breaker on recall. *(B1's true concurrent reader-and-writer model,
+> B5's incrementality/k-core, and a fixed-token context budgeter remain as refinements — see the notes.)*
 > This remains the living design base for Path B — turning OpenWiki's knowledge graph from a document
 > **mirror** into agent **memory**.
 > The roadmap-level overview lives in [`docs/roadmap.md`](roadmap.md#path-b--the-second-brain-memory-model);
@@ -366,9 +367,19 @@ to matter but late enough to de-risk. Each stage lists an **exit criterion** (ho
   the prompt), degrades to no-op without a project / memory / graph, and skips capture when the graph
   is write-locked. Proven live end-to-end: a `UserPromptSubmit` payload injected the three-tier block;
   a `SessionEnd` payload captured two new facts from a transcript (surfaced by the next `recall`). So
-  memory now flows automatically — recalled *into* each turn, captured *out of* each session. **Still
-  deferred:** per-fact **confidence** weighting and a fixed-token budgeter (the first slice budgets by
-  simple `-k`/`--themes` caps).
+  memory now flows automatically — recalled *into* each turn, captured *out of* each session.
+- **Per-fact confidence weighting landed (v0.54) — the §11 refinement.** Each `Assertion` now carries a
+  **`confidence`** (+ `last_seen`): **re-affirming** a current fact (a dedup hit) *reinforces* its
+  confidence (`reinforced_weight`, ~+1 per affirmation, capped) and stamps `last_seen`, so a fact
+  restated across sessions becomes "more established." `recall` scores by
+  `cos × effective_weight(confidence_weight(confidence), last_seen, now)` — the confidence lift is
+  **gentle + log-scaled** (`decay.confidence_weight`: conf 1→1.0, 3→1.16, 10→1.33) and **decayed by
+  recency**. Deliberately a **tie-breaker**, not a relevance override — a first live cut multiplied by
+  the raw confidence (up to 10×) and let a thrice-affirmed *chat-model* fact hijack a *"which
+  database?"* query; the log-scaled tie-breaker fixed it (relevance/cosine still dominates; a one-off
+  fact keeps its prior weight of exactly 1.0, so single-stated memory is unchanged). Columns are
+  `ALTER`-migrated on pre-0.54 graphs and preserved across a rebuild (B0). **Still deferred:** a
+  fixed-token context budgeter (the assembly budgets by simple `-k`/`--themes` caps).
 
 ## 7. Evaluation strategy
 
@@ -521,7 +532,7 @@ lifecycle; "concentrate, don't replay" retrieval.
 | **Append-only for *every* remembered edge** (not just on conflict) → time-travel + reversible consolidation for free. | B4, §4 |
 | **Write-time validation gates** — dedup, controlled-vocab predicates, source-support (anti-hallucination), anti-vagueness, near-dup merge, cross-tier contradiction rejection. | B2/B3 |
 | **`ConsolidationRun`/`MergeRun` audit node**; rollback = close validity on its outputs. | B3/B5, §4 |
-| **Tier-aware confidence** (per-tier half-lives; retrieval weighted by confidence; reset on re-emergence) + **source-invalidation cascade**. | B5, B6 |
+| **Tier-aware confidence** (per-tier half-lives; retrieval weighted by confidence; reset on re-emergence) + **source-invalidation cascade**. | B6 (**landed v0.54**: per-fact `confidence`, reinforced on re-affirmation, gentle log-scaled recall weight; reset-on-re-emergence via B4 revival) |
 | **Host-lifecycle triggers** — `UserPromptSubmit`→recall/inject, `Stop`→capture, `PreCompact`→flush — and **fail-soft** hooks. | B6 (**landed v0.53**: `claude-code --hooks` → `owiki hook inject`/`capture`) |
 | **Cost governance** — per-session budget cap; cheap model for distil, expensive for reasoning. | §8 |
 | **Real embeddings only** — a parallel project's hash-stub embeddings returned garbage; use bge-m3. | §8 |

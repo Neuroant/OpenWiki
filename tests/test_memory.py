@@ -353,6 +353,44 @@ def test_consolidate_excludes_superseded_facts(tmp_path):
         store.close()
 
 
+# -- B6 refinement: per-fact confidence weighting ------------------------------
+
+def test_reaffirmation_raises_confidence_and_recall_score(tmp_path):
+    import pytest
+    pytest.importorskip("kuzu")
+    from openwiki.graph import GraphStore
+
+    store = GraphStore(_build_graph(tmp_path), writable=True)
+    try:
+        store.remember("s1", [MemoryFact("the database", "is", "kuzu")], _MemEmbedder(), now=1000)
+        before = store.recall("which database", _MemEmbedder(), now=1000)[0]
+        assert before["confidence"] == 1.0
+        res = store.remember("s2", [MemoryFact("the database", "is", "kuzu")], _MemEmbedder(), now=2000)
+        assert res["added"] == 0 and res["duplicates"] == 1          # re-affirmed (not a new node)
+        after = store.recall("which database", _MemEmbedder(), now=2000)[0]
+        assert after["confidence"] > before["confidence"]            # confidence reinforced
+        assert after["score"] > before["score"]                      # → ranks higher
+    finally:
+        store.close()
+
+
+def test_confidence_decays_by_recency(tmp_path):
+    import pytest
+    pytest.importorskip("kuzu")
+    from openwiki.graph import GraphStore
+    from openwiki.graph.decay import DAY_SECONDS
+
+    store = GraphStore(_build_graph(tmp_path), writable=True)
+    try:
+        store.remember("s1", [MemoryFact("the database", "is", "kuzu")], _MemEmbedder(), now=1000)
+        fresh = store.recall("which database", _MemEmbedder(), now=1000, half_life_days=10.0)[0]
+        stale = store.recall("which database", _MemEmbedder(),
+                             now=1000 + int(20 * DAY_SECONDS), half_life_days=10.0)[0]
+        assert stale["score"] < fresh["score"]                       # ~2 half-lives → decayed
+    finally:
+        store.close()
+
+
 # -- B6: three-tier context assembly -------------------------------------------
 
 def test_assemble_context_three_tiers_and_fail_soft():

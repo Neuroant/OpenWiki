@@ -533,8 +533,16 @@ wires memory into the Claude Code session lifecycle — **`UserPromptSubmit` →
 `owiki hook capture`** (parse the transcript → `remember`). The `hook` command is strictly **fail-soft**
 (always exits 0 — exit 2 would reject the prompt; degrades to no-op without memory). So memory now flows
 automatically: recalled *into* each turn, captured *out of* each session. Verified live end-to-end.
-**Still open (refinements, not stages):** per-fact confidence weighting, B5 incrementality / k-core
-stability, and B1's true concurrent reader-and-writer model.
+
+**Per-fact confidence weighting landed (v0.54).** The second B6 refinement: each remembered
+`Assertion` carries a **confidence** — **re-affirming** a fact (a dedup hit across sessions) reinforces
+it (`reinforced_weight`) + refreshes `last_seen`, and `recall` weights by a **gentle, log-scaled**
+confidence lift (`confidence_weight`: conf 1→1.0, 3→1.16, 10→1.33) **decayed by recency**. It's a
+*tie-breaker* among similarly-relevant facts, not a relevance override — a first cut used the raw
+confidence as the multiplier and let a thrice-affirmed fact hijack an unrelated query; the log-scaled
+version keeps cosine dominant (a one-off fact is unchanged at weight 1.0). Migrated on old graphs
+(`ALTER`) + preserved across rebuild (B0). **Still open (refinements, not stages):** a fixed-token
+context budgeter, B5 incrementality / k-core stability, and B1's true concurrent reader-and-writer model.
 
 ### Honest guardrails
 

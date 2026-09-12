@@ -847,6 +847,27 @@ class GraphStore:
         except Exception:
             return False
 
+    def concept_members(self) -> dict:
+        """``{concept_id: set(assertion_ids)}`` from CONSOLIDATES — for the incremental
+        sleep pass (reuse a theme's summary when its member set is unchanged, B5)."""
+        try:
+            rows = self._rows("MATCH (c:MemoryConcept)-[:CONSOLIDATES]->(a:Assertion) RETURN c.id, a.id;")
+        except Exception:
+            return {}
+        out: dict = {}
+        for cid, aid in rows:
+            out.setdefault(int(cid), set()).add(aid)
+        return out
+
+    def concept_assignment(self) -> dict:
+        """``{assertion_id: concept_id}`` from CONSOLIDATES — the prior partition, used to
+        **warm-start** clustering so a re-run is stable and edits stay local (B5)."""
+        try:
+            rows = self._rows("MATCH (c:MemoryConcept)-[:CONSOLIDATES]->(a:Assertion) RETURN a.id, c.id;")
+        except Exception:
+            return {}
+        return {aid: int(cid) for aid, cid in rows}
+
     def relevant_concepts(self, assertion_ids, limit: int = 4) -> list:
         """B6 attractor tier: the consolidated themes (`MemoryConcept`) that contain any of
         the given (activated) assertions, ranked by how many they cover, then size. Small

@@ -29,13 +29,18 @@ _THINK = re.compile(r"<think>.*?</think>", re.DOTALL)
 
 
 def detect_communities(edges, nodes: Optional[Iterable] = None,
-                       max_passes: int = 30) -> dict:
+                       max_passes: int = 30, seed: Optional[dict] = None) -> dict:
     """Partition nodes into communities by weighted modularity (single-level Louvain).
 
     ``edges`` is an iterable of ``(a, b, weight)`` undirected pairs (weight > 0);
     ``nodes`` optionally seeds isolated vertices. Returns ``{node: community_id}``
     with contiguous ids ordered by community size (largest first). Deterministic:
     nodes are processed in sorted order and ties break to the lowest community id.
+
+    ``seed`` **warm-starts** from a prior ``{node: community_id}`` partition (B5): local
+    moving begins from it rather than all-singletons, so re-running on the same graph is
+    **stable** (no drift) and a small edit stays **local** (only genuinely-improving moves
+    happen). Nodes absent from ``seed`` (new) get fresh singleton communities.
     """
     adj: dict = {}
 
@@ -62,8 +67,18 @@ def detect_communities(edges, nodes: Optional[Iterable] = None,
     if m2 == 0:                                           # no edges → all singletons
         return {n: i for i, n in enumerate(nodes_sorted)}
 
-    comm = {n: i for i, n in enumerate(nodes_sorted)}
-    sigma_tot = {i: k[n] for n, i in comm.items()}       # summed degree per community
+    if seed:                                             # warm-start from a prior partition
+        comm = {n: seed[n] for n in nodes_sorted if n in seed}
+        next_id = (max(comm.values()) + 1) if comm else 0
+        for n in nodes_sorted:                           # new (unseeded) nodes → fresh singletons
+            if n not in comm:
+                comm[n] = next_id
+                next_id += 1
+    else:
+        comm = {n: i for i, n in enumerate(nodes_sorted)}
+    sigma_tot: dict = {}                                 # summed degree per community
+    for n, c in comm.items():
+        sigma_tot[c] = sigma_tot.get(c, 0.0) + k[n]
 
     for _ in range(max_passes):
         moved = False

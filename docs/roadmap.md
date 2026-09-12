@@ -549,8 +549,18 @@ identity first (truncated if it alone overflows), then facts (the majority share
 remainder), with graceful truncation — **facts prioritized over themes** under pressure. Defaults to
 `[memory] context_budget` (2000 chars) and bounds the `context` CLI (`--max-chars`), the auto-inject
 hook, and the MCP `wiki_memory` tool. Verified live (default 819 chars; `--max-chars 200` → identity +
-top fact, themes dropped). **Still open (refinements, not stages):** B5 incrementality / k-core
-stability, and B1's true concurrent reader-and-writer model.
+top fact, themes dropped).
+
+**Incremental + stable consolidation landed (v0.56); the §8 k-core decision resolved.** B5's "hard
+part" (incrementality) + the stability critique, together: `consolidate` **warm-starts** clustering
+from the prior partition (`detect_communities(seed=…)`) so a re-run doesn't drift and an edit stays
+local, and a theme whose member set is unchanged **reuses its summary** — only new/changed clusters
+cost an LLM call (`--resummarize` forces a full rebuild). Verified live: re-consolidating unchanged
+memory did 0 summaries (all reused); adding one fact re-summarized only its cluster (1 summarized, 1
+reused). **Resolved: warm-start Louvain, not k-core** — k-core gives a coreness hierarchy, not topical
+themes; warm-start delivers the same stability while keeping the modularity objective (one clustering
+path shared with Path A). **Still open (a refinement, not a stage):** B1's true concurrent
+reader-and-writer model (the read-path usage log defers writes rather than allowing simultaneous ones).
 
 ### Honest guardrails
 

@@ -208,18 +208,22 @@ consolidation (below); B6 (v0.52) three-tier context assembly (`context` below).
 **Consolidate the memory (the "sleep" pass)** — the memory-tier analog of `communities`
 (Path B / B5): cluster the **current** remembered facts by embedding similarity, LLM-summarize
 each cluster into a **theme** (`MemoryConcept` + `CONSOLIDATES`), then fold usage + decay
-(the "forget" half). Re-runnable and **bounded** (re-clustering replaces the themes, doesn't
-accumulate); the theme summaries are the memory's "attractor" tier + support global search
-over memory (`answer_global`):
+(the "forget" half). Re-runnable, **bounded**, and **incremental**: clustering **warm-starts**
+from the prior partition (`detect_communities(seed=…)`) so a re-run is stable and edits stay
+local, and a theme whose member set is **unchanged reuses its summary** (no LLM call) — only
+new/changed clusters are re-summarized. The theme summaries are the memory's "attractor" tier +
+support global search over memory (`answer_global`):
 ```
 .venv\Scripts\python -m openwiki consolidate            # writes MemoryConcept themes, then decays
 ```
 Options: `--graph DIR`, `--min-size N` (smallest cluster that becomes a theme; default 2),
 `--max-facts N` (facts shown to the summarizer per theme; default 12), `--similar-k N`
 (clustering edges per fact; default 6), `--half-life DAYS` / `--floor F` / `--no-decay` (the
-decay step), `--model NAME`, `--host URL`. Gated by `[memory] enabled`. Reuses
-`community.detect_communities` + a new `summarize_facts`; `MemoryConcept`/`CONSOLIDATES` are a
-*derived* view (recomputed each pass, not snapshotted across rebuilds — like `Community`).
+decay step), `--resummarize` (ignore the cache — rebuild every summary), `--model NAME`,
+`--host URL`. Gated by `[memory] enabled`. Reuses `community.detect_communities` (now with a
+warm-start `seed`) + `summarize_facts`; `MemoryConcept`/`CONSOLIDATES` are a *derived* view
+(recomputed each pass, not snapshotted across rebuilds — like `Community`). Reports
+`N theme(s) (M summarized, K reused)`.
 
 **Assemble a session's memory context (B6)** — the Path B payoff: build the context for a query
 from the **three memory tiers** — **identity** (the project's, or `[memory] identity`), **activation**
@@ -437,7 +441,13 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   (`upsert_memory_concepts`; `memory_concepts()`/`has_memory_concepts()` read them) — then folds usage
   + decays. Re-runnable + **bounded** (re-clustering *replaces* the themes); the summaries are the
   memory's "attractor" tier and support global search over memory (`answer_global`). `MemoryConcept`
-  is a *derived* view (recomputed each pass, not snapshotted), like `Community`.
+  is a *derived* view (recomputed each pass, not snapshotted), like `Community`. **Stable + incremental:**
+  `detect_communities` takes a **warm-start `seed`** (the prior partition, via `GraphStore.concept_assignment`)
+  so a re-run doesn't drift and an edit stays local; and a theme whose member set is unchanged (matched via
+  `GraphStore.concept_members`) **reuses its summary** — only new/changed clusters cost an LLM call
+  (`--resummarize` forces a full rebuild). Chosen over **k-core** for stability (see `docs/path-b-memory.md` §8):
+  warm-start Louvain keeps the topical-partition semantics + modularity objective, where k-core yields a
+  coreness hierarchy, not themes to summarize.
   **B6 three-tier assembly:** `assemble_context(identity, facts, themes, max_chars=None)` (pure, in
   `memory.py`) formats the identity + activation + attractor tiers and — with `max_chars` — **fits them
   to a char budget** (~4/token): identity first (truncated if needed), then facts (the majority share,

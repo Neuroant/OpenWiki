@@ -337,6 +337,36 @@ def test_consolidate_clusters_current_facts_and_is_bounded(tmp_path):
         store.close()
 
 
+def test_concept_assignment_and_members_enable_warm_start(tmp_path):
+    """B5 incrementality: CONSOLIDATES read-back inverts, and warm-starting from it is stable."""
+    import pytest
+    pytest.importorskip("kuzu")
+    from openwiki.graph import GraphStore, detect_communities
+
+    store = GraphStore(_build_graph(tmp_path), writable=True)
+    try:
+        store.remember("s1", _PY_FACTS + _DB_FACTS, _MemEmbedder())
+        ag = store.assertion_graph()
+        assignment = detect_communities(ag["edges"], list(ag["facts"]))
+        cids = set(assignment.values())
+        store.upsert_memory_concepts(assignment, {c: "s" for c in cids}, {c: f"T{c}" for c in cids})
+
+        asg, mem = store.concept_assignment(), store.concept_members()
+        assert set(asg) == set(assignment)                            # every fact assigned
+        assert sum(len(v) for v in mem.values()) == len(asg) == 6     # members invert the assignment
+        # warm-starting from the persisted partition reproduces the same grouping (stable re-run)
+        again = detect_communities(ag["edges"], list(ag["facts"]), seed=asg)
+
+        def groups(a):
+            g: dict = {}
+            for n, c in a.items():
+                g.setdefault(c, set()).add(n)
+            return {frozenset(s) for s in g.values()}
+        assert groups(again) == groups(assignment)
+    finally:
+        store.close()
+
+
 def test_consolidate_excludes_superseded_facts(tmp_path):
     import pytest
     pytest.importorskip("kuzu")

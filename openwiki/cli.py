@@ -371,6 +371,9 @@ def _build_argparser() -> argparse.ArgumentParser:
                         help="Prune usage edges below this effective weight in the decay step (default: 0.1).")
     cons_p.add_argument("--no-decay", action="store_true",
                         help="Only re-cluster/summarize; skip the fold-usage + decay 'forget' step.")
+    cons_p.add_argument("--resummarize", action="store_true",
+                        help="Re-summarize every theme from scratch (ignore the incremental cache "
+                             "+ warm-start; a full rebuild of the consolidation layer).")
     cons_p.add_argument("--model", default=None,
                         help="Chat model for the theme summaries (default: manifest models.chat).")
     cons_p.add_argument("--host", default=None, help="Ollama host URL.")
@@ -1822,13 +1825,22 @@ def _cmd_consolidate(args: argparse.Namespace) -> int:
         print("error: graph is locked by another process (stop `serve`/`chat` first).", file=sys.stderr)
         graph.close()
         return 2
+    reused = summarized = 0
     try:
         if not graph.has_memory():
             print("(no remembered facts yet — capture sessions with `openwiki remember` first)")
             return 0
+        # B5 stability + incrementality: warm-start clustering from the prior partition, and
+        # reuse an existing theme's summary when its member set is unchanged (skip the LLM call).
+        prior_assign = {} if args.resummarize else graph.concept_assignment()
+        prior_by_set = {}
+        if not args.resummarize:
+            members_prev = graph.concept_members()
+            prior_by_set = {frozenset(members_prev.get(c["id"], set())): (c["label"], c["summary"])
+                            for c in graph.memory_concepts()}
         ag = graph.assertion_graph(similar_k=args.similar_k)
         facts = ag["facts"]
-        assignment0 = detect_communities(ag["edges"], list(facts))
+        assignment0 = detect_communities(ag["edges"], list(facts), seed=prior_assign or None)
         members: dict = defaultdict(list)
         for aid, cid in assignment0.items():
             members[cid].append(aid)
@@ -1842,20 +1854,29 @@ def _cmd_consolidate(args: argparse.Namespace) -> int:
 
         chat = OllamaChat(model=args.model, host=args.host, temperature=0.2)
         if kept:
-            print(f"Consolidating {len(facts)} fact(s) into {len(kept)} theme(s). "
-                  f"Summarizing with {chat.name} …", file=sys.stderr)
+            print(f"Consolidating {len(facts)} fact(s) into {len(kept)} theme(s) with {chat.name} "
+                  f"(unchanged themes reuse their summary) …", file=sys.stderr)
         else:
             print(f"No themes yet — need a cluster of ≥{args.min_size} related facts "
                   f"({len(facts)} fact(s) so far).", file=sys.stderr)
         assignment, summaries, labels = {}, {}, {}
         for new_id, cid in enumerate(kept):
-            ranked = sorted(members[cid], key=lambda a: (-degree.get(a, 0.0), a))
-            fact_texts = [facts[a] for a in ranked[: args.max_facts]]
-            labels[new_id], summaries[new_id] = summarize_facts(
-                chat, fact_texts, fallback_label=f"Thema {new_id}")
+            member_set = frozenset(members[cid])
+            cached = prior_by_set.get(member_set)
+            if cached is not None:                     # membership unchanged → reuse (no LLM call)
+                labels[new_id], summaries[new_id] = cached
+                reused += 1
+                tag = "reuse"
+            else:
+                ranked = sorted(members[cid], key=lambda a: (-degree.get(a, 0.0), a))
+                fact_texts = [facts[a] for a in ranked[: args.max_facts]]
+                labels[new_id], summaries[new_id] = summarize_facts(
+                    chat, fact_texts, fallback_label=f"Thema {new_id}")
+                summarized += 1
+                tag = "new"
             for aid in members[cid]:
                 assignment[aid] = new_id
-            print(f"  [{new_id}] {len(members[cid]):>3} facts — {labels[new_id]}", file=sys.stderr)
+            print(f"  [{new_id}] {len(members[cid]):>3} facts — {labels[new_id]}  ({tag})", file=sys.stderr)
 
         result = graph.upsert_memory_concepts(assignment, summaries, labels)
         folded = decayed = None
@@ -1865,7 +1886,8 @@ def _cmd_consolidate(args: argparse.Namespace) -> int:
     finally:
         graph.close()
 
-    print(f"Consolidated {result['assertions']} fact(s) into {result['concepts']} theme(s) → {args.graph}")
+    print(f"Consolidated {result['assertions']} fact(s) into {result['concepts']} theme(s) "
+          f"({summarized} summarized, {reused} reused) → {args.graph}")
     if decayed is not None:
         fold_note = f"folded {folded['records']} usage record(s); " if folded and folded["records"] else ""
         print(f"  {fold_note}decayed {decayed['edges']} usage edge(s) ({decayed['pruned']} pruned).")

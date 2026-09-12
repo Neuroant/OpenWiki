@@ -16,7 +16,8 @@
 > so memory flows automatically; **per-fact confidence** (v0.54): re-affirming a fact reinforces its
 > confidence, a gentle log-scaled tie-breaker on recall; and a **fixed-token context budgeter** (v0.55):
 > the assembly fits the three tiers to a char budget (identity → facts → themes, graceful truncation).
-> *(B1's true concurrent reader-and-writer model and B5's incrementality/k-core remain as refinements — see the notes.)*
+> B5 (v0.56) then gained **incremental, stable consolidation** (warm-start Louvain — the §8 k-core
+> decision, resolved). *(B1's true concurrent reader-and-writer model remains as a refinement — see the notes.)*
 > This remains the living design base for Path B — turning OpenWiki's knowledge graph from a document
 > **mirror** into agent **memory**.
 > The roadmap-level overview lives in [`docs/roadmap.md`](roadmap.md#path-b--the-second-brain-memory-model);
@@ -330,9 +331,20 @@ to matter but late enough to de-risk. Each stage lists an **exit criterion** (ho
   so it stays **bounded**: a re-run *replaces* the themes rather than accumulating. Proven live —
   9 facts → 3 coherent themes; `answer_global` over the theme summaries then produced a synthesized
   **global answer over memory** (the exit criterion's "global-search quality"), and a second pass
-  stayed at 3 themes. **Deferred:** true incrementality (re-summarize only changed clusters), the
-  **k-core vs Louvain** stability question (§8), per-tier half-lives, and the source-invalidation
-  cascade — the first slice re-clusters from scratch (fine for a bounded fact set).
+  stayed at 3 themes.
+- **Incrementality + stability landed (v0.56) — the B5 "hard part" + the §8 k-core decision.** Two
+  coupled refinements: (1) `detect_communities` now takes a **warm-start `seed`** — clustering begins
+  from the prior partition (`GraphStore.concept_assignment`) rather than all-singletons, so a re-run is
+  **stable** (no drift) and a small edit stays **local** (only genuinely-improving moves happen); (2) a
+  theme whose **member set is unchanged reuses its summary** (matched via `GraphStore.concept_members`)
+  — only new/changed clusters cost an LLM call (`--resummarize` forces a full rebuild). Proven live:
+  re-consolidating an unchanged memory did **0 summaries (all reused)**; adding one fact re-summarized
+  **only its cluster** (1 summarized, 1 reused), leaving the other theme untouched. **The §8 k-core
+  decision is resolved: warm-start Louvain, not k-core.** k-core yields a *coreness hierarchy*, not a
+  topical partition to summarize; warm-start Louvain achieves the stability k-core was proposed for
+  while keeping the modularity objective consistent with Path A doc communities — simpler, and it
+  reuses one clustering path for both tiers. **Still deferred:** per-tier decay half-lives and the
+  source-invalidation cascade.
 
 ### B6 — Three-tier context assembly
 - **Goal:** the payoff — build a new session's context from memory, cheaply.
@@ -440,8 +452,12 @@ concentrating it helps more than replaying it.** This is the green light for the
   `FACT` edge with `predicate` as a property (Cognitive Substrate's choice — one index, no
   per-predicate migration, but provenance/versioning are awkward on an edge). *Leaning reified* (§4/§11).
 - **Abstraction: communities vs k-core** — Louvain communities can *shift under incremental edits*
-  (§11's critique); evaluate **k-core decomposition** (deterministic, stable nested hierarchy) for
-  the evolving graph, or a stability-preserving community-update strategy. *Open — B5.*
+  (§11's critique); evaluate **k-core decomposition** (deterministic, stable nested hierarchy) or a
+  stability-preserving community-update strategy. **Resolved (v0.56): a stability-preserving Louvain —
+  warm-start from the prior partition (`detect_communities(seed=…)`)** — not k-core. k-core yields a
+  *coreness hierarchy*, not a topical partition to summarize; warm-start delivers the stability k-core
+  was proposed for (a re-run doesn't drift; edits stay local) while keeping the modularity objective +
+  a single clustering path shared with Path A doc communities. See §6/B5.
 - **Capture trigger** — end-of-session batch vs streaming during the turn loop. *Leaning batch (a
   "sleep" pass), matching the biology and the host `Stop` hook (§11); avoids write-on-every-turn.*
 - **Identity (DNA) storage** — a manifest field vs a dedicated identity doc vs a special graph node.
@@ -517,8 +533,10 @@ If no → we've learned it cheaply, before touching ADR-3.
 > **B6 (v0.52)** landed the payoff — `context_for(query)` fuses identity + activation (recall) +
 > attractors (B5 themes) into an assembled session context (the `context` CLI + MCP `wiki_memory`),
 > and the cross-session eval scores it **assembled 100% > raw-log 87.5% > cold 0%**. **The B0–B6 plan
-> is complete** — what remains are refinements (B1 true concurrency, B5 incrementality/k-core, B6
-> host-hook injection + confidence), not stages.
+> is complete**, and its refinements have landed too — B6 host-hook injection (v0.53), per-fact
+> confidence (v0.54), the context budgeter (v0.55), and B5 incremental+stable consolidation (v0.56).
+> What remains is **B1's true concurrent reader-and-writer model** (the read-path usage log defers
+> writes rather than allowing simultaneous ones) — a refinement, not a stage.
 
 ## 11. Prior art & learnings — "Cognitive Substrate"
 

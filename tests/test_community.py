@@ -60,6 +60,28 @@ def test_detect_is_deterministic_regardless_of_edge_order():
     assert detect_communities(_BARBELL) == detect_communities(list(reversed(_BARBELL)))
 
 
+def _groups(assignment):
+    g: dict = {}
+    for node, cid in assignment.items():
+        g.setdefault(cid, set()).add(node)
+    return {frozenset(s) for s in g.values()}
+
+
+def test_detect_warm_start_is_stable_and_incremental():
+    """B5: warm-starting from a prior partition is stable (no drift) and edits stay local."""
+    edges = [("a", "b", 1.0), ("b", "c", 1.0), ("a", "c", 1.0),   # triangle 1
+             ("d", "e", 1.0), ("e", "f", 1.0), ("d", "f", 1.0)]    # triangle 2 (disconnected)
+    first = detect_communities(edges)
+    assert _groups(first) == {frozenset("abc"), frozenset("def")}
+    # re-running warm-started from the prior partition reproduces it exactly (no drift)
+    assert _groups(detect_communities(edges, seed=first)) == _groups(first)
+    # adding a node attached to triangle 1 leaves triangle 2's cluster untouched
+    incr = detect_communities(edges + [("a", "g", 1.0), ("b", "g", 1.0)], seed=first)
+    assert incr["d"] == incr["e"] == incr["f"]                    # triangle-2 cluster unchanged
+    assert incr["a"] == incr["b"] == incr["c"] == incr["g"]       # g joined triangle 1
+    assert incr["a"] != incr["d"]
+
+
 # -- summaries + global answer (fake chat) -------------------------------------
 
 def test_summarize_returns_model_label_and_summary():

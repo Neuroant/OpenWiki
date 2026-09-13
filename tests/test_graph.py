@@ -546,11 +546,53 @@ def test_wikitools_create_page_syncs_graph(tmp_path, writable_store):
     assert any("synced 901-note" in e for e in tools.edits)
 
 
-def test_wikitools_no_sync_on_readonly_graph(tmp_path, store):
+def test_wikitools_edit_on_readonly_graph_queues_reindex(tmp_path, store):
+    """Concurrency (B1): a read-only graph (serve/chat sharing it with other readers) can't
+    upsert, so an agent edit writes the page file and *queues* a reindex op for a later
+    writable fold — never a hard failure, never a silently-dropped graph update."""
     from openwiki.tools import WikiTools
 
     wdir = tmp_path / "w"
     (wdir / "pages").mkdir(parents=True)
     tools = WikiTools(wdir, graph=store, embedder=FakeEmbedder())  # read-only graph
-    tools.create_page("902-x", "X", "body")
-    assert not any("synced" in e for e in tools.edits)            # no write attempted
+    assert store.pending_ops() == 0
+    tools.create_page("902-x", "X", "alpha nautilus body")
+    assert (wdir / "pages" / "902-x.md").is_file()                # file written regardless
+    assert not any("synced" in e for e in tools.edits)            # no live upsert attempted
+    assert any("queued 902-x" in e for e in tools.edits)          # deferred to the journal
+    assert store.pending_ops() == 1                                # one reindex op queued
+
+
+def test_fold_journal_applies_queued_ops(tmp_path):
+    """A read-only store queues remember + reindex ops; a later writable store folds them
+    into the graph and clears the journal (B1 deferred-write apply). The read-only store is
+    closed before the writable open — Kuzu is reader-XOR-writer."""
+    from openwiki.graph.memory import MemoryFact
+
+    wiki = _wiki()
+    index = SemanticIndex.build(wiki, FakeEmbedder(), size_words=50, overlap_words=10)
+    GraphBuilder(tmp_path / "graph", similar_k=3).build(wiki, index)
+
+    ro = GraphStore(tmp_path / "graph")                            # a reader (read-only)
+    try:
+        ro.queue_reindex("903-note", "alpha nautilus notes")
+        ro.queue_remember("s1", [MemoryFact("the database", "is", "Kuzu")])
+        assert ro.pending_ops() == 2
+    finally:
+        ro.close()
+
+    rw = GraphStore(tmp_path / "graph", writable=True)             # a writer folds them in
+    try:
+        res = rw.fold_journal(FakeEmbedder())
+        assert res["records"] == 2
+        assert res["reindexed"] == 1 and res["remembered"] >= 1
+        assert rw.pending_ops() == 0                               # journal cleared
+        assert rw.neighborhood("903-note")["center"] == "903-note"  # page joined the graph
+        assert rw.has_memory()                                      # fact persisted
+    finally:
+        rw.close()
+
+
+def test_fold_journal_requires_writable(store):
+    with pytest.raises(RuntimeError):
+        store.fold_journal(FakeEmbedder())

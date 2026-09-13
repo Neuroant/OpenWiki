@@ -228,8 +228,9 @@ flowchart LR
 - `_EXPAND_RELS = (references, referenced_by, similar, shared_entity, reinforced)` — the
   edge kinds GraphRAG expands along.
 - Grounding is enforced by the system prompt; `Source` carries provenance so `[n]` citations
-  resolve to pages. `record_usage` reinforces immediately on a writable graph (serve/chat) or
-  appends to the usage log on a read-only `ask`/MCP (B1, ADR-17) — best-effort, never blocking retrieval.
+  resolve to pages. `record_usage` reinforces immediately on a writable graph (a `--sync` writer) or
+  appends to the usage log on the read-only default (`serve`/`chat`/`ask`/MCP) for a writer to fold in
+  (B1, ADR-17/ADR-19) — best-effort, never blocking retrieval.
 
 ---
 *Chapter complete. Cross-refs: interfaces → §8 (concepts), decisions → §9, runtime flows →

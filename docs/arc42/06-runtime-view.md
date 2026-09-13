@@ -57,7 +57,7 @@ sequenceDiagram
     A->>GS: neighborhood(seed slugs) → candidates
     A->>IX: best_chunk_per_page(question, candidates) → related
     A->>GS: record_usage(seed, related)
-    Note over A,GS: writable serve/chat reinforces now, read-only ask/MCP appends to the usage log (B1)
+    Note over A,GS: read-only default (serve/chat/ask/MCP) appends usage to the journal for a later writer to fold in (B1/ADR-19)
   end
   A->>C: chat(grounded prompt + numbered excerpts)
   C-->>A: answer with [n] citations
@@ -203,22 +203,25 @@ Any embed or chat call goes through `urllib` to Ollama; on failure `OllamaEmbedd
 Note: even plain RAG retrieval needs the embedder (to embed the *query*), so a down Ollama
 fails retrieval, not just generation.
 
-### Read-only-graph fallback & read-path usage (B1)
-`serve`/`chat` request the graph **writable** (exclusive Kuzu lock) to enable edits + live
-reinforcement, and **fold in** any pending read-path usage on startup (`fold_usage`). If the lock is
-already held, `_open_graph` falls back to **read-only** (a note is printed); `upsert_page` becomes a
-guarded no-op, so reads still work — the wiki simply doesn't self-update in that process.
-On the deliberately read-only paths (`ask`/MCP), reinforcement is **not** lost: in Second Brain mode
-`record_usage` **appends** the usage to `graph.usage.jsonl`, which the next writable process folds in
-(B1/ADR-17) — so reads teach the graph without ever contending for the write lock.
+### Concurrency & the write-ahead journal (B1 / ADR-19)
+Kuzu 0.11 is **reader-XOR-writer** (measured): a writable connection blocks all readers, and readers
+block a writer — no simultaneous read+write. So `serve`/`chat` open the graph **read-only by default**,
+which lets many readers (`ask`/MCP/`recall`/`context`, a second `serve`) run **concurrently** while
+serving. Writes never take the lock on these paths: reinforcement **appends** to `graph.usage.jsonl`
+(B1/ADR-17), and `remember` / host-`capture` / a chat-edit's graph re-sync **queue** to
+`graph.journal.jsonl` as `remember`/`reindex` ops. A writer **folds** both (`fold_usage` +
+`fold_journal`) at `serve`/`chat` start+shutdown (`_transient_fold`), in `openwiki decay`, or on the
+next `remember`; writable opens use **retry-with-backoff** for transient contention. A chat-edit still
+writes its page file live — only the *graph* re-sync is deferred. `--sync` opts `serve`/`chat` back into
+a held-**writable** connection (live edit-sync + immediate reinforcement, exclusive lock — blocks other
+graph access); if that writable open is refused, `_open_graph` falls back to read-only (a note is printed).
 
-### Concurrency
 - The web layer is a `ThreadingHTTPServer`: requests run on separate threads that share **one**
   `GraphStore` connection, serialized by the store's re-entrant `RLock` (an `upsert` holds it
   across a batch).
 - The stateful `WikiAgent` (mutable history) is serialized by a lock in `WikiWebApp`.
-- Writable graph access is process-exclusive → at most one writable `serve`/`chat` at a time,
-  with the read-only fallback above.
+- Writable graph access is process-exclusive → at most one `--sync` (or `remember`/`decay`) writer at a
+  time; the read-only default + journal is how concurrent access is achieved.
 
 ---
 *Chapter complete. Cross-refs: block interfaces → §5; grounding/provenance, concurrency,

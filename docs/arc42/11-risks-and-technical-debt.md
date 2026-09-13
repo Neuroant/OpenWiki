@@ -20,7 +20,7 @@
 | # | Debt | Why it exists | Cost to address |
 |---|---|---|---|
 | D1 | **Graph is a mirror, not authoritative** | Deliberate (ADR-3) for a document wiki | ✅ **Addressed (v0.48, B0 / ADR-16)** — a remembered tier is now preserved across doc rebuilds; the doc tier stays a rebuildable mirror. |
-| D2 | **Reinforcement only fires in writable contexts** | Kuzu exclusive-lock model (ADR-8) | ✅ **Addressed (v0.49, B1 / ADR-17)** — read-only `ask`/MCP append usage to a log a writer folds in; no lock contention. |
+| D2 | **Reinforcement only fires in writable contexts** | Kuzu exclusive-lock model (ADR-8) | ✅ **Addressed (v0.49, B1 / ADR-17; generalized v0.57 / ADR-19)** — read-only `ask`/MCP append usage to a log a writer folds in; ADR-19 then makes `serve`/`chat` read-only too so readers run concurrently and *all* writes queue to a lock-free journal (Kuzu is reader-XOR-writer — no simultaneous read+write). |
 | D3 | **Retrieval ignores Kuzu's HNSW; brute-force cosine** | Simplicity at small scale | Medium — back `SemanticIndex.search` with an ANN index when corpora grow. |
 | D4 | **Incremental upsert recomputes only `SIMILAR_TO`** | Cheap live sync for edits | Medium — CHILD_OF/NEXT/REFERENCES/entities still need a full `graph-build`. |
 | D5 | **Community precision is moderate / labels heuristic-then-LLM** | Broad thematic questions span themes | Low — acceptable; measured (precision 56.7% on the thematic set). |

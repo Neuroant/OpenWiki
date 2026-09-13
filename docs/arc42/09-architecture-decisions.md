@@ -16,7 +16,7 @@
 | [5](#adr-5) | Target Python 3.13 (not 3.14) | Accepted | — |
 | [6](#adr-6) | Borrow GraphRAG's *ideas*, not the library | Accepted | Q2, Q5 |
 | [7](#adr-7) | Optional layers as always-created, empty-by-default tables | Accepted | Q4 |
-| [8](#adr-8) | Graph read-only by default, writable only for edits | Accepted; refined by [ADR-17](#adr-17) (Path B) | correctness |
+| [8](#adr-8) | Graph read-only by default, writable only for edits | Accepted; refined by [ADR-17](#adr-17)/[ADR-19](#adr-19) (Path B) | correctness |
 | [9](#adr-9) | Evaluation-driven claims | Accepted | Q5 |
 | [10](#adr-10) | Project manifest + settings precedence | Accepted | usability |
 | [11](#adr-11) | Incremental builds via a per-stage fingerprint chain | Accepted | performance |
@@ -27,6 +27,7 @@
 | [16](#adr-16) | Graph preserves the remembered tier across a document rebuild | Accepted (Path B / B0) | Q4 |
 | [17](#adr-17) | Read-path reinforcement via an append-only usage log | Accepted (Path B / B1) | correctness |
 | [18](#adr-18) | Contradiction as append-only supersession (`SUPERSEDES`-edge-only) | Accepted (Path B / B4) | Q4, correctness |
+| [19](#adr-19) | Concurrency as read-only readers + a lock-free write-ahead journal | Accepted (Path B / B1) | correctness, Q2 |
 
 ---
 
@@ -117,7 +118,9 @@
   fires in writable contexts, limiting Path-B memory on the read-only `ask` path (debt D2).
 - **Update (Path B / B1):** [ADR-17](#adr-17) **resolves** D2 without weakening this decision —
   read-only reads append usage to a log a writable process folds in, so reads reinforce without ever
-  taking the exclusive write lock.
+  taking the exclusive write lock. [ADR-19](#adr-19) then **generalizes** this: `serve`/`chat` also
+  open **read-only by default** (so readers run concurrently), with *all* writes routed through a
+  lock-free journal — the "writable only for edits" mode becomes the opt-in `--sync`.
 
 ### ADR-9
 **Evaluation-driven claims (measure the graph's value).**
@@ -244,8 +247,9 @@
   Skip read-path learning — rejected (that *is* the debt).
 - **Consequences:** + Usage memory grows from *all* reads, not just serve/chat; zero read-path lock
   contention; the log survives a rebuild and folds in what still matches. − Writes are **deferred**,
-  not simultaneous (a true concurrent reader-and-writer model is still future) — acceptable for the
-  CLI/MCP pattern, where a writer runs between read sessions. Addresses debt D2.
+  not simultaneous. [ADR-19](#adr-19) generalizes this log into a full write-ahead journal (and settles
+  the "true concurrent reader-and-writer" question against Kuzu's measured reader-XOR-writer lock).
+  Addresses debt D2.
 
 ### ADR-18
 **Contradiction as append-only supersession (`SUPERSEDES`-edge-only).** *(Path B / B4)*
@@ -265,7 +269,38 @@
   rebuild ([ADR-16](#adr-16)). − Conservative detection misses synonym-predicate contradictions; per-fact
   `confidence` is deferred. Addresses debt D6.
 
+### ADR-19
+**Concurrency as read-only readers + a lock-free write-ahead journal.** *(Path B / B1 — generalizes [ADR-8](#adr-8)/[ADR-17](#adr-17))*
+- **Context:** ADR-17 let read-only `ask`/MCP reinforce via a usage log, but `serve`/`chat` still held
+  an **exclusive writable** lock for their whole lifetime — blocking *every* other process (even a
+  read-only `ask`). Path B's "second brain" wants to `ask`/`remember`/`recall` while a `serve` runs.
+  The Kuzu locking model was **measured**, not assumed: a writable connection blocks all readers, **and**
+  a read-only connection blocks a writer (multiple readers coexist). Kuzu 0.11 is **reader-XOR-writer** —
+  there is **no** simultaneous read+write (no MVCC/WAL).
+- **Decision:** Since simultaneity is impossible *in Kuzu*, target the reachable maximum — **concurrent
+  readers + never-blocked writes**. `serve`/`chat` open **read-only by default** (readers coexist), and
+  *all* memory writes are **queued to a lock-free write-ahead journal** rather than taking the lock:
+  reinforce pairs → `graph.usage.jsonl` (ADR-17), and `remember` / host-`capture` / chat-edit graph
+  re-sync → `graph.journal.jsonl` as self-contained `remember`/`reindex` ops (`graph/journal.py`;
+  `queue_remember`/`queue_reindex` append read-only). A **writer folds** the journal
+  (`GraphStore.fold_journal(embedder)`) at `serve`/`chat` start+shutdown, in `openwiki decay`, or on the
+  next `remember`; a locked-out `remember`/`capture` **queues** instead of failing. Writable opens
+  **retry-with-backoff** for transient two-writer contention. `--sync` restores the ADR-8 held-writable
+  mode (live edit-sync, exclusive).
+- **Alternatives:** Keep `serve` writable (ADR-8 as-is) — rejected (blocks all concurrent access, the
+  actual pain). Short-lived writable opens per write from within a read-only `serve` — rejected (the
+  process's own read lock conflicts with its writable open; self-deadlock). A background writer daemon —
+  rejected (no always-on process; ADR-17's reasoning). Switch to an MVCC store (DuckDB/SQLite/Neo4j) for
+  true concurrency — rejected here (ADR-5/ADR-6 keep Kuzu; that's a store change, not a code change).
+- **Consequences:** + Many readers run while serving; writes never block or get lost (queued + folded).
+  + One journal mechanism spans reinforce + remember + edit re-sync; both sidecars survive a rebuild. −
+  A chat-edit's **graph** re-sync is now **deferred** (folded on the next writable pass), though the page
+  file writes live; heavy edit-sync workloads should use `--sync`. − Journaled writes lag until a writer
+  runs (a long-lived read-only `serve` accumulates the journal until its shutdown/next-start fold). This
+  is the **honest resolution** of ADR-8/D2's "true concurrent reader-and-writer" question: not achievable
+  within Kuzu; the journal is the ceiling.
+
 ---
 *Chapter complete. The Path-B agent-memory direction has **landed** its load-bearing decisions:
-ADR-14 (coexistence) + ADR-15/16/17/18 realize it and resolve the §11 debts D1/D2/D6 that ADR-3/ADR-8
+ADR-14 (coexistence) + ADR-15/16/17/18/19 realize it and resolve the §11 debts D1/D2/D6 that ADR-3/ADR-8
 flagged. Deep design in `docs/path-b-memory.md`. New significant decisions should be appended here with the next id.*

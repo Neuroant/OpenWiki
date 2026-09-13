@@ -51,11 +51,17 @@ rebuild, so it survives re-ingesting sources (ADR-16). See §8.15.
 ## 8.6 Concurrency
 
 `GraphStore` guards its single Kuzu connection with a re-entrant lock (`RLock`); an upsert
-holds it across a batch. The threaded web server shares one connection. Writable access is
-exclusive (Kuzu lock) — hence one writable process at a time with a read-only fallback.
-**Read-path writes are decoupled from the lock (B1):** a read-only process records usage by
-*appending* to `graph.usage.jsonl` (no lock), and the next writable process folds it in — so reads
-"learn" without ever contending for exclusive access (ADR-17).
+holds it across a batch. The threaded web server shares one connection. Kuzu 0.11 is
+**reader-XOR-writer** (measured): a writable connection blocks *all* readers, and readers block a
+writer — multiple readers coexist, but there is **no** simultaneous read+write.
+**So all writes are decoupled from the lock via a write-ahead journal (B1 / ADR-19):** `serve`/`chat`
+open **read-only by default** (readers run concurrently), and writes *queue* to a lock-free JSONL
+sidecar rather than contend — reinforce pairs → `graph.usage.jsonl` (ADR-17), and `remember` /
+host-`capture` / a chat-edit's graph re-sync → `graph.journal.jsonl` (`queue_remember`/`queue_reindex`).
+A writer **folds** the journal (`fold_journal`) at `serve`/`chat` start+shutdown, in `decay`, or on the
+next `remember`; writable opens retry-with-backoff for transient contention. `--sync` opts back into a
+held-writable connection (live edit-sync, exclusive). This is the reachable ceiling under Kuzu —
+concurrent reads + never-blocked writes, not true simultaneity.
 
 ## 8.7 Configuration & settings resolution
 

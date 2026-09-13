@@ -135,7 +135,9 @@ via tool calls:
 Options: `-m/--message TEXT` (repeatable; omit for the REPL), `--wiki DIR`,
 `--dry-run` (preview edits without writing), `--show-tools`, `--model NAME`,
 `--host URL`, `-i DIR`, `--graph DIR` (enables the `graph_neighbors`/`find_path`
-tools when the graph exists).
+tools when the graph exists), `--sync` (hold the graph **writable** for live
+edit-sync; **default is read-only** so other processes run concurrently — agent
+edits still write page files and re-sync via the journal at start/exit).
 
 **Build the knowledge graph** — writes a Kuzu DB to `output/graph/` from a source
 (PDF or `ingest` JSON) + the existing index (mirrors embeddings):
@@ -246,8 +248,13 @@ assembler; §7 — assembled beats cold + raw-log).
 .venv\Scripts\python -m openwiki serve --port 8137        # http://127.0.0.1:8137
 ```
 Options: `--wiki DIR`, `-i/--index DIR`, `--graph DIR`, `--bind ADDR`, `--port N`,
-`--model NAME`, `--host URL`, `--temperature T`, `--dry-run`. The graph tab lights
-up automatically if `--graph` (default `output/graph`) exists.
+`--model NAME`, `--host URL`, `--temperature T`, `--dry-run`, `--sync`. The graph tab
+lights up automatically if `--graph` (default `output/graph`) exists. **By default the
+graph is opened read-only** so `ask`/MCP/`recall`/`context` (and a second reader) run
+**concurrently** while serving (Kuzu is reader-XOR-writer — see the concurrency note);
+agent edits write page files immediately and their graph re-sync is **deferred** to the
+write-ahead journal, folded at serve start & shutdown. `--sync` restores the old
+exclusive-writable mode (live graph sync, but blocks other graph access).
 
 **MCP server (for coding agents)** — exposes RAG+GraphRAG as stdio MCP tools:
 ```
@@ -457,6 +464,13 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   belong to), read-only + fail-soft. The budget defaults to `Project.context_budget` (`[memory]
   context_budget`, 2000). Exposed as the `context` CLI (`--max-chars`) and the MCP `wiki_memory` tool
   (both budgeted); the cross-session eval's "assembled" condition is this assembler. Design in `docs/path-b-memory.md`.
+  `usage.py` + `journal.py` are the **lock-free deferred-write log** (**B1 concurrency**): Kuzu is
+  reader-XOR-writer (no simultaneous read+write), so a read-only process queues its intended writes to a
+  JSONL sidecar instead of failing — `usage.py` holds reinforce pairs (`fold_usage`), `journal.py` holds
+  self-contained `remember`/`reindex` ops (`GraphStore.queue_remember`/`queue_reindex` append read-only;
+  `fold_journal(embedder)` drains + clears, writable). Both pure/dependency-free (no Kuzu); the CLI folds
+  them at `serve`/`chat` start+shutdown, in `decay`, and on the next `remember`. See the concurrency note
+  under *Conventions & gotchas*.
 - **`openwiki/web/`** — the web UI. `server.py` = `WikiWebApp` (state) + a
   `ThreadingHTTPServer` handler exposing a JSON API (`/api/wiki`,
   `/api/pages/{slug}`, `/api/search`, `/api/chat`, `/api/graph/{slug}` = explore,
@@ -704,12 +718,25 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   the `shared_entity` edges, the `find_entity` tool, and the entity term in RAG
   expansion (`agent._EXPAND_RELS`). Extraction is slow (~1 call/page) — run it in
   the background; tests use a deterministic fake chat.
-- **Incremental updates:** `serve`/`chat` open the graph **writable** (exclusive
-  Kuzu lock) when an index is present and not `--dry-run`, passing `index.embedder`
-  to `WikiTools`; edits then upsert into the graph live. Writable is exclusive, so
-  one such process at a time (there's a read-only fallback if the lock is held).
-  Only `SIMILAR_TO` is recomputed on upsert — CHILD_OF/NEXT, REFERENCES and
-  entities still need a full `graph-build`. Kuzu's HNSW index supports incremental
+- **Concurrency model (B1) — Kuzu is reader-XOR-writer:** a writable connection is
+  exclusive (it blocks **all** readers, *and* readers block a writer — empirically
+  verified; there is **no** simultaneous read+write in Kuzu 0.11). So `serve`/`chat`
+  default to **read-only**: many readers (`ask`/MCP/`recall`/`context`, a second
+  `serve`) coexist, and would-be **writes never block or fail** — they append to a
+  lock-free **write-ahead journal** (`graph.usage.jsonl` reinforce pairs +
+  `graph.journal.jsonl` queued `remember`/`reindex` ops) that a later writable pass
+  folds in (`GraphStore.fold_journal`, needs an embedder). Folders: `serve`/`chat`
+  transiently at start **and** shutdown (`_transient_fold`), `openwiki decay` (when it
+  can load the project's embedder), and the next `remember`. `remember`/hook-`capture`
+  **queue** when the graph is locked instead of erroring; a chat-edit's graph re-sync
+  is queued as a `reindex` op (the page file is written regardless). Writable opens
+  use **retry-with-backoff** (`_open_graph(retries=)`) to ride out transient
+  contention. `--sync` opts `serve`/`chat` back into a held-writable connection (live
+  edit-sync, but exclusive — blocks other access). Design: `docs/path-b-memory.md` §B1.
+- **Incremental updates (`--sync` / a writable pass):** a **writable** graph (index
+  present, not `--dry-run`) passes `index.embedder` to `WikiTools`; edits upsert into
+  the graph live. Only `SIMILAR_TO` is recomputed on upsert — CHILD_OF/NEXT, REFERENCES
+  and entities still need a full `graph-build`. Kuzu's HNSW index supports incremental
 - **Outline synthesis** (`outline.py`): when a source PDF has **no bookmarks**,
   `openwiki build` (with `[build] synthesize_outline`, default on) derives a flat
   section outline from **numbered running headers** (e.g. `10.1 Title` at the top of

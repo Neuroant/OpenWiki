@@ -48,12 +48,21 @@ class WikiTools:
         self._has_entities: Optional[bool] = None  # cached graph.has_entities()
 
     def _sync_graph(self, slug: str, content: str) -> None:
-        """Reflect a write in the knowledge graph, if it's writable."""
-        if self.embedder is None or self.graph is None or not getattr(self.graph, "writable", False):
+        """Reflect a write in the knowledge graph. On a **writable** graph, upsert now;
+        on a **read-only** graph (concurrency mode — serve/chat share the graph with other
+        readers), queue a `reindex` op to the write-ahead journal so a later writable pass
+        folds it in. The page file is written either way; only the graph sync is deferred."""
+        if self.graph is None:
             return
         try:
-            self.graph.upsert_page(slug, content, embedder=self.embedder)
-            self.edits.append(f"graph: synced {slug}")
+            if getattr(self.graph, "writable", False):
+                if self.embedder is None:
+                    return
+                self.graph.upsert_page(slug, content, embedder=self.embedder)
+                self.edits.append(f"graph: synced {slug}")
+            else:
+                self.graph.queue_reindex(slug, content)
+                self.edits.append(f"graph: queued {slug} for re-sync (deferred)")
         except Exception as exc:  # a graph hiccup must not fail the edit itself
             self.edits.append(f"graph sync failed for {slug}: {exc}")
 

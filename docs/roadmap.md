@@ -559,8 +559,23 @@ cost an LLM call (`--resummarize` forces a full rebuild). Verified live: re-cons
 memory did 0 summaries (all reused); adding one fact re-summarized only its cluster (1 summarized, 1
 reused). **Resolved: warm-start Louvain, not k-core** — k-core gives a coreness hierarchy, not topical
 themes; warm-start delivers the same stability while keeping the modularity objective (one clustering
-path shared with Path A). **Still open (a refinement, not a stage):** B1's true concurrent
-reader-and-writer model (the read-path usage log defers writes rather than allowing simultaneous ones).
+path shared with Path A).
+
+**Concurrent reader-and-writer model landed (v0.57) — the last Path B refinement.** First the
+constraint, *measured*: Kuzu 0.11 is **reader-XOR-writer** (a writable connection blocks all readers,
+and readers block a writer — no simultaneous read+write exists in Kuzu). So "true simultaneity" is
+unreachable *in Kuzu*, and the append-only log was the right shape all along. v0.57 generalizes it into
+a **lock-free write-ahead journal** and flips the lock holder: **`serve`/`chat` open read-only** so many
+readers (`ask`/MCP/`recall`/`context`, a second `serve`) run **concurrently**, and *all* memory writes —
+reinforce pairs (`usage.jsonl`), plus `remember` / host-`capture` / chat-edit re-sync as self-contained
+`remember`/`reindex` ops (`journal.jsonl`) — **queue instead of blocking or failing**; a writer folds
+them (`fold_journal`) at `serve`/`chat` start+shutdown, in `decay`, or on the next `remember`. Writable
+opens **retry-with-backoff**; `--sync` restores the old held-writable mode. Trade-off: a chat-edit's
+*graph* re-sync is deferred (the page file writes live). Verified live (concurrent `recall` while serving;
+`remember` queued 4 facts under the lock; `decay` folded them; a fresh `serve` folded on startup).
+**Concurrent reads + never-blocked writes is the reachable maximum under Kuzu** — going further means a
+different store (ADR-5). With this, **every planned Path B stage (B0–B6) and refinement has landed**;
+remaining roadmap directions are non-memory (hybrid/ANN retrieval, packaging/CI, observability).
 
 ### Honest guardrails
 

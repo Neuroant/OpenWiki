@@ -21,6 +21,7 @@ import os
 import re
 import shutil
 import sys
+import time
 from pathlib import Path
 from typing import Optional, Sequence
 
@@ -273,6 +274,9 @@ def _build_argparser() -> argparse.ArgumentParser:
     )
     chat_p.add_argument("--dry-run", action="store_true", help="Preview edits without writing files.")
     chat_p.add_argument("--show-tools", action="store_true", help="Print each tool call the agent makes.")
+    chat_p.add_argument("--sync", action="store_true",
+                        help="Hold the graph writable for live edit-sync (exclusive lock — blocks "
+                             "other processes). Default: read-only, edits re-sync via the journal.")
 
     serve_p = sub.add_parser("serve", parents=[common], help="Serve a web UI over the wiki and the agent.")
     serve_p.add_argument(
@@ -293,6 +297,10 @@ def _build_argparser() -> argparse.ArgumentParser:
     serve_p.add_argument("--host", default=None, help="Ollama host URL.")
     serve_p.add_argument("--temperature", type=float, default=0.2, help="Sampling temperature (default: 0.2).")
     serve_p.add_argument("--dry-run", action="store_true", help="Agent previews edits without writing files.")
+    serve_p.add_argument("--sync", action="store_true",
+                         help="Hold the graph writable for live edit-sync (exclusive lock — blocks "
+                              "ask/MCP/recall and a second serve). Default: read-only so readers run "
+                              "concurrently; agent edits re-sync via the journal at start/shutdown.")
 
     mcp_p = sub.add_parser("mcp", parents=[common], help="Expose the wiki (RAG+GraphRAG) to coding agents over MCP (stdio).")
     mcp_p.add_argument("--wiki", type=Path, default=None,
@@ -1662,22 +1670,61 @@ def _print_edits(tools: WikiTools) -> None:
             print(f"  - {entry}", file=sys.stderr)
 
 
-def _open_graph(path: Path, writable: bool):
-    """Open the graph, falling back to read-only if a writable open is refused."""
+def _open_graph(path: Path, writable: bool, retries: int = 0, backoff: float = 0.15):
+    """Open the graph, falling back to read-only if a writable open is refused.
+
+    Kuzu's writable lock is exclusive, so a writable open fails while any other
+    process holds the graph. When ``retries`` > 0 we retry with a short linear
+    backoff — enough to ride out *transient* contention (two writers briefly racing,
+    e.g. ``decay`` and a hook ``capture``). A writer blocked by a long-lived reader
+    (a running read-only ``serve``) won't clear; those callers queue to the journal
+    instead. On a read-only open we don't retry (it only fails under a writer)."""
     if not path.exists():
         return None
+    attempt = 0
+    while True:
+        try:
+            return GraphStore(path, writable=writable)
+        except Exception as exc:
+            if writable and attempt < retries:
+                time.sleep(backoff * (attempt + 1))
+                attempt += 1
+                continue
+            if writable:
+                try:
+                    print(f"(graph opened read-only: {exc})", file=sys.stderr)
+                    return GraphStore(path, writable=False)
+                except Exception as exc2:
+                    print(f"(graph not loaded: {exc2})", file=sys.stderr)
+                    return None
+            print(f"(graph not loaded: {exc})", file=sys.stderr)
+            return None
+
+
+def _transient_fold(path: Path, embedder) -> None:
+    """Open the graph writable *transiently* (retry-with-backoff), fold the write-ahead
+    journals (usage pairs + queued remember/reindex ops), and close — so a read-only
+    ``serve``/``chat`` absorbs deferred writes at start and shutdown. Best-effort: if the
+    lock is held (another reader/writer is up), skip; the journals persist for the next
+    writable pass. Needs an embedder to apply memory/reindex ops (usage folds regardless)."""
+    if path is None or not Path(path).exists():
+        return
+    graph = _open_graph(path, writable=True, retries=6)
+    if graph is None:
+        return
+    if not getattr(graph, "writable", False):
+        graph.close()
+        return
     try:
-        return GraphStore(path, writable=writable)
-    except Exception as exc:
-        if writable:
-            try:
-                print(f"(graph opened read-only: {exc})", file=sys.stderr)
-                return GraphStore(path, writable=False)
-            except Exception as exc2:
-                print(f"(graph not loaded: {exc2})", file=sys.stderr)
-                return None
-        print(f"(graph not loaded: {exc})", file=sys.stderr)
-        return None
+        folded = graph.fold_usage()
+        ops = graph.fold_journal(embedder) if embedder is not None else {"records": 0}
+        if folded.get("records") or ops.get("records"):
+            print(f"(folded {folded.get('records', 0)} usage + {ops.get('records', 0)} "
+                  f"queued op(s) into the graph)", file=sys.stderr)
+    except Exception:      # pragma: no cover - maintenance must never crash the command
+        pass
+    finally:
+        graph.close()
 
 
 def _cmd_chat(args: argparse.Namespace) -> int:
@@ -1686,38 +1733,59 @@ def _cmd_chat(args: argparse.Namespace) -> int:
         index = SemanticIndex.load(args.index)
         if isinstance(index.embedder, OllamaEmbedder):
             index.embedder.host = args.host.rstrip("/")
-    # Writable graph (+ embedder) → agent edits update the graph incrementally.
-    graph = _open_graph(args.graph, writable=index is not None and not args.dry_run)
-    _fold_pending_usage(graph)   # absorb read-path usage logged since the last writer (B1)
     embedder = index.embedder if index else None
+    project = getattr(args, "project_obj", None)
+    mem = bool(project is not None and project.memory_enabled)
+    # Read-only by default (concurrency — see `serve`): edits write page files, and the
+    # graph re-sync is deferred to the journal, folded at start & exit. --sync = live sync.
+    sync = getattr(args, "sync", False) and index is not None and not args.dry_run
+    if sync:
+        graph = _open_graph(args.graph, writable=True, retries=6)
+        _fold_pending_usage(graph)
+        if graph is not None and getattr(graph, "writable", False) and embedder is not None:
+            try:
+                graph.fold_journal(embedder)
+            except Exception:
+                pass
+    else:
+        _transient_fold(args.graph, embedder)
+        graph = _open_graph(args.graph, writable=False)
+        if graph is not None and mem:
+            graph.log_usage = True
     tools = WikiTools(args.wiki, index=index, graph=graph, embedder=embedder, dry_run=args.dry_run)
     chat = OllamaChat(model=args.model, host=args.host, temperature=args.temperature)
     agent = WikiAgent(chat, tools, wiki_summary=summarize_wiki(args.wiki))
 
-    if args.message:  # non-interactive: run the given turns in one session
-        for message in args.message:
-            print(f"you> {message}", file=sys.stderr)
-            _run_turn(agent, message, args.show_tools)
+    try:
+        if args.message:  # non-interactive: run the given turns in one session
+            for message in args.message:
+                print(f"you> {message}", file=sys.stderr)
+                _run_turn(agent, message, args.show_tools)
+            _print_edits(tools)
+            return 0
+
+        mode = " (dry-run)" if args.dry_run else ""
+        print(f"OpenWiki chat{mode} — model {chat.name}. Type 'exit' to quit.", file=sys.stderr)
+        while True:
+            try:
+                user = input("you> ")
+            except EOFError:
+                break
+            if user.strip().lower() in {"exit", "quit", ":q"}:
+                break
+            if not user.strip():
+                continue
+            try:
+                _run_turn(agent, user, args.show_tools)
+            except RuntimeError as exc:
+                print(f"error: {exc}", file=sys.stderr)
         _print_edits(tools)
         return 0
-
-    mode = " (dry-run)" if args.dry_run else ""
-    print(f"OpenWiki chat{mode} — model {chat.name}. Type 'exit' to quit.", file=sys.stderr)
-    while True:
-        try:
-            user = input("you> ")
-        except EOFError:
-            break
-        if user.strip().lower() in {"exit", "quit", ":q"}:
-            break
-        if not user.strip():
-            continue
-        try:
-            _run_turn(agent, user, args.show_tools)
-        except RuntimeError as exc:
-            print(f"error: {exc}", file=sys.stderr)
-    _print_edits(tools)
-    return 0
+    finally:
+        if graph is not None:
+            graph.close()
+        if not sync:
+            _transient_fold(args.graph, embedder)
 
 
 def _cmd_graph_build(args: argparse.Namespace) -> int:
@@ -1894,11 +1962,30 @@ def _cmd_consolidate(args: argparse.Namespace) -> int:
     return 0
 
 
+def _decay_embedder(args: argparse.Namespace):
+    """Best-effort: the project's / ``--index`` embedder, so ``decay`` can also fold queued
+    remember/reindex ops. Returns None if there's no index (decay still folds usage)."""
+    idx = getattr(args, "index", None)
+    if idx is None:
+        project = getattr(args, "project_obj", None)
+        idx = project.index_dir if project is not None else None
+    if idx is None or not (Path(idx) / "index.json").is_file():
+        return None
+    try:
+        index = SemanticIndex.load(idx)
+        if isinstance(index.embedder, OllamaEmbedder):
+            index.embedder.host = getattr(args, "host", None) or DEFAULT_HOST
+            index.embedder.host = index.embedder.host.rstrip("/")
+        return index.embedder
+    except Exception:
+        return None
+
+
 def _cmd_decay(args: argparse.Namespace) -> int:
     """Maintenance pass over the usage-memory edges: first **fold in** any pending
-    read-path usage (B1), then age each REINFORCES edge to now (persisting its decayed
-    weight) and prune those below the floor."""
-    graph = _open_graph(args.graph, writable=True)
+    read-path usage + queued deferred writes (B1), then age each REINFORCES edge to now
+    (persisting its decayed weight) and prune those below the floor."""
+    graph = _open_graph(args.graph, writable=True, retries=6)
     if graph is None:
         print(f"error: no graph at {args.graph} (run `openwiki graph-build` first).", file=sys.stderr)
         return 2
@@ -1906,14 +1993,24 @@ def _cmd_decay(args: argparse.Namespace) -> int:
         print("error: graph is locked by another process (stop `serve`/`chat` first).", file=sys.stderr)
         graph.close()
         return 2
+    ops = {"records": 0}
     try:
         folded = graph.fold_usage()
+        embedder = _decay_embedder(args)
+        if embedder is not None and graph.pending_ops():
+            try:
+                ops = graph.fold_journal(embedder)
+            except Exception:
+                pass
         result = graph.decay(half_life_days=args.half_life, floor=args.floor)
     finally:
         graph.close()
     if folded["records"]:
         print(f"Folded in {folded['records']} pending read-usage record(s) "
               f"({folded['reinforced']} reinforcement(s)).")
+    if ops.get("records"):
+        print(f"Folded in {ops['records']} queued op(s) "
+              f"({ops.get('remembered', 0)} fact(s), {ops.get('reindexed', 0)} page re-sync(s)).")
     print(f"Decayed {result['edges']} reinforced edge(s): "
           f"{result['decayed']} kept, {result['pruned']} pruned "
           f"(half-life {args.half_life}d, floor {args.floor}) → {args.graph}")
@@ -1939,13 +2036,9 @@ def _cmd_remember(args: argparse.Namespace) -> int:
     if isinstance(index.embedder, OllamaEmbedder):
         index.embedder.host = args.host.rstrip("/")
     session_id = args.session or args.transcript.stem
-    graph = _open_graph(args.graph, writable=True)
+    graph = _open_graph(args.graph, writable=True, retries=6)
     if graph is None:
         print(f"error: no graph at {args.graph} (run `openwiki graph-build` first).", file=sys.stderr)
-        return 2
-    if not getattr(graph, "writable", False):
-        print("error: graph is locked by another process (stop `serve`/`chat` first).", file=sys.stderr)
-        graph.close()
         return 2
     try:
         chat = OllamaChat(model=args.model, host=args.host, temperature=0.2)
@@ -1953,7 +2046,19 @@ def _cmd_remember(args: argparse.Namespace) -> int:
         facts = capture_session(chat, args.transcript.read_text(encoding="utf-8"))
         for f in facts:
             print(f"  · {f.subject} {f.predicate} {f.object}", file=sys.stderr)
+        if not getattr(graph, "writable", False):
+            # Locked by a running read-only serve/chat: queue to the journal instead of
+            # failing — the next writable pass (serve/chat restart, `openwiki decay`, or the
+            # next `remember`) folds it in. Writes are deferred, never lost.
+            n = graph.queue_remember(session_id, facts)
+            print(f"Graph busy (serve/chat running) — queued {n} fact(s) for '{session_id}' to the "
+                  f"journal; they'll be folded on the next writable pass → {args.graph}")
+            return 0
         result = graph.remember(session_id, facts, index.embedder)
+        try:
+            graph.fold_journal(index.embedder)     # opportunistically drain older queued ops
+        except Exception:
+            pass
     finally:
         graph.close()
     sup = f", {result['superseded']} superseded" if result.get("superseded") else ""
@@ -2089,8 +2194,9 @@ def _hook_inject(project: Project, payload: dict) -> None:
 
 
 def _hook_capture(project: Project, payload: dict) -> None:
-    """SessionEnd/PreCompact → capture the transcript into the remembered tier (best-effort;
-    skips silently if the graph is locked by a running serve/chat)."""
+    """SessionEnd/PreCompact → capture the transcript into the remembered tier (best-effort).
+    If the graph is locked by a running read-only serve/chat, **queue** the facts to the
+    write-ahead journal instead of dropping them — the next writable pass folds them in."""
     from .claude_code_template import parse_claude_transcript
 
     tpath = payload.get("transcript_path")
@@ -2100,17 +2206,22 @@ def _hook_capture(project: Project, payload: dict) -> None:
     transcript = parse_claude_transcript(Path(tpath).read_text(encoding="utf-8", errors="ignore"))
     if not transcript.strip():
         return
-    graph = _open_graph(project.graph_path, writable=True)
+    graph = _open_graph(project.graph_path, writable=True, retries=4)
     if graph is None:
         return
-    if not getattr(graph, "writable", False):
-        graph.close()
-        return   # locked (serve/chat) — skip; the next session end will capture
     try:
         chat = OllamaChat(model=project.setting("models", "chat", DEFAULT_CHAT),
                           host=project.setting("models", "host", DEFAULT_HOST), temperature=0.2)
         facts = capture_session(chat, transcript)
-        graph.remember(str(payload.get("session_id") or "session"), facts, embedder)
+        sid = str(payload.get("session_id") or "session")
+        if getattr(graph, "writable", False):
+            graph.remember(sid, facts, embedder)
+            try:
+                graph.fold_journal(embedder)
+            except Exception:
+                pass
+        else:
+            graph.queue_remember(sid, facts)   # locked → queue; a later writer folds it in
     finally:
         graph.close()
 
@@ -2135,11 +2246,29 @@ def _cmd_serve(args: argparse.Namespace) -> int:
         index = SemanticIndex.load(args.index)
         if isinstance(index.embedder, OllamaEmbedder):
             index.embedder.host = args.host.rstrip("/")
-
-    # Writable graph (+ embedder) → agent edits update the graph incrementally.
-    graph = _open_graph(args.graph, writable=index is not None and not args.dry_run)
-    _fold_pending_usage(graph)   # absorb read-path usage logged since the last writer (B1)
     embedder = index.embedder if index else None
+    project = getattr(args, "project_obj", None)
+    mem = bool(project is not None and project.memory_enabled)
+
+    # Default: open the graph READ-ONLY so other processes (ask / MCP / recall / context,
+    # a second reader) run concurrently while serving — Kuzu is reader-XOR-writer, so a
+    # writable serve blocks them all. Agent edits still write page files; their graph
+    # re-sync is deferred to the write-ahead journal, folded at start & shutdown. --sync
+    # restores the old exclusive-writable mode (live graph sync, but blocks other access).
+    sync = getattr(args, "sync", False) and index is not None and not args.dry_run
+    if sync:
+        graph = _open_graph(args.graph, writable=True, retries=6)
+        _fold_pending_usage(graph)
+        if graph is not None and getattr(graph, "writable", False) and embedder is not None:
+            try:
+                graph.fold_journal(embedder)
+            except Exception:
+                pass
+    else:
+        _transient_fold(args.graph, embedder)      # absorb pending deferred writes first
+        graph = _open_graph(args.graph, writable=False)
+        if graph is not None and mem:
+            graph.log_usage = True                  # read-path reinforcement → journal
 
     tools = WikiTools(args.wiki, index=index, graph=graph, embedder=embedder, dry_run=args.dry_run)
     chat = OllamaChat(model=args.model, host=args.host, temperature=args.temperature)
@@ -2148,10 +2277,16 @@ def _cmd_serve(args: argparse.Namespace) -> int:
                      project=getattr(args, "project_obj", None))
 
     graph_feat = ("graph+sync" if graph and getattr(graph, "writable", False) else
-                  ("graph" if graph else None))
+                  ("graph (read-only, concurrent)" if graph else None))
     features = ["search" if index else None, "chat", graph_feat]
     print(f"Serving wiki '{args.wiki}' — {', '.join(f for f in features if f)}.", file=sys.stderr)
-    serve(app, host=args.bind, port=args.port)
+    try:
+        serve(app, host=args.bind, port=args.port)
+    finally:
+        if graph is not None:
+            graph.close()
+        if not sync:
+            _transient_fold(args.graph, embedder)   # fold what accumulated this session
     return 0
 
 

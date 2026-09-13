@@ -31,6 +31,10 @@ from .decay import (
     confidence_weight, effective_weight, reinforced_weight,
 )
 from .entities import _normalize
+from .journal import (
+    append_reindex, append_remember, clear_journal, journal_path,
+    pending_journal, read_journal,
+)
 from .usage import append_usage, clear_usage, read_usage, usage_log_path
 
 
@@ -59,6 +63,9 @@ class GraphStore:
         # log (opt-in via log_usage) that a writable process folds in (fold_usage).
         self.log_usage = False
         self._usage_path = usage_log_path(self.db_path)
+        # B1 concurrency: a read-only store queues deferred writes (remember / edit
+        # re-sync) to the op journal; the next writable pass folds them (fold_journal).
+        self._journal_path = journal_path(self.db_path)
 
     def close(self) -> None:
         self._conn.close()
@@ -586,6 +593,56 @@ class GraphStore:
     def pending_usage(self) -> int:
         """How many usage records are queued in the log (0 if none)."""
         return len(read_usage(self._usage_path))
+
+    # -- deferred-write journal (B1 concurrency) -----------------------
+
+    def queue_remember(self, session_id: str, facts) -> int:
+        """Append a `remember` op to the write-ahead journal (works read-only — that's the
+        point: a locked-out writer queues instead of failing). Folded by ``fold_journal``.
+        Returns the number of triples queued."""
+        return append_remember(self._journal_path, session_id, facts)
+
+    def queue_reindex(self, slug: str, text: str) -> int:
+        """Append a `reindex` op (re-sync one page) to the journal — a read-only serve/chat
+        defers an agent edit's graph sync here; a later writer folds it (``fold_journal``)."""
+        return append_reindex(self._journal_path, slug, text)
+
+    def pending_ops(self) -> int:
+        """How many deferred-write ops (remember/reindex) are queued (0 if none)."""
+        return pending_journal(self._journal_path)
+
+    def fold_journal(self, embedder, now: Optional[int] = None) -> dict:
+        """B1: drain the write-ahead journal (queued `remember` + `reindex` ops) into the
+        graph and clear it. Writable-only; needs an ``embedder`` (facts + page chunks are
+        embedded at fold time). Best-effort per record — a bad op never aborts the batch."""
+        if not self.writable:
+            raise RuntimeError("GraphStore is read-only; open it writable to fold the journal.")
+        if embedder is None:
+            raise ValueError("fold_journal needs an embedder.")
+        records = read_journal(self._journal_path)
+        if not records:
+            return {"records": 0, "remembered": 0, "reindexed": 0}
+        from .memory import MemoryFact
+        now = int(now if now is not None else time.time())
+        remembered = reindexed = 0
+        for rec in records:
+            try:
+                if rec.get("op") == "remember":
+                    facts = [MemoryFact(t[0], t[1], t[2]) for t in rec.get("facts", [])
+                             if isinstance(t, list) and len(t) == 3]
+                    if facts:
+                        res = self.remember(str(rec.get("session") or "session"),
+                                            facts, embedder, now=now)
+                        remembered += res.get("added", 0)
+                elif rec.get("op") == "reindex":
+                    slug = str(rec.get("slug") or "")
+                    if slug:
+                        self.upsert_page(slug, rec.get("text") or "", embedder=embedder)
+                        reindexed += 1
+            except Exception:      # pragma: no cover - one bad op never aborts the fold
+                continue
+        clear_journal(self._journal_path)
+        return {"records": len(records), "remembered": remembered, "reindexed": reindexed}
 
     # -- remembered tier (Path B: session memory) ----------------------
 

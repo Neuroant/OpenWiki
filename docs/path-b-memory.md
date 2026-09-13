@@ -17,7 +17,10 @@
 > confidence, a gentle log-scaled tie-breaker on recall; and a **fixed-token context budgeter** (v0.55):
 > the assembly fits the three tiers to a char budget (identity → facts → themes, graceful truncation).
 > B5 (v0.56) then gained **incremental, stable consolidation** (warm-start Louvain — the §8 k-core
-> decision, resolved). *(B1's true concurrent reader-and-writer model remains as a refinement — see the notes.)*
+> decision, resolved); and **B1's concurrent reader-and-writer model** landed (v0.57): Kuzu is
+> **reader-XOR-writer** (measured — no simultaneous read+write), so `serve`/`chat` now open **read-only**
+> (concurrent readers) and *all* memory writes queue to a **lock-free write-ahead journal** a writer folds
+> in — concurrent reads + never-blocked writes, the reachable maximum under Kuzu (see B1).
 > This remains the living design base for Path B — turning OpenWiki's knowledge graph from a document
 > **mirror** into agent **memory**.
 > The roadmap-level overview lives in [`docs/roadmap.md`](roadmap.md#path-b--the-second-brain-memory-model);
@@ -245,9 +248,39 @@ to matter but late enough to de-risk. Each stage lists an **exit criterion** (ho
   write lock. The next writer **folds it in** (`fold_usage` → `reinforce` each pair, then clear): serve/chat
   drain it on startup, and `openwiki decay` folds it *before* aging. Proven live — two read-only asks
   logged their pairs (no graph write), then `decay` folded them into `REINFORCES` edges (2 records → 2
-  edges, log cleared). Reads now teach the graph, not just serve/chat. **Still deferred:** a true
-  concurrent reader-*and*-writer model (the log defers writes rather than allowing simultaneous ones) —
-  enough for the CLI/MCP usage pattern, where a writer runs between read sessions.
+  edges, log cleared). Reads now teach the graph, not just serve/chat.
+- **Concurrent reader-and-writer model — resolved (v0.57).** First, the constraint, measured rather
+  than assumed. Kuzu 0.11 is strictly **reader-XOR-writer**:
+
+  | holder | open read-only | open writable |
+  |---|---|---|
+  | **writable held** | ❌ blocked | ❌ blocked |
+  | **read-only held** | ✅ ok | ❌ blocked |
+
+  A writable connection blocks *all* readers, **and** readers block a writer — there is **no**
+  simultaneous read+write in Kuzu (no MVCC/WAL concurrency). So "true simultaneity" is unreachable *in
+  Kuzu*; the append-only log wasn't a stopgap but the **right** shape. v0.57 generalizes it into a full
+  **lock-free write-ahead journal** and flips the long-lived lock holder:
+  - **`serve`/`chat` open read-only by default** → many readers (`ask`/MCP/`recall`/`context`, a second
+    `serve`) run **concurrently** while serving (previously a writable `serve` blocked *everything*).
+  - **No write ever blocks or is lost.** Reinforce pairs journal to `graph.usage.jsonl` (B1, unchanged);
+    **`remember`, host `capture`, and chat-edit graph re-sync** journal to `graph.journal.jsonl` as
+    self-contained `remember`/`reindex` ops (`graph/journal.py`; `GraphStore.queue_remember`/`queue_reindex`
+    append read-only). A locked-out `remember` **queues** instead of erroring; an edit writes its page
+    file and queues a `reindex`.
+  - **A writer folds the journal** (`GraphStore.fold_journal(embedder)` — drain + apply + clear): `serve`/
+    `chat` transiently at **start and shutdown** (`_transient_fold`), `openwiki decay` (when it can load the
+    project embedder), and the next `remember`. Writable opens use **retry-with-backoff**
+    (`_open_graph(retries=)`) to ride out transient two-writer contention.
+  - **`--sync`** opts `serve`/`chat` back into a held-writable connection (live edit-sync, exclusive).
+  - **Trade-off (honest):** a chat-edit's *graph* re-sync is now **deferred** (folded on the next writable
+    pass), though the page file is written live. Not true simultaneity — Kuzu forbids it — but **concurrent
+    readers + never-blocked writes**, which is the reachable maximum. Verified live: with `serve` up (read-only),
+    a concurrent `recall` succeeded and a `remember` queued 4 facts; `decay` then folded them and `recall`
+    surfaced them; a fresh `serve` folded a queued op on startup. Re-opens **ADR-8/ADR-17**; the empirical
+    table above is the resolution (there is nothing further to reach *within Kuzu* — a different store would be
+    ADR-5 territory). Re-uses `usage.py`'s pattern; both sidecars survive a `graph-build` (`_remove_existing`
+    leaves them).
 
 ### B2 — Session capture → typed sub-graph
 - **Goal:** turn a conversation into a small typed knowledge sub-graph (the day's trace).
@@ -478,8 +511,11 @@ concentrating it helps more than replaying it.** This is the green light for the
 - **Community instability** — see the k-core decision above; matters more as the graph evolves.
 - **Complexity vs payoff** — the honest kill-switch is §7: if assembled context doesn't beat a pasted
   transcript, stop.
-- **Concurrency** — B1's writable-safe model is load-bearing; get it wrong and memory writes corrupt
-  the store or serialize everything.
+- **Concurrency — resolved (v0.57).** Load-bearing, and now settled against a *measured* constraint:
+  Kuzu 0.11 is **reader-XOR-writer** (a writer blocks all readers; readers block a writer — no MVCC), so
+  "true simultaneity" is impossible *in Kuzu*. The reachable maximum — **concurrent readers + never-blocked
+  writes** — ships via read-only `serve`/`chat` + a lock-free write-ahead journal a writer folds in (see B1).
+  This closes ADR-8/ADR-17's debt honestly; going further would mean a different store (ADR-5), not more code.
 
 ## 9. Relationship to the current code
 
@@ -534,9 +570,12 @@ If no → we've learned it cheaply, before touching ADR-3.
 > attractors (B5 themes) into an assembled session context (the `context` CLI + MCP `wiki_memory`),
 > and the cross-session eval scores it **assembled 100% > raw-log 87.5% > cold 0%**. **The B0–B6 plan
 > is complete**, and its refinements have landed too — B6 host-hook injection (v0.53), per-fact
-> confidence (v0.54), the context budgeter (v0.55), and B5 incremental+stable consolidation (v0.56).
-> What remains is **B1's true concurrent reader-and-writer model** (the read-path usage log defers
-> writes rather than allowing simultaneous ones) — a refinement, not a stage.
+> confidence (v0.54), the context budgeter (v0.55), B5 incremental+stable consolidation (v0.56), and
+> **B1's concurrent reader-and-writer model** (v0.57) — read-only `serve`/`chat` + a lock-free
+> write-ahead journal, the reachable maximum under Kuzu's reader-XOR-writer lock (see B1). **All planned
+> stages and refinements have now landed.** Further concurrency would require a different store (ADR-5),
+> not more code; other future directions are non-memory (hybrid/ANN retrieval, packaging/CI) — see
+> [`docs/roadmap.md`](roadmap.md).
 
 ## 11. Prior art & learnings — "Cognitive Substrate"
 

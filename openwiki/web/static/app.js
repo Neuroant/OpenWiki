@@ -93,6 +93,7 @@ function activateTab(tab) {
 function renderActiveTab() {
   const content = $("#content");
   stopSim();  // pause any running graph layout when switching tabs
+  stopMetricsPoll();  // stop the System-tab metrics poll when switching away
   if (state.tab === "wiki") {
     content.innerHTML = state.wikiMarkdown
       ? marked.parse(state.wikiMarkdown)
@@ -105,9 +106,71 @@ function renderActiveTab() {
     renderProject();
   } else if (state.tab === "eval") {
     renderEval();
+  } else if (state.tab === "system") {
+    renderSystem();
   } else {
     renderDoc(state.tab);
   }
+}
+
+// -- System / observability tab ---------------------------------------------
+
+function fmtMs(ms) {
+  if (ms == null) return "";
+  return ms >= 1000 ? (ms / 1000).toFixed(2) + " s" : Math.round(ms) + " ms";
+}
+function startMetricsPoll(fn) { stopMetricsPoll(); state.metricsTimer = setInterval(fn, 2000); }
+function stopMetricsPoll() { if (state.metricsTimer) { clearInterval(state.metricsTimer); state.metricsTimer = 0; } }
+
+const KIND_LABEL = { chat: "Chat-Modell", embed: "Embeddings", http: "API-Anfragen" };
+
+function renderMetrics(data) {
+  const sum = data.summary || {};
+  const kinds = Object.keys(sum);
+  const cards = kinds.length ? kinds.map((k) => {
+    const s = sum[k];
+    const tok = (s.eval_tokens || s.prompt_tokens)
+      ? `<div class="m-row"><span>Tokens</span><b>${s.prompt_tokens} ein / ${s.eval_tokens} aus</b></div>` : "";
+    return `<div class="m-card"><div class="m-card-h">${KIND_LABEL[k] || k}</div>
+      <div class="m-row"><span>Aufrufe</span><b>${s.count}</b></div>
+      <div class="m-row"><span>p50 / p95</span><b>${fmtMs(s.p50_ms)} / ${fmtMs(s.p95_ms)}</b></div>
+      <div class="m-row"><span>Gesamtzeit</span><b>${fmtMs(s.total_ms)}</b></div>${tok}</div>`;
+  }).join("") : `<p class="muted">Noch keine Aktivität — stelle dem Agenten eine Frage oder durchsuche das Wiki.</p>`;
+  const rows = (data.events || []).map((e) => {
+    const tps = e.tokens_per_sec ? `${e.tokens_per_sec} tok/s` : "";
+    let tok = "";
+    if (e.eval_tokens != null) tok = `${e.prompt_tokens ?? 0} / ${e.eval_tokens}`;
+    else if (e.prompt_tokens != null) tok = `${e.prompt_tokens} / –`;
+    const when = new Date(e.t * 1000).toLocaleTimeString();
+    return `<tr><td class="num">${when}</td><td><span class="m-kind ${e.kind}">${e.kind}</span></td>
+      <td class="m-name">${escapeHtml(e.name)}</td><td class="num">${fmtMs(e.duration_ms)}</td>
+      <td class="num">${tok}</td><td class="num">${tps}</td></tr>`;
+  }).join("");
+  return `<div class="m-head"><strong>System &amp; Observability</strong>
+      <span class="muted">Live-Telemetrie · ${data.total_events || 0} Ereignisse im Puffer · alle 2 s aktualisiert</span></div>
+    <div class="m-cards">${cards}</div>
+    <h3 class="m-h3">Letzte Ereignisse</h3>
+    <table class="m-table"><thead><tr><th>Zeit</th><th>Art</th><th>Name</th><th>Dauer</th><th>Tokens (ein/aus)</th><th>Rate</th></tr></thead>
+    <tbody>${rows || `<tr><td colspan="6" class="muted">—</td></tr>`}</tbody></table>`;
+}
+
+async function renderSystem() {
+  const content = $("#content");
+  content.innerHTML = `<div id="sys"><p class="muted">Wird geladen…</p></div>`;
+  const draw = async () => {
+    let data;
+    try {
+      data = await getJSON("/api/metrics?limit=60");
+    } catch (e) {
+      const sys = $("#sys");
+      if (sys) sys.innerHTML = `<p class="muted">Fehler: ${escapeHtml(e.message)}</p>`;
+      return;
+    }
+    const sys = $("#sys");
+    if (sys) sys.innerHTML = renderMetrics(data);   // null if the tab was switched away mid-fetch
+  };
+  await draw();
+  startMetricsPoll(draw);
 }
 async function loadDoc(name) {
   if (state.docs[name]) return state.docs[name];
@@ -1149,6 +1212,20 @@ function renderToolCalls(container, calls) {
   container.appendChild(tools);
 }
 
+function renderChatStats(container, s) {
+  if (!s) return;   // fake/non-Ollama backend, or nothing recorded
+  const bits = [];
+  if (s.duration_ms) bits.push(fmtMs(s.duration_ms));
+  if (s.eval_tokens) bits.push(`${s.eval_tokens} Tokens`);
+  if (s.tokens_per_sec) bits.push(`${s.tokens_per_sec} tok/s`);
+  if (s.calls > 1) bits.push(`${s.calls} Modellaufrufe`);
+  if (!bits.length) return;
+  const meta = document.createElement("div");
+  meta.className = "msg-meta";
+  meta.textContent = "⏱ " + bits.join(" · ");
+  container.appendChild(meta);
+}
+
 async function sendChat(message) {
   message = (message || "").trim();
   if (!message) return;
@@ -1161,6 +1238,7 @@ async function sendChat(message) {
     bubble.textContent = data.reply || "(keine Antwort)";
     const calls = data.tool_calls || [];
     renderToolCalls(bubble, calls);
+    renderChatStats(bubble, data.stats);
     const writes = calls.filter((c) => WRITE_TOOLS.has(c.name));
     if (writes.length) {
       await refreshNav();

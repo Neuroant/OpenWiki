@@ -9,11 +9,14 @@ later without touching :mod:`openwiki.search`.
 from __future__ import annotations
 
 import json
+import time
 import urllib.error
 import urllib.request
 from typing import Protocol, Sequence, runtime_checkable
 
 import numpy as np
+
+from .metrics import COLLECTOR, parse_ollama_stats
 
 
 @runtime_checkable
@@ -56,6 +59,7 @@ class OllamaEmbedder:
             data=payload,
             headers={"Content-Type": "application/json"},
         )
+        t0 = time.perf_counter()
         try:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
                 data = json.loads(response.read().decode("utf-8"))
@@ -63,6 +67,14 @@ class OllamaEmbedder:
             raise RuntimeError(
                 f"Could not reach Ollama at {self.host} (is it running?): {exc}"
             ) from exc
+        try:  # best-effort telemetry — an embed call has no eval tokens, just prompt + latency
+            stats = parse_ollama_stats(data)
+            COLLECTOR.record("embed", f"ollama:{self.model}",
+                             duration_ms=(time.perf_counter() - t0) * 1000.0,
+                             prompt_tokens=stats.get("prompt_tokens"),
+                             count=len(inputs))
+        except Exception:  # pragma: no cover
+            pass
 
         vectors = data.get("embeddings")
         if not vectors:

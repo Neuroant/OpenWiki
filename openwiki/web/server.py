@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import re
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Optional
@@ -392,9 +393,17 @@ class WikiWebApp:
         with self._ans_lock:
             return dict(self._ans_job)
 
+    def metrics(self, limit: int = 50) -> dict:
+        """Runtime observability snapshot (recent LLM/embed/HTTP events + aggregates)
+        for the System tab / ``/api/metrics``."""
+        from .. import metrics as m
+        return m.COLLECTOR.snapshot(limit=limit)
+
     def chat(self, message: str) -> dict:
         if self.agent is None:
             raise RuntimeError("Chat is unavailable (no agent configured).")
+        from .. import metrics as m
+        start = m.COLLECTOR.seq
         with self._lock:
             turn = self.agent.send(message)
         return {
@@ -403,7 +412,27 @@ class WikiWebApp:
                 {"name": c.name, "arguments": c.arguments, "result": c.result}
                 for c in turn.tool_calls
             ],
+            "stats": _turn_stats(m.COLLECTOR.since(start)),
         }
+
+
+def _turn_stats(events) -> Optional[dict]:
+    """Aggregate the chat-model calls made during one agent turn (a tool loop can make
+    several) into a compact per-turn stat line. ``None`` when nothing was recorded (e.g.
+    a fake model in tests, or a non-Ollama backend)."""
+    chat_evs = [e for e in events if e.kind == "chat"]
+    if not chat_evs:
+        return None
+    dur = sum(e.duration_ms for e in chat_evs)
+    eval_tok = sum(e.eval_tokens or 0 for e in chat_evs)
+    prompt_tok = sum(e.prompt_tokens or 0 for e in chat_evs)
+    return {
+        "calls": len(chat_evs),
+        "duration_ms": round(dur, 1),
+        "eval_tokens": eval_tok,
+        "prompt_tokens": prompt_tok,
+        "tokens_per_sec": round(eval_tok / (dur / 1000.0), 1) if dur > 0 and eval_tok else None,
+    }
 
 
 def make_handler(app: WikiWebApp):
@@ -416,6 +445,7 @@ def make_handler(app: WikiWebApp):
         # -- responders --
 
         def _json(self, obj, status=200):
+            self._status = status
             body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
             self.send_response(status)
             self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -424,6 +454,7 @@ def make_handler(app: WikiWebApp):
             self.wfile.write(body)
 
         def _bytes(self, data, content_type, status=200):
+            self._status = status
             self.send_response(status)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(data)))
@@ -449,6 +480,8 @@ def make_handler(app: WikiWebApp):
         # -- routes --
 
         def do_GET(self):
+            t0 = time.perf_counter()
+            self._status = 200
             path = urlparse(self.path).path
             try:
                 if path == "/":
@@ -469,6 +502,10 @@ def make_handler(app: WikiWebApp):
                     return self._json(app.run_eval(top_k, expand_k, eval_set))
                 if path == "/api/health":
                     return self._json(app.health_stats())
+                if path == "/api/metrics":
+                    query = parse_qs(urlparse(self.path).query)
+                    limit = int(query.get("limit", ["50"])[0])
+                    return self._json(app.metrics(limit))
                 if path == "/api/communities":
                     return self._json({"communities": app.communities()})
                 if path == "/api/answer-eval":
@@ -490,8 +527,12 @@ def make_handler(app: WikiWebApp):
                 return self._json({"error": "not found"}, 404)
             except Exception as exc:  # never let the handler thread crash
                 return self._json({"error": str(exc)}, 500)
+            finally:
+                _observe_request("GET", path, self._status, (time.perf_counter() - t0) * 1000.0)
 
         def do_POST(self):
+            t0 = time.perf_counter()
+            self._status = 200
             path = urlparse(self.path).path
             try:
                 data = self._body_json()
@@ -532,8 +573,22 @@ def make_handler(app: WikiWebApp):
                 return self._json({"error": str(exc)}, 503)
             except Exception as exc:
                 return self._json({"error": str(exc)}, 500)
+            finally:
+                _observe_request("POST", path, self._status, (time.perf_counter() - t0) * 1000.0)
 
     return Handler
+
+
+def _observe_request(method: str, path: str, status: int, ms: float) -> None:
+    """Record an API request as an ``http`` metrics event. Skips static assets and the
+    metrics-poll itself so the System tab doesn't drown in its own traffic. Best-effort."""
+    if not path.startswith("/api/") or path == "/api/metrics":
+        return
+    try:
+        from .. import metrics as m
+        m.COLLECTOR.record("http", f"{method} {path}", duration_ms=ms, status=status)
+    except Exception:  # pragma: no cover
+        pass
 
 
 def serve(app: WikiWebApp, host: str = "127.0.0.1", port: int = 8000) -> None:

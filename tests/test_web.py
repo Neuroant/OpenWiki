@@ -135,6 +135,14 @@ def test_chat_edits_page(app):
     assert out["reply"] == "Erledigt."
     assert out["tool_calls"][0]["name"] == "edit_page"
     assert "ALPHA lautstarke content." in app.get_page("000-a")["markdown"]
+    assert "stats" in out                     # per-turn telemetry key always present
+    assert out["stats"] is None               # a fake (non-Ollama) chat records nothing
+
+
+def test_metrics_snapshot_shape(app):
+    snap = app.metrics()
+    assert set(snap) == {"events", "summary", "total_events"}
+    assert isinstance(snap["events"], list) and isinstance(snap["summary"], dict)
 
 
 def test_search_without_index(tmp_path):
@@ -207,11 +215,18 @@ def test_http_static_js(base_url):
     assert status == 200 and "loadPage" in body
 
 
+def test_http_api_metrics(base_url):
+    status, body = _get(base_url + "/api/metrics")
+    assert status == 200
+    data = json.loads(body)
+    assert "events" in data and "summary" in data
+
+
 def test_http_index_html_has_tabs(base_url):
     status, body = _get(base_url + "/")
     assert status == 200
     for tab in ('data-tab="wiki"', 'data-tab="help"', 'data-tab="tutorial"',
-                'data-tab="graph"', 'data-tab="project"'):
+                'data-tab="graph"', 'data-tab="project"', 'data-tab="system"'):
         assert tab in body
 
 

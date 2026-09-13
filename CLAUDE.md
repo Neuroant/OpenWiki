@@ -351,7 +351,16 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   `index.json`). `best_chunk_per_page(query, slugs)` re-ranks specific pages by
   the query — the query-relevance step of graph-augmented retrieval.
 - **`openwiki/llm.py`** — the `ChatModel` protocol + `OllamaChat` (`/api/chat`,
-  stdlib urllib). Parallels `embeddings.py`.
+  stdlib urllib). Parallels `embeddings.py`. Both **capture per-call telemetry**
+  (observability): `chat_raw`/`_embed` time the call and parse Ollama's returned
+  counters (`parse_ollama_stats`), stashing `chat.last_stats` and recording a
+  `chat`/`embed` event to `metrics.COLLECTOR` (best-effort — never breaks the call).
+- **`openwiki/metrics.py`** — the **observability** layer: a pure/stdlib, thread-safe,
+  bounded ring buffer (`MetricsCollector` + module-level `COLLECTOR`) of recent runtime
+  events (chat/embed/http) with latency + token counts, plus `parse_ollama_stats`
+  (Ollama's ns durations + token counters → ms + tok/s) and `snapshot()` aggregates
+  (p50/p95, totals). Surfaced by the CLI (`ask` `⏱` footer), the web `/api/metrics` +
+  System tab, and per-turn `chat()` stats. Always-on but bounded — no config, no cost.
 - **`openwiki/agent.py`** — `RAGAgent`: retrieve top chunks → number them as
   excerpts → a grounded system prompt → `ChatModel` → `RAGAnswer` (answer +
   `Source`s). `<think>…</think>` is stripped; `cited_markers()` reports which
@@ -480,8 +489,11 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   RAG + GraphRAG side by side, `/api/answer-eval` (GET status / POST start) = the
   async answer-quality job, `/api/health` = KB quality metrics, `/api/communities` =
   the graph's topical communities, `/api/global` (POST) = a thematic answer from the
-  community summaries) plus static files
-  (served `no-cache`); `serve()` runs it.
+  community summaries, `/api/metrics?limit=` = the runtime observability snapshot
+  (`WikiWebApp.metrics()` → `metrics.COLLECTOR.snapshot()`)) plus static files
+  (served `no-cache`); `serve()` runs it. Every `/api/*` request is timed and recorded
+  as an `http` metrics event (`_observe_request`), and `chat()` returns per-turn LLM
+  telemetry (`_turn_stats` over the collector events since the turn began).
   The Graph tab is a hand-rolled **force-directed explorer** (`app.js`: `physicsTick`
   spring/charge sim, click-to-expand / double-click-to-collapse via a `parent`
   (introducer) pointer + `descendantsOf`, drag, edge-type filters (incl. the
@@ -491,8 +503,12 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   `COMMUNITY_PALETTE`, keyed by the node's `community` id from `_page_gnode` →
   `GraphStore._community_of`), with a swatch legend + a "Themenfarben" toggle
   (fetched from `/api/communities`; neutral blue when off or no communities) — no JS libraries. `static/` = a no-build vanilla-JS SPA with client-side Markdown via a
-  vendored `marked.min.js`. The center pane has six tabs (**Projekt / Wiki /
-  Graph / Evaluation / Tutorial / Hilfe**). The **Evaluation tab** (`renderEval`,
+  vendored `marked.min.js`. The center pane has seven tabs (**Projekt / Wiki /
+  Graph / Evaluation / System / Tutorial / Hilfe**). The **System tab** (`renderSystem`
+→ `/api/metrics`) is the **observability** surface: per-kind summary cards (chat / embed /
+http — count, p50/p95, total time, token in/out) + a live recent-events table, polled every
+2 s while active; agent chat replies also carry a `⏱ latency · tokens · tok/s` line
+(`renderChatStats` from `chat()`'s `stats`). The **Evaluation tab** (`renderEval`,
   backed by `/api/eval` → `WikiWebApp.run_eval()`, reusing `eval.make_retrievers`)
   runs the project's `eval.jsonl` benchmark live with `top_k`/`expand_k` sliders,
   shows the RAG-vs-GraphRAG metric table (leading value highlighted) + miss

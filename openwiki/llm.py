@@ -8,9 +8,12 @@ this behind a protocol means the agent never depends on a specific provider.
 from __future__ import annotations
 
 import json
+import time
 import urllib.error
 import urllib.request
 from typing import Protocol, Sequence, runtime_checkable
+
+from .metrics import COLLECTOR, parse_ollama_stats
 
 Message = dict  # {"role": "system" | "user" | "assistant", "content": str}
 
@@ -43,6 +46,9 @@ class OllamaChat:
         # Extra Ollama options merged into every request (e.g. a fixed ``seed`` for
         # reproducible decoding). Per-call ``options`` still take precedence.
         self.options = dict(options or {})
+        # Telemetry from the most recent call (latency + token counts); also recorded
+        # into the metrics collector. Empty until the first call.
+        self.last_stats: dict = {}
 
     @property
     def name(self) -> str:
@@ -68,6 +74,7 @@ class OllamaChat:
             data=payload,
             headers={"Content-Type": "application/json"},
         )
+        t0 = time.perf_counter()
         try:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
                 data = json.loads(response.read().decode("utf-8"))
@@ -81,4 +88,18 @@ class OllamaChat:
             raise RuntimeError(
                 f"Could not reach Ollama at {self.host} (is it running?): {exc}"
             ) from exc
+        self._record(data, (time.perf_counter() - t0) * 1000.0)
         return data.get("message", {}) or {}
+
+    def _record(self, data: dict, wall_ms: float) -> None:
+        """Capture per-call telemetry (Ollama's counters + measured latency) into
+        ``last_stats`` and the metrics collector. Best-effort — never raises."""
+        try:
+            stats = parse_ollama_stats(data)
+            self.last_stats = {"duration_ms": round(wall_ms, 1), **stats}
+            COLLECTOR.record("chat", self.name, duration_ms=wall_ms,
+                             prompt_tokens=stats.get("prompt_tokens"),
+                             eval_tokens=stats.get("eval_tokens"),
+                             tokens_per_sec=stats.get("tokens_per_sec"))
+        except Exception:  # pragma: no cover - telemetry must not break a chat call
+            pass

@@ -269,3 +269,26 @@ header {
 .ab-related { background: #fff0e6; color: #e8590c; }
 .ab-cited { color: #1e7e34; font-size: 11.5px; font-weight: 600; }
 @media (max-width: 720px) { .ab-cols { grid-template-columns: 1fr; } }
+
+/* -- System / observability tab -- */
+.m-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+.m-head strong { font-size: 17px; }
+.m-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
+.m-card { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; background: #fff; }
+.m-card-h { font-weight: 700; font-size: 13px; margin-bottom: 8px; }
+.m-row { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; padding: 2px 0; color: var(--muted); }
+.m-row b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+.m-h3 { margin: 22px 0 6px; font-size: 15px; }
+.m-table { border-collapse: collapse; width: 100%; }
+.m-table th, .m-table td { text-align: left; padding: 5px 12px; border-bottom: 1px solid var(--line);
+  font-size: 13px; font-variant-numeric: tabular-nums; }
+.m-table th { color: var(--muted); font-weight: 600; font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; }
+.m-table td.num { text-align: right; }
+.m-table td.m-name { font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; font-size: 12px; }
+.m-kind { display: inline-block; font-size: 10.5px; font-weight: 700; padding: 1px 7px; border-radius: 999px; }
+.m-kind.chat { background: var(--accent-soft); color: var(--accent); }
+.m-kind.embed { background: #e6f4ea; color: #1e7e34; }
+.m-kind.http { background: #fff0e6; color: #e8590c; }
+
+/* chat reply telemetry line */
+.msg-meta { font-size: 11px; color: var(--muted); margin-top: 4px; font-variant-numeric: tabular-nums; }

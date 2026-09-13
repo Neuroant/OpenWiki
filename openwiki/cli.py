@@ -1640,7 +1640,25 @@ def _cmd_ask(args: argparse.Namespace) -> int:
             for s in result.sources:
                 print(f"\n[{s.marker}] {s.page_title} (PDF p.{s.pdf_page_start}–{s.pdf_page_end})")
                 print(f"    {_snippet(s.text, 400)}")
+    _print_llm_telemetry(chat)
     return 0
+
+
+def _print_llm_telemetry(chat) -> None:
+    """One-line latency/token footer (to stderr) from the model's last call — the CLI
+    face of the observability layer (the web UI's System tab shows the full picture)."""
+    stats = getattr(chat, "last_stats", None)
+    if not stats:
+        return
+    bits = []
+    if stats.get("duration_ms"):
+        bits.append(f"{stats['duration_ms'] / 1000:.2f}s")
+    if stats.get("eval_tokens"):
+        bits.append(f"{stats['eval_tokens']} tok")
+    if stats.get("tokens_per_sec"):
+        bits.append(f"{stats['tokens_per_sec']} tok/s")
+    if bits:
+        print("  ⏱ " + " · ".join(bits), file=sys.stderr)
 
 
 def _fmt_args(arguments: dict) -> str:

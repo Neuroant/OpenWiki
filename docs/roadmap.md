@@ -289,7 +289,15 @@ point it jumps to P0.</sub>
 - **AuthN + roles** (read-only vs read-write) for `serve` and the MCP server.
 - **Docker image**, **PyPI publish**, **cross-platform CI** (Linux/macOS) running the
   offline suite.
-- **Request logging / basic metrics** in `serve`.
+- ✅ **Observability landed (v0.58).** An in-process metrics collector (`metrics.py` — a
+  bounded, thread-safe ring buffer + `parse_ollama_stats`) captures the per-call **latency +
+  token counters Ollama already returns but the code discarded** (`OllamaChat`/`OllamaEmbedder`
+  now record a chat/embed event; every `/api/*` request records an http event). Surfaced three
+  ways: the web **System tab** (`/api/metrics` — per-kind p50/p95 + token totals + a live event
+  table), **per-turn chat telemetry** in the agent panel, and a CLI **`ask` `⏱` footer**
+  (latency · tokens · tok/s). Immediately useful — it exposes that one agent "question" is
+  several model calls, and that a slow first answer is mostly cold-model `load` time. *(Still
+  open: request logging to disk, pipeline/build-stage timings on the Projekt tab.)*
 
 ### G — Ingestion fidelity & new modalities (P2)
 - Adopt **`pymupdf_layout`** for higher-fidelity PDF structure (already flagged in
@@ -575,7 +583,8 @@ opens **retry-with-backoff**; `--sync` restores the old held-writable mode. Trad
 `remember` queued 4 facts under the lock; `decay` folded them; a fresh `serve` folded on startup).
 **Concurrent reads + never-blocked writes is the reachable maximum under Kuzu** — going further means a
 different store (ADR-5). With this, **every planned Path B stage (B0–B6) and refinement has landed**;
-remaining roadmap directions are non-memory (hybrid/ANN retrieval, packaging/CI, observability).
+remaining roadmap directions are non-memory (hybrid/ANN retrieval, packaging/CI) — of which
+**observability landed next (v0.58** — an Ollama-telemetry metrics layer + web System tab; see Direction F).
 
 ### Honest guardrails
 

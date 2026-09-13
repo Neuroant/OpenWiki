@@ -18,6 +18,7 @@ from .graph import (
 )
 from .llm import ChatModel, OllamaChat
 from .merge import combine_documents
+from .metrics import COLLECTOR, MetricsCollector, parse_ollama_stats
 from .mcp_server import MCPStdioServer, build_server
 from .ontology import format_entity_types, propose_ontology, sample_corpus
 from .outline import synthesize_outline
@@ -33,7 +34,7 @@ from .tools import WikiTools
 from .web import WikiWebApp, serve
 from .wiki import Wiki, WikiBuilder, WikiPage, slugify, write_wiki
 
-__version__ = "0.57.0"
+__version__ = "0.58.0"
 
 __all__ = [
     "PDFParser",
@@ -87,6 +88,9 @@ __all__ = [
     "UserConfig",
     "Registry",
     "combine_documents",
+    "COLLECTOR",
+    "MetricsCollector",
+    "parse_ollama_stats",
     "propose_ontology",
     "sample_corpus",
     "format_entity_types",

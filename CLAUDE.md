@@ -490,7 +490,10 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   async answer-quality job, `/api/health` = KB quality metrics, `/api/communities` =
   the graph's topical communities, `/api/global` (POST) = a thematic answer from the
   community summaries, `/api/metrics?limit=` = the runtime observability snapshot
-  (`WikiWebApp.metrics()` → `metrics.COLLECTOR.snapshot()`)) plus static files
+  (`WikiWebApp.metrics()` → `metrics.COLLECTOR.snapshot()`), `/api/memory` = the Path B
+  memory-tier overview (`memory_info()`: identity + counts + themes + browsable assertions),
+  `/api/recall` (POST) = decay-weighted `recall`, `/api/context` (POST) = the assembled
+  three-tier `context_for`) plus static files
   (served `no-cache`); `serve()` runs it. Every `/api/*` request is timed and recorded
   as an `http` metrics event (`_observe_request`), and `chat()` returns per-turn LLM
   telemetry (`_turn_stats` over the collector events since the turn began).
@@ -503,8 +506,15 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   `COMMUNITY_PALETTE`, keyed by the node's `community` id from `_page_gnode` →
   `GraphStore._community_of`), with a swatch legend + a "Themenfarben" toggle
   (fetched from `/api/communities`; neutral blue when off or no communities) — no JS libraries. `static/` = a no-build vanilla-JS SPA with client-side Markdown via a
-  vendored `marked.min.js`. The center pane has seven tabs (**Projekt / Wiki /
-  Graph / Evaluation / System / Tutorial / Hilfe**). The **System tab** (`renderSystem`
+  vendored `marked.min.js`. The center pane has eight tabs (**Projekt / Wiki /
+  Graph / Gedächtnis / Evaluation / System / Tutorial / Hilfe**). The **Gedächtnis (Memory)
+tab** (`renderMemory` → `/api/memory`) surfaces **Path B** in the browser: the identity
+(DNA) + stat chips (Sitzungen / Fakten / überholt / Themen), a **recall/context box**
+(`/api/recall` decay-weighted facts, `/api/context` the assembled three-tier context),
+`MemoryConcept` **theme cards**, and a browsable **assertion table** (current vs superseded
+via a toggle, with confidence). Read-only + graceful empty states (no graph / Wiki mode /
+no sessions / no index). Backed by `GraphStore.memory_overview()` + `list_assertions()`
+(browse) reusing `recall`/`context_for`/`memory_concepts`. The **System tab** (`renderSystem`
 → `/api/metrics`) is the **observability** surface: per-kind summary cards (chat / embed /
 http — count, p50/p95, total time, token in/out) + a live recent-events table, polled every
 2 s while active; agent chat replies also carry a `⏱ latency · tokens · tok/s` line

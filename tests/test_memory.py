@@ -522,3 +522,64 @@ def test_context_for_fail_soft_without_memory(tmp_path):
         assert "Who I am" in store.context_for("x", _MemEmbedder(), identity="Me.")  # identity survives
     finally:
         store.close()
+
+
+# -- Memory tab: browse helpers + web layer ------------------------------------
+
+def test_list_assertions_and_overview(tmp_path):
+    """The Memory tab's browse helpers: overview counts + a metadata-rich fact list,
+    with supersession reflected (current vs superseded)."""
+    import pytest
+    pytest.importorskip("kuzu")
+    from openwiki.graph import GraphStore
+
+    store = GraphStore(_build_graph(tmp_path), writable=True)
+    emb = _MemEmbedder()
+    try:
+        store.remember("s1", [MemoryFact("db", "is", "Kuzu"), MemoryFact("lang", "is", "Python")], emb)
+        store.remember("s2", [MemoryFact("db", "is", "Postgres")], emb)   # supersedes "db is Kuzu"
+        ov = store.memory_overview()
+        assert ov["sessions"] == 2
+        assert ov["assertions"] == 2 and ov["superseded"] == 1            # current vs superseded
+        rows = store.list_assertions()
+        assert len(rows) == 3                                             # all, incl. superseded
+        sup = [r for r in rows if r["superseded"]]
+        assert len(sup) == 1 and sup[0]["object"] == "Kuzu"
+        assert all("confidence" in r and "session_id" in r for r in rows)
+        assert len(store.list_assertions(include_superseded=False)) == 2  # current only
+    finally:
+        store.close()
+
+
+def test_web_memory_info_and_recall(tmp_path):
+    """WikiWebApp exposes the memory tier: overview available + a working recall."""
+    import pytest
+    pytest.importorskip("kuzu")
+    from openwiki.graph import GraphBuilder, GraphStore
+    from openwiki.search import SemanticIndex
+    from openwiki.web.server import WikiWebApp
+    from openwiki.wiki import Wiki, WikiPage, write_wiki
+
+    wiki_dir = tmp_path / "wiki"
+    pages = [WikiPage(slug="000-a", title="A", level=1, order=0, pdf_page_start=1,
+                      pdf_page_end=1, text="python project database kuzu")]
+    wiki = Wiki(title="T", pages=pages, source="x.pdf", split_level=1)
+    write_wiki(wiki, wiki_dir)
+    emb = _MemEmbedder()
+    index = SemanticIndex.build(wiki, emb, size_words=50, overlap_words=10)
+    GraphBuilder(tmp_path / "graph").build(wiki, index)
+    store = GraphStore(tmp_path / "graph", writable=True)
+    store.remember("s1", [MemoryFact("the database", "is", "Kuzu"),
+                          MemoryFact("the project", "uses", "Python")], emb)
+    try:
+        app = WikiWebApp(wiki_dir, index=index, graph=store)
+        info = app.memory_info()
+        assert info["available"] and info["has_embedder"]
+        assert info["stats"]["assertions"] == 2 and info["stats"]["sessions"] == 1
+        assert len(info["assertions"]) == 2
+        facts = app.memory_recall("which database?", k=3)["facts"]
+        assert facts and facts[0]["object"] == "Kuzu"                    # relevance ranks it top
+        ctx = app.memory_context("which database?")["context"]
+        assert "kuzu" in ctx.lower()
+    finally:
+        store.close()

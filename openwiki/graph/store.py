@@ -800,6 +800,56 @@ class GraphStore:
         scored.sort(key=lambda x: -x["score"])
         return scored[:k]
 
+    def memory_overview(self) -> dict:
+        """Counts for the Memory tab header: sessions, **current** + superseded assertions,
+        and consolidated themes. Read-only + defensive (0 on a graph without the tables)."""
+        def count(query: str) -> int:
+            try:
+                return int(self._rows(query)[0][0])
+            except Exception:
+                return 0
+        total = count("MATCH (a:Assertion) RETURN count(a);")
+        superseded = len(self._superseded_ids())
+        return {
+            "sessions": count("MATCH (s:Session) RETURN count(s);"),
+            "assertions": max(0, total - superseded),   # current (not superseded)
+            "superseded": superseded,
+            "themes": count("MATCH (c:MemoryConcept) RETURN count(c);"),
+        }
+
+    def list_assertions(self, limit: int = 200, include_superseded: bool = True) -> list:
+        """All remembered facts with metadata (subject/predicate/object + session, confidence,
+        timestamps, superseded flag), newest first (by ``last_seen`` else ``created_at``) — the
+        Memory tab's browsable table. Read-only + defensive (pre-0.54 graphs lack confidence)."""
+        try:
+            rows = self._rows("MATCH (a:Assertion) RETURN a.id, a.subject, a.predicate, a.object, "
+                              "a.session_id, a.created_at, a.confidence, a.last_seen;")
+            has_conf = True
+        except Exception:
+            try:
+                rows = self._rows("MATCH (a:Assertion) RETURN a.id, a.subject, a.predicate, "
+                                  "a.object, a.session_id, a.created_at;")
+                has_conf = False
+            except Exception:
+                return []
+        sup = self._superseded_ids()
+        out = []
+        for row in rows:
+            if has_conf:
+                aid, subj, pred, obj, sid, created, conf, seen = row
+            else:
+                aid, subj, pred, obj, sid, created = row
+                conf, seen = 1.0, 0
+            is_sup = aid in sup
+            if is_sup and not include_superseded:
+                continue
+            out.append({"id": aid, "subject": subj, "predicate": pred, "object": obj,
+                        "session_id": sid, "created_at": int(created or 0),
+                        "confidence": round(float(conf if conf is not None else 1.0), 2),
+                        "last_seen": int(seen or 0), "superseded": is_sup})
+        out.sort(key=lambda a: -(a["last_seen"] or a["created_at"]))
+        return out[:limit]
+
     def forget_all(self) -> None:
         """Reset the remembered tier — delete every Session + Assertion (and their edges).
         Writable-only; used to isolate scenarios in the cross-session eval."""

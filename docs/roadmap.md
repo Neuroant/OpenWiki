@@ -585,6 +585,12 @@ opens **retry-with-backoff**; `--sync` restores the old held-writable mode. Trad
 different store (ADR-5). With this, **every planned Path B stage (B0–B6) and refinement has landed**;
 remaining roadmap directions are non-memory (hybrid/ANN retrieval, packaging/CI) — of which
 **observability landed next (v0.58** — an Ollama-telemetry metrics layer + web System tab; see Direction F).
+Then the **Memory (Gedächtnis) tab landed (v0.59)** — the browser finally *shows* Path B: the identity +
+counts, a **recall/context box** (`/api/recall` decay-weighted facts, `/api/context` the assembled three-tier
+context), the `MemoryConcept` **theme cards**, and a browsable **assertion table** (current vs superseded).
+Read-only over the existing store API (`memory_overview`/`list_assertions` + `recall`/`context_for`); the whole
+second-brain tier is no longer CLI/MCP-only. Next non-memory UI: **pipeline/build-stage observability** on the
+Projekt tab (stage timings + token spend for the entity/community/consolidate passes), extending the v0.58 collector.
 
 ### Honest guardrails
 

@@ -106,6 +106,8 @@ function renderActiveTab() {
     renderProject();
   } else if (state.tab === "eval") {
     renderEval();
+  } else if (state.tab === "memory") {
+    renderMemory();
   } else if (state.tab === "system") {
     renderSystem();
   } else {
@@ -171,6 +173,126 @@ async function renderSystem() {
   };
   await draw();
   startMetricsPoll(draw);
+}
+
+// -- Memory (Gedächtnis / Second Brain) tab ---------------------------------
+
+function memReasonHtml(data) {
+  if (data.reason === "no_graph")
+    return `<p class="muted">Kein Wissensgraph geladen — starte den Server mit <code>--graph</code> (oder baue ihn mit <code>openwiki graph-build</code>).</p>`;
+  if (data.mode)   // reason "empty", Second Brain mode on
+    return `<p class="muted"><b>Second-Brain-Modus aktiv</b>, aber noch keine Sitzungen erfasst.<br>
+      Erfasse eine Sitzung mit <code>openwiki remember &lt;transkript&gt;</code> — sie erscheint dann hier.</p>`;
+  return `<p class="muted"><b>Wiki-Modus</b> — das Gedächtnis (Path B) ist deaktiviert.<br>
+    Aktiviere den Second-Brain-Modus mit <code>[memory] enabled = true</code> in <code>openwiki.toml</code>.</p>`;
+}
+
+function memFactRow(f) {
+  const badges = [];
+  if (f.superseded) badges.push(`<span class="mem-badge sup">überholt</span>`);
+  if (f.confidence > 1) badges.push(`<span class="mem-badge conf" title="mehrfach bestätigt">×${f.confidence}</span>`);
+  const sc = (f.score != null) ? `<span class="mem-score" title="Relevanz (cos ${f.cos})">${f.score}</span>` : "";
+  return `<div class="mem-fact${f.superseded ? " is-sup" : ""}">${sc}
+    <span class="mem-triple"><b>${escapeHtml(f.subject)}</b> ${escapeHtml(f.predicate)} <b>${escapeHtml(f.object)}</b></span>
+    <span class="mem-src">[${escapeHtml(f.session_id || "?")}]</span> ${badges.join(" ")}</div>`;
+}
+
+function renderMemoryView(data) {
+  const s = data.stats || {};
+  const identity = data.identity
+    ? `<div class="mem-identity"><span class="mem-k">Identität</span> ${escapeHtml(data.identity)}</div>` : "";
+  const chips = `<div class="mem-chips">
+    <span class="mem-chip"><b>${s.sessions || 0}</b> Sitzungen</span>
+    <span class="mem-chip"><b>${s.assertions || 0}</b> Fakten</span>
+    <span class="mem-chip"><b>${s.superseded || 0}</b> überholt</span>
+    <span class="mem-chip"><b>${s.themes || 0}</b> Themen</span></div>`;
+
+  const recallBox = data.has_embedder ? `
+    <div class="mem-recall">
+      <input id="mem-q" type="text" placeholder="Woran soll ich mich erinnern? (z. B. welche Modelle nutzen wir?)" />
+      <button id="mem-recall-btn">Abrufen</button>
+      <button id="mem-context-btn" class="secondary">Kontext bauen</button>
+    </div>
+    <div id="mem-out" class="mem-out" hidden></div>`
+    : `<p class="muted">Kein Suchindex geladen — Abruf und Kontext sind nicht verfügbar (starte den Server mit <code>-i</code>).</p>`;
+
+  const themes = (data.themes || []).length ? `
+    <h3 class="mem-h3">Themen (Konsolidierung)</h3>
+    <div class="mem-themes">${data.themes.map((t) => `
+      <div class="mem-theme"><div class="mem-theme-h">${escapeHtml(t.label || "Thema " + t.id)}
+        <span class="muted">· ${t.size} Fakten</span></div>
+        <div class="mem-theme-s">${escapeHtml(t.summary || "")}</div></div>`).join("")}</div>` : "";
+
+  const rows = (data.assertions || []).map((f) => `
+    <tr class="${f.superseded ? "sup" : ""}">
+      <td><b>${escapeHtml(f.subject)}</b></td><td>${escapeHtml(f.predicate)}</td>
+      <td><b>${escapeHtml(f.object)}</b></td><td class="m-name">${escapeHtml(f.session_id || "")}</td>
+      <td class="num">${f.confidence}</td>
+      <td>${f.superseded ? '<span class="mem-badge sup">überholt</span>' : ""}</td></tr>`).join("");
+
+  return `<div class="mem-head"><strong>Gedächtnis</strong>
+      <span class="muted">Path B · Second Brain — was frühere Sitzungen hinterlassen haben</span></div>
+    ${identity}${chips}
+    <h3 class="mem-h3">Abruf &amp; Kontext</h3>
+    ${recallBox}
+    ${themes}
+    <h3 class="mem-h3">Erinnerte Fakten
+      <label class="mem-toggle"><input type="checkbox" id="mem-show-sup" /> überholte zeigen</label></h3>
+    <table class="mem-table" id="mem-table"><thead><tr>
+      <th>Subjekt</th><th>Prädikat</th><th>Objekt</th><th>Sitzung</th><th>Konfidenz</th><th></th></tr></thead>
+      <tbody>${rows || `<tr><td colspan="6" class="muted">—</td></tr>`}</tbody></table>`;
+}
+
+async function renderMemory() {
+  const content = $("#content");
+  content.innerHTML = `<p class="muted">Wird geladen…</p>`;
+  let data;
+  try {
+    data = await getJSON("/api/memory");
+  } catch (e) {
+    content.innerHTML = `<p class="muted">Fehler: ${escapeHtml(e.message)}</p>`;
+    return;
+  }
+  if (!data.available) {
+    content.innerHTML = `<div class="mem-head"><strong>Gedächtnis</strong></div>` + memReasonHtml(data);
+    return;
+  }
+  content.innerHTML = renderMemoryView(data);
+  wireMemory();
+  content.scrollTop = 0;
+}
+
+function wireMemory() {
+  const table = $("#mem-table");
+  const sup = $("#mem-show-sup");
+  if (sup && table) sup.addEventListener("change", () => table.classList.toggle("show-sup", sup.checked));
+  const q = $("#mem-q");
+  const out = $("#mem-out");
+  if (!q) return;
+  const run = async (mode) => {
+    const query = q.value.trim();
+    if (!query) return;
+    out.hidden = false;
+    out.innerHTML = `<p class="muted">…</p>`;
+    try {
+      if (mode === "context") {
+        const d = await postJSON("/api/context", { query });
+        out.innerHTML = `<div class="mem-ctx-h muted">Zusammengesetzter Kontext${d.budget ? " · Budget " + d.budget + " Zeichen" : ""}</div>
+          <pre class="mem-context">${escapeHtml(d.context || "(leer)")}</pre>`;
+      } else {
+        const d = await postJSON("/api/recall", { query, k: 8 });
+        const facts = d.facts || [];
+        out.innerHTML = facts.length
+          ? `<div class="mem-facts">${facts.map(memFactRow).join("")}</div>`
+          : `<p class="muted">Keine passenden Erinnerungen.</p>`;
+      }
+    } catch (e) {
+      out.innerHTML = `<p class="muted">Fehler: ${escapeHtml(e.message)}</p>`;
+    }
+  };
+  $("#mem-recall-btn").addEventListener("click", () => run("recall"));
+  $("#mem-context-btn").addEventListener("click", () => run("context"));
+  q.addEventListener("keydown", (e) => { if (e.key === "Enter") run("recall"); });
 }
 async function loadDoc(name) {
   if (state.docs[name]) return state.docs[name];

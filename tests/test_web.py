@@ -145,6 +145,16 @@ def test_metrics_snapshot_shape(app):
     assert isinstance(snap["events"], list) and isinstance(snap["summary"], dict)
 
 
+def test_memory_info_no_graph(app):
+    info = app.memory_info()                  # app fixture has no graph
+    assert info["available"] is False and info["reason"] == "no_graph"
+
+
+def test_memory_recall_guarded_without_graph(app):
+    with pytest.raises(RuntimeError):
+        app.memory_recall("anything")
+
+
 def test_search_without_index(tmp_path):
     (tmp_path / "wiki" / "pages").mkdir(parents=True)
     with pytest.raises(RuntimeError):
@@ -222,11 +232,17 @@ def test_http_api_metrics(base_url):
     assert "events" in data and "summary" in data
 
 
+def test_http_api_memory(base_url):
+    status, body = _get(base_url + "/api/memory")
+    assert status == 200
+    assert json.loads(body)["available"] is False   # base_url app fixture has no graph
+
+
 def test_http_index_html_has_tabs(base_url):
     status, body = _get(base_url + "/")
     assert status == 200
     for tab in ('data-tab="wiki"', 'data-tab="help"', 'data-tab="tutorial"',
-                'data-tab="graph"', 'data-tab="project"', 'data-tab="system"'):
+                'data-tab="graph"', 'data-tab="project"', 'data-tab="system"', 'data-tab="memory"'):
         assert tab in body
 
 

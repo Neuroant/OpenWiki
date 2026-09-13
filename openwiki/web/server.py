@@ -399,6 +399,61 @@ class WikiWebApp:
         from .. import metrics as m
         return m.COLLECTOR.snapshot(limit=limit)
 
+    # -- memory tier (Path B / Second Brain) ---------------------------------
+
+    def _memory_embedder(self):
+        return self.index.embedder if self.index is not None else None
+
+    def memory_info(self) -> dict:
+        """Overview for the Memory (Gedächtnis) tab: identity + counts + themes + a
+        browsable assertion list. ``available: false`` (with a ``reason``) when there is
+        no graph, no remembered content, or the project is in Wiki mode. Read-only."""
+        mode = bool(self.project is not None and self.project.memory_enabled)
+        if self.graph is None:
+            return {"available": False, "reason": "no_graph", "mode": mode}
+        try:
+            if not self.graph.has_memory():
+                return {"available": False, "reason": "empty", "mode": mode}
+        except Exception:
+            return {"available": False, "reason": "no_graph", "mode": mode}
+        identity = self.project.identity if self.project is not None else ""
+        return {
+            "available": True,
+            "mode": mode,
+            "identity": identity,
+            "has_embedder": self._memory_embedder() is not None,
+            "stats": self.graph.memory_overview(),
+            "themes": self.graph.memory_concepts(),
+            "assertions": self.graph.list_assertions(limit=200),
+        }
+
+    def memory_recall(self, query: str, k: int = 8, include_superseded: bool = False) -> dict:
+        """The remembered facts most relevant to a query (decay-weighted, B6 activation tier).
+        Needs a graph with memory + a search index (for the embedder). Read-only."""
+        embedder = self._memory_embedder()
+        if self.graph is None or embedder is None:
+            raise RuntimeError("Recall needs a graph with memory and a search index.")
+        query = (query or "").strip()
+        if not query:
+            raise RuntimeError("empty query")
+        k = max(1, min(int(k), 30))
+        facts = self.graph.recall(query, embedder, k=k, include_superseded=bool(include_superseded))
+        return {"query": query, "k": k, "facts": facts}
+
+    def memory_context(self, query: str) -> dict:
+        """The assembled three-tier session context for a query (identity + activation +
+        attractors, B6), budgeted by the project's ``context_budget``. Read-only."""
+        embedder = self._memory_embedder()
+        if self.graph is None or embedder is None:
+            raise RuntimeError("Context needs a graph with memory and a search index.")
+        query = (query or "").strip()
+        if not query:
+            raise RuntimeError("empty query")
+        identity = self.project.identity if self.project is not None else ""
+        budget = self.project.context_budget if self.project is not None else None
+        context = self.graph.context_for(query, embedder, identity=identity, max_chars=budget)
+        return {"query": query, "context": context, "identity": identity, "budget": budget}
+
     def chat(self, message: str) -> dict:
         if self.agent is None:
             raise RuntimeError("Chat is unavailable (no agent configured).")
@@ -506,6 +561,8 @@ def make_handler(app: WikiWebApp):
                     query = parse_qs(urlparse(self.path).query)
                     limit = int(query.get("limit", ["50"])[0])
                     return self._json(app.metrics(limit))
+                if path == "/api/memory":
+                    return self._json(app.memory_info())
                 if path == "/api/communities":
                     return self._json({"communities": app.communities()})
                 if path == "/api/answer-eval":
@@ -556,6 +613,17 @@ def make_handler(app: WikiWebApp):
                     if not question:
                         return self._json({"error": "empty question"}, 400)
                     return self._json(app.ask_global(question))
+                if path == "/api/recall":
+                    query = (data.get("query") or "").strip()
+                    if not query:
+                        return self._json({"error": "empty query"}, 400)
+                    return self._json(app.memory_recall(
+                        query, int(data.get("k", 8)), bool(data.get("include_superseded", False))))
+                if path == "/api/context":
+                    query = (data.get("query") or "").strip()
+                    if not query:
+                        return self._json({"error": "empty query"}, 400)
+                    return self._json(app.memory_context(query))
                 if path == "/api/answer-eval":
                     return self._json(app.start_answer_eval(
                         int(data.get("top_k", 5)), int(data.get("expand_k", 3)),

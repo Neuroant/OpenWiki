@@ -1,0 +1,30 @@
+name: Publish to PyPI
+
+# Manual-only (workflow_dispatch): publishing is a deliberate, one-way action. It is also
+# GATED until the project is made public — before running this you must:
+#   1. choose a license, add a LICENSE file, and set it in pyproject.toml;
+#   2. remove the "Private :: Do Not Upload" classifier from pyproject.toml (PyPI rejects it);
+#   3. configure a PyPI "trusted publisher" for the `owiki` project pointing at this workflow
+#      (https://docs.pypi.org/trusted-publishers/) — no API token/secret is then needed.
+# The distribution name is `owiki` (the `openwiki` name is taken on PyPI).
+on:
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: pypi                 # add a `pypi` environment + trusted publisher on PyPI
+    permissions:
+      id-token: write                 # OIDC trusted publishing — no stored credentials
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Build + check
+        run: |
+          python -m pip install --upgrade build twine
+          python -m build
+          python -m twine check dist/*
+      - name: Publish to PyPI (trusted publishing)
+        uses: pypa/gh-action-pypi-publish@release/v1

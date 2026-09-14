@@ -327,11 +327,20 @@ point it jumps to P0.</sub>
 - **AuthN + roles** (read-only vs read-write) for `serve` and the MCP server.
 - ✅ **CI landed (v0.64).** GitHub Actions (`.github/workflows/ci.yml`) runs the offline suite
   on every push/PR to `main` across a **Python 3.11–3.13** matrix (`ubuntu-latest`; `-e .[dev]`
-  → PyMuPDF + NumPy + Kuzu + pytest). The suite is offline by design — Ollama tests skip when no
-  server is reachable, graph tests use a fake embedder (+ `importorskip` for Kuzu), network is
-  faked, and the sample PDF is committed so the parser tests run — so CI exercises ~all of it on
-  Linux (proving it isn't Windows-locked). *(Still open: PyPI publish, Docker image, a Windows/macOS
-  matrix leg.)*
+  → PyMuPDF + NumPy + Kuzu + pytest) + **builds the Docker image** (smoke `owiki --version`). The
+  suite is offline by design — Ollama tests skip when no server is reachable, graph tests use a
+  fake embedder (+ `importorskip` for Kuzu), network is faked, and the sample PDF is committed so
+  the parser tests run — so CI exercises ~all of it on Linux (proving it isn't Windows-locked). First
+  run went green on all three legs.
+- ✅ **Packaging landed (v0.65).** PyPI-ready: distribution name **`owiki`** (the `openwiki` name is
+  taken; the *import* package stays `openwiki`), enriched metadata + classifiers, builds clean
+  (`python -m build` → sdist + wheel that includes `web/static` and excludes the 4 MB sample PDF;
+  `twine check` passes). Ships a **`Dockerfile`** (`python:3.13-slim`, targeted copy, `owiki`
+  entrypoint) + `.dockerignore` + `docker-compose.yml` (serve against a host Ollama), CI-built. A
+  **manual** `Publish to PyPI` workflow (`workflow_dispatch`, OIDC trusted publishing) is ready but
+  **gated**: no license is chosen yet (the package carries `Private :: Do Not Upload`), so publishing
+  waits on a license decision + removing that classifier + configuring the PyPI trusted publisher.
+  *(Still open: the actual PyPI publish once licensed; a Windows/macOS CI matrix leg.)*
 - ✅ **Observability landed (v0.58).** An in-process metrics collector (`metrics.py` — a
   bounded, thread-safe ring buffer + `parse_ollama_stats`) captures the per-call **latency +
   token counters Ollama already returns but the code discarded** (`OllamaChat`/`OllamaEmbedder`

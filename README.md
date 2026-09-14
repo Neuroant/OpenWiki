@@ -599,6 +599,34 @@ MCP server).
 > agent preview edits without writing. All processing (embeddings + LLM) is local
 > via Ollama — nothing is sent to third parties.
 
+### Docker
+
+A `Dockerfile` packages the app + its deps (PyMuPDF, NumPy, Kuzu) — but **not** Ollama or
+models: keep Ollama on the host (or a sibling container) and point `--host` at it, and mount
+a project as a volume. The CLI is the entrypoint, so `docker run owiki <subcommand> …`:
+
+```bash
+docker build -t owiki .
+docker run --rm owiki --version
+
+# serve a project's wiki (Ollama on the host):
+docker run --rm -p 8137:8137 -v "$PWD:/data" \
+  --add-host host.docker.internal:host-gateway owiki \
+  serve --bind 0.0.0.0 --port 8137 \
+  --wiki /data/output/wiki -i /data/output/index --graph /data/output/graph \
+  --host http://host.docker.internal:11434
+```
+
+`docker-compose.yml` wires the same thing up (`docker compose up`, then
+http://127.0.0.1:8137). Build a project's `output/` first (locally or
+`docker compose run --rm openwiki build`).
+
+> **Packaging note:** the distribution name is **`owiki`** (`openwiki` is taken on PyPI); the
+> import package stays `openwiki`. It builds clean (`python -m build` → sdist + wheel, `twine
+> check` passes) and CI builds the Docker image on every push. It is **not published** yet —
+> a license hasn't been chosen (the package is marked *Do Not Upload*); the manual
+> `Publish to PyPI` workflow is ready for when it is.
+
 ## Use as a library
 
 ```python
@@ -690,5 +718,5 @@ PDF ──PDFParser──▶ ParsedDocument ──▶ JSON / Markdown
 - [x] **LLM re-ranking** — a re-rank pass over a wider pool (`--rerank`), measured
 - [x] **Typed `Entity→Entity` relations** — LLM-extracted subject–predicate–object `RELATED_TO` edges (`--relations`), surfaced in `find_entity` + the Graph tab
 - [x] **Relation-aware GraphRAG** — expansion traverses typed relations (`MENTIONS→RELATED_TO→MENTIONS`); a `relation` neighbourhood group in `graph_neighbors`, `ask`, and `owiki eval`
-- [x] **CI** — GitHub Actions runs the offline suite on every push/PR (Python 3.11–3.13)
-- [ ] **Packaging** — PyPI publish + Docker image
+- [x] **CI** — GitHub Actions runs the offline suite on every push/PR (Python 3.11–3.13) + builds the Docker image
+- [x] **Packaging** — PyPI-ready build (dist name `owiki`, `twine check` clean) + a `Dockerfile`/compose + a manual PyPI-publish workflow *(publish gated on a license decision)*

@@ -38,3 +38,13 @@ jobs:
 
       - name: Run tests
         run: python -m pytest -q
+
+  # Validate the Dockerfile builds and the CLI runs inside the image (no push).
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t owiki:ci .
+      - name: Smoke test the CLI
+        run: docker run --rm owiki:ci --version

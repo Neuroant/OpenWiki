@@ -1,0 +1,22 @@
+# Keep the build context tiny — only pyproject/README + the openwiki package are COPYed,
+# but excluding the rest speeds transfer and guarantees no stray data lands in the image.
+.git
+.github
+.venv
+venv
+output
+dist
+build
+*.egg-info
+__pycache__
+**/__pycache__
+*.pyc
+tests
+docs
+examples
+.openwiki
+node_modules
+*.pdf
+.playwright-mcp
+install-openwiki.ps1
+install-openwiki.sh

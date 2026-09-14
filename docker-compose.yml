@@ -1,0 +1,24 @@
+# Run OpenWiki's web UI in a container against an Ollama on the host.
+#
+#   1) build a project's wiki/index/graph first (needs Ollama + the models pulled):
+#        owiki build            # or run it inside the container: `docker compose run --rm openwiki build`
+#   2) docker compose up
+#   3) open http://127.0.0.1:8137
+#
+# The bind mount maps the *current directory* (an OpenWiki project) to /data. Ollama runs
+# on the host and is reached via host.docker.internal (the extra_hosts line makes that work
+# on Linux too, not just Docker Desktop).
+services:
+  openwiki:
+    build: .
+    image: owiki
+    ports:
+      - "8137:8137"
+    volumes:
+      - "./:/data"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: >
+      serve --bind 0.0.0.0 --port 8137
+      --wiki /data/output/wiki -i /data/output/index --graph /data/output/graph
+      --host http://host.docker.internal:11434

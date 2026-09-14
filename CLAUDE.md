@@ -153,8 +153,10 @@ wiki), `--similar-k N`, `--no-references` (skip the page + section cross-ref edg
 `--entities` (LLM-extract typed entities → `Entity` + `MENTIONS`; **slow**, one
 call/page), `--relations` (also extract typed **`Entity→Entity` relations** →
 `RELATED_TO {predicate,weight}`; implies `--entities`, a second call per entity-rich
-page — Direction B), `--entity-model NAME`, `--entity-types "A,B,C"` (the domain
-ontology; overrides the default), `--entity-max-chars N`, `-v`.
+page — Direction B), `--resolve-entities` (**corpus-wide entity resolution** → merge
+same-concept surface variants into **canonical** entities with `aliases` + a `description`;
+implies `--entities`, embedding candidates + one LLM call per cluster), `--entity-model NAME`,
+`--entity-types "A,B,C"` (the domain ontology; overrides the default), `--entity-max-chars N`, `-v`.
 
 **Consolidate the graph into communities** — a re-runnable "sleep pass" over an
 already-built graph: detect topical communities (weighted-modularity Louvain over
@@ -427,7 +429,14 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   per-page call returns subject–predicate–object triples *among that page's entities*,
   grounded to them (unresolved/self dropped) and merged across pages into `Relation`s
   (predicate + weight + provenance), stored as `RELATED_TO` edges (always-created empty,
-  like MENTIONS); `store.py`
+  like MENTIONS). **Corpus-wide resolution** (`resolve_entities`, `--resolve-entities`) is the
+  second pass that merges same-concept surface variants the per-page normalizer misses into
+  **canonical** `Entity`s with `aliases` + an LLM `description`: block by type → embedding
+  candidate clusters (cosine ≥ 0.80, calibrated for bge-m3) → one LLM call per multi-member
+  cluster to confirm/split (bounded; singletons free; never drops an entity). Catches
+  spelling/spacing/plural/word-order/near-synonym variants — **not** acronym↔full-form (too
+  far apart in embedding space; honest limitation). `Entity` nodes gain `description`/`aliases`
+  columns and `pages_for_entity` matches aliases too (search an acronym → find the canonical). `store.py`
   (`GraphStore`) answers `neighborhood(slug)` (agent's `graph_neighbors`, incl. a
   `shared_entity` group **and a `relation` group** — pages a *typed* `RELATED_TO` connects via
   `MENTIONS→RELATED_TO→MENTIONS`, i.e. **relation-aware GraphRAG**: it's in `agent._EXPAND_RELS`,

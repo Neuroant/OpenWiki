@@ -242,6 +242,26 @@ def test_typed_relations_built_and_queried(tmp_path):
         store.close()
 
 
+def test_resolved_entities_store_description_and_aliases(tmp_path):
+    """Corpus-wide resolution: canonical entities persist their description + aliases, and an
+    alias is findable via pages_for_entity (so acronyms/synonyms resolve to the canonical)."""
+    from openwiki.graph.entities import Entity
+    wiki = _wiki()
+    index = SemanticIndex.build(wiki, FakeEmbedder(), size_words=50, overlap_words=10)
+    entities = [Entity(key="Effect::insert-effekt", name="Insert-Effekt", type="Effect",
+                       pages=["000-a"], aliases=["IFX"], description="An insert-effect slot.")]
+    GraphBuilder(tmp_path / "graph", similar_k=3).build(wiki, index, entities=entities)
+    store = GraphStore(tmp_path / "graph")
+    try:
+        ents = store.entities_for_page("000-a")
+        assert ents == [{"name": "Insert-Effekt", "type": "Effect",
+                         "description": "An insert-effect slot.", "aliases": ["IFX"]}]
+        hit = store.pages_for_entity("ifx")          # search by the alias finds the canonical
+        assert hit and hit[0]["entity"] == "Insert-Effekt" and hit[0]["aliases"] == ["IFX"]
+    finally:
+        store.close()
+
+
 def test_relations_absent_on_entityless_graph(store):
     assert store.has_relations() is False       # default fixture builds no relations
     assert store.relations_for_entity("x") == [] and store.stats()["relations"] == 0

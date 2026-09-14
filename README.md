@@ -295,6 +295,14 @@ turning co-mention into a real, traversable graph (e.g. *IFX → is processed be
 *Reverb → is a kind of → MFX*). The `find_entity` tool lists an entity's relations, and the
 Graph tab draws the typed edges (predicate on hover).
 
+**Entity resolution (canonical entities, opt-in).** `graph-build --resolve-entities` (implies
+`--entities`) merges same-concept surface variants the per-page normalizer misses into
+**canonical** entities with an `aliases` list + an LLM `description` — block by type → embedding
+candidate clusters → one LLM call per cluster to confirm (bounded; singletons free; never drops
+an entity). E.g. *Drumkit* + *Drum Kit* → canonical **Drum Kit** *(aka Drumkit)*; searching an
+alias then finds the canonical. Catches spelling / spacing / plural / word-order / near-synonym
+variants — not acronym↔full-form (too far apart in embedding space).
+
 **Global search — themes across the whole corpus.** `openwiki communities` runs a
 re-runnable "sleep pass": it detects topical **communities** (weighted-modularity Louvain
 over the similarity/reference/shared-entity graph) and writes **one LLM summary per
@@ -718,5 +726,6 @@ PDF ──PDFParser──▶ ParsedDocument ──▶ JSON / Markdown
 - [x] **LLM re-ranking** — a re-rank pass over a wider pool (`--rerank`), measured
 - [x] **Typed `Entity→Entity` relations** — LLM-extracted subject–predicate–object `RELATED_TO` edges (`--relations`), surfaced in `find_entity` + the Graph tab
 - [x] **Relation-aware GraphRAG** — expansion traverses typed relations (`MENTIONS→RELATED_TO→MENTIONS`); a `relation` neighbourhood group in `graph_neighbors`, `ask`, and `owiki eval`
+- [x] **Corpus-wide entity resolution** — `--resolve-entities` merges surface variants into canonical entities with aliases + descriptions (embedding candidates + LLM verify)
 - [x] **CI** — GitHub Actions runs the offline suite on every push/PR (Python 3.11–3.13) + builds the Docker image
 - [x] **Packaging** — PyPI-ready build (dist name `owiki`, `twine check` clean) + a `Dockerfile`/compose + a manual PyPI-publish workflow *(publish gated on a license decision)*

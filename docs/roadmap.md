@@ -283,8 +283,16 @@ point it jumps to P0.</sub>
   / `relations_for_page`, the `find_entity` agent/MCP tool lists relations, and the **Graph tab** draws
   typed entity→entity edges (predicate on hover) with their own filter. Co-mention is now a real,
   traversable knowledge graph.
-- **Corpus-wide entity resolution** → canonical entities with descriptions/aliases.
-- **Confidence + provenance** on entities and relations *(relations now carry weight + provenance pages)*.
+- ✅ **Corpus-wide entity resolution landed (v0.66)** — `resolve_entities` (`--resolve-entities`)
+  merges same-concept surface variants the per-page normalizer misses into **canonical** entities
+  with `aliases` + an LLM `description`: block by type → embedding candidate clusters (cosine ≥ 0.80,
+  calibrated for bge-m3) → one LLM call per multi-member cluster to confirm/split (bounded — singletons
+  free; never drops an entity). `Entity` nodes carry `description`/`aliases`, and `pages_for_entity` +
+  `find_entity` match aliases (search an acronym/synonym → the canonical). Verified live (`Drumkit` +
+  `Drum Kit` → canonical *Drum Kit* aka *Drumkit*). **Honest limit:** acronym↔full-form (`IFX`↔`Insert-Effekt`
+  ≈ 0.40 cosine) isn't embedding-close, so it isn't a candidate — resolution catches spelling / spacing /
+  plural / word-order / near-synonym variants, not acronyms.
+- **Confidence + provenance** on entities and relations *(relations carry weight + provenance pages; resolved entities carry aliases + a description)*.
 - ✅ **Relation-aware GraphRAG landed (v0.64)** — GraphRAG expansion now traverses the typed
   relations: `neighborhood` gains a `relation` group (pages connected via
   `MENTIONS→RELATED_TO→MENTIONS`), added to `agent._EXPAND_RELS` so both `ask` and `owiki eval`

@@ -20,6 +20,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Union
 
+import numpy as np
+
 from ..llm import ChatModel
 from ..wiki import Wiki
 
@@ -97,9 +99,11 @@ def _system_prompt(types: dict[str, str]) -> str:
 @dataclass
 class Entity:
     key: str          # "<type>::<normalized name>" — unique
-    name: str         # display (surface) form
+    name: str         # display (surface) form (canonical, after resolution)
     type: str
     pages: list[str] = field(default_factory=list)  # slugs mentioning it
+    aliases: list[str] = field(default_factory=list)  # surface variants merged in (resolution)
+    description: str = ""                              # one-line gloss (resolution, canonical only)
 
 
 @dataclass
@@ -229,20 +233,24 @@ def extract_relations(wiki: Wiki, entities: list, chat: ChatModel,
     Needs the already-extracted ``entities`` (from :func:`extract_entities`) so relations point
     at real ``Entity`` nodes — turning co-mention into a real, traversable knowledge graph.
     """
-    pages_entities: dict[str, list[tuple[str, str]]] = {}
+    pages_entities: dict[str, list[tuple]] = {}
     for entity in entities:
         for slug in entity.pages:
-            pages_entities.setdefault(slug, []).append((entity.name, entity.key))
+            pages_entities.setdefault(slug, []).append((entity.name, entity.key, entity.aliases))
     page_by_slug = {p.slug: p for p in wiki.pages}
     slugs = [s for s in pages_entities if len(pages_entities[s]) >= 2 and s in page_by_slug]
     agg: dict[tuple, Relation] = {}
     for i, slug in enumerate(slugs):
         ents = pages_entities[slug]
-        norm_to_key = {_normalize(name): key for name, key in ents}
+        norm_to_key = {}                                  # canonical names + aliases → key
+        for name, key, aliases in ents:
+            norm_to_key[_normalize(name)] = key
+            for alias in aliases:
+                norm_to_key.setdefault(_normalize(alias), key)
         text = page_by_slug[slug].text.strip()[:max_chars]
         if text:
             for subj, pred, obj in _extract_page_relations(
-                    chat, page_by_slug[slug].title, [n for n, _ in ents], text):
+                    chat, page_by_slug[slug].title, [n for n, _, _ in ents], text):
                 sk = norm_to_key.get(_normalize(subj))
                 ok = norm_to_key.get(_normalize(obj))
                 pred = _clean_predicate(pred)
@@ -306,3 +314,176 @@ def extract_entities(wiki: Wiki, chat: ChatModel, types: Ontology = None,
                 len(by_key), len(wiki.pages), len(type_map),
                 f"; {retried} empty page(s) retried" if retried else "")
     return list(by_key.values())
+
+
+# -- corpus-wide entity resolution (canonical entities + aliases + descriptions) ----------
+#
+# The per-page extraction resolves entities by a *deterministic* normalized key (spelling /
+# plural / word-order variants merge). Resolution is the corpus-wide second pass that also
+# merges same-concept surface variants the normalizer can't see — synonyms, acronym↔full
+# form, near-duplicates — into **canonical** entities carrying the merged surface forms as
+# ``aliases`` and an LLM one-line ``description``. It **blocks by type** (aliases share a
+# type), generates candidates by **embedding similarity** (so only plausible near-duplicates
+# are considered), and confirms each multi-member cluster with **one small LLM call** — so
+# the cost is bounded (nothing for the many singletons) and the prompts stay short + reliable.
+# It never drops an entity: anything the model doesn't group survives unchanged.
+
+_RESOLVE_SYSTEM = (
+    "You are given several candidate names of the same TYPE that may or may not name the same "
+    "real-world concept. Group ONLY the names that are aliases of the *same* concept (synonyms, "
+    "an acronym vs. its full form, spelling / word-order variants). Do NOT group two DISTINCT "
+    "concepts just because they are related or the same kind of thing.\n"
+    'Return ONLY a JSON array of objects {"canonical": <clearest full name from the group>, '
+    '"aliases": [<every name in the group, including the canonical>], "description": <one short '
+    "factual sentence, or \"\">}. Every input name must appear in exactly one group; a name that "
+    "stands alone is its own group of one. Output the JSON array and nothing else."
+)
+
+
+def _normalize_rows(mat: np.ndarray) -> np.ndarray:
+    norms = np.linalg.norm(mat, axis=1, keepdims=True)
+    norms[norms == 0] = 1.0
+    return mat / norms
+
+
+def _cluster_indices(idxs: list, embs: np.ndarray, similarity: float) -> list:
+    """Union-find over the given row indices: merge any pair with cosine ≥ ``similarity``
+    (vectors are pre-normalized, so the dot product is the cosine). Returns index groups."""
+    parent = {i: i for i in idxs}
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    for a in range(len(idxs)):
+        for b in range(a + 1, len(idxs)):
+            i, j = idxs[a], idxs[b]
+            if float(embs[i] @ embs[j]) >= similarity:
+                ri, rj = find(i), find(j)
+                if ri != rj:
+                    parent[ri] = rj
+    groups: dict = {}
+    for i in idxs:
+        groups.setdefault(find(i), []).append(i)
+    return list(groups.values())
+
+
+def _parse_resolution(reply: str, allowed_names: list) -> list:
+    """Parse the LLM's grouping into ``[{canonical, members, description}]``, restricted to the
+    cluster's actual names (case-insensitive). Robust — ``[]`` on any parse failure (→ no merge)."""
+    reply = _THINK.sub("", reply)
+    match = _JSON_ARRAY.search(reply)
+    if not match:
+        return []
+    try:
+        data = json.loads(match.group(0))
+    except json.JSONDecodeError:
+        return []
+    allowed = {n.lower(): n for n in allowed_names}
+    groups = []
+    for item in data if isinstance(data, list) else []:
+        if not isinstance(item, dict):
+            continue
+        members = [allowed[a.lower()] for a in (item.get("aliases") or [])
+                   if isinstance(a, str) and a.lower() in allowed]
+        if not members:
+            continue
+        canonical = item.get("canonical")
+        canonical = allowed[canonical.lower()] if (isinstance(canonical, str)
+                                                   and canonical.lower() in allowed) else members[0]
+        desc = item.get("description")
+        groups.append({"canonical": canonical, "members": members,
+                       "description": desc.strip() if isinstance(desc, str) else ""})
+    return groups
+
+
+def _merge_entities(members: list, canonical_name: str, description: str) -> Entity:
+    """Fold several same-type entities into one canonical Entity (union pages, collect the
+    other surface forms as aliases)."""
+    pages: list = []
+    aliases: set = set()
+    for e in members:
+        for slug in e.pages:
+            if slug not in pages:
+                pages.append(slug)
+        aliases.add(e.name)
+        aliases.update(e.aliases)
+    aliases.discard(canonical_name)
+    etype = members[0].type
+    return Entity(key=f"{etype}::{_normalize(canonical_name)}", name=canonical_name, type=etype,
+                  pages=pages, aliases=sorted(aliases), description=description)
+
+
+def resolve_entities(entities: list, embedder, chat: ChatModel, similarity: float = 0.80) -> list:
+    """Corpus-wide entity resolution → canonical entities with ``aliases`` + ``description``.
+    Blocks by type, generates candidate clusters by embedding cosine (≥ ``similarity``), and
+    confirms each multi-member cluster with one LLM call. Bounded (singletons cost nothing) and
+    safe (an entity the model doesn't group survives unchanged). ``embedder``/``chat`` ``None``
+    → returned unchanged. Returns ``(canonical_entities, n_clusters)``.
+
+    The ``0.80`` default is calibrated for bge-m3 on short entity names: it clusters true
+    surface variants (``Drumkit``/``Drum Kit`` ≈ 0.84, ``Drumkit``/``Drumkits`` ≈ 0.92) while
+    excluding distinct same-type entities (``Reverb``/``Delay`` ≈ 0.52). Candidate generation
+    favours *recall* — the LLM provides precision by splitting a mixed cluster. **Limitation:**
+    acronym↔full-form (``IFX``/``Insert-Effekt`` ≈ 0.40) is *not* embedding-close, so it isn't
+    a candidate; embedding-based resolution catches spelling/spacing/plural/word-order/near-
+    synonym variants, not acronyms."""
+    entities = list(entities)
+    if not entities or embedder is None or chat is None:
+        return entities, 0
+    embs = _normalize_rows(embedder.embed_documents([e.name for e in entities]).astype(np.float32))
+    by_type: dict = {}
+    for i, e in enumerate(entities):
+        by_type.setdefault(e.type, []).append(i)
+
+    out: dict = {}   # canonical key → Entity (dedup by key)
+
+    def add(ent: Entity) -> None:
+        cur = out.get(ent.key)
+        if cur is None:
+            out[ent.key] = ent
+            return
+        for slug in ent.pages:                       # key collision → union
+            if slug not in cur.pages:
+                cur.pages.append(slug)
+        merged = set(cur.aliases) | set(ent.aliases) | {ent.name}
+        merged.discard(cur.name)
+        cur.aliases = sorted(merged)
+        if not cur.description and ent.description:
+            cur.description = ent.description
+
+    n_clusters = 0
+    for etype, idxs in by_type.items():
+        for cluster in _cluster_indices(idxs, embs, similarity):
+            if len(cluster) == 1:
+                add(entities[cluster[0]])
+                continue
+            n_clusters += 1
+            group = [entities[i] for i in cluster]
+            names_in = [e.name for e in group]
+            try:
+                reply = chat.chat([
+                    {"role": "system", "content": _RESOLVE_SYSTEM},
+                    {"role": "user", "content": f"Type: {etype}\nNames:\n"
+                     + "\n".join(f"- {n}" for n in names_in)},
+                ])
+                subgroups = _parse_resolution(reply, names_in)
+            except Exception as exc:                 # a bad cluster shouldn't abort the run
+                logger.warning("entity resolution failed on a %s cluster: %s", etype, exc)
+                subgroups = []
+            placed: set = set()
+            for sg in subgroups:
+                members = [e for e in group if e.name in sg["members"]]
+                if not members:
+                    continue
+                add(_merge_entities(members, sg["canonical"], sg["description"]))
+                placed.update(e.name for e in members)
+            for e in group:                          # safety: never drop an ungrouped entity
+                if e.name not in placed:
+                    add(e)
+
+    logger.info("Entity resolution: %d canonical from %d raw (%d candidate cluster(s))",
+                len(out), len(entities), n_clusters)
+    return list(out.values()), n_clusters

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 
+import numpy as np
+
 from openwiki.graph.entities import DEFAULT_ENTITY_TYPES, coerce_types, extract_entities
 from openwiki.wiki import Wiki, WikiPage
 
@@ -104,3 +106,61 @@ def test_extract_relations_skips_single_entity_pages():
     chat = FakeChat('[{"subject":"A","predicate":"is","object":"A"}]')
     assert extract_relations(wiki, ents, chat) == []      # <2 entities → no call, no relations
     assert chat.last is None
+
+
+# -- corpus-wide entity resolution ---------------------------------------------
+
+from openwiki.graph.entities import resolve_entities   # noqa: E402
+
+
+class _ResolveEmb:
+    """Fake embedder: IFX & Insert-Effekt get identical vectors (→ same candidate cluster),
+    Reverb is distinct."""
+    name = "fake:res"
+
+    def _v(self, t):
+        t = t.lower()
+        if "ifx" in t or "insert" in t:
+            return np.array([1.0, 0.0, 0.0], dtype=np.float32)
+        if "reverb" in t:
+            return np.array([0.0, 1.0, 0.0], dtype=np.float32)
+        return np.array([0.0, 0.0, 1.0], dtype=np.float32)
+
+    def embed_documents(self, texts):
+        return np.vstack([self._v(t) for t in texts])
+
+
+def test_resolve_merges_aliases_keeps_distinct():
+    ents = [Entity(key="Effect::ifx", name="IFX", type="Effect", pages=["000"]),
+            Entity(key="Effect::insert-effekt", name="Insert-Effekt", type="Effect", pages=["001"]),
+            Entity(key="Effect::reverb", name="Reverb", type="Effect", pages=["002"])]
+    chat = FakeChat('[{"canonical":"Insert-Effekt","aliases":["IFX","Insert-Effekt"],'
+                    '"description":"An insert-effect slot."}]')
+    resolved, n_clusters = resolve_entities(ents, _ResolveEmb(), chat)
+    assert n_clusters == 1 and len(resolved) == 2
+    by = {e.name: e for e in resolved}
+    assert by["Insert-Effekt"].aliases == ["IFX"]                 # the acronym folded in
+    assert set(by["Insert-Effekt"].pages) == {"000", "001"}       # pages unioned
+    assert by["Insert-Effekt"].description                        # LLM description kept
+    assert by["Reverb"].aliases == [] and by["Reverb"].description == ""   # singleton untouched
+
+
+def test_resolve_never_drops_ungrouped_entities():
+    ents = [Entity(key="Effect::ifx", name="IFX", type="Effect", pages=["000"]),
+            Entity(key="Effect::insert-effekt", name="Insert-Effekt", type="Effect", pages=["001"])]
+    resolved, n_clusters = resolve_entities(ents, _ResolveEmb(), FakeChat("not json at all"))
+    assert n_clusters == 1                                        # they cluster (identical vectors)
+    assert {e.name for e in resolved} == {"IFX", "Insert-Effekt"}  # …but a bad reply merges nothing
+
+
+def test_resolve_noop_without_models():
+    ents = [Entity(key="Effect::a", name="A", type="Effect", pages=["000"])]
+    assert resolve_entities(ents, None, None) == (ents, 0)
+
+
+def test_cli_imports_the_graph_helpers_it_uses():
+    """Guard: the CLI must import the graph functions its build paths call (a missing import
+    only shows up when the CLI runs, which the offline suite otherwise doesn't exercise)."""
+    import openwiki.cli as cli
+    for fn in ("resolve_entities", "extract_relations", "extract_entities", "build_graph"):
+        assert callable(getattr(cli, fn, None)), f"cli is missing {fn}"

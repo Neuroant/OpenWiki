@@ -250,7 +250,8 @@ chat  = {_toml_str(chat)}
 similar_k = {similar_k}
 references = {str(references).lower()}
 entities = {str(entities).lower()}
-# relations = false   # also extract typed Entity->Entity relations (RELATED_TO); implies entities, +1 LLM call/page
+# relations = false        # also extract typed Entity->Entity relations (RELATED_TO); implies entities, +1 LLM call/page
+# resolve_entities = false # merge same-concept surface variants into canonical entities (aliases + descriptions); implies entities
 # entity_types = ["Concept", "Method", "Component", "Property"]   # domain ontology used when entities = true
 # entity_max_chars = 8000   # how much of each page the entity model sees
 

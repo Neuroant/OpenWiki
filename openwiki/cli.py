@@ -33,7 +33,7 @@ from .opencode_template import scaffold_opencode
 from .graph import (
     GraphStore, answer_global, build_graph, capture_session, detect_communities,
     detect_page_offset, extract_entities, extract_references, extract_references_multi,
-    extract_relations, format_memory, summarize_community, summarize_facts,
+    extract_relations, format_memory, resolve_entities, summarize_community, summarize_facts,
 )
 from .embeddings import OllamaEmbedder
 from .llm import OllamaChat
@@ -352,6 +352,10 @@ def _build_argparser() -> argparse.ArgumentParser:
     graph_p.add_argument("--relations", action="store_true",
                          help="Also extract typed Entity->Entity relations (implies --entities; a second "
                               "LLM call per entity-rich page). Adds RELATED_TO edges.")
+    graph_p.add_argument("--resolve-entities", action="store_true",
+                         help="Corpus-wide entity resolution (implies --entities): merge same-concept "
+                              "surface variants into canonical entities with aliases + descriptions "
+                              "(embedding candidates + one LLM call per cluster).")
     graph_p.add_argument("--entity-model", default=None,
                          help="Ollama model for entity extraction.")
     graph_p.add_argument("--entity-types", default=None, metavar="LIST",
@@ -1046,13 +1050,18 @@ def _cmd_build(args: argparse.Namespace) -> int:
         entities = None
         relations = None
         want_relations = bool(gcfg.get("relations", False))
-        if gcfg.get("entities", False) or want_relations:
+        want_resolve = bool(gcfg.get("resolve_entities", False))
+        if gcfg.get("entities", False) or want_relations or want_resolve:
             model = models.get("chat", DEFAULT_CHAT)
             print("  graph: extracting entities (one LLM call per page) …", file=sys.stderr)
             entities = extract_entities(wiki, _entity_chat(model, host),
                                         types=gcfg.get("entity_types"),
                                         max_chars=int(gcfg.get("entity_max_chars", 8000)),
                                         retry_chat=_entity_retry_chat(model, host))
+            if want_resolve:
+                print("  graph: resolving entities (embedding candidates + LLM verify) …",
+                      file=sys.stderr)
+                entities, _n = resolve_entities(entities, index.embedder, _entity_chat(model, host))
             if want_relations:
                 print("  graph: extracting relations (one LLM call per entity-rich page) …",
                       file=sys.stderr)
@@ -1899,7 +1908,8 @@ def _cmd_graph_build(args: argparse.Namespace) -> int:
     entities = None
     relations = None
     want_relations = getattr(args, "relations", False)
-    if args.entities or want_relations:
+    want_resolve = getattr(args, "resolve_entities", False)
+    if args.entities or want_relations or want_resolve:
         chat = _entity_chat(args.entity_model, args.host)
         print(f"Extracting entities with {chat.name} (one call per page) …", file=sys.stderr)
 
@@ -1911,6 +1921,13 @@ def _cmd_graph_build(args: argparse.Namespace) -> int:
                                     max_chars=args.entity_max_chars or 8000,
                                     on_progress=_progress if args.verbose else None,
                                     retry_chat=_entity_retry_chat(args.entity_model, args.host))
+        if want_resolve:
+            print(f"Resolving entities with {chat.name} (embedding candidates + LLM verify) …",
+                  file=sys.stderr)
+            raw = len(entities)
+            entities, n_clusters = resolve_entities(entities, index.embedder, chat)
+            print(f"  resolved {raw} → {len(entities)} canonical ({n_clusters} cluster(s) checked)",
+                  file=sys.stderr)
         if want_relations:
             print(f"Extracting relations with {chat.name} (one call per entity-rich page) …",
                   file=sys.stderr)
@@ -1929,8 +1946,9 @@ def _cmd_graph_build(args: argparse.Namespace) -> int:
     print(f"  chunks (dim {stats['dim']}): {stats['chunks']}")
     print(f"  SIMILAR_TO    : {stats['similar_edges']}")
     print(f"  REFERENCES    : {stats['reference_edges']}")
-    if args.entities or want_relations:
-        print(f"  entities      : {stats['entities']}  (MENTIONS: {stats['mention_edges']})")
+    if args.entities or want_relations or want_resolve:
+        canon = "  (canonical, aliases resolved)" if want_resolve else ""
+        print(f"  entities      : {stats['entities']}  (MENTIONS: {stats['mention_edges']}){canon}")
     if want_relations:
         print(f"  relations     : {stats['relation_edges']}  (RELATED_TO)")
     print(f"  graph -> {args.out}")

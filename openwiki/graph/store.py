@@ -304,20 +304,38 @@ class GraphStore:
 
     # -- entities -------------------------------------------------------
 
+    @staticmethod
+    def _aliases(joined) -> list:
+        return [a for a in (joined or "").split(", ") if a]
+
     def entities_for_page(self, slug: str) -> list[dict]:
-        rows = self._rows(
-            "MATCH (:Page {slug:$s})-[:MENTIONS]->(e:Entity) "
-            "RETURN e.name, e.type ORDER BY e.type, e.name;", {"s": slug})
-        return [{"name": r[0], "type": r[1]} for r in rows]
+        try:  # enriched (description + aliases from resolution); fall back for pre-0.66 graphs
+            rows = self._rows(
+                "MATCH (:Page {slug:$s})-[:MENTIONS]->(e:Entity) "
+                "RETURN e.name, e.type, e.description, e.aliases ORDER BY e.type, e.name;", {"s": slug})
+        except Exception:
+            rows = [(r[0], r[1], "", "") for r in self._rows(
+                "MATCH (:Page {slug:$s})-[:MENTIONS]->(e:Entity) "
+                "RETURN e.name, e.type ORDER BY e.type, e.name;", {"s": slug})]
+        return [{"name": r[0], "type": r[1], "description": r[2] or "",
+                 "aliases": self._aliases(r[3])} for r in rows]
 
     def pages_for_entity(self, query: str, limit: int = 20) -> list[dict]:
-        """Pages that mention an entity whose name contains ``query`` (case-insensitive)."""
-        rows = self._rows(
-            "MATCH (e:Entity)<-[:MENTIONS]-(p:Page) "
-            "WHERE contains(lower(e.name), lower($q)) "
-            "RETURN e.name, e.type, p.slug, p.title ORDER BY e.name LIMIT $k;",
-            {"q": str(query), "k": limit})
-        return [{"entity": r[0], "type": r[1], "slug": r[2], "title": r[3]} for r in rows]
+        """Pages that mention an entity whose name **or an alias** contains ``query``
+        (case-insensitive) — so resolution's alias table makes acronyms/synonyms findable."""
+        try:
+            rows = self._rows(
+                "MATCH (e:Entity)<-[:MENTIONS]-(p:Page) "
+                "WHERE contains(lower(e.name), lower($q)) OR contains(lower(e.aliases), lower($q)) "
+                "RETURN e.name, e.type, p.slug, p.title, e.description, e.aliases "
+                "ORDER BY e.name LIMIT $k;", {"q": str(query), "k": limit})
+        except Exception:   # pre-0.66 graph without description/aliases columns
+            rows = [(r[0], r[1], r[2], r[3], "", "") for r in self._rows(
+                "MATCH (e:Entity)<-[:MENTIONS]-(p:Page) WHERE contains(lower(e.name), lower($q)) "
+                "RETURN e.name, e.type, p.slug, p.title ORDER BY e.name LIMIT $k;",
+                {"q": str(query), "k": limit})]
+        return [{"entity": r[0], "type": r[1], "slug": r[2], "title": r[3],
+                 "description": r[4] or "", "aliases": self._aliases(r[5])} for r in rows]
 
     # -- typed entity relations (Direction B) --------------------------
 

@@ -221,7 +221,8 @@ class GraphBuilder:
         conn.execute("CREATE REL TABLE PART_OF(FROM Chunk TO Page);")
         conn.execute("CREATE REL TABLE SIMILAR_TO(FROM Page TO Page, score DOUBLE);")
         conn.execute("CREATE REL TABLE REFERENCES(FROM Page TO Page);")
-        conn.execute("CREATE NODE TABLE Entity(key STRING, name STRING, type STRING, PRIMARY KEY(key));")
+        conn.execute("CREATE NODE TABLE Entity(key STRING, name STRING, type STRING, "
+                     "description STRING, aliases STRING, PRIMARY KEY(key));")
         conn.execute("CREATE REL TABLE MENTIONS(FROM Page TO Entity);")
         # Typed Entity->Entity relations (Direction B) — always created, empty without
         # --relations, so store code degrades gracefully (as with Entity/MENTIONS).
@@ -352,8 +353,10 @@ class GraphBuilder:
         n_mentions = 0
         for entity in entities:
             conn.execute(
-                "CREATE (:Entity {key:$k, name:$n, type:$t});",
-                parameters={"k": entity.key, "n": entity.name, "t": entity.type},
+                "CREATE (:Entity {key:$k, name:$n, type:$t, description:$d, aliases:$a});",
+                parameters={"k": entity.key, "n": entity.name, "t": entity.type,
+                            "d": getattr(entity, "description", "") or "",
+                            "a": ", ".join(getattr(entity, "aliases", []) or [])},
             )
             for slug in entity.pages:
                 if slug in page_slugs:

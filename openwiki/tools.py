@@ -206,12 +206,20 @@ class WikiTools:
         if not hits:
             return f"No entity matching '{name}' found in the graph."
         grouped: dict = {}
+        meta: dict = {}
         for h in hits:
-            grouped.setdefault((h["entity"], h["type"]), []).append(f"{h['slug']} ({h['title']})")
-        lines = [
-            f"{ent} [{etype}] is mentioned on: " + ", ".join(pages)
-            for (ent, etype), pages in grouped.items()
-        ]
+            k = (h["entity"], h["type"])
+            grouped.setdefault(k, []).append(f"{h['slug']} ({h['title']})")
+            meta.setdefault(k, {"description": h.get("description", ""), "aliases": h.get("aliases", [])})
+        lines = []
+        for (ent, etype), pages in grouped.items():
+            head = f"{ent} [{etype}]"
+            m = meta.get((ent, etype), {})
+            if m.get("aliases"):
+                head += " (aka " + ", ".join(m["aliases"]) + ")"
+            if m.get("description"):
+                head += f" — {m['description']}"
+            lines.append(head + "\n  mentioned on: " + ", ".join(pages))
         # Typed relations touching the matched entity (Direction B) — the graph's edges.
         relations = self.graph.relations_for_entity(str(name)) if hasattr(self.graph, "relations_for_entity") else []
         if relations:

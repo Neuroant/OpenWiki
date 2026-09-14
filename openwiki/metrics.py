@@ -136,4 +136,6 @@ def parse_ollama_stats(data: dict) -> dict:
 
 # Module-level default collector — the LLM/embedding backends record here, and the
 # web app + CLI read it. Bounded, so it is safe to leave on for the process lifetime.
-COLLECTOR = MetricsCollector()
+# 1024 events comfortably spans a full build's per-stage LLM spend (e.g. one entity
+# call per page) so the build-observability stage deltas aren't evicted mid-stage.
+COLLECTOR = MetricsCollector(maxlen=1024)

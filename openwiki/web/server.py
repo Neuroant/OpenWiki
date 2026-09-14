@@ -135,7 +135,8 @@ class WikiWebApp:
             else:
                 status = "up_to_date"
             stages.append({"name": stage, "status": status,
-                           "stats": record.get("stats", {}), "built": record.get("built", "")})
+                           "stats": record.get("stats", {}), "built": record.get("built", ""),
+                           "duration_s": record.get("duration_s"), "llm": record.get("llm")})
 
         registry_obj = Registry.load()
         active = registry_obj.active()

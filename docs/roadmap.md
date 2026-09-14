@@ -296,8 +296,13 @@ point it jumps to P0.</sub>
   ways: the web **System tab** (`/api/metrics` — per-kind p50/p95 + token totals + a live event
   table), **per-turn chat telemetry** in the agent panel, and a CLI **`ask` `⏱` footer**
   (latency · tokens · tok/s). Immediately useful — it exposes that one agent "question" is
-  several model calls, and that a slow first answer is mostly cold-model `load` time. *(Still
-  open: request logging to disk, pipeline/build-stage timings on the Projekt tab.)*
+  several model calls, and that a slow first answer is mostly cold-model `load` time.
+- ✅ **Pipeline/build observability landed (v0.60).** Each `openwiki build` stage now records its
+  **wall time + LLM token spend** (the metrics-collector delta over the stage, via
+  `_stage_start`/`_finish_stage`) into `BuildState`, surfaced by `openwiki status` and the Projekt
+  tab's build table (Dauer / LLM columns). Immediately shows where a build's time + tokens go —
+  e.g. entity extraction (one chat call/page) and memory capture dominate, while ingest/wiki are
+  instant. *(Still open: request logging to disk.)*
 
 ### G — Ingestion fidelity & new modalities (P2)
 - Adopt **`pymupdf_layout`** for higher-fidelity PDF structure (already flagged in
@@ -589,8 +594,9 @@ Then the **Memory (Gedächtnis) tab landed (v0.59)** — the browser finally *sh
 counts, a **recall/context box** (`/api/recall` decay-weighted facts, `/api/context` the assembled three-tier
 context), the `MemoryConcept` **theme cards**, and a browsable **assertion table** (current vs superseded).
 Read-only over the existing store API (`memory_overview`/`list_assertions` + `recall`/`context_for`); the whole
-second-brain tier is no longer CLI/MCP-only. Next non-memory UI: **pipeline/build-stage observability** on the
-Projekt tab (stage timings + token spend for the entity/community/consolidate passes), extending the v0.58 collector.
+second-brain tier is no longer CLI/MCP-only. Then **pipeline/build-stage observability landed (v0.60)** — per-stage
+wall time + LLM token spend on the Projekt tab + `openwiki status`, extending the v0.58 collector into build time
+(see Direction F). Remaining non-memory directions: retrieval quality (hybrid/re-rank, Direction A), packaging/CI (F).
 
 ### Honest guardrails
 

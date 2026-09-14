@@ -370,11 +370,16 @@ async function renderProject() {
       `<li>${s.exists ? "✓" : "✗"} <code>${esc(s.path)}</code>${s.exists ? "" : ' <span class="muted">(fehlt)</span>'}</li>`
     ).join("") || `<li class="muted">(keine Quellen)</li>`;
 
+    const fmtDur = (s) => (s == null ? "" : (s >= 1 ? s.toFixed(1) + " s" : Math.round(s * 1000) + " ms"));
+    const fmtLlm = (l) => (l && l.calls
+      ? `${l.calls} Aufruf(e) · ${(l.prompt_tokens || 0) + (l.eval_tokens || 0)} Tokens` : "");
     const stages = p.stages.map((st) => {
       const stats = Object.keys(st.stats || {}).length
         ? `<span class="muted">${esc(JSON.stringify(st.stats))}</span>` : "";
       return `<tr><td><code>${st.name}</code></td><td>${badge(st.status)}</td>` +
-             `<td class="muted">${esc(st.built || "")}</td><td>${stats}</td></tr>`;
+             `<td class="muted">${esc(st.built || "")}</td>` +
+             `<td class="num">${fmtDur(st.duration_s)}</td>` +
+             `<td class="muted">${fmtLlm(st.llm)}</td><td>${stats}</td></tr>`;
     }).join("");
 
     const cfg = p.settings || {};
@@ -454,7 +459,7 @@ async function renderProject() {
 
       <h3>Build-Status</h3>
       <table class="proj-table">
-        <thead><tr><th>Stufe</th><th>Status</th><th>Gebaut</th><th>Statistik</th></tr></thead>
+        <thead><tr><th>Stufe</th><th>Status</th><th>Gebaut</th><th>Dauer</th><th>LLM</th><th>Statistik</th></tr></thead>
         <tbody>${stages}</tbody>
       </table>
       <p class="muted">Neu bauen mit <code>openwiki build</code> — inkrementell, nur veraltete Stufen.</p>

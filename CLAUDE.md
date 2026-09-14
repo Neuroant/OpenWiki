@@ -59,8 +59,10 @@ the manifest — explicit flags always win, and with no manifest the historical
 `./output` defaults apply (back-compat). **`openwiki build`** runs the whole
 declared pipeline (ingest → wiki → index → graph → memory) into the project's layout,
 incrementally — a per-stage fingerprint chain in `.openwiki/state.json` skips
-stages whose inputs+params are unchanged (`--only STAGES`, `--force`);
-**`openwiki status`** reports sources, settings, and per-stage build state. A
+stages whose inputs+params are unchanged (`--only STAGES`, `--force`); each stage also
+records its **wall time + LLM token spend** (build observability).
+**`openwiki status`** reports sources, settings, and per-stage build state (incl. duration +
+token spend). A
 user-global **`~/.openwiki/`** (override with `$OPENWIKI_HOME`) holds `config.toml`
 (cross-project setting defaults — below a project's manifest, above built-in
 defaults) and `registry.toml` (**`openwiki project list/use/add/remove/add-source`**;
@@ -360,7 +362,9 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   events (chat/embed/http) with latency + token counts, plus `parse_ollama_stats`
   (Ollama's ns durations + token counters → ms + tok/s) and `snapshot()` aggregates
   (p50/p95, totals). Surfaced by the CLI (`ask` `⏱` footer), the web `/api/metrics` +
-  System tab, and per-turn `chat()` stats. Always-on but bounded — no config, no cost.
+  System tab, per-turn `chat()` stats, and **per-build-stage token spend** (`_cmd_build`
+  diffs the collector per stage — build observability). Always-on but bounded (`maxlen`
+  1024, spanning a full build's per-stage LLM events) — no config, no cost.
 - **`openwiki/agent.py`** — `RAGAgent`: retrieve top chunks → number them as
   excerpts → a grounded system prompt → `ChatModel` → `RAGAnswer` (answer +
   `Source`s). `<think>…</think>` is stripped; `cited_markers()` reports which
@@ -537,7 +541,8 @@ http — count, p50/p95, total time, token in/out) + a live recent-events table,
   (`static/help.md`, `static/tutorial.md`) served as static files and rendered
   client-side. The **Projekt tab** (`renderProject`, backed by `/api/project` →
   `WikiWebApp.project_info()`) is a complete read-only overview of the active
-  project's knowledge model: sources, per-stage build status, **all** pipeline
+  project's knowledge model: sources, per-stage build status (with **Dauer + LLM**
+  columns — the stage's wall time + token spend from build observability), **all** pipeline
   settings (build/models/graph/serve), the entity **ontology**, live graph stats
   from `GraphStore.stats()` (node/edge counts + an entity-type distribution bar
   chart), a **Themen (Communities)** section (label + size + LLM summary cards, from
@@ -571,6 +576,10 @@ http — count, p50/p95, total time, token in/out) + a live recent-events table,
   files + chat model + mode (a doc rebuild preserves memory, so it needn't re-capture).
   Pure/testable; the CLI's `_cmd_build` does the actual stage execution (PDFParser →
   WikiBuilder → SemanticIndex → GraphBuilder → capture_session/`GraphStore.remember`).
+  **Build observability:** each stage records its **wall time + LLM token spend** into the
+  `BuildState` record (`duration_s` + `llm` = the `metrics.COLLECTOR` delta over the stage,
+  via `_stage_start`/`_finish_stage`/`_sum_llm`), surfaced by `openwiki status` and the
+  Projekt tab's build table (Dauer / LLM columns).
 - **`openwiki/eval.py`** — `owiki eval`: retrieval evaluation. Pure ranking metrics
   (`reciprocal_rank`/`hit_at_k`/`recall_at_k`) + an `evaluate(items, retrieve, k)` driver
   that takes a `retrieve(question) -> ranked page slugs` callable, so it's backend-agnostic

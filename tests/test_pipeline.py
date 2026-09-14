@@ -100,6 +100,35 @@ def test_buildstate_roundtrip(tmp_path):
     assert reloaded.get("ingest")["stats"]["pages"] == 5
 
 
+def test_buildstate_records_observability(tmp_path):
+    """Build observability: a stage record carries wall time + LLM token spend, and
+    round-trips; omitting them leaves the record lean (back-compat)."""
+    proj = _project(tmp_path / "p")
+    state = BuildState.load(proj)
+    state.record("index", "fp1", proj.index_dir, {"chunks": 3},
+                 duration_s=1.2345, llm={"calls": 2, "prompt_tokens": 10, "eval_tokens": 5})
+    state.record("wiki", "fp2", proj.wiki_dir, {"pages": 4})   # no timing/llm
+    state.save()
+
+    reloaded = BuildState.load(proj)
+    idx = reloaded.get("index")
+    assert idx["duration_s"] == 1.23 and idx["llm"]["eval_tokens"] == 5
+    assert "duration_s" not in reloaded.get("wiki") and "llm" not in reloaded.get("wiki")
+
+
+def test_sum_llm_over_metrics_events():
+    """cli._sum_llm sums chat+embed calls/tokens for a build stage, ignoring http."""
+    from openwiki import metrics as m
+    from openwiki.cli import _sum_llm
+    c = m.MetricsCollector()
+    c.record("embed", "e", duration_ms=30, prompt_tokens=8)
+    c.record("chat", "c", duration_ms=100, prompt_tokens=50, eval_tokens=20)
+    c.record("http", "x", duration_ms=1)                       # excluded (not a model call)
+    got = _sum_llm(c.since(0))
+    assert got == {"calls": 2, "prompt_tokens": 58, "eval_tokens": 20}
+    assert _sum_llm([]) == {}
+
+
 def test_stale_stages_logic(tmp_path):
     proj = _project(tmp_path / "p")
     fps = compute_fingerprints(proj, proj.source_paths())

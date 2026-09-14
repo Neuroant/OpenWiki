@@ -866,6 +866,36 @@ def _corpus_references(project, sources, doc, wiki, multi):
     return extract_references_multi(doc, wiki, metas)
 
 
+def _sum_llm(events) -> dict:
+    """Sum the chat+embed calls + token counts over a metrics-event slice — a build
+    stage's LLM spend (from the observability collector). ``{}`` when the stage made
+    no model calls (ingest/wiki)."""
+    calls = prompt = evalt = 0
+    for e in events:
+        if e.kind in ("chat", "embed"):
+            calls += 1
+            prompt += e.prompt_tokens or 0
+            evalt += e.eval_tokens or 0
+    return {"calls": calls, "prompt_tokens": prompt, "eval_tokens": evalt} if calls else {}
+
+
+def _stage_start():
+    """Start a build-stage meter: (wall-clock t0, metrics-collector sequence)."""
+    from . import metrics
+    return time.perf_counter(), metrics.COLLECTOR.seq
+
+
+def _finish_stage(state, stage, fingerprint, output, stats, meter) -> None:
+    """Record a build stage with its wall time + LLM token spend (the collector delta
+    since the stage began) and persist — pipeline/build observability."""
+    from . import metrics
+    t0, seq0 = meter
+    duration = time.perf_counter() - t0
+    llm = _sum_llm(metrics.COLLECTOR.since(seq0))
+    state.record(stage, fingerprint, output, stats, duration_s=duration, llm=llm)
+    state.save()
+
+
 def _cmd_build(args: argparse.Namespace) -> int:
     logging.basicConfig(
         level=logging.INFO if getattr(args, "verbose", False) else logging.WARNING,
@@ -942,6 +972,7 @@ def _cmd_build(args: argparse.Namespace) -> int:
         return doc
 
     if "ingest" in todo:
+        _meter = _stage_start()
         project.parsed_dir.mkdir(parents=True, exist_ok=True)
         parsed_docs = []
         synth = build.get("synthesize_outline", True)
@@ -957,21 +988,21 @@ def _cmd_build(args: argparse.Namespace) -> int:
         parsed_path.write_text(
             json.dumps(doc.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8"
         )
-        state.record("ingest", fps["ingest"], parsed_path,
-                     {"pages": len(doc.pages), "sources": len(sources)})
-        state.save()
+        _finish_stage(state, "ingest", fps["ingest"], parsed_path,
+                      {"pages": len(doc.pages), "sources": len(sources)}, _meter)
         print(f"  ingest → {len(sources)} source(s), {len(doc.pages)} page(s) → {parsed_path}",
               file=sys.stderr)
 
     if "wiki" in todo:
+        _meter = _stage_start()
         wiki = WikiBuilder(split_level=split).build(_doc())
         write_wiki(wiki, project.wiki_dir, include_tables=tables)
-        state.record("wiki", fps["wiki"], project.wiki_dir, {"pages": len(wiki.pages)})
-        state.save()
+        _finish_stage(state, "wiki", fps["wiki"], project.wiki_dir, {"pages": len(wiki.pages)}, _meter)
         print(f"  wiki → {len(wiki.pages)} page(s) → {project.wiki_dir}", file=sys.stderr)
 
     index = None
     if "index" in todo:
+        _meter = _stage_start()
         embedder = OllamaEmbedder(model=models.get("embed", DEFAULT_EMBED), host=host)
         wiki = WikiBuilder(split_level=split).build(_doc())
         index = SemanticIndex.build(
@@ -980,12 +1011,12 @@ def _cmd_build(args: argparse.Namespace) -> int:
             overlap_words=int(build.get("overlap", 30)),
         )
         index.save(project.index_dir)
-        state.record("index", fps["index"], project.index_dir,
-                     {"chunks": len(index.chunks), "dim": int(index.embeddings.shape[1])})
-        state.save()
+        _finish_stage(state, "index", fps["index"], project.index_dir,
+                      {"chunks": len(index.chunks), "dim": int(index.embeddings.shape[1])}, _meter)
         print(f"  index → {len(index.chunks)} chunk(s) → {project.index_dir}", file=sys.stderr)
 
     if "graph" in todo:
+        _meter = _stage_start()
         if index is None:
             if not (project.index_dir / "index.json").is_file():
                 print("error: graph needs an index — run `openwiki build index` first.", file=sys.stderr)
@@ -1005,21 +1036,20 @@ def _cmd_build(args: argparse.Namespace) -> int:
         stats = build_graph(wiki, index, project.graph_path,
                             similar_k=int(gcfg.get("similar_k", 6)),
                             references=references, entities=entities)
-        state.record("graph", fps["graph"], project.graph_path,
-                     {"pages": stats["pages"], "chunks": stats["chunks"],
-                      "similar_to": stats["similar_edges"], "references": stats["reference_edges"]})
-        state.save()
+        _finish_stage(state, "graph", fps["graph"], project.graph_path,
+                      {"pages": stats["pages"], "chunks": stats["chunks"],
+                       "similar_to": stats["similar_edges"], "references": stats["reference_edges"]}, _meter)
         print(f"  graph → {stats['pages']} page(s) / {stats['chunks']} chunk(s) → {project.graph_path}",
               file=sys.stderr)
 
     if "memory" in todo:
+        _meter = _stage_start()
         session_paths = project.session_paths()
         if not project.memory_enabled or not session_paths:
             if session_paths and not project.memory_enabled:
                 print("  memory: skipped — [memory] enabled = false (Wiki mode)", file=sys.stderr)
-            state.record("memory", fps["memory"], project.graph_path,
-                         {"remembered": 0, "sessions": len(session_paths)})
-            state.save()
+            _finish_stage(state, "memory", fps["memory"], project.graph_path,
+                          {"remembered": 0, "sessions": len(session_paths)}, _meter)
         elif not project.graph_path.exists():
             print("error: memory stage needs a graph — build the graph first.", file=sys.stderr)
             return 2
@@ -1052,9 +1082,8 @@ def _cmd_build(args: argparse.Namespace) -> int:
                           f"({res['facts']} captured)", file=sys.stderr)
             finally:
                 graph.close()
-            state.record("memory", fps["memory"], project.graph_path,
-                         {"remembered": total, "sessions": len(session_paths)})
-            state.save()
+            _finish_stage(state, "memory", fps["memory"], project.graph_path,
+                          {"remembered": total, "sessions": len(session_paths)}, _meter)
             print(f"  memory → {total} new fact(s) from {len(session_paths)} session(s) "
                   f"→ {project.graph_path}", file=sys.stderr)
 
@@ -1116,7 +1145,14 @@ def _cmd_status(args: argparse.Namespace) -> int:
             label = "up to date"
         stats = rec.get("stats", {})
         extra = ("  " + json.dumps(stats, ensure_ascii=False)) if stats else ""
-        print(f"    {stage:<7} {label:<11}{extra}")
+        meta = []
+        if rec.get("duration_s") is not None:
+            meta.append(f"{rec['duration_s']:.2f}s")
+        llm = rec.get("llm") or {}
+        if llm.get("calls"):
+            meta.append(f"{llm['calls']} call(s), {llm.get('eval_tokens', 0)} tok")
+        metastr = ("  [" + " · ".join(meta) + "]") if meta else ""
+        print(f"    {stage:<7} {label:<11}{metastr}{extra}")
     return 0
 
 

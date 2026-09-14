@@ -181,6 +181,7 @@ header {
   text-align: left; padding: 5px 10px; border-bottom: 1px solid var(--line); font-size: 13px;
 }
 .proj-table th { color: var(--muted); font-weight: 600; }
+.proj-table td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .pbadge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; }
 .pbadge-up_to_date { background: #e6f4ea; color: #1e7e34; }
 .pbadge-stale { background: #fff4e5; color: #b5730a; }

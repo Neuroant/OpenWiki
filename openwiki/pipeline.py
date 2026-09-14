@@ -118,13 +118,19 @@ class BuildState:
     def fingerprint(self, stage: str) -> Optional[str]:
         return self.get(stage).get("fingerprint")
 
-    def record(self, stage: str, fingerprint: str, output, stats: Optional[dict] = None) -> None:
-        self.data.setdefault("stages", {})[stage] = {
+    def record(self, stage: str, fingerprint: str, output, stats: Optional[dict] = None,
+               duration_s: Optional[float] = None, llm: Optional[dict] = None) -> None:
+        rec = {
             "fingerprint": fingerprint,
             "output": str(output),
             "built": time.strftime("%Y-%m-%dT%H:%M:%S"),
             "stats": stats or {},
         }
+        if duration_s is not None:            # build observability: wall time + LLM spend
+            rec["duration_s"] = round(float(duration_s), 2)
+        if llm:
+            rec["llm"] = llm
+        self.data.setdefault("stages", {})[stage] = rec
 
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)

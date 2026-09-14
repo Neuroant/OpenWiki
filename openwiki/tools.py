@@ -163,6 +163,7 @@ class WikiTools:
     _REL_LABEL = {
         "parent": "parent", "child": "child", "prev": "previous", "next": "next",
         "references": "references", "referenced_by": "referenced by", "similar": "similar",
+        "shared_entity": "shared concept", "relation": "related (typed)", "reinforced": "reinforced",
     }
 
     def graph_neighbors(self, slug: str) -> str:

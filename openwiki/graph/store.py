@@ -192,6 +192,10 @@ class GraphStore:
                 {"s": slug, "k": similar_k}),
             # Usage-memory neighbors, ranked by time-decayed weight (may be empty).
             "reinforced": self._reinforced_neighbors(slug, int(time.time()), k=similar_k),
+            # Relation-aware (Direction B): pages a *typed* Entity→Entity relation connects
+            # (MENTIONS→RELATED_TO→MENTIONS). Last, so it surfaces pages that similarity /
+            # shared-entity don't — the connections only the knowledge graph knows.
+            "relation": self._relation_neighbors(slug, limit=similar_k),
         }
 
         nodes = {slug: {**self._node(center[0]), "rel": "center"}}
@@ -206,6 +210,19 @@ class GraphStore:
                 edges.append(edge)
 
         return {"center": slug, "nodes": list(nodes.values()), "edges": edges}
+
+    def _relation_neighbors(self, slug: str, limit: int = 6) -> list:
+        """Pages connected to ``slug`` by a **typed** entity relation
+        (``MENTIONS → RELATED_TO → MENTIONS``), most-connected first. Guarded: ``[]`` on a
+        graph built before the relation layer (no RELATED_TO table)."""
+        try:
+            return self._rows(
+                f"MATCH (:Page {{slug:$s}})-[:MENTIONS]->(:Entity)-[:RELATED_TO]-(:Entity)"
+                f"<-[:MENTIONS]-(p:Page) WHERE p.slug <> $s "
+                f"RETURN {self._P}, count(*) AS rels ORDER BY rels DESC, p.slug LIMIT $k;",
+                {"s": slug, "k": limit})
+        except Exception:
+            return []
 
     # -- explorable subgraph (web Graph tab) ---------------------------
     #

@@ -245,6 +245,44 @@ def test_typed_relations_built_and_queried(tmp_path):
 def test_relations_absent_on_entityless_graph(store):
     assert store.has_relations() is False       # default fixture builds no relations
     assert store.relations_for_entity("x") == [] and store.stats()["relations"] == 0
+    assert not any(n["rel"] == "relation" for n in store.neighborhood("000-a")["nodes"])
+
+
+def test_relation_aware_neighborhood_surfaces_non_similar_page(tmp_path):
+    """Relation-aware GraphRAG: a page reachable ONLY via a typed entity relation
+    (not cosine-similar, not sharing an entity) shows up under the 'relation' group."""
+    from openwiki.agent import _EXPAND_RELS
+    from openwiki.graph.entities import Entity, Relation
+    assert "relation" in _EXPAND_RELS               # ask/eval expand along relations
+
+    # Reading order arp → setup → drum, so arp and drum are NOT structural (NEXT) neighbors;
+    # arp/drum are orthogonal in embedding space (no SIMILAR_TO) and share no entity.
+    pages = [
+        WikiPage(slug="000-arp", title="Arp", level=1, order=0, pdf_page_start=1, pdf_page_end=1,
+                 text="alpha"),
+        WikiPage(slug="001-setup", title="Setup", level=1, order=1, pdf_page_start=2, pdf_page_end=2,
+                 text="gamma alpha beta"),            # the page that states the relation
+        WikiPage(slug="002-drum", title="Drum", level=1, order=2, pdf_page_start=3, pdf_page_end=3,
+                 text="beta"),
+    ]
+    wiki = Wiki(title="T", pages=pages, source="x.pdf", split_level=1)
+    index = SemanticIndex.build(wiki, FakeEmbedder(), size_words=50, overlap_words=10)
+    entities = [Entity(key="Feature::arpeggiator", name="Arpeggiator", type="Feature",
+                       pages=["000-arp", "001-setup"]),
+                Entity(key="SoundObject::drumkit", name="Drumkit", type="SoundObject",
+                       pages=["002-drum", "001-setup"])]
+    relations = [Relation(subject="Feature::arpeggiator", predicate="controls",
+                          object="SoundObject::drumkit", pages=["001-setup"])]
+    GraphBuilder(tmp_path / "graph", similar_k=3).build(wiki, index, entities=entities, relations=relations)
+    store = GraphStore(tmp_path / "graph")
+    try:
+        nb = store.neighborhood("000-arp")
+        rels = {n["slug"]: n["rel"] for n in nb["nodes"]}
+        # 002-drum shares NO entity with 000-arp, isn't cosine-similar, and isn't a reading-order
+        # neighbor — only the typed relation (Arpeggiator --controls--> Drumkit) connects them.
+        assert rels.get("002-drum") == "relation"
+    finally:
+        store.close()
 
 
 # -- find_path --------------------------------------------------------------

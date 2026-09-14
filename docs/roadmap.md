@@ -285,9 +285,20 @@ point it jumps to P0.</sub>
   traversable knowledge graph.
 - **Corpus-wide entity resolution** → canonical entities with descriptions/aliases.
 - **Confidence + provenance** on entities and relations *(relations now carry weight + provenance pages)*.
-- **Relation-aware GraphRAG + agent tools** — answer by *traversing* relations, not just
-  listing neighbours. This is the most plausible path to the graph earning its keep on
-  relational *retrieval*, not only answer quality. **← the natural next step now that the relation layer exists.**
+- ✅ **Relation-aware GraphRAG landed (v0.64)** — GraphRAG expansion now traverses the typed
+  relations: `neighborhood` gains a `relation` group (pages connected via
+  `MENTIONS→RELATED_TO→MENTIONS`), added to `agent._EXPAND_RELS` so both `ask` and `owiki eval`
+  expand along it, and `graph_neighbors` lists it ("related (typed)"). Placed *last* in the dedup
+  order, so it surfaces exactly the pages similarity/structure/shared-entity *don't* — the
+  connections only the knowledge graph knows. Verified: the relation channel retrieves a page
+  reached solely via a typed relation (unit test with orthogonal embeddings; live on a synth
+  corpus, *Arpeggiator →controls→ Drumkit* pulls the Drumkits page). Whether it moves *retrieval
+  recall* on a given corpus is, as ever, an `owiki eval` question — its clearest value (per the
+  RAG-vs-GraphRAG findings) is answer quality + explainable traversal, and it needs a
+  **relation-targeted eval set** to measure rigorously.
+- **Agent relation traversal** — `find_entity` already lists an entity's typed relations, so the
+  agent can answer "what does X control?" by reading them; a dedicated entity-path tool is a
+  possible follow-up.
 
 ### C — Evaluation breadth & rigor (P1)
 - **A second/third corpus** + an **embedder bake-off** — does the RAG-vs-GraphRAG finding

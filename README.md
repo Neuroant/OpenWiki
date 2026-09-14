@@ -682,5 +682,5 @@ PDF ──PDFParser──▶ ParsedDocument ──▶ JSON / Markdown
 - [x] **Hybrid retrieval** — BM25 + dense via reciprocal rank fusion (`--hybrid`); measured (ties on prose, **wins on code**)
 - [x] **LLM re-ranking** — a re-rank pass over a wider pool (`--rerank`), measured
 - [x] **Typed `Entity→Entity` relations** — LLM-extracted subject–predicate–object `RELATED_TO` edges (`--relations`), surfaced in `find_entity` + the Graph tab
-- [ ] **Relation-aware GraphRAG** — answer by *traversing* typed relations (the next step now that the relation layer exists)
+- [x] **Relation-aware GraphRAG** — expansion traverses typed relations (`MENTIONS→RELATED_TO→MENTIONS`); a `relation` neighbourhood group in `graph_neighbors`, `ask`, and `owiki eval`
 - [ ] **CI + packaging** — GitHub Actions running the offline suite; PyPI / Docker

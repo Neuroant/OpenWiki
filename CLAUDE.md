@@ -429,7 +429,9 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   (predicate + weight + provenance), stored as `RELATED_TO` edges (always-created empty,
   like MENTIONS); `store.py`
   (`GraphStore`) answers `neighborhood(slug)` (agent's `graph_neighbors`, incl. a
-  `shared_entity` group), `find_path(a, b)`, entity queries (`entities_for_page`,
+  `shared_entity` group **and a `relation` group** — pages a *typed* `RELATED_TO` connects via
+  `MENTIONS→RELATED_TO→MENTIONS`, i.e. **relation-aware GraphRAG**: it's in `agent._EXPAND_RELS`,
+  placed last so it surfaces pages similarity/structure don't), `find_path(a, b)`, entity queries (`entities_for_page`,
   `pages_for_entity`, `has_entities`), **relation queries** (`has_relations`,
   `relations_for_entity`, `relations_for_page`; `expand_entity` returns typed relation
   edges), `hybrid_search(vec)`, and the Graph‑tab

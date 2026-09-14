@@ -1,0 +1,40 @@
+name: CI
+
+# Run the offline test suite on every push / PR to main. The suite is designed to run
+# without a network: Ollama-dependent tests skip when no server is reachable, the graph
+# tests use a fake embedder (+ importorskip for Kuzu), and network calls are faked. The
+# sample PDF is committed, so the PDF-parser tests run too.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]   # Kuzu has no 3.14 wheel yet
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install (editable + dev extras)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Run tests
+        run: python -m pytest -q

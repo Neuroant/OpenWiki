@@ -1,5 +1,7 @@
 # OpenWiki
 
+[![CI](https://github.com/Neuroant/OpenWiki/actions/workflows/ci.yml/badge.svg)](https://github.com/Neuroant/OpenWiki/actions/workflows/ci.yml)
+
 Learning to build **agentic wikis** — pipelines that turn source documents into
 structured, machine-navigable knowledge bases.
 
@@ -617,6 +619,11 @@ print(doc.pages[0].text)
 python -m pytest
 ```
 
+The suite is **offline** — no Ollama or network needed: Ollama-dependent tests skip when
+no server is reachable, the graph tests use a fake embedder (and `importorskip` for Kuzu),
+and network calls are faked. It runs in **CI** (GitHub Actions) on every push/PR across
+Python 3.11–3.13 — see the badge above.
+
 ## How it fits together
 
 ```
@@ -683,4 +690,5 @@ PDF ──PDFParser──▶ ParsedDocument ──▶ JSON / Markdown
 - [x] **LLM re-ranking** — a re-rank pass over a wider pool (`--rerank`), measured
 - [x] **Typed `Entity→Entity` relations** — LLM-extracted subject–predicate–object `RELATED_TO` edges (`--relations`), surfaced in `find_entity` + the Graph tab
 - [x] **Relation-aware GraphRAG** — expansion traverses typed relations (`MENTIONS→RELATED_TO→MENTIONS`); a `relation` neighbourhood group in `graph_neighbors`, `ask`, and `owiki eval`
-- [ ] **CI + packaging** — GitHub Actions running the offline suite; PyPI / Docker
+- [x] **CI** — GitHub Actions runs the offline suite on every push/PR (Python 3.11–3.13)
+- [ ] **Packaging** — PyPI publish + Docker image

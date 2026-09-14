@@ -325,8 +325,13 @@ point it jumps to P0.</sub>
 
 ### F — Deployment, security & multi-user (P2, conditional)
 - **AuthN + roles** (read-only vs read-write) for `serve` and the MCP server.
-- **Docker image**, **PyPI publish**, **cross-platform CI** (Linux/macOS) running the
-  offline suite.
+- ✅ **CI landed (v0.64).** GitHub Actions (`.github/workflows/ci.yml`) runs the offline suite
+  on every push/PR to `main` across a **Python 3.11–3.13** matrix (`ubuntu-latest`; `-e .[dev]`
+  → PyMuPDF + NumPy + Kuzu + pytest). The suite is offline by design — Ollama tests skip when no
+  server is reachable, graph tests use a fake embedder (+ `importorskip` for Kuzu), network is
+  faked, and the sample PDF is committed so the parser tests run — so CI exercises ~all of it on
+  Linux (proving it isn't Windows-locked). *(Still open: PyPI publish, Docker image, a Windows/macOS
+  matrix leg.)*
 - ✅ **Observability landed (v0.58).** An in-process metrics collector (`metrics.py` — a
   bounded, thread-safe ring buffer + `parse_ollama_stats`) captures the per-call **latency +
   token counters Ollama already returns but the code discarded** (`OllamaChat`/`OllamaEmbedder`

@@ -82,11 +82,12 @@ def compute_fingerprints(project: Project, sources: Iterable[Path]) -> dict:
         build.get("chunk_size", 180), build.get("overlap", 30),
         models.get("embed", "bge-m3"),
     )
+    relations = graph.get("relations", False)
     graph_fp = _hash(
         "graph", index, split,
-        graph.get("similar_k", 6), graph.get("references", True), entities,
+        graph.get("similar_k", 6), graph.get("references", True), entities, relations,
         (models.get("chat", ""), graph.get("entity_types"), graph.get("entity_max_chars"))
-        if entities else "",
+        if (entities or relations) else "",
     )
     memory = _hash(
         "memory", sources_signature(project.session_paths()),

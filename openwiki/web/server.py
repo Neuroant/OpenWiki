@@ -155,6 +155,7 @@ class WikiWebApp:
             "graph": {"similar_k": p.setting("graph", "similar_k", 6),
                       "references": p.setting("graph", "references", True),
                       "entities": p.setting("graph", "entities", False),
+                      "relations": p.setting("graph", "relations", False),
                       "entity_max_chars": p.setting("graph", "entity_max_chars", 8000)},
             "serve": {"port": p.setting("serve", "port", 8000),
                       "bind": p.setting("serve", "bind", "127.0.0.1"),

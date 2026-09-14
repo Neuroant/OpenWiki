@@ -25,7 +25,8 @@ stages are implemented:
 7. **Knowledge graph** — an additive Kuzu (embedded graph + vector DB) layer over
    the wiki, with an interactive Graph tab in the UI. Reads the wiki + index,
    never mutates them. Structural + vector + cross-reference edges, plus an opt-in
-   LLM-extracted **entity layer** (`Entity` nodes + `MENTIONS`).
+   LLM-extracted **entity layer** (`Entity` nodes + `MENTIONS`, plus opt-in typed
+   `Entity→Entity` **relations** — `RELATED_TO` — turning co-mention into a real graph).
 
 The sample input is `301357_NAUTILUS_OG_G1.pdf`, the German Korg NAUTILUS
 synthesizer manual (269 pages, 228 outline entries → a 51-page wiki → 815
@@ -150,8 +151,10 @@ edits still write page files and re-sync via the journal at start/exit).
 Options: `--out DIR`, `-i/--index DIR`, `--split-level N` (must match the indexed
 wiki), `--similar-k N`, `--no-references` (skip the page + section cross-ref edges),
 `--entities` (LLM-extract typed entities → `Entity` + `MENTIONS`; **slow**, one
-call/page), `--entity-model NAME`, `--entity-types "A,B,C"` (the domain ontology;
-overrides the default), `--entity-max-chars N`, `-v`.
+call/page), `--relations` (also extract typed **`Entity→Entity` relations** →
+`RELATED_TO {predicate,weight}`; implies `--entities`, a second call per entity-rich
+page — Direction B), `--entity-model NAME`, `--entity-types "A,B,C"` (the domain
+ontology; overrides the default), `--entity-max-chars N`, `-v`.
 
 **Consolidate the graph into communities** — a re-runnable "sleep pass" over an
 already-built graph: detect topical communities (weighted-modularity Louvain over
@@ -419,10 +422,17 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   whose embedding dim changed are dropped with a warning). `references.py` extracts
   page ("Seite N") + section/chapter ("Abschnitt 1.6", "Kapitel 2") cross-refs
   (see the offset note below);
-  `entities.py` LLM-extracts typed entities per page (opt-in); `store.py`
+  `entities.py` LLM-extracts typed entities per page (opt-in) **and** (with
+  `extract_relations`, Direction B) typed **`Entity→Entity` relations** — a second
+  per-page call returns subject–predicate–object triples *among that page's entities*,
+  grounded to them (unresolved/self dropped) and merged across pages into `Relation`s
+  (predicate + weight + provenance), stored as `RELATED_TO` edges (always-created empty,
+  like MENTIONS); `store.py`
   (`GraphStore`) answers `neighborhood(slug)` (agent's `graph_neighbors`, incl. a
   `shared_entity` group), `find_path(a, b)`, entity queries (`entities_for_page`,
-  `pages_for_entity`, `has_entities`), `hybrid_search(vec)`, and the Graph‑tab
+  `pages_for_entity`, `has_entities`), **relation queries** (`has_relations`,
+  `relations_for_entity`, `relations_for_page`; `expand_entity` returns typed relation
+  edges), `hybrid_search(vec)`, and the Graph‑tab
   explorer API `explore(slug)` / `expand(type, id)` (typed page + entity nodes).
   With `writable=True` it also **upserts** pages incrementally
   (`upsert_page(slug, text, embedder)`: MERGE the Page, replace its Chunks — the

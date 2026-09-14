@@ -33,7 +33,7 @@ from .opencode_template import scaffold_opencode
 from .graph import (
     GraphStore, answer_global, build_graph, capture_session, detect_communities,
     detect_page_offset, extract_entities, extract_references, extract_references_multi,
-    format_memory, summarize_community, summarize_facts,
+    extract_relations, format_memory, summarize_community, summarize_facts,
 )
 from .embeddings import OllamaEmbedder
 from .llm import OllamaChat
@@ -349,6 +349,9 @@ def _build_argparser() -> argparse.ArgumentParser:
                          help="Skip 'siehe Seite N' cross-reference (REFERENCES) edges.")
     graph_p.add_argument("--entities", action="store_true",
                          help="Extract typed entities via an LLM (one call/page; slow). Adds Entity + MENTIONS.")
+    graph_p.add_argument("--relations", action="store_true",
+                         help="Also extract typed Entity->Entity relations (implies --entities; a second "
+                              "LLM call per entity-rich page). Adds RELATED_TO edges.")
     graph_p.add_argument("--entity-model", default=None,
                          help="Ollama model for entity extraction.")
     graph_p.add_argument("--entity-types", default=None, metavar="LIST",
@@ -1041,19 +1044,28 @@ def _cmd_build(args: argparse.Namespace) -> int:
         references = (_corpus_references(project, sources, _doc(), wiki, multi)
                      if gcfg.get("references", True) else None)
         entities = None
-        if gcfg.get("entities", False):
+        relations = None
+        want_relations = bool(gcfg.get("relations", False))
+        if gcfg.get("entities", False) or want_relations:
             model = models.get("chat", DEFAULT_CHAT)
             print("  graph: extracting entities (one LLM call per page) …", file=sys.stderr)
             entities = extract_entities(wiki, _entity_chat(model, host),
                                         types=gcfg.get("entity_types"),
                                         max_chars=int(gcfg.get("entity_max_chars", 8000)),
                                         retry_chat=_entity_retry_chat(model, host))
+            if want_relations:
+                print("  graph: extracting relations (one LLM call per entity-rich page) …",
+                      file=sys.stderr)
+                relations = extract_relations(wiki, entities, _entity_chat(model, host),
+                                              max_chars=int(gcfg.get("entity_max_chars", 8000)))
         stats = build_graph(wiki, index, project.graph_path,
                             similar_k=int(gcfg.get("similar_k", 6)),
-                            references=references, entities=entities)
-        _finish_stage(state, "graph", fps["graph"], project.graph_path,
-                      {"pages": stats["pages"], "chunks": stats["chunks"],
-                       "similar_to": stats["similar_edges"], "references": stats["reference_edges"]}, _meter)
+                            references=references, entities=entities, relations=relations)
+        graph_stats = {"pages": stats["pages"], "chunks": stats["chunks"],
+                       "similar_to": stats["similar_edges"], "references": stats["reference_edges"]}
+        if want_relations:
+            graph_stats["relations"] = stats["relation_edges"]
+        _finish_stage(state, "graph", fps["graph"], project.graph_path, graph_stats, _meter)
         print(f"  graph → {stats['pages']} page(s) / {stats['chunks']} chunk(s) → {project.graph_path}",
               file=sys.stderr)
 
@@ -1885,7 +1897,9 @@ def _cmd_graph_build(args: argparse.Namespace) -> int:
     references = None if args.no_references else extract_references(doc, wiki)
 
     entities = None
-    if args.entities:
+    relations = None
+    want_relations = getattr(args, "relations", False)
+    if args.entities or want_relations:
         chat = _entity_chat(args.entity_model, args.host)
         print(f"Extracting entities with {chat.name} (one call per page) …", file=sys.stderr)
 
@@ -1897,16 +1911,28 @@ def _cmd_graph_build(args: argparse.Namespace) -> int:
                                     max_chars=args.entity_max_chars or 8000,
                                     on_progress=_progress if args.verbose else None,
                                     retry_chat=_entity_retry_chat(args.entity_model, args.host))
+        if want_relations:
+            print(f"Extracting relations with {chat.name} (one call per entity-rich page) …",
+                  file=sys.stderr)
+
+            def _rprogress(done, total, found):
+                print(f"  page {done}/{total} — {found} relations so far", file=sys.stderr)
+
+            relations = extract_relations(wiki, entities, chat,
+                                          max_chars=args.entity_max_chars or 8000,
+                                          on_progress=_rprogress if args.verbose else None)
 
     stats = build_graph(wiki, index, args.out, similar_k=args.similar_k,
-                        references=references, entities=entities)
+                        references=references, entities=entities, relations=relations)
     print(f"Built graph from {args.source.name}")
     print(f"  pages         : {stats['pages']}")
     print(f"  chunks (dim {stats['dim']}): {stats['chunks']}")
     print(f"  SIMILAR_TO    : {stats['similar_edges']}")
     print(f"  REFERENCES    : {stats['reference_edges']}")
-    if args.entities:
+    if args.entities or want_relations:
         print(f"  entities      : {stats['entities']}  (MENTIONS: {stats['mention_edges']})")
+    if want_relations:
+        print(f"  relations     : {stats['relation_edges']}  (RELATED_TO)")
     print(f"  graph -> {args.out}")
     return 0
 

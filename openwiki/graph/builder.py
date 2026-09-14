@@ -46,7 +46,8 @@ class GraphBuilder:
         self.db_path = Path(db_path)
         self.similar_k = similar_k
 
-    def build(self, wiki: Wiki, index: SemanticIndex, references=None, entities=None) -> dict:
+    def build(self, wiki: Wiki, index: SemanticIndex, references=None, entities=None,
+              relations=None) -> dict:
         if not index.chunks:
             raise ValueError("The semantic index is empty; run `openwiki index` first.")
         dim = int(index.embeddings.shape[1])
@@ -74,6 +75,7 @@ class GraphBuilder:
             n_similar = self._insert_similarities(conn, wiki, index)
             n_refs = self._insert_references(conn, references or [])
             n_entities, n_mentions = self._insert_entities(conn, entities or [])
+            n_relations = self._insert_relations(conn, relations or [])
             n_assertions, n_reinf = self._restore_memory(conn, preserved, dim)
         finally:
             conn.close()
@@ -86,6 +88,7 @@ class GraphBuilder:
             "reference_edges": n_refs,
             "entities": n_entities,
             "mention_edges": n_mentions,
+            "relation_edges": n_relations,
             "preserved_assertions": n_assertions,
             "preserved_reinforced": n_reinf,
             "dim": dim,
@@ -220,6 +223,10 @@ class GraphBuilder:
         conn.execute("CREATE REL TABLE REFERENCES(FROM Page TO Page);")
         conn.execute("CREATE NODE TABLE Entity(key STRING, name STRING, type STRING, PRIMARY KEY(key));")
         conn.execute("CREATE REL TABLE MENTIONS(FROM Page TO Entity);")
+        # Typed Entity->Entity relations (Direction B) — always created, empty without
+        # --relations, so store code degrades gracefully (as with Entity/MENTIONS).
+        conn.execute("CREATE REL TABLE RELATED_TO(FROM Entity TO Entity, "
+                     "predicate STRING, weight INT64, pages STRING);")
         # Consolidation layer (populated by `openwiki communities`, empty otherwise),
         # so store code degrades gracefully — as with Entity/MENTIONS above.
         conn.execute("CREATE NODE TABLE Community("
@@ -357,6 +364,28 @@ class GraphBuilder:
                     n_mentions += 1
         return len(entities), n_mentions
 
+    def _insert_relations(self, conn, relations) -> int:
+        """Insert typed RELATED_TO (Entity->Entity) edges. Skips a relation whose endpoints
+        weren't inserted (both entities must exist)."""
+        if not relations:
+            return 0
+        keys = set()
+        res = conn.execute("MATCH (e:Entity) RETURN e.key;")
+        while res.has_next():
+            keys.add(res.get_next()[0])
+        n = 0
+        for rel in relations:
+            if rel.subject not in keys or rel.object not in keys:
+                continue
+            conn.execute(
+                "MATCH (a:Entity {key:$s}),(b:Entity {key:$o}) "
+                "CREATE (a)-[:RELATED_TO {predicate:$p, weight:$w, pages:$g}]->(b);",
+                parameters={"s": rel.subject, "o": rel.object, "p": rel.predicate,
+                            "w": int(rel.weight), "g": ",".join(rel.pages)},
+            )
+            n += 1
+        return n
+
     def _page_embeddings(self, wiki: Wiki, index: SemanticIndex) -> dict:
         """Mean of each page's chunk vectors, L2-normalized."""
         by_page: dict[str, list[np.ndarray]] = {}
@@ -379,6 +408,6 @@ class GraphBuilder:
 
 
 def build_graph(wiki: Wiki, index: SemanticIndex, db_path,
-                similar_k: int = 6, references=None, entities=None) -> dict:
+                similar_k: int = 6, references=None, entities=None, relations=None) -> dict:
     return GraphBuilder(db_path, similar_k=similar_k).build(
-        wiki, index, references=references, entities=entities)
+        wiki, index, references=references, entities=entities, relations=relations)

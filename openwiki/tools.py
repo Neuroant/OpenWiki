@@ -207,10 +207,16 @@ class WikiTools:
         grouped: dict = {}
         for h in hits:
             grouped.setdefault((h["entity"], h["type"]), []).append(f"{h['slug']} ({h['title']})")
-        return "\n".join(
+        lines = [
             f"{ent} [{etype}] is mentioned on: " + ", ".join(pages)
             for (ent, etype), pages in grouped.items()
-        )
+        ]
+        # Typed relations touching the matched entity (Direction B) — the graph's edges.
+        relations = self.graph.relations_for_entity(str(name)) if hasattr(self.graph, "relations_for_entity") else []
+        if relations:
+            lines.append("Relations:")
+            lines += [f"  {r['subject']} --{r['predicate']}--> {r['object']}" for r in relations]
+        return "\n".join(lines)
 
     # -- write tools ----------------------------------------------------
 

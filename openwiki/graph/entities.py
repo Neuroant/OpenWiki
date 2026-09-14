@@ -102,6 +102,21 @@ class Entity:
     pages: list[str] = field(default_factory=list)  # slugs mentioning it
 
 
+@dataclass
+class Relation:
+    """A typed relationship between two entities — the edge that turns co-mention into a
+    real knowledge graph. ``subject``/``object`` are entity *keys*; ``predicate`` is a short
+    verb phrase; ``pages`` are the slugs whose text stated it (its support)."""
+    subject: str      # entity key
+    predicate: str
+    object: str       # entity key
+    pages: list[str] = field(default_factory=list)
+
+    @property
+    def weight(self) -> int:
+        return len(self.pages)
+
+
 def _normalize(name: str) -> str:
     """Merge-key for an entity name, so surface variants resolve to one entity:
     lowercase, drop punctuation, split hyphens, strip German articles, fold
@@ -152,6 +167,98 @@ def _extract_page(chat: ChatModel, title: str, text: str, system_prompt: str,
     except Exception as exc:  # a bad page shouldn't abort the whole run
         logger.warning("entity extraction failed on '%s': %s", title, exc)
         return []
+
+
+_RELATION_SYSTEM = (
+    "You extract factual relationships BETWEEN the given entities from the text (it may be "
+    "German). You are given the list of entities that appear in the text. Return ONLY "
+    "relationships the text actually states between two of those entities, as a JSON array of "
+    'objects {"subject": ..., "predicate": ..., "object": ...} where:\n'
+    "- subject and object are EXACTLY names copied from the entity list (verbatim);\n"
+    "- predicate is a short verb phrase for the relationship (1-4 words, e.g. 'is part of', "
+    "'controls', 'generates', 'requires', 'is a kind of', 'is set in');\n"
+    "- include only relationships explicitly supported by the text — do NOT invent, and do "
+    "not relate an entity to itself.\n"
+    "No duplicates. If none, return []. Output the JSON array and nothing else."
+)
+
+
+def _parse_relations(reply: str) -> list[tuple[str, str, str]]:
+    """Parse a JSON array of ``{subject, predicate, object}`` into raw (surface) triples."""
+    reply = _THINK.sub("", reply)
+    match = _JSON_ARRAY.search(reply)
+    if not match:
+        return []
+    try:
+        data = json.loads(match.group(0))
+    except json.JSONDecodeError:
+        return []
+    out = []
+    for item in data if isinstance(data, list) else []:
+        if isinstance(item, dict):
+            s, p, o = item.get("subject"), item.get("predicate"), item.get("object")
+            if isinstance(s, str) and isinstance(p, str) and isinstance(o, str):
+                out.append((s.strip(), p.strip(), o.strip()))
+    return out
+
+
+def _clean_predicate(pred: str) -> str:
+    return " ".join(pred.split())[:40].strip()
+
+
+def _extract_page_relations(chat: ChatModel, title: str, names: list, text: str) -> list:
+    listing = "\n".join(f"- {n}" for n in names)
+    messages = [
+        {"role": "system", "content": _RELATION_SYSTEM},
+        {"role": "user", "content": f"Page title: {title}\n\nEntities:\n{listing}\n\nText:\n{text}"},
+    ]
+    try:
+        return _parse_relations(chat.chat(messages))
+    except Exception as exc:  # a bad page shouldn't abort the whole run
+        logger.warning("relation extraction failed on '%s': %s", title, exc)
+        return []
+
+
+def extract_relations(wiki: Wiki, entities: list, chat: ChatModel,
+                      max_chars: int = 8000, on_progress=None) -> list:
+    """Extract typed relationships **among the entities on each page** (one call per page that
+    has ≥2 entities). Each returned subject/object is grounded to an extracted entity by
+    normalized name (unresolved, self, or empty-predicate triples are dropped); identical
+    ``(subject, predicate, object)`` across pages merge, accumulating provenance (``pages``).
+
+    Needs the already-extracted ``entities`` (from :func:`extract_entities`) so relations point
+    at real ``Entity`` nodes — turning co-mention into a real, traversable knowledge graph.
+    """
+    pages_entities: dict[str, list[tuple[str, str]]] = {}
+    for entity in entities:
+        for slug in entity.pages:
+            pages_entities.setdefault(slug, []).append((entity.name, entity.key))
+    page_by_slug = {p.slug: p for p in wiki.pages}
+    slugs = [s for s in pages_entities if len(pages_entities[s]) >= 2 and s in page_by_slug]
+    agg: dict[tuple, Relation] = {}
+    for i, slug in enumerate(slugs):
+        ents = pages_entities[slug]
+        norm_to_key = {_normalize(name): key for name, key in ents}
+        text = page_by_slug[slug].text.strip()[:max_chars]
+        if text:
+            for subj, pred, obj in _extract_page_relations(
+                    chat, page_by_slug[slug].title, [n for n, _ in ents], text):
+                sk = norm_to_key.get(_normalize(subj))
+                ok = norm_to_key.get(_normalize(obj))
+                pred = _clean_predicate(pred)
+                if not sk or not ok or sk == ok or not (2 <= len(pred) <= 40):
+                    continue
+                mkey = (sk, pred.lower(), ok)
+                rel = agg.get(mkey)
+                if rel is None:
+                    rel = Relation(subject=sk, predicate=pred, object=ok)
+                    agg[mkey] = rel
+                if slug not in rel.pages:
+                    rel.pages.append(slug)
+        if on_progress:
+            on_progress(i + 1, len(slugs), len(agg))
+    logger.info("Relations: %d unique across %d entity-rich page(s)", len(agg), len(slugs))
+    return list(agg.values())
 
 
 def extract_entities(wiki: Wiki, chat: ChatModel, types: Ontology = None,

@@ -275,13 +275,19 @@ point it jumps to P0.</sub>
   strategy beats spending the same budget on more semantic hits for *recall*.
 
 ### B — Deeper knowledge graph: relations (P0)
-- **Typed `Entity→Entity` relations** (subject–predicate–object per page), turning
-  co-mention into a real knowledge graph.
+- ✅ **Typed `Entity→Entity` relations landed (v0.63)** — a second per-page LLM call extracts
+  subject–predicate–object triples *among that page's entities* (`entities.extract_relations`),
+  grounded to the extracted entities (unresolved/self dropped), merged across pages (predicate +
+  weight + provenance), and stored as **`RELATED_TO {predicate, weight, pages}`** edges (always-created,
+  opt-in via `graph-build --relations` / `[graph] relations`). Surfaced: `GraphStore.relations_for_entity`
+  / `relations_for_page`, the `find_entity` agent/MCP tool lists relations, and the **Graph tab** draws
+  typed entity→entity edges (predicate on hover) with their own filter. Co-mention is now a real,
+  traversable knowledge graph.
 - **Corpus-wide entity resolution** → canonical entities with descriptions/aliases.
-- **Confidence + provenance** on entities and relations.
+- **Confidence + provenance** on entities and relations *(relations now carry weight + provenance pages)*.
 - **Relation-aware GraphRAG + agent tools** — answer by *traversing* relations, not just
   listing neighbours. This is the most plausible path to the graph earning its keep on
-  relational *retrieval*, not only answer quality.
+  relational *retrieval*, not only answer quality. **← the natural next step now that the relation layer exists.**
 
 ### C — Evaluation breadth & rigor (P1)
 - **A second/third corpus** + an **embedder bake-off** — does the RAG-vs-GraphRAG finding

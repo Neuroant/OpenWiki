@@ -418,7 +418,8 @@ async function renderProject() {
         <div><h4>Kanten</h4>${kv({
           "CHILD_OF (Hierarchie)": g.child_of, "NEXT (Reihenfolge)": g.next,
           "PART_OF (Chunk→Page)": g.part_of, "SIMILAR_TO (ähnlich)": g.similar_to,
-          "REFERENCES (Verweise)": g.references, "MENTIONS (Begriffe)": g.mentions })}</div>
+          "REFERENCES (Verweise)": g.references, "MENTIONS (Begriffe)": g.mentions,
+          "RELATED_TO (Beziehungen)": g.relations })}</div>
       </div>
       <h4>Entitätstypen (Verteilung)</h4>${typesHtml}`;
     } else {
@@ -837,7 +838,8 @@ function renderAnswerEvalJob(job) {
 const SVG_NS = "http://www.w3.org/2000/svg";
 const EDGE_COLOR = { parent: "#7048e8", child: "#7048e8", prev: "#868e96", next: "#868e96",
                      similar: "#2f9e44", references: "#e8590c", referenced_by: "#e8590c",
-                     shared_entity: "#0c8599", mentions: "#f08c00", reinforced: "#c2255c" };
+                     shared_entity: "#0c8599", mentions: "#f08c00", reinforced: "#c2255c",
+                     relation: "#9c36b5" };
 // Legend/filter groups (a click toggles a whole relationship kind on/off).
 const FILTERS = [
   { key: "hier",    label: "Hierarchie",          types: ["parent", "child"],          color: "#7048e8" },
@@ -846,6 +848,7 @@ const FILTERS = [
   { key: "ref",     label: "Verweise",            types: ["references", "referenced_by"], color: "#e8590c" },
   { key: "shared",  label: "Gemeinsame Begriffe", types: ["shared_entity"],            color: "#0c8599" },
   { key: "entity",  label: "Begriffe (Entitäten)", types: ["mentions"],                color: "#f08c00" },
+  { key: "relation", label: "Beziehungen (typisiert)", types: ["relation"],            color: "#9c36b5" },
   { key: "reinforced", label: "Verstärkt (Nutzung)", types: ["reinforced"],            color: "#c2255c" },
 ];
 const TYPE_FILTER = {};
@@ -935,7 +938,8 @@ function mergeGraph(data, ox, oy, parentId) {
       seen.add(k);
       // `addedBy` = the expansion that first revealed this edge, so collapsing that
       // node can remove the edges it introduced (even to already-visible nodes).
-      graph.edges.push({ source: e.source, target: e.target, type: e.type, addedBy: parentId });
+      graph.edges.push({ source: e.source, target: e.target, type: e.type,
+                         label: e.label, addedBy: parentId });
     }
   });
 }
@@ -1033,6 +1037,9 @@ function buildGraphDom(content) {
     const line = svgEl("line", { stroke: EDGE_COLOR[e.type] || "#ccc",
       "stroke-width": focus && inSel ? base + 1.7 : base,
       "stroke-opacity": !focus ? 0.4 : (inSel ? 0.92 : 0.15) });
+    if (e.type === "relation" && e.label) {   // show the predicate on hover
+      const t = svgEl("title", {}); t.textContent = e.label; line.appendChild(t);
+    }
     edgeG.appendChild(line);
     graph._edgeEls.push({ e, line });
     deg[e.source] = (deg[e.source] || 0) + 1;

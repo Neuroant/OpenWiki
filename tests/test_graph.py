@@ -217,6 +217,36 @@ def test_build_is_idempotent(tmp_path):
     GraphStore(tmp_path / "graph").close()
 
 
+def test_typed_relations_built_and_queried(tmp_path):
+    """Direction B: RELATED_TO edges are written and queryable (entity + page views)."""
+    from openwiki.graph.entities import Entity, Relation
+    wiki = _wiki()
+    index = SemanticIndex.build(wiki, FakeEmbedder(), size_words=50, overlap_words=10)
+    entities = [Entity(key="Feature::alpha", name="Alpha", type="Feature", pages=["000-a"]),
+                Entity(key="SoundObject::beta", name="Beta", type="SoundObject", pages=["000-a", "001-b"])]
+    relations = [Relation(subject="Feature::alpha", predicate="controls",
+                          object="SoundObject::beta", pages=["000-a"])]
+    stats = GraphBuilder(tmp_path / "graph", similar_k=3).build(
+        wiki, index, entities=entities, relations=relations)
+    assert stats["relation_edges"] == 1
+    store = GraphStore(tmp_path / "graph")
+    try:
+        assert store.has_relations() and store.stats()["relations"] == 1
+        rels = store.relations_for_entity("alpha")
+        assert rels == [{"subject": "Alpha", "subject_type": "Feature", "predicate": "controls",
+                         "object": "Beta", "object_type": "SoundObject", "weight": 1}]
+        assert store.relations_for_page("000-a")[0]["object"] == "Beta"
+        edges = [e for e in store.expand_entity("Feature::alpha")["edges"] if e["type"] == "relation"]
+        assert edges and edges[0]["label"] == "controls" and edges[0]["target"] == "SoundObject::beta"
+    finally:
+        store.close()
+
+
+def test_relations_absent_on_entityless_graph(store):
+    assert store.has_relations() is False       # default fixture builds no relations
+    assert store.relations_for_entity("x") == [] and store.stats()["relations"] == 0
+
+
 # -- find_path --------------------------------------------------------------
 
 def test_find_path_between_pages(store):

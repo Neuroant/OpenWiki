@@ -109,8 +109,15 @@ class GraphStore:
             "similar_to": count("MATCH ()-[r:SIMILAR_TO]->() RETURN count(r);"),
             "references": count("MATCH ()-[r:REFERENCES]->() RETURN count(r);"),
             "mentions": count("MATCH ()-[r:MENTIONS]->() RETURN count(r);"),
+            "relations": self._rel_count(),
             "entity_types": by_type,
         }
+
+    def _rel_count(self) -> int:
+        try:
+            return self._rows("MATCH ()-[r:RELATED_TO]->() RETURN count(r);")[0][0]
+        except Exception:      # pre-relations graph without the table
+            return 0
 
     def health(self, hub_limit: int = 12) -> dict:
         """Knowledge-base *quality* signals (for the Evaluation tab's health panel):
@@ -237,14 +244,33 @@ class GraphStore:
             edges.append({"source": slug, "target": key, "type": "mentions"})
         return {"nodes": nodes, "edges": edges}
 
-    def expand_entity(self, key: str, page_k: int = 15) -> dict:
-        """The pages that mention an entity (expanding an entity node)."""
+    def expand_entity(self, key: str, page_k: int = 15, relation_k: int = 12) -> dict:
+        """Expanding an entity node: the pages that mention it **plus** the entities it is
+        typed-related to (RELATED_TO), so the Graph tab reveals the knowledge sub-graph."""
         rows = self._rows(
             "MATCH (e:Entity {key:$k})<-[:MENTIONS]-(p:Page) "
             "RETURN p.slug, p.title, p.level, p.pdf_start, p.pdf_end LIMIT $pk;",
             {"k": key, "pk": page_k})
         nodes = [self._page_gnode(r) for r in rows]
         edges = [{"source": r[0], "target": key, "type": "mentions"} for r in rows]
+        # typed relations in both directions (empty on a graph without the layer)
+        try:
+            outgoing = self._rows(
+                "MATCH (e:Entity {key:$k})-[r:RELATED_TO]->(o:Entity) "
+                "RETURN o.key, o.name, o.type, r.predicate, r.weight "
+                "ORDER BY r.weight DESC LIMIT $rk;", {"k": key, "rk": relation_k})
+            incoming = self._rows(
+                "MATCH (e:Entity {key:$k})<-[r:RELATED_TO]-(o:Entity) "
+                "RETURN o.key, o.name, o.type, r.predicate, r.weight "
+                "ORDER BY r.weight DESC LIMIT $rk;", {"k": key, "rk": relation_k})
+        except Exception:
+            outgoing = incoming = []
+        for okey, oname, otype, predicate, _w in outgoing:
+            nodes.append({"id": okey, "kind": "entity", "label": oname, "etype": otype})
+            edges.append({"source": key, "target": okey, "type": "relation", "label": predicate})
+        for okey, oname, otype, predicate, _w in incoming:
+            nodes.append({"id": okey, "kind": "entity", "label": oname, "etype": otype})
+            edges.append({"source": okey, "target": key, "type": "relation", "label": predicate})
         return {"nodes": nodes, "edges": edges}
 
     def explore(self, slug: str) -> dict:
@@ -275,6 +301,40 @@ class GraphStore:
             "RETURN e.name, e.type, p.slug, p.title ORDER BY e.name LIMIT $k;",
             {"q": str(query), "k": limit})
         return [{"entity": r[0], "type": r[1], "slug": r[2], "title": r[3]} for r in rows]
+
+    # -- typed entity relations (Direction B) --------------------------
+
+    def has_relations(self) -> bool:
+        return self._rel_count() > 0
+
+    def relations_for_entity(self, query: str, limit: int = 30) -> list[dict]:
+        """Typed relations touching any entity whose name contains ``query`` — both
+        directions (subject or object), each as ``subject --predicate--> object`` with the
+        support weight. Empty on a graph without the relation layer."""
+        try:
+            rows = self._rows(
+                "MATCH (a:Entity)-[r:RELATED_TO]->(b:Entity) "
+                "WHERE contains(lower(a.name), lower($q)) OR contains(lower(b.name), lower($q)) "
+                "RETURN a.name, a.type, r.predicate, b.name, b.type, r.weight "
+                "ORDER BY r.weight DESC, a.name LIMIT $k;",
+                {"q": str(query), "k": limit})
+        except Exception:
+            return []
+        return [{"subject": r[0], "subject_type": r[1], "predicate": r[2],
+                 "object": r[3], "object_type": r[4], "weight": r[5]} for r in rows]
+
+    def relations_for_page(self, slug: str, limit: int = 40) -> list[dict]:
+        """Typed relations whose subject entity is mentioned on ``slug`` — the page's local
+        knowledge sub-graph."""
+        try:
+            rows = self._rows(
+                "MATCH (:Page {slug:$s})-[:MENTIONS]->(a:Entity)-[r:RELATED_TO]->(b:Entity) "
+                "RETURN DISTINCT a.name, r.predicate, b.name, r.weight "
+                "ORDER BY r.weight DESC, a.name LIMIT $k;",
+                {"s": slug, "k": limit})
+        except Exception:
+            return []
+        return [{"subject": r[0], "predicate": r[1], "object": r[2], "weight": r[3]} for r in rows]
 
     # Page-to-page relationships only (never route through Chunk/PART_OF).
     _PAGE_RELS = "CHILD_OF|NEXT|SIMILAR_TO|REFERENCES"

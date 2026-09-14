@@ -144,6 +144,49 @@ retrieval). Same caveats apply (small N, one corpus, judge verbosity/self-prefer
 
 ---
 
+## Finding 4 — hybrid retrieval (BM25 + dense): ties on prose, **wins on code**
+
+Finding 1 explained *why* graph expansion can't add retrieval recall here: **bge-m3 already
+ranks this German prose corpus well**. That same reason predicts where a lexical signal
+*would* help — a corpus of **exact tokens a text embedder blurs**: identifiers, acronyms,
+symbol names. So we tested hybrid retrieval (BM25 fused with dense cosine via reciprocal
+rank fusion, `owiki eval --hybrid`) on two corpora.
+
+**On the NAUTILUS prose manual it ties** — identical MRR/hit/recall as pure dense at every
+budget (1, 2, 8). There's nothing for BM25 to rescue: dense already finds the German terms
+and acronyms (RPPR, USB, Arpeggiator). It doesn't *hurt* either (unlike LLM re-ranking, which
+demoted the top page — MRR 0.81 → 0.57–0.60).
+
+**On a code corpus it wins clearly.** Corpus: OpenWiki's *own source* ingested as a
+`--repo` (49 files → 418 chunks), 14 questions asking where an identifier lives / what it
+does (`reciprocal_rank_fusion`, `search_hybrid` vs `hybrid_search`, `parse_ollama_stats`,
+`capture_session`, …), ground truth = the defining file's page.
+
+| budget | RAG hit@k | **Hybrid hit@k** | RAG MRR | **Hybrid MRR** |
+|---|---|---|---|---|
+| top-1 | 57.1% | **85.7%** | 0.571 | **0.857** |
+| top-3 | 85.7% | **92.9%** | 0.702 | **0.893** |
+| top-8 | 100%  | 100%       | 0.735 | **0.911** |
+
+Hybrid lifts **hit@1 by +28.6 points** and MRR from 0.74 → 0.91. Note *recall saturates* at
+top-8 (both 100%) — the defining file is findable either way; hybrid's gain is in **ranking**
+(getting it to #1), exactly what matters for a code-search "jump to definition" use. The
+mechanism is the hypothesis confirmed: BM25 matches `search_hybrid` (search.py) as a literal
+token and doesn't confuse it with `hybrid_search` (graph/store.py), whereas the text embedder,
+seeing near-identical names, ranks them closer together.
+
+**The retrieval story, whole:** on this project's prose, bge-m3's dense ranking is a strong
+baseline that graph expansion (Finding 1), LLM re-ranking, and BM25 fusion each fail to beat —
+three honest ties/losses. Hybrid is the one lever that produces a **decisive win**, and only
+on the corpus type that predicts it (code). The lesson isn't "hybrid is good" or "bad" — it's
+*measure on your corpus*: match the retrieval technique to where your embedder is weak.
+
+*(Caveats: small N (14), one code corpus = OpenWiki itself, one embedder; the ground-truth
+file slugs track the current `openwiki/` tree. Directional, not decimal-precise — but the
+prose-vs-code contrast is the robust part.)*
+
+---
+
 ## Caveats / threats to validity
 
 - **Small N** (12–14 questions per set), one corpus, one embedder. The result is robust
@@ -172,6 +215,11 @@ retrieval). Same caveats apply (small N, one corpus, judge verbosity/self-prefer
 3. The graph's largest value here isn't in either number: it's **human exploration**
    (the Graph tab, `find_path`, `find_entity`) and structural navigation, which these
    retrieval/answer metrics don't capture at all.
+4. **Match the retrieval technique to where the embedder is weak.** On prose bge-m3 is
+   already strong, so graph expansion / re-ranking / BM25 fusion all tie-or-lose; on
+   **code** (exact identifiers) **hybrid (BM25 + dense) wins big** (+28.6 pts hit@1). Don't
+   adopt a retrieval add-on on faith — `owiki eval` tells you within one run whether it
+   helps *your* corpus.
 
 ---
 
@@ -195,6 +243,22 @@ owiki eval --project <proj> --answers --judge --eval-set eval_relational.jsonl
 
 ```
 owiki eval --project <proj> --global --judge --eval-set eval_thematic.jsonl
+```
+
+**Hybrid vs dense** (Finding 4) — add the `Hybrid (BM25)` row to any retrieval run (no LLM):
+
+```
+owiki eval --project <proj> --hybrid                    # ties on prose (NAUTILUS)
+```
+
+The **code-corpus** run (Finding 4's win) is reproducible from OpenWiki's own source; the
+eval set is committed at `examples/code-eval.jsonl` (its ground-truth file slugs track the
+current `openwiki/` tree):
+
+```
+owiki init /tmp/owsrc --source /path/to/openwiki --repo && cd /tmp/owsrc && owiki build
+owiki eval --eval-set /path/to/openwiki/examples/code-eval.jsonl \
+           -i output/index --no-graph --top-k 1 --expand-k 0 --hybrid
 ```
 
 Note: `--eval-set` accepts a bare name (resolved against the project root) or a path.

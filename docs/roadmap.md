@@ -247,11 +247,15 @@ point it jumps to P0.</sub>
   **Measured on NAUTILUS: it ties pure dense** — identical MRR/hit/recall at every budget (1, 2, 8) —
   because bge-m3 already handles the German terms + acronyms (RPPR/USB/Arpeggiator all found by dense),
   so there's nothing for BM25 to rescue. Crucially it doesn't *hurt* (unlike re-ranking), and a unit
-  test shows it genuinely rescues an exact-term page an embedder is blind to — so it should pay off on a
-  corpus where dense is weaker on literal tokens (**code** identifiers, or a smaller embedding model).
-  Consistent with the corpus's pattern: bge-m3's dense retrieval is the strong baseline that graph
-  expansion, LLM re-ranking, and now BM25 fusion each fail to beat here. *(Still open: score-fusion with a
-  tunable dense/lexical weight; a code-corpus eval where hybrid should win.)*
+  test shows it genuinely rescues an exact-term page an embedder is blind to. **Then confirmed on a code
+  corpus (v0.62):** ingesting OpenWiki's own source as a `--repo` (49 files, 14 identifier questions),
+  hybrid **wins decisively** — hit@1 **57.1% → 85.7%** (+28.6 pts), MRR 0.74 → 0.91 — because code is
+  exact-identifier-heavy and bge-m3 is a *text* embedder (it can't tell `search_hybrid` from
+  `hybrid_search`; BM25 can). So the retrieval story is complete + honest: on prose, bge-m3's dense
+  ranking is the strong baseline that graph expansion, LLM re-ranking, and BM25 fusion each fail to beat;
+  on **code**, hybrid is the clear win. Lesson: match the technique to where the embedder is weak, and let
+  `owiki eval` decide (full writeup: `docs/RAG-vs-GraphRAG.md` Finding 4; eval set: `examples/code-eval.jsonl`).
+  *(Still open: score-fusion with a tunable dense/lexical weight.)*
 - ✅ **Re-ranking landed (v0.61)** — a single **LLM re-rank pass** (`rerank.py`, on-ethos: reuses the
   local chat model, no cross-encoder dependency): fetch a wider candidate pool, one chat call orders it
   by relevance, keep the budget. Wired into `ask --rerank` and, crucially, **`owiki eval --rerank`** (a

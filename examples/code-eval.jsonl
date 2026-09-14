@@ -1,0 +1,14 @@
+{"question": "What does reciprocal_rank_fusion do?", "pages": ["022-lexical-py"]}
+{"question": "Where is the BM25 class that scores documents implemented?", "pages": ["022-lexical-py"]}
+{"question": "Where is search_hybrid implemented?", "pages": ["036-search-py"]}
+{"question": "What does the GraphStore.hybrid_search method do?", "pages": ["019-graph-store-py"]}
+{"question": "What does parse_ollama_stats extract?", "pages": ["027-metrics-py"]}
+{"question": "How does rerank_order re-rank passages?", "pages": ["035-rerank-py"]}
+{"question": "What is effective_weight and confidence_weight?", "pages": ["014-graph-decay-py"]}
+{"question": "What does capture_session produce from a transcript?", "pages": ["017-graph-memory-py"]}
+{"question": "How does detect_communities partition the graph?", "pages": ["013-graph-community-py"]}
+{"question": "What does extract_references detect and detect_page_offset compute?", "pages": ["018-graph-references-py"]}
+{"question": "What fields does BuildState record and compute_fingerprints hash?", "pages": ["033-pipeline-py"]}
+{"question": "How does extract_entities extract typed entities per page?", "pages": ["015-graph-entities-py"]}
+{"question": "What does append_usage write to the usage log?", "pages": ["020-graph-usage-py"]}
+{"question": "How does the WikiAgent multi-turn tool loop work?", "pages": ["004-chat-agent-py"]}

@@ -359,13 +359,13 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   no dependency): `tokenize` (Unicode, German-safe, no stemming — exact-term recall),
   `BM25` (inverted-index postings + idf + k1/b) over the chunk texts, and
   `reciprocal_rank_fusion` (scale-free rank blend, optional per-ranker weights). Catches
-  exact terms the embedder blurs (identifiers, acronyms, compounds). **Measured on
-  NAUTILUS: hybrid *ties* pure dense** (identical MRR/hit/recall at every budget) — bge-m3
-  already handles the German terms + acronyms, so there's nothing for BM25 to rescue here;
-  it doesn't hurt either (unlike re-ranking). The capability is real (a unit test shows it
-  rescues an exact-term page the embedder is blind to) and would pay off where dense is
-  weaker on literal tokens (e.g. a **code** corpus, or a smaller embedder). `owiki eval
-  --hybrid` / `ask --hybrid` measure/use it.
+  exact terms the embedder blurs (identifiers, acronyms, compounds). **Measured: hybrid
+  *ties* pure dense on the NAUTILUS prose** (identical MRR/hit/recall at every budget — bge-m3
+  already handles the German terms; nothing to rescue, and no harm, unlike re-ranking) but
+  **wins decisively on a code corpus** (OpenWiki's own source as a `--repo`: hit@1 57.1% →
+  85.7%, MRR 0.74 → 0.91) — code is exact-identifier-heavy and a text embedder can't tell
+  `search_hybrid` from `hybrid_search`; BM25 can. `owiki eval --hybrid` / `ask --hybrid`
+  measure/use it; writeup in `docs/RAG-vs-GraphRAG.md` Finding 4, eval set `examples/code-eval.jsonl`.
 - **`openwiki/llm.py`** — the `ChatModel` protocol + `OllamaChat` (`/api/chat`,
   stdlib urllib). Parallels `embeddings.py`. Both **capture per-call telemetry**
   (observability): `chat_raw`/`_embed` time the call and parse Ollama's returned

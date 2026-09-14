@@ -121,9 +121,9 @@ the wiki pages:
 .venv\Scripts\python -m openwiki ask "Was ist Smooth Sound Transitions?"
 ```
 Options: `--model NAME` (default `qwen3:30b-a3b-instruct-2507-q4_K_M`), `-k N`,
-`--temperature T`, `--show-context`, `--host URL`, `-i DIR`, `--rerank` /
-`--rerank-pool N` (**LLM re-rank** a wider seed pool down to top-k before answering),
-and (when a graph exists) `--graph DIR` / `--expand-k N` / `--no-graph` for
+`--temperature T`, `--show-context`, `--host URL`, `-i DIR`, `--hybrid` (**BM25+dense**
+hybrid seed retrieval), `--rerank` / `--rerank-pool N` (**LLM re-rank** a wider seed pool
+down to top-k before answering), and (when a graph exists) `--graph DIR` / `--expand-k N` / `--no-graph` for
 **graph-augmented retrieval** — seeds are expanded along references + similar edges
 (sources marked `+`). In **Second Brain mode** the read path also **reinforces** usage: `ask` logs the
 seed→related pairs it pulled to `graph.usage.jsonl`, folded into `REINFORCES` edges by
@@ -352,7 +352,20 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   NumPy embedding matrix with brute-force cosine (a dot product); no vector DB
   because the corpus is small. Persists to `output/index/` (`embeddings.npy` +
   `index.json`). `best_chunk_per_page(query, slugs)` re-ranks specific pages by
-  the query — the query-relevance step of graph-augmented retrieval.
+  the query — the query-relevance step of graph-augmented retrieval. **`search_hybrid`**
+  fuses the dense cosine ranking with a lazy BM25 lexical ranking (`_lexical`, over the
+  chunk texts) via reciprocal rank fusion — hybrid retrieval (Direction A).
+- **`openwiki/lexical.py`** — the **lexical** half of hybrid search (pure, stdlib+NumPy,
+  no dependency): `tokenize` (Unicode, German-safe, no stemming — exact-term recall),
+  `BM25` (inverted-index postings + idf + k1/b) over the chunk texts, and
+  `reciprocal_rank_fusion` (scale-free rank blend, optional per-ranker weights). Catches
+  exact terms the embedder blurs (identifiers, acronyms, compounds). **Measured on
+  NAUTILUS: hybrid *ties* pure dense** (identical MRR/hit/recall at every budget) — bge-m3
+  already handles the German terms + acronyms, so there's nothing for BM25 to rescue here;
+  it doesn't hurt either (unlike re-ranking). The capability is real (a unit test shows it
+  rescues an exact-term page the embedder is blind to) and would pay off where dense is
+  weaker on literal tokens (e.g. a **code** corpus, or a smaller embedder). `owiki eval
+  --hybrid` / `ask --hybrid` measure/use it.
 - **`openwiki/llm.py`** — the `ChatModel` protocol + `OllamaChat` (`/api/chat`,
   stdlib urllib). Parallels `embeddings.py`. Both **capture per-call telemetry**
   (observability): `chat_raw`/`_embed` time the call and parse Ollama's returned
@@ -596,7 +609,8 @@ http — count, p50/p95, total time, token in/out) + a live recent-events table,
   same budget `top_k+expand_k`: **RAG** = top semantic pages; **GraphRAG** = `top_k` semantic
   seeds + `expand_k` graph-expanded (same `_EXPAND_RELS` + `best_chunk_per_page` as the
   agent). Eval sets are per-project JSONL (`<project>/eval.jsonl`: `{"question","pages"}`).
-  A third retriever, **RAG+Rerank** (`owiki eval --rerank`), LLM-re-ranks a wider candidate pool
+  Extra retriever rows: **Hybrid (BM25)** (`owiki eval --hybrid`, no chat model — RRF-fuses
+  dense + lexical; ties dense on NAUTILUS) and **RAG+Rerank** (`owiki eval --rerank`), which LLM-re-ranks a wider candidate pool
   (`--rerank-pool`, default 20) down to the budget (`eval.reranking_retriever`/`make_reranker` +
   `rerank.py`) — the roadmap's "single LLM re-rank pass"; needs a chat model (one call/question).
   **First measured (a small NAUTILUS navigational set): it does not help** — recall was already

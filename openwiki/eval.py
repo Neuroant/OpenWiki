@@ -132,6 +132,18 @@ def semantic_pages(index, question: str, n: int) -> list[str]:
     return ranked
 
 
+def hybrid_pages(index, question: str, n: int) -> list[str]:
+    """The top ``n`` distinct page slugs by **hybrid** (BM25 + dense) rank — the lexical
+    counterpart to :func:`semantic_pages`, for the ``owiki eval --hybrid`` row."""
+    ranked: list[str] = []
+    for result in index.search_hybrid(question, k=max(n * 6, 30)):
+        if result.page_slug not in ranked:
+            ranked.append(result.page_slug)
+            if len(ranked) >= n:
+                break
+    return ranked
+
+
 def graph_expand(index, graph, seeds: list[str], question: str, expand_k: int) -> list[str]:
     """Pages reachable from ``seeds`` along expansion edges, re-ranked by the query."""
     candidates: list[str] = []

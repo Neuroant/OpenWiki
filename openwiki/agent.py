@@ -77,7 +77,7 @@ _EXPAND_RELS = ("references", "referenced_by", "similar", "shared_entity", "rein
 class RAGAgent:
     def __init__(self, index: SemanticIndex, chat: ChatModel, top_k: int = 5,
                  graph=None, expand_k: int = 3, rerank: bool = False,
-                 rerank_pool: int = 20) -> None:
+                 rerank_pool: int = 20, hybrid: bool = False) -> None:
         self.index = index
         self.chat = chat
         self.top_k = top_k
@@ -85,6 +85,7 @@ class RAGAgent:
         self.expand_k = expand_k  # how many related pages to add
         self.rerank = rerank      # LLM re-rank a wider seed pool down to top_k
         self.rerank_pool = rerank_pool
+        self.hybrid = hybrid      # fuse BM25 + dense for the seed search (search_hybrid)
 
     @staticmethod
     def _source(result, marker: int, kind: str) -> Source:
@@ -103,15 +104,22 @@ class RAGAgent:
         sources += self._expand(question, sources)
         return sources
 
+    def _base_search(self, question: str, k: int):
+        """Seed search — hybrid (BM25 + dense) if enabled, else pure dense cosine."""
+        if self.hybrid:
+            return self.index.search_hybrid(question, k=k)
+        return self.index.search(question, k=k)
+
     def _seed(self, question: str, k: int):
-        """The top-``k`` semantic seeds — optionally after an LLM re-rank of a wider pool
-        (fetch ``rerank_pool``, re-rank by relevance, keep ``k``). Off by default."""
+        """The top-``k`` seeds — optionally after an LLM re-rank of a wider pool (fetch
+        ``rerank_pool``, re-rank by relevance, keep ``k``). Both hybrid + re-rank are off
+        by default; they compose (re-rank orders the hybrid pool)."""
         if not self.rerank:
-            return self.index.search(question, k=k)
-        from .rerank import rerank_order
-        pool = self.index.search(question, k=max(self.rerank_pool, k))
+            return self._base_search(question, k)
+        pool = self._base_search(question, max(self.rerank_pool, k))
         if len(pool) <= k:
             return pool
+        from .rerank import rerank_order
         order = rerank_order(question, [r.text for r in pool], self.chat)
         return [pool[i] for i in order][:k]
 

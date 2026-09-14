@@ -241,8 +241,17 @@ Effort: **S**/**M**/**L**.
 point it jumps to P0.</sub>
 
 ### A — Retrieval quality & scale (P0)
-- **Hybrid retrieval** — fuse a lexical/BM25 signal with dense cosine (helps exact German
-  compounds, identifiers, rare terms the embedder blurs).
+- ✅ **Hybrid retrieval landed (v0.62)** — a pure, stdlib **BM25** (`lexical.py`, inverted-index,
+  no `rank-bm25` dependency) fused with the dense cosine ranking via **reciprocal rank fusion**
+  (`SemanticIndex.search_hybrid`), wired into `ask --hybrid` and `owiki eval --hybrid`.
+  **Measured on NAUTILUS: it ties pure dense** — identical MRR/hit/recall at every budget (1, 2, 8) —
+  because bge-m3 already handles the German terms + acronyms (RPPR/USB/Arpeggiator all found by dense),
+  so there's nothing for BM25 to rescue. Crucially it doesn't *hurt* (unlike re-ranking), and a unit
+  test shows it genuinely rescues an exact-term page an embedder is blind to — so it should pay off on a
+  corpus where dense is weaker on literal tokens (**code** identifiers, or a smaller embedding model).
+  Consistent with the corpus's pattern: bge-m3's dense retrieval is the strong baseline that graph
+  expansion, LLM re-ranking, and now BM25 fusion each fail to beat here. *(Still open: score-fusion with a
+  tunable dense/lexical weight; a code-corpus eval where hybrid should win.)*
 - ✅ **Re-ranking landed (v0.61)** — a single **LLM re-rank pass** (`rerank.py`, on-ethos: reuses the
   local chat model, no cross-encoder dependency): fetch a wider candidate pool, one chat call orders it
   by relevance, keep the budget. Wired into `ask --rerank` and, crucially, **`owiki eval --rerank`** (a

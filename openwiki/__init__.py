@@ -19,6 +19,7 @@ from .graph import (
 from .llm import ChatModel, OllamaChat
 from .merge import combine_documents
 from .metrics import COLLECTOR, MetricsCollector, parse_ollama_stats
+from .lexical import BM25, reciprocal_rank_fusion, tokenize
 from .rerank import parse_order, rerank_order
 from .mcp_server import MCPStdioServer, build_server
 from .ontology import format_entity_types, propose_ontology, sample_corpus
@@ -35,7 +36,7 @@ from .tools import WikiTools
 from .web import WikiWebApp, serve
 from .wiki import Wiki, WikiBuilder, WikiPage, slugify, write_wiki
 
-__version__ = "0.61.0"
+__version__ = "0.62.0"
 
 __all__ = [
     "PDFParser",
@@ -94,6 +95,9 @@ __all__ = [
     "parse_ollama_stats",
     "parse_order",
     "rerank_order",
+    "BM25",
+    "reciprocal_rank_fusion",
+    "tokenize",
     "propose_ontology",
     "sample_corpus",
     "format_entity_types",

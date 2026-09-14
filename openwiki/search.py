@@ -44,6 +44,7 @@ class SemanticIndex:
         self.chunks = chunks
         self.embeddings = embeddings  # L2-normalized, shape (n_chunks, dim)
         self.model_name = model_name
+        self._bm25 = None             # lazy lexical index (built on first hybrid search)
 
     # -- build ----------------------------------------------------------
 
@@ -95,6 +96,36 @@ class SemanticIndex:
         k = min(k, len(scores))
         top = np.argsort(-scores)[:k]
         return [self._result(int(i), float(scores[i])) for i in top]
+
+    def _lexical(self):
+        """The lazily-built BM25 index over the chunk texts (cheap; cached)."""
+        if self._bm25 is None:
+            from .lexical import BM25
+            self._bm25 = BM25.build([c.text for c in self.chunks])
+        return self._bm25
+
+    def search_hybrid(self, query: str, k: int = 5, rrf_k: int = 60) -> list[SearchResult]:
+        """Hybrid retrieval: fuse the **dense** cosine ranking with a **BM25 lexical**
+        ranking over the same chunks via reciprocal rank fusion (Direction A). Dense
+        catches paraphrase/semantics; BM25 catches exact rare terms (identifiers,
+        acronyms, German compounds) the embedder blurs. ``.score`` is the RRF score."""
+        if not self.chunks:
+            return []
+        from .lexical import reciprocal_rank_fusion
+        q = self.embedder.embed_query(query).astype(np.float32)
+        q = q / (np.linalg.norm(q) or 1.0)
+        dense = self.embeddings @ q
+        lexical = self._lexical().scores(query)
+        dense_order = list(np.argsort(-dense))
+        lexical_order = list(np.argsort(-lexical))
+        fused = reciprocal_rank_fusion([dense_order, lexical_order], k=rrf_k)
+        # RRF score for the chosen chunks (recomputed for the SearchResult .score).
+        rank_of = {}
+        for order in (dense_order, lexical_order):
+            for rank, i in enumerate(order, 1):
+                rank_of[i] = rank_of.get(i, 0.0) + 1.0 / (rrf_k + rank)
+        k = min(k, len(fused))
+        return [self._result(int(i), float(rank_of.get(int(i), 0.0))) for i in fused[:k]]
 
     def best_chunk_per_page(self, query: str, page_slugs) -> list[SearchResult]:
         """Best-matching chunk within each of ``page_slugs`` for the query.

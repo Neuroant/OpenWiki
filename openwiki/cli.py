@@ -210,6 +210,8 @@ def _build_argparser() -> argparse.ArgumentParser:
                         help="Graph-expanded pages added for GraphRAG (default: 3).")
     eval_p.add_argument("--no-graph", action="store_true", help="Skip the GraphRAG column.")
     eval_p.add_argument("--misses", action="store_true", help="List questions with no expected page in the top-k.")
+    eval_p.add_argument("--hybrid", action="store_true",
+                        help="Add a Hybrid row: fuse BM25 (lexical) with dense retrieval (RRF). No chat model needed.")
     eval_p.add_argument("--rerank", action="store_true",
                         help="Add a RAG+Rerank row: LLM-re-rank a wider pool down to the budget "
                              "(needs a chat model; one call per question — slow).")
@@ -246,6 +248,9 @@ def _build_argparser() -> argparse.ArgumentParser:
     ask_p.add_argument("--expand-k", type=int, default=3,
                        help="Related pages to add via graph expansion (default: 3; 0 disables).")
     ask_p.add_argument("--no-graph", action="store_true", help="Disable graph-augmented retrieval.")
+    ask_p.add_argument("--hybrid", action="store_true",
+                       help="Hybrid seed retrieval: fuse BM25 (lexical) with dense cosine (RRF) — "
+                            "helps exact terms/identifiers the embedder blurs.")
     ask_p.add_argument("--rerank", action="store_true",
                        help="LLM-re-rank a wider seed pool down to top-k before answering "
                             "(one extra chat call; higher-precision seeds).")
@@ -1440,6 +1445,10 @@ def _cmd_eval(args: argparse.Namespace) -> int:
     reports = [("RAG (semantic)", evaluate(items, rag_fn, budget))]
     if graphrag_fn is not None:
         reports.append(("GraphRAG", evaluate(items, graphrag_fn, budget)))
+    if getattr(args, "hybrid", False):
+        from .eval import hybrid_pages
+        reports.append(("Hybrid (BM25)",
+                        evaluate(items, lambda q: hybrid_pages(index, q, budget), budget)))
     if getattr(args, "rerank", False):
         from .eval import reranking_retriever
         model = args.model or (project.setting("models", "chat", DEFAULT_CHAT) if project else DEFAULT_CHAT)
@@ -1674,9 +1683,12 @@ def _cmd_ask(args: argparse.Namespace) -> int:
     chat = OllamaChat(model=args.model, host=args.host, temperature=args.temperature)
     agent = RAGAgent(index, chat, top_k=args.top_k, graph=graph, expand_k=args.expand_k,
                      rerank=getattr(args, "rerank", False),
-                     rerank_pool=getattr(args, "rerank_pool", 20))
+                     rerank_pool=getattr(args, "rerank_pool", 20),
+                     hybrid=getattr(args, "hybrid", False))
 
-    mode = ("re-ranked " if getattr(args, "rerank", False) else "") + ("graph-augmented " if graph else "")
+    mode = ("hybrid " if getattr(args, "hybrid", False) else "") + \
+           ("re-ranked " if getattr(args, "rerank", False) else "") + \
+           ("graph-augmented " if graph else "")
     print(f"{mode}retrieving and asking {chat.name} …", file=sys.stderr)
     result = agent.answer(args.question)
 

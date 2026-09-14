@@ -31,11 +31,31 @@ similarity and cross-reference edges, plus an opt-in LLM-extracted **entity
 layer** — an additional level of abstraction over the wiki that never modifies it.
 
 Finally, `openwiki serve` puts it all in the browser: a **web UI** to browse
-pages, search, chat with the agent (including its editing tools), and **explore
-the graph** interactively.
+pages, search, chat with the agent (including its editing tools), **explore the
+graph**, inspect the **memory tier**, run the **evaluation** benchmark, and watch
+live **observability** — across eight tabs.
+
+Beyond the linear pipeline, OpenWiki grows several further layers, each built
+natively (local, stdlib-where-possible, no cloud) and **rigorously measured**:
+
+- **Global search** (`ask --global`) — a consolidation pass clusters the graph into
+  topical **communities** with one LLM summary each, so you can ask "what are the main
+  themes and how do they relate?" — questions chunk-RAG can't answer.
+- **Second Brain** (Path B) — an opt-in **agent-memory tier**: `remember` a session's
+  facts, `recall` them (decay-weighted) in the next, with contradiction handling, a
+  "sleep" consolidation pass, and three-tier `context` assembly — memory that persists
+  and improves across sessions.
+- **Evaluation harness** (`owiki eval`) — turns "is the graph/technique worth it?" from
+  opinion into numbers: retrieval + answer-quality + global + cross-session metrics.
+- **Hybrid retrieval & re-ranking** — BM25+dense fusion and an LLM re-rank pass, each a
+  measurable retrieval option (`--hybrid` / `--rerank`).
+- **Observability** — the LLM/embedding calls' latency + token counts (per request and
+  per build stage), surfaced in the CLI and a live **System** tab.
 
 The sample document is `301357_NAUTILUS_OG_G1.pdf` — the German Korg NAUTILUS
-synthesizer manual (269 pages, 228 outline entries).
+synthesizer manual (269 pages, 228 outline entries → a 51-page wiki → 815 embedded
+chunks → a graph of 51 pages / 815 chunks / 306 `SIMILAR_TO` + 122 `REFERENCES`
+edges, plus 801 entities / 1431 `MENTIONS` with `--entities`).
 
 ## Quickstart
 
@@ -169,6 +189,15 @@ pages, and marks them `+` in the sources — surfacing context that pure top-k
 cosine misses. Control with `--expand-k N` (default 3; `0` or `--no-graph`
 disables).
 
+**Retrieval variants** (each measurable via `owiki eval`, see below):
+
+- `--hybrid` — fuse **BM25** (lexical) with dense cosine via reciprocal rank fusion.
+  Ties pure dense on this German prose, but **wins big on code** (exact identifiers a
+  text embedder blurs) — the eval decides for your corpus.
+- `--rerank` — an **LLM re-rank** pass over a wider candidate pool (one extra chat call).
+- `--global` — **global search**: answer a thematic/overview question from the graph's
+  community summaries instead of local chunks (run `openwiki communities` first).
+
 ### Chat + edit the wiki (agent)
 
 `chat` is a multi-turn agent that can search, read, and **edit** wiki pages via
@@ -190,11 +219,13 @@ Tools: `search_wiki`, `list_pages`, `read_page`, `edit_page`, `append_section`,
 `create_page`. Edits are written into `output/wiki/pages/` — use `--dry-run` to
 preview them first. File access is confined to the pages directory.
 
-If a knowledge graph is present (and not `--dry-run`), edits update it
-**incrementally**: a created or edited page is upserted into the graph — chunked,
-embedded, and linked by `SIMILAR_TO` — so it joins the Graph tab and the agent's
-graph tools right away, without a full `graph-build`. (Structural/reference/entity
-edges still come from a full rebuild.)
+Edits are **incrementally synced** to the graph — a created/edited page is upserted
+(chunked, embedded, linked by `SIMILAR_TO`) so it joins the Graph tab and the agent's
+graph tools without a full `graph-build`. By default `chat`/`serve` open the graph
+**read-only** so other processes (`ask`, MCP, a second reader) run concurrently — Kuzu is
+reader-XOR-writer — and the page file writes live while the graph re-sync is **deferred**
+to a lock-free journal (folded in by the next writer). Pass `--sync` for immediate,
+exclusive live-sync. (Structural/reference/entity edges still come from a full rebuild.)
 
 If a knowledge graph is present (`graph-build`), the agent also gets
 **`graph_neighbors`** (a page's related pages) and **`find_path`** (the shortest
@@ -223,6 +254,7 @@ Graph model (all edges deterministic or vector-derived — no LLM):
 - `(Page)-[:SIMILAR_TO {score}]->(Page)` — top-k semantic neighbors
 - `(Page)-[:REFERENCES]->(Page)` — the manual's *"siehe Seite N"* cross-references
 - `(Page)-[:MENTIONS]->(Entity)` — typed entities (opt-in; see below)
+- `(Entity)-[:RELATED_TO {predicate}]->(Entity)` — typed relations (opt-in `--relations`)
 - plus an HNSW vector index on `Chunk.emb` for hybrid vector→graph queries.
 
 The `REFERENCES` edges resolve the manual's **printed** page numbers to the
@@ -253,6 +285,67 @@ synth sample, so for another domain set `[graph] entity_types` in `openwiki.toml
 write it by hand? **`openwiki ontology`** samples your corpus and proposes a fitting
 one (`--write` drops it straight into the manifest).
 
+**Typed relations (real knowledge graph, opt-in).** `graph-build --relations` (implies
+`--entities`) adds a second per-page LLM call that extracts **subject–predicate–object
+relations *among that page's entities*** — grounded to them, merged across pages with a
+support weight — and stores them as `(Entity)-[:RELATED_TO {predicate}]->(Entity)` edges,
+turning co-mention into a real, traversable graph (e.g. *IFX → is processed before → MFX*,
+*Reverb → is a kind of → MFX*). The `find_entity` tool lists an entity's relations, and the
+Graph tab draws the typed edges (predicate on hover).
+
+**Global search — themes across the whole corpus.** `openwiki communities` runs a
+re-runnable "sleep pass": it detects topical **communities** (weighted-modularity Louvain
+over the similarity/reference/shared-entity graph) and writes **one LLM summary per
+community**. Then `openwiki ask --global "Was sind die Hauptthemen und wie hängen sie
+zusammen?"` answers thematic/overview questions from those summaries — the kind of
+whole-corpus synthesis local chunk-RAG can't do.
+
+```bash
+openwiki communities                                        # detect + summarize themes
+openwiki ask --global "Wie hängen Sampling und Sequencer zusammen?"
+```
+
+### Evaluation — measure it, don't guess
+
+OpenWiki treats "is the graph / this technique worth it?" as an empirical question.
+`owiki eval` runs a per-project JSONL benchmark (`{"question", "pages"}`) and scores
+**retrieval** (MRR / hit@k / recall@k), comparing retrievers over the same budget:
+
+```bash
+owiki eval                                   # RAG (semantic) vs GraphRAG
+owiki eval --hybrid --rerank                 # add Hybrid (BM25+dense) and RAG+Rerank rows
+owiki eval --answers --judge                 # also generate answers: citation grounding + LLM judge
+owiki eval --global --eval-set eval_thematic.jsonl   # global-search grounding on thematic questions
+```
+
+The honest findings so far (full writeup: **[docs/RAG-vs-GraphRAG.md](docs/RAG-vs-GraphRAG.md)**):
+on this strong-embedder German prose, graph expansion, LLM re-ranking, and BM25 fusion each
+**fail to beat pure dense on retrieval recall** — but the graph **wins on answer quality**
+and enables **global search**, and **hybrid wins decisively on a code corpus** (hit@1
+57%→86%). The pure metrics + drivers are unit-tested with fakes (no Ollama/Kuzu needed);
+the same benchmark runs live in the web **Evaluation** tab.
+
+### Second Brain — agent memory (Path B, opt-in)
+
+A per-project **mode** turns the graph from a document *mirror* into agent **memory**:
+capture a conversation's durable facts, recall them in a later session, and let them
+persist across document rebuilds. Enable it with `[memory] enabled = true` (Wiki mode is
+the default), then:
+
+```bash
+openwiki remember session.md --session 2026-09-08   # capture subject–predicate–object facts
+openwiki recall "which chat model did we standardize on?"   # decay-weighted, current facts
+openwiki consolidate                                 # "sleep": cluster facts into LLM-summarized themes
+openwiki context "which models do we use?"           # assemble the 3-tier session context
+```
+
+Facts are stored as reified `Assertion`s under a `Session`; a newer fact that contradicts an
+older one **supersedes** it (history stays queryable); `recall` ranks by decay-weighted
+cosine so useful facts persist and stale ones fade. It's read-safe under concurrency (Kuzu
+is reader-XOR-writer, so writes queue to a lock-free journal a writer folds in), and it can
+wire into a coding agent's lifecycle via **host hooks** (`claude-code --hooks`: inject memory
+on each prompt, capture on session end). Design: **[docs/path-b-memory.md](docs/path-b-memory.md)**.
+
 ### Web UI
 
 `serve` starts a local web UI (stdlib `http.server`, no extra dependencies) that
@@ -270,24 +363,34 @@ Left pane: search + nav tree. Center: the rendered page. Right: the agent chat
 agent preview edits without writing. Needs the wiki (`build-wiki`) and — for
 search/chat — the index (`index`) and a running Ollama.
 
-The center pane has four tabs:
+The center pane has **eight tabs**:
 
+- **Projekt** — a read-only overview of the active project: sources, per-stage build
+  status (with **duration + LLM token spend**), all pipeline settings, the entity
+  ontology, live graph stats, the topical **communities** (+ a global-search box), and
+  the registered-project list.
 - **Wiki** — the rendered pages (the default view).
-- **Hilfe** — an extensive reference (interface, search, agent + its tools,
-  privacy, troubleshooting).
-- **Tutorial** — a guided tour where each step has a **▶ Ausprobieren** button
-  that runs the real action (open a page, run a search, ask the agent, create a
-  page), so you learn by doing.
 - **Graph** — an interactive **force-directed explorer** around the current page.
   Two node types (pages as circles, entities as diamonds) with colour-coded edges
-  (hierarchy, sequence, similar, cross-references, shared concepts, mentions).
-  **Click a node to expand** it (pull in its neighbours / an entity's pages) and
-  **double-click to collapse** the subtree it opened — so you build up *and* tear
-  down the graph. **Drag** nodes to arrange, toggle **edge-type filters**, and
-  "Seite öffnen" opens a page. The clicked node's subtree is highlighted (heavier
-  edges, accent-ringed anchor) while the rest dims, so the active subgraph stands
-  out. Labels auto-declutter (culled names appear on hover). Needs `graph-build`
-  (entities with `--entities`).
+  (hierarchy, sequence, similar, cross-references, shared concepts, mentions, and typed
+  **relations**). Page nodes are **coloured by community**. **Click a node to expand** it
+  (pull in its neighbours / an entity's pages *and typed relations*) and **double-click to
+  collapse** the subtree it opened. **Drag** nodes to arrange, toggle **edge-type filters**,
+  and "Seite öffnen" opens a page. The clicked node's subtree is highlighted while the rest
+  dims. Labels auto-declutter (culled names + relation predicates appear on hover). Needs
+  `graph-build` (entities/relations with `--entities` / `--relations`).
+- **Gedächtnis** (Memory) — the **Second Brain** tier in the browser (Second Brain mode):
+  identity + counts, a **recall/context box**, the consolidated **theme cards**, and a
+  browsable **assertion table** (current vs superseded, confidence).
+- **Evaluation** — runs the project's benchmark live: the RAG-vs-GraphRAG metric table with
+  `top_k`/`expand_k` sliders, a live A/B question panel, an async answer-quality job (citation
+  grounding + LLM judge), and a KB-health panel.
+- **System** — live **observability**: per-kind (chat/embed/http) latency percentiles + token
+  totals and a recent-events table, refreshed every 2 s.
+- **Tutorial** — a guided tour where each step has a **▶ Ausprobieren** button that runs the
+  real action (open a page, run a search, ask the agent, create a page).
+- **Hilfe** — an extensive reference (interface, search, agent + its tools, privacy,
+  troubleshooting).
 
 The Help/Tutorial content lives in `openwiki/web/static/{help,tutorial}.md` and is
 rendered client-side; tutorial buttons are `run:<kind>:<arg>` links wired to the
@@ -298,8 +401,10 @@ live UI.
 `openwiki mcp` exposes the wiki's **RAG + GraphRAG** as an
 [MCP](https://modelcontextprotocol.io) server (dependency-free, stdio), so coding
 agents — **Claude Code**, **OpenCode**, Cursor, … — can query it as tools:
-`wiki_ask` (grounded, cited answers), `wiki_search`, `wiki_read_page`,
-`wiki_graph_neighbors`, `wiki_find_path`, `wiki_find_entity`.
+`wiki_ask` (grounded, cited answers), `wiki_global` (thematic answers from community
+summaries), `wiki_search`, `wiki_list_pages`, `wiki_read_page`, `wiki_graph_neighbors`,
+`wiki_find_path`, `wiki_find_entity` (with its typed relations), and `wiki_memory` (the
+three-tier memory context, in Second Brain mode). Tools are advertised by availability.
 
 ```bash
 openwiki mcp --wiki output/wiki --index output/index --graph output/graph
@@ -348,7 +453,11 @@ chat  = "qwen3:30b-a3b-instruct-2507-q4_K_M"
 [graph]
 similar_k = 6
 references = true
-entities = false
+entities = false            # LLM-extract typed entities (Entity + MENTIONS)
+# relations = false         # also extract typed Entity→Entity relations (RELATED_TO); implies entities
+
+[memory]                    # Second Brain mode (Path B) — off = Wiki mode (documents only)
+enabled = false             # remember/recall/consolidate/context + the Gedächtnis tab + memory hooks
 ```
 
 - **`openwiki build`** runs the whole pipeline into the project's `output/`,
@@ -363,6 +472,7 @@ entities = false
   openwiki project add-source path/to/other.pdf          # a file
   openwiki project add-source https://example.com/page   # a web page
   openwiki project add-source ../my-service --repo        # a code repository
+  openwiki project add-source chat-log.md --session       # a session transcript → memory tier (Path B)
   ```
   Point `--source` / `add-source` at a **folder** (without `--repo`) to register all
   its files at once, or a glob: `openwiki init proj --source "C:\docs\*.pdf"`.
@@ -521,8 +631,9 @@ PDF ──PDFParser──▶ ParsedDocument ──▶ JSON / Markdown
              WikiAgent + WikiTools ──▶ edits pages/*.md
                         │
               GraphBuilder ──▶ Kuzu graph (output/graph/) ──▶ GraphStore
-                        │
-              WikiWebApp (http.server) ──▶ browser UI (Wiki · Hilfe · Tutorial · Graph)
+                        │            (entities + typed relations, communities, memory tier)
+              WikiWebApp (http.server) ──▶ browser UI
+                (Projekt · Wiki · Graph · Gedächtnis · Evaluation · System · Tutorial · Hilfe)
 ```
 
 - `openwiki/models.py` — the structured document model shared by everything downstream
@@ -535,13 +646,17 @@ PDF ──PDFParser──▶ ParsedDocument ──▶ JSON / Markdown
 - `openwiki/agent.py` — the RAG agent (retrieve → grounded prompt → cited answer)
 - `openwiki/tools.py` — the read/write tools the editing agent calls
 - `openwiki/chat_agent.py` — the multi-turn editing agent (tool loop + history)
-- `openwiki/graph/` — the Kuzu graph layer (`builder.py` writes it, `store.py` queries **and incrementally upserts** it, `references.py` extracts cross-references, `entities.py` extracts typed entities via an LLM)
-- `openwiki/web/` — stdlib web server + vanilla-JS SPA (browse, search, chat/edit, graph)
+- `openwiki/lexical.py` — pure BM25 + reciprocal-rank fusion (the lexical half of `--hybrid`)
+- `openwiki/rerank.py` — the LLM re-ranker (`--rerank`); pure parse + chat-injected
+- `openwiki/graph/` — the Kuzu graph layer: `builder.py` writes it, `store.py` queries **and incrementally upserts** it, `references.py` (cross-references), `entities.py` (typed entities **and relations** via an LLM), `community.py` (Louvain + community summaries → global search), `memory.py` (the Path B remembered tier), `decay.py` (usage decay/reinforce), and `usage.py`/`journal.py` (the lock-free deferred-write log)
+- `openwiki/metrics.py` — the observability collector (per-call latency + tokens; System tab + `owiki eval`/build timings)
+- `openwiki/eval.py` — the evaluation harness (retrieval + answer-quality + global + cross-session metrics; pure + fake-testable)
+- `openwiki/web/` — stdlib web server + vanilla-JS SPA (the eight tabs above)
 - `openwiki/mcp_server.py` — stdio MCP server exposing the wiki as tools for coding agents
-- `openwiki/project.py` · `pipeline.py` · `userconfig.py` · `merge.py` — the **project** layer: the `openwiki.toml` model + resolution, the `openwiki build` fingerprint/staleness state, the `~/.openwiki/` global config + registry, and multi-source merge
+- `openwiki/project.py` · `pipeline.py` · `userconfig.py` · `merge.py` — the **project** layer: the `openwiki.toml` model + resolution (incl. the memory **mode**), the `openwiki build` fingerprint/staleness/**timing** state, the `~/.openwiki/` global config + registry, and multi-source merge
 - `openwiki/outline.py` — synthesizes a section outline from heading text when a PDF has no bookmarks (finer wiki pages)
-- `openwiki/ontology.py` — proposes a domain entity ontology from the corpus (one LLM call) for `openwiki ontology`
-- `openwiki/cli.py` — the `openwiki` command line (`init`, `build`, `status`, `project`, `ontology`, `ingest`, `build-wiki`, `index`, `search`, `ask`, `chat`, `graph-build`, `serve`, `mcp`)
+- `openwiki/ontology.py` · `opencode_template.py` · `claude_code_template.py` — the ontology proposer and the OpenCode / Claude Code (+ memory-hooks) scaffolders
+- `openwiki/cli.py` — the `openwiki`/`owiki` command line (`init`, `build`, `status`, `project`, `ontology`, `opencode`, `claude-code`, `ingest`, `build-wiki`, `index`, `search`, `eval`, `ask`, `chat`, `graph-build`, `communities`, `decay`, `remember`, `recall`, `consolidate`, `context`, `hook`, `serve`, `mcp`)
 
 ## Roadmap
 
@@ -558,3 +673,14 @@ PDF ──PDFParser──▶ ParsedDocument ──▶ JSON / Markdown
 - [x] **Entity layer** — LLM-extracted typed entities + `MENTIONS` edges (`--entities`), a `find_entity` tool, and shared-concept edges/expansion
 - [x] **Incremental graph updates** — agent edits upsert the page into the graph live (chunks + embeddings + `SIMILAR_TO`), no rebuild needed
 - [x] **Project workspaces** — `openwiki.toml` projects with `openwiki init`/`build` (incremental) + `status`, a `~/.openwiki/` registry + global config, and multi-source merge ([docs/projects.md](docs/projects.md))
+- [x] **Coding-agent scaffolding** — `openwiki opencode` / `claude-code` wire a project into OpenCode / Claude Code (MCP + agent + commands)
+- [x] **Evaluation harness** — `owiki eval` (retrieval, answer-quality + LLM judge, global, cross-session); the rigorous RAG-vs-GraphRAG writeup ([docs/RAG-vs-GraphRAG.md](docs/RAG-vs-GraphRAG.md))
+- [x] **Community consolidation + global search** — Louvain communities + LLM summaries, `openwiki communities` + `ask --global` (Path A)
+- [x] **Agent memory (Second Brain, Path B)** — `remember`/`recall`/`consolidate`/`context`, contradiction supersession, decay, three-tier assembly, host hooks; the Gedächtnis tab ([docs/path-b-memory.md](docs/path-b-memory.md))
+- [x] **Concurrency** — reader-XOR-writer-safe: read-only `serve`/`chat` + a lock-free write-ahead journal folded in by a writer
+- [x] **Observability** — per-call LLM/embedding latency + token capture, surfaced in the CLI, the **System** tab, and per-build-stage on **Projekt**
+- [x] **Hybrid retrieval** — BM25 + dense via reciprocal rank fusion (`--hybrid`); measured (ties on prose, **wins on code**)
+- [x] **LLM re-ranking** — a re-rank pass over a wider pool (`--rerank`), measured
+- [x] **Typed `Entity→Entity` relations** — LLM-extracted subject–predicate–object `RELATED_TO` edges (`--relations`), surfaced in `find_entity` + the Graph tab
+- [ ] **Relation-aware GraphRAG** — answer by *traversing* typed relations (the next step now that the relation layer exists)
+- [ ] **CI + packaging** — GitHub Actions running the offline suite; PyPI / Docker

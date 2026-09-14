@@ -121,10 +121,11 @@ the wiki pages:
 .venv\Scripts\python -m openwiki ask "Was ist Smooth Sound Transitions?"
 ```
 Options: `--model NAME` (default `qwen3:30b-a3b-instruct-2507-q4_K_M`), `-k N`,
-`--temperature T`, `--show-context`, `--host URL`, `-i DIR`, and (when a graph
-exists) `--graph DIR` / `--expand-k N` / `--no-graph` for **graph-augmented
-retrieval** — seeds are expanded along references + similar edges (sources marked
-`+`). In **Second Brain mode** the read path also **reinforces** usage: `ask` logs the
+`--temperature T`, `--show-context`, `--host URL`, `-i DIR`, `--rerank` /
+`--rerank-pool N` (**LLM re-rank** a wider seed pool down to top-k before answering),
+and (when a graph exists) `--graph DIR` / `--expand-k N` / `--no-graph` for
+**graph-augmented retrieval** — seeds are expanded along references + similar edges
+(sources marked `+`). In **Second Brain mode** the read path also **reinforces** usage: `ask` logs the
 seed→related pairs it pulled to `graph.usage.jsonl`, folded into `REINFORCES` edges by
 the next `serve`/`chat`/`decay` (B1) — read-only, so no lock contention.
 
@@ -373,7 +374,15 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   and re-ranks the added pages by the query — GraphRAG; those `Source`s have
   `kind="related"`. `_expand` also **records usage** (`graph.record_usage`) for the
   seed→related pairs it pulls in — reinforced live on a writable graph, or logged for
-  a later fold-in on read-only `ask`/MCP (B1).
+  a later fold-in on read-only `ask`/MCP (B1). With `rerank=True` (`ask --rerank`),
+  `retrieve()` first LLM-re-ranks a wider seed pool (`rerank_pool`) down to `top_k` (`_seed`).
+- **`openwiki/rerank.py`** — **LLM re-ranking** of retrieval candidates (retrieval quality,
+  roadmap Direction A): pure + chat-injected `rerank_order(query, texts, chat)` → a permutation
+  (one chat call orders the passages by relevance; `parse_order` is robust — dedups, appends
+  omitted, identity-falls-back on any error, so it never drops/dupes a candidate). Wired into the
+  agent (`ask --rerank`) and eval (`owiki eval --rerank` → a **RAG+Rerank** row). Measured: on the
+  NAUTILUS set it *doesn't* beat pure semantic (MRR drops) — same shape as GraphRAG; the harness
+  is how you'd test it on a harder corpus.
 - **`openwiki/tools.py`** — `WikiTools`: the tools the editing agent calls
   (`search_wiki`, `list_pages`, `read_page`, `edit_page`, `append_section`,
   `create_page`), each returning a string. File access is confined to `pages/`,
@@ -587,8 +596,15 @@ http — count, p50/p95, total time, token in/out) + a live recent-events table,
   same budget `top_k+expand_k`: **RAG** = top semantic pages; **GraphRAG** = `top_k` semantic
   seeds + `expand_k` graph-expanded (same `_EXPAND_RELS` + `best_chunk_per_page` as the
   agent). Eval sets are per-project JSONL (`<project>/eval.jsonl`: `{"question","pages"}`).
-  The controlled same-budget comparison is deliberate: it asks whether graph expansion beats
-  *more* semantic hits. **Rigorously measured on informatik, it does not** — across
+  A third retriever, **RAG+Rerank** (`owiki eval --rerank`), LLM-re-ranks a wider candidate pool
+  (`--rerank-pool`, default 20) down to the budget (`eval.reranking_retriever`/`make_reranker` +
+  `rerank.py`) — the roadmap's "single LLM re-rank pass"; needs a chat model (one call/question).
+  **First measured (a small NAUTILUS navigational set): it does not help** — recall was already
+  saturated (100%) and MRR *dropped* (0.81 → 0.57–0.60 with **both** a 14b and a 30b re-ranker),
+  i.e. the LLM demotes the page bge-m3 already ranked top. Same shape as the GraphRAG finding; the
+  harness is the way to test whether it pays off on a *harder* set (ambiguous/relational queries).
+  The controlled same-budget comparison is deliberate: it asks whether graph expansion (or re-ranking)
+  beats *more* semantic hits. **Rigorously measured on informatik, it does not** — across
   definitional *and* relational question sets (`eval.jsonl` and a 12-question
   `eval_relational.jsonl` of graph-connected page pairs), and every budget tested, GraphRAG's
   recall lands ~4–12 pts *below* pure RAG. Reason: bge-m3 already ranks the relevant pages

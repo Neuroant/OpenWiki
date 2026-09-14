@@ -76,12 +76,15 @@ _EXPAND_RELS = ("references", "referenced_by", "similar", "shared_entity", "rein
 
 class RAGAgent:
     def __init__(self, index: SemanticIndex, chat: ChatModel, top_k: int = 5,
-                 graph=None, expand_k: int = 3) -> None:
+                 graph=None, expand_k: int = 3, rerank: bool = False,
+                 rerank_pool: int = 20) -> None:
         self.index = index
         self.chat = chat
         self.top_k = top_k
         self.graph = graph        # optional GraphStore -> graph-augmented retrieval
         self.expand_k = expand_k  # how many related pages to add
+        self.rerank = rerank      # LLM re-rank a wider seed pool down to top_k
+        self.rerank_pool = rerank_pool
 
     @staticmethod
     def _source(result, marker: int, kind: str) -> Source:
@@ -92,12 +95,25 @@ class RAGAgent:
         )
 
     def retrieve(self, question: str, top_k: int | None = None) -> list[Source]:
-        seeds = self.index.search(question, k=top_k or self.top_k)
+        k = top_k or self.top_k
+        seeds = self._seed(question, k)
         sources = [self._source(r, i + 1, "seed") for i, r in enumerate(seeds)]
         if self.graph is None or self.expand_k <= 0 or not sources:
             return sources
         sources += self._expand(question, sources)
         return sources
+
+    def _seed(self, question: str, k: int):
+        """The top-``k`` semantic seeds — optionally after an LLM re-rank of a wider pool
+        (fetch ``rerank_pool``, re-rank by relevance, keep ``k``). Off by default."""
+        if not self.rerank:
+            return self.index.search(question, k=k)
+        from .rerank import rerank_order
+        pool = self.index.search(question, k=max(self.rerank_pool, k))
+        if len(pool) <= k:
+            return pool
+        order = rerank_order(question, [r.text for r in pool], self.chat)
+        return [pool[i] for i in order][:k]
 
     def _expand(self, question: str, seeds: list[Source]) -> list[Source]:
         """Pull in graph-connected pages (references/similar), re-ranked by query."""

@@ -167,6 +167,37 @@ def make_retrievers(index, graph, top_k: int, expand_k: int):
     return rag, graphrag
 
 
+def make_reranker(index, chat, snippet_chars: int = 500):
+    """A ``(question, candidate_slugs) -> reordered slugs`` reranker: fetch each candidate's
+    best chunk text, then one LLM call orders them by relevance (`rerank.rerank_order`).
+    Identity on fewer than 2 candidates. Injected with a chat model, so it stays testable."""
+    from .rerank import rerank_order
+
+    def rerank_fn(question: str, slugs) -> list[str]:
+        slugs = list(slugs)
+        if len(slugs) < 2:
+            return slugs
+        by_slug = {r.page_slug: r.text for r in index.best_chunk_per_page(question, slugs)}
+        texts = [by_slug.get(s, "") for s in slugs]
+        order = rerank_order(question, texts, chat, snippet_chars=snippet_chars)
+        return [slugs[i] for i in order]
+
+    return rerank_fn
+
+
+def reranking_retriever(index, chat, budget: int, pool: int = 20):
+    """A retriever that fetches a **wider** semantic pool, LLM-re-ranks it, and keeps the
+    top ``budget`` — the controlled test of whether re-ranking beats plain top-``budget``
+    semantic over the same final budget (like the RAG-vs-GraphRAG comparison)."""
+    rerank_fn = make_reranker(index, chat)
+
+    def retrieve(question: str) -> list[str]:
+        candidates = semantic_pages(index, question, max(pool, budget))
+        return rerank_fn(question, candidates)[:budget]
+
+    return retrieve
+
+
 # -- answer-quality evaluation -------------------------------------------------
 
 def cited_page_slugs(answer) -> set:

@@ -243,8 +243,16 @@ point it jumps to P0.</sub>
 ### A — Retrieval quality & scale (P0)
 - **Hybrid retrieval** — fuse a lexical/BM25 signal with dense cosine (helps exact German
   compounds, identifiers, rare terms the embedder blurs).
-- **Re-ranking** — a cross-encoder or a single LLM re-rank pass over the top-N; the
-  cheapest measurable win, scored directly by `owiki eval`.
+- ✅ **Re-ranking landed (v0.61)** — a single **LLM re-rank pass** (`rerank.py`, on-ethos: reuses the
+  local chat model, no cross-encoder dependency): fetch a wider candidate pool, one chat call orders it
+  by relevance, keep the budget. Wired into `ask --rerank` and, crucially, **`owiki eval --rerank`** (a
+  RAG+Rerank row) so it's *measured*, not assumed. **First result: it does not help** on a small NAUTILUS
+  navigational set — recall was already saturated (100%) and MRR *dropped* (0.81 → 0.57–0.60 with **both**
+  a 14b and a 30b re-ranker), i.e. the LLM demotes the page bge-m3 already ranked top. Same shape as the
+  RAG-vs-GraphRAG finding: on this corpus the embedder's ranking is already strong. Re-ranking would more
+  plausibly pay off on **harder/ambiguous** queries (where the top cosine hit is wrong) or with a real
+  **cross-encoder** — both now testable via the harness. *(Still open: a cross-encoder backend; a labeled
+  hard-query set.)*
 - **Query rewriting / expansion** before retrieval, especially for short or relational
   questions.
 - **Scale** — back `SemanticIndex.search` with Kuzu's existing HNSW (or an ANN lib) so

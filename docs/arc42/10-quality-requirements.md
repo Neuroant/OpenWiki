@@ -17,7 +17,8 @@ flowchart LR
   P --> P1["No cloud calls"] & P2["Data stays on disk"]
   M --> M1["Modularity (IR + boundaries)"] & M2["Testability (offline)"] & M3["Minimal dependencies"]
   F --> F1["Grounded, cited answers"] & F2["Global sensemaking"] & F3["Cross-session memory (Path B)"]
-  E --> E1["Small-corpus latency"] & E2["Incremental builds"]
+  E --> E1["Small-corpus latency"] & E2["Incremental builds"] & E3["Observability (per-call metrics)"]
+  M --> M4["CI (offline suite, Linux)"]
   I --> I1["CLI / HTTP / MCP"]
   U --> U1["One-command build"] & U2["Browser exploration"]
 ```
@@ -29,7 +30,7 @@ Scenarios are written as *stimulus → expected response* so they can be checked
 | ID | Quality | Prio | Scenario (stimulus → response) |
 |---|---|---|---|
 | QS-1 | Privacy | must | Run any command with no network → succeeds using only the local Ollama + local files; no external host is contacted. |
-| QS-2 | Testability | must | `pytest` on a bare checkout with no Ollama and no Kuzu → passes (Ollama faked; Kuzu tests skipped cleanly). |
+| QS-2 | Testability | must | `pytest` on a bare checkout with no Ollama and no Kuzu → passes (Ollama faked; Kuzu tests skipped cleanly). Runs in **CI** on every push (Python 3.11–3.13, ADR-24). |
 | QS-3 | Modularity | must | Add a new source format → implement one parser + one `sources.parse_source` case; no downstream module changes. |
 | QS-4 | Modularity | should | Swap the embedding backend → implement the `Embedder` protocol; `search`/`agent`/`eval` unchanged. |
 | QS-5 | Measurability | must | Ask "does the graph help?" → run `owiki eval [--answers/--global] --judge` → get reproducible metrics + a documented finding. |
@@ -38,22 +39,23 @@ Scenarios are written as *stimulus → expected response* so they can be checked
 | QS-8 | Robustness | should | Open a graph built before the community/reinforcement layer → store/UI still work (best-effort/empty). |
 | QS-9 | Interop | should | A coding agent lists tools over MCP → sees only the tools its artifacts support (advertised by availability). |
 | QS-10 | Usability | should | `openwiki init … && openwiki build && openwiki serve` → a browsable, searchable wiki with no extra config. |
-| QS-11 | Observability | should | A run fails (e.g. Ollama down) → the operator gets a clear, actionable message. *(Partial: clear stderr messages, but no structured logs/metrics — §11 D7.)* |
+| QS-11 | Observability | should | A run fails (e.g. Ollama down) → a clear, actionable message; **and** every LLM/embedding call's latency + token counts are captured (`metrics.py`, ADR-20) and surfaced in the CLI `⏱` footer, the **System** tab (`/api/metrics`), per-turn chat stats, and per-build-stage on Projekt. |
 | QS-12 | Cross-session memory | should | In Second Brain mode, establish a fact in one session and change it in a later one → `recall` returns the **current** fact, not the stale one (contradiction handling, ADR-18); the memory survives a `graph-build` (ADR-16); `eval --cross-session` measures assembled memory beating cold-start + raw-log. |
 
 ## 10.3 Current evidence & gaps
 
-- **Met:** QS-2 (the suite — **284 tests** — runs offline); QS-5 (three findings in
-  `docs/RAG-vs-GraphRAG.md`); QS-1 / QS-3 / QS-4 / QS-6 / QS-8 / QS-9 are architectural
-  (enforced by boundaries + tests); QS-7 by the fingerprint chain (ADR-11); QS-12 by the memory
-  tests + the cross-session eval (Path B, §8.15).
-- **Not formally measured (performance):** there is no latency/throughput budget yet. Known
-  scale on the reference corpus (informatik): 16 PDFs → 76 wiki pages → 2 703 chunks → a graph
-  of 76 pages / 760 `SIMILAR_TO` / 32 `REFERENCES`; retrieval is brute-force O(n) (fine here,
-  won't scale — §11 R3/D3). A concrete budget (index throughput, `ask` p50/p95) is an open
-  item, gated mostly on the local model + hardware.
-- **Partial (observability):** QS-11 — clear error messages but stderr-only logging, no
-  metrics (§11 D7).
+- **Met:** QS-2 (the suite — **362 tests** — runs offline, and in **CI** on every push across Python
+  3.11–3.13 + a Docker build, ADR-24); QS-5 (four findings in `docs/RAG-vs-GraphRAG.md`, incl. hybrid
+  winning on a code corpus); QS-11 by the metrics collector (ADR-20 — per-call latency/tokens in the CLI,
+  System tab, and per-build-stage); QS-1 / QS-3 / QS-4 / QS-6 / QS-8 / QS-9 are architectural (enforced by
+  boundaries + tests); QS-7 by the fingerprint chain (ADR-11); QS-12 by the memory tests + the
+  cross-session eval (Path B, §8.15).
+- **Not formally measured (performance):** there is no latency/throughput *budget* yet — though the
+  observability layer (ADR-20) now surfaces per-run p50/p95 latency + tokens, so measurement is a query
+  away. Known scale on the reference corpus (informatik): 16 PDFs → 76 wiki pages → 2 703 chunks → a graph
+  of 76 pages / 760 `SIMILAR_TO` / 32 `REFERENCES`; retrieval is brute-force O(n) (fine here, won't scale
+  — §11 R3/D3). A concrete budget (index throughput, `ask` p50/p95) is an open item, gated mostly on the
+  local model + hardware.
 
 ---
 *Chapter complete. Priorities are indicative (this is a single-user learning project, not an

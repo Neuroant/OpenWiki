@@ -20,7 +20,11 @@
 | Term | Definition |
 |---|---|
 | **RAG** | Retrieval-Augmented Generation: retrieve top chunks → grounded prompt → cited answer. |
-| **GraphRAG** | RAG plus graph expansion: seed pages' graph neighbors are pulled in and re-ranked by the query. |
+| **GraphRAG** | RAG plus graph expansion: seed pages' graph neighbors (incl. typed **relations**) are pulled in and re-ranked by the query. |
+| **Hybrid retrieval** | Fusing dense (cosine) with lexical (**BM25**) rankings via **RRF** (`--hybrid`); catches exact tokens the embedder blurs. Ties dense on prose, wins on code (ADR-21). |
+| **BM25** | The classic lexical relevance score (term frequency × inverse document frequency, length-normalized); the lexical half of hybrid retrieval (`lexical.py`, pure). |
+| **RRF (Reciprocal Rank Fusion)** | Scale-free blend of two rankings: an item's score is Σ 1/(k+rank). Fuses dense + BM25 without reconciling score scales. |
+| **Re-ranking** | An optional LLM pass (`--rerank`) that reorders a wider candidate pool by relevance (one chat call, `rerank.py`); measured, opt-in (ADR-21). |
 | **Global search** | Answering a whole-corpus/thematic question from the community summaries (not chunk retrieval). |
 | **Grounding** | The constraint (and metric) that answers use/cite only the provided excerpts. |
 | **Provenance** | The source trail carried by chunks/answers (page slug, PDF page range) enabling citations. |
@@ -31,8 +35,10 @@
 | Term | Definition |
 |---|---|
 | **GraphStore / GraphBuilder** | The Kuzu read (query) and write (build) sides of the graph layer. |
-| **SIMILAR_TO / REFERENCES / MENTIONS** | Vector-similarity, cross-reference, and page→entity edges. |
-| **Entity layer** | Opt-in LLM-extracted typed entities (`Entity` + `MENTIONS`), normalized to merge surface variants. |
+| **SIMILAR_TO / REFERENCES / MENTIONS / RELATED_TO** | Vector-similarity, cross-reference, page→entity, and typed entity→entity edges. |
+| **Entity layer** | Opt-in LLM-extracted typed entities (`Entity` + `MENTIONS`), normalized to merge surface variants — optionally enriched with typed **relations** (ADR-22) and **resolution** (ADR-23). |
+| **Typed relation (`RELATED_TO`)** | An LLM-extracted subject–predicate–object edge between two entities (`{predicate, weight, pages}`); co-mention becomes a traversable graph, and GraphRAG expansion follows it (ADR-22). |
+| **Entity resolution / canonical entity / alias** | The corpus-wide pass merging same-concept surface variants into one **canonical** `Entity` with an `aliases` list + an LLM `description` (embedding candidates + LLM verify, ADR-23). |
 | **REINFORCES** | A usage-memory edge (weight + last_seen) strengthened when a connection is used and decayed over time. |
 | **Reinforcement / decay** | Hebbian "strengthen on use" (`reinforce`) and time-based "forget" (`decay`, exponential half-life). |
 | **Remembered tier** | The authoritative Path B memory subgraph (`Session`/`Assertion` + `SUPERSEDES`, plus the `REINFORCES` overlay); additive, preserved across doc rebuilds (ADR-16); active only in Second Brain mode. |
@@ -41,6 +47,7 @@
 | **MemoryConcept / consolidation** | A theme over a cluster of related current facts, with an LLM summary (`CONSOLIDATES` edges to its members) — the "sleep" pass (`openwiki consolidate`, B5). A *derived* view (recomputed, not snapshotted), like `Community`; supports global search over memory. |
 | **Context assembly / `context_for`** | The B6 payoff: assemble a session's context from the three memory tiers — **identity** + **activation** (`recall`) + **attractors** (relevant `MemoryConcept`s) — into one block (`openwiki context` / MCP `wiki_memory`). "Load the concentrate, not the log." |
 | **Usage log** | The append-only `graph.usage.jsonl` sidecar a read-only `ask`/MCP writes to; the next writer folds it into `REINFORCES` edges — read-path reinforcement without the write lock (B1/ADR-17). |
+| **Write-ahead journal** | The lock-free `graph.journal.jsonl` sidecar holding queued `remember`/`reindex` ops when the graph is read-only; a later writer folds it in (`fold_journal`) — the concurrency mechanism (ADR-19). |
 | **Mode (Wiki / Second Brain)** | A per-project policy (`[memory] enabled`): Wiki = document tier only (default); Second Brain = document + remembered tiers (ADR-14). |
 | **Path A / Path B** | A = the consolidation layer (communities / global search, done); B = agent-memory — **complete (B0–B6)**: authoritative graph (B0), read-path reinforcement (B1), contradiction versioning (B4), sleep consolidation (B5), and three-tier context assembly (B6). Remaining items are refinements, not stages. |
 
@@ -52,7 +59,9 @@
 | **Kuzu** | The embedded graph + vector database (single file); pins the project to Python ≤3.13 on Windows. |
 | **MCP** | Model Context Protocol — the stdio JSON-RPC interface exposing read-only `wiki_*` tools to coding agents. |
 | **SPA** | The no-build vanilla-JS single-page app served by the stdlib web server. |
-| **Fingerprint chain** | Per-stage input+param hashes in `.openwiki/state.json` enabling incremental builds. |
+| **Fingerprint chain** | Per-stage input+param hashes in `.openwiki/state.json` enabling incremental builds; each stage also records **duration + token spend** (observability). |
+| **Observability / metrics collector** | The in-process, bounded ring buffer (`metrics.py`, `COLLECTOR`) capturing per-call latency + tokens Ollama returns; surfaced in the CLI `ask` footer, the **System** tab (`/api/metrics`), chat turns, and per-build-stage on Projekt (ADR-20). |
+| **owiki (distribution)** | The PyPI distribution name (the *import* package stays `openwiki`; `openwiki` is taken on PyPI). Ships a wheel/sdist + a Docker image; publishing is license-gated (ADR-24). |
 | **bge-m3 / qwen3** | Default embedding / chat models (multilingual, strong on the German corpora). |
 
 ## 12.5 Acronyms
@@ -63,6 +72,11 @@
 | **AGPL** | Affero General Public License (PyMuPDF's license; §2 LC1) |
 | **ANN** | Approximate Nearest Neighbor (search — a scale option, §11 D3) |
 | **arc42** | The architecture-documentation template these docs follow |
+| **BM25** | Best Matching 25 — the lexical relevance function (hybrid retrieval, ADR-21) |
+| **CI** | Continuous Integration (GitHub Actions runs the offline suite + Docker build, ADR-24) |
+| **OIDC** | OpenID Connect (PyPI *trusted publishing* — token-less publish, ADR-24) |
+| **PyPI** | The Python Package Index (distribution `owiki`, ADR-24) |
+| **RRF** | Reciprocal Rank Fusion (blends dense + BM25 rankings, ADR-21) |
 | **HNSW** | Hierarchical Navigable Small World (Kuzu's vector index; mirrored, not used for retrieval) |
 | **HTTP / JSON** | HyperText Transfer Protocol / JavaScript Object Notation (the web API) |
 | **IR** | Intermediate Representation (`ParsedDocument`) |
@@ -75,5 +89,6 @@
 | **TOML** | Tom's Obvious Minimal Language (`openwiki.toml`, config files) |
 
 ---
-*Chapter complete. Path B terms have landed: Session/Assertion (ADR-15), SUPERSEDES/supersession
-(ADR-18), the remembered tier + Wiki/Second-Brain mode (ADR-14/16), and the usage log (ADR-17).*
+*Chapter complete. Path B terms landed (ADR-14–18); later terms cover the deepened graph (typed
+relations, entity resolution — ADR-22/23), retrieval variants (hybrid, BM25, RRF, re-ranking — ADR-21),
+observability (ADR-20), and shipping (owiki, CI, OIDC — ADR-24).*

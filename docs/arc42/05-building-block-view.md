@@ -103,14 +103,17 @@ files, network/Ollama, or Kuzu).
 | `wiki.py` | pure | `WikiBuilder(split_level).build(doc) -> Wiki`; `write_wiki(wiki, out_dir)`; `Wiki`/`WikiPage`, `slugify`. |
 | `chunking.py` | pure | `chunk_wiki(wiki, size_words, overlap_words) -> list[Chunk]`; `chunk_text`, `normalize_text`. |
 | `embeddings.py` | I/O (Ollama) | `Embedder` protocol (`embed_documents`, `embed_query`, `name`) + `OllamaEmbedder`; `get_embedder`. |
-| `search.py` | I/O (Ollama via embedder) | `SemanticIndex.build/save/load`; `search(query, k) -> [SearchResult]`; `best_chunk_per_page(query, slugs)`. Normalized NumPy matrix, brute-force cosine. |
+| `search.py` | I/O (Ollama via embedder) | `SemanticIndex.build/save/load`; `search(query, k) -> [SearchResult]`; `best_chunk_per_page(query, slugs)`; `search_hybrid(query, k)` (BM25+dense via RRF, ADR-21). Normalized NumPy matrix, brute-force cosine. |
+| `lexical.py` | pure (+NumPy) | `tokenize`; `BM25` (inverted index) over chunk texts; `reciprocal_rank_fusion(rankings)`. The lexical half of hybrid retrieval (ADR-21) — no `rank-bm25` dependency. |
+| `rerank.py` | pure (injected chat) | `rerank_order(query, texts, chat) -> permutation` (one chat call; `parse_order` robust) — the LLM re-rank pass (ADR-21). |
+| `metrics.py` | pure (stdlib) | `MetricsCollector` + module `COLLECTOR` (bounded ring buffer) + `parse_ollama_stats`. Observability (ADR-20): LLM/embed/http events with latency + tokens. |
 
 **Agents**
 
 | Block | kind | Responsibility & key interface |
 |---|---|---|
-| `llm.py` | I/O (Ollama) | `ChatModel` protocol (`chat`, `chat_raw`, `name`) + `OllamaChat` (`/api/chat`, tool calls). |
-| `agent.py` | I/O (via injected deps) | `RAGAgent(index, chat, top_k, graph, expand_k)`; `retrieve(q) -> [Source]`; `answer(q) -> RAGAnswer`. RAG + GraphRAG + memory reinforcement. |
+| `llm.py` | I/O (Ollama) | `ChatModel` protocol (`chat`, `chat_raw`, `name`) + `OllamaChat` (`/api/chat`, tool calls). Records per-call telemetry to `metrics.COLLECTOR` + `last_stats` (ADR-20). |
+| `agent.py` | I/O (via injected deps) | `RAGAgent(index, chat, top_k, graph, expand_k, rerank, hybrid)`; `retrieve(q) -> [Source]`; `answer(q) -> RAGAnswer`. RAG + GraphRAG (expands along typed **relations** too, ADR-22) + memory reinforcement; optional **hybrid** seed + LLM **re-rank** (ADR-21). |
 | `tools.py` | I/O (files/graph) | `WikiTools`: `read_page`, `list_pages`, `search_wiki`, `edit_page`, `append_section`, `create_page`, `graph_neighbors`, `find_path`, `find_entity`, `schemas()`, `dispatch(name, args)`. |
 | `chat_agent.py` | I/O (via tools/chat) | `WikiAgent(chat, tools).send(msg) -> AgentTurn`; `summarize_wiki(dir)`. Multi-turn tool loop. |
 
@@ -122,7 +125,7 @@ files, network/Ollama, or Kuzu).
 |---|---|---|
 | `web/server.py` | I/O (http, Kuzu) | `WikiWebApp` (state + methods) + `make_handler(app)` + `serve(app, host, port)`. See §5.3. |
 | `mcp_server.py` | I/O (stdio) | `build_server(wiki_dir, index, graph, agent) -> MCPStdioServer`; `.handle(msg)` is pure. |
-| `eval.py` | pure (drivers inject I/O) | Metrics (`reciprocal_rank`, `hit_at_k`, `recall_at_k`, `grounding`, `community_grounding`, `judge_pairwise`, `task_success`) + drivers (`evaluate`, `make_retrievers`, `run_answer_eval`, `run_global_eval`, `run_cross_session_eval` — the Path B headline metric). |
+| `eval.py` | pure (drivers inject I/O) | Metrics (`reciprocal_rank`, `hit_at_k`, `recall_at_k`, `grounding`, `community_grounding`, `judge_pairwise`, `task_success`) + drivers (`evaluate`, `make_retrievers`, `hybrid_pages`, `make_reranker`/`reranking_retriever` (ADR-21), `run_answer_eval`, `run_global_eval`, `run_cross_session_eval`). |
 | `project.py` | I/O (files) | `Project.load/find/resolve`; `out_dir`/`wiki_dir`/`index_dir`/`graph_path`; `setting(section, key)`; `render_manifest`. |
 | `pipeline.py` | pure | `compute_fingerprints`, `stale_stages`, `BuildState` (incremental build state). |
 | `userconfig.py` | I/O (files) | `UserConfig` + `Registry` under `~/.openwiki/`. |
@@ -162,14 +165,15 @@ flowchart TB
 
 | Block | kind | Key interface | Notes |
 |---|---|---|---|
-| `builder.py` | I/O (kuzu) | `GraphBuilder(db_path, similar_k).build(wiki, index, references, entities) -> stats` | Clean rebuild of the *derived* tier; mirrors embeddings into `Chunk`; creates all tables (some empty). **Snapshots + restores the remembered tier** across a rebuild (B0, ADR-16). |
+| `builder.py` | I/O (kuzu) | `GraphBuilder(db_path, similar_k).build(wiki, index, references, entities, relations) -> stats` | Clean rebuild of the *derived* tier; mirrors embeddings into `Chunk`; creates all tables (some empty), incl. `RELATED_TO` (ADR-22) + `Entity.description/aliases` (ADR-23). **Snapshots + restores the remembered tier** across a rebuild (B0, ADR-16). |
 | `store.py` | I/O (kuzu) | see §5.4 | Read-only by default; writable for edits/memory. |
 | `references.py` | pure | `extract_references(doc, wiki)`, `extract_references_multi(doc, wiki, meta)`, `detect_page_offset(doc)` | Page + section/chapter cross-refs → `REFERENCES` edges. |
-| `entities.py` | pure (injected chat) | `extract_entities(wiki, chat, types, …) -> [Entity]`; `coerce_types`; `DEFAULT_ENTITY_TYPES` | LLM per page + normalization; opt-in. |
+| `entities.py` | pure (injected chat/embedder) | `extract_entities(…) -> [Entity]`; `extract_relations(wiki, entities, chat) -> [Relation]` (typed `RELATED_TO`, ADR-22); `resolve_entities(entities, embedder, chat) -> canonical + aliases + descriptions` (ADR-23); `coerce_types`; `DEFAULT_ENTITY_TYPES` | LLM per page + deterministic normalization; relations + resolution opt-in. |
 | `community.py` | pure (injected chat) | `detect_communities(edges, nodes)`; `summarize_community(chat, members)`; `summarize_facts(chat, facts)` (B5 memory themes); `answer_global(chat, q, communities)`; `parse_summary` | Consolidation layer / global search (docs **and**, via B5, memory). |
 | `decay.py` | pure | `effective_weight(w, last_seen, now, half_life)`; `reinforced_weight(w, boost, cap)` | Usage-memory math. |
 | `memory.py` | pure (injected chat) | `capture_session(chat, transcript) -> [MemoryFact]`; `parse_facts`; `format_memory(recalled)` | Path B: session → subject–predicate–object facts + context formatting. |
 | `usage.py` | pure | `usage_log_path(db)`; `append_usage(path, pairs)`; `read_usage`; `clear_usage` | Path B (B1): the append-only read-path usage-log sidecar. |
+| `journal.py` | pure | `journal_path(db)`; `append_remember`/`append_reindex`; `read_journal`/`clear_journal` | Path B (B1, ADR-19): the lock-free write-ahead journal (queued `remember`/`reindex` ops). |
 
 ## 5.3 Level 2 — the `web/` subpackage
 
@@ -179,7 +183,7 @@ serves static files; `web/static/` is a no-build vanilla-JS SPA.
 
 | Block | kind | Key interface |
 |---|---|---|
-| `WikiWebApp` | I/O (Kuzu/Ollama/files) | `manifest`, `get_page`, `search`, `chat`, `graph_explore`/`graph_expand`/`graph_neighborhood`, `project_info`, `communities`, `ask_global`, `run_eval`, `compare`, `health_stats`, `start_answer_eval`/`answer_eval_status`. |
+| `WikiWebApp` | I/O (Kuzu/Ollama/files) | `manifest`, `get_page`, `search`, `chat` (+ per-turn stats), `graph_explore`/`graph_expand`/`graph_neighborhood`, `project_info`, `communities`, `ask_global`, `run_eval`, `compare`, `health_stats`, `start_answer_eval`/`answer_eval_status`, `metrics` (ADR-20), `memory_info`/`memory_recall`/`memory_context` (Path B). Serves an 8-tab SPA (Projekt · Wiki · Graph · Gedächtnis · Evaluation · System · Tutorial · Hilfe). |
 | `make_handler(app)` / `serve(app, host, port)` | I/O (http) | JSON API + static file serving on `ThreadingHTTPServer`. |
 | `web/static/{index.html, app.js, style.css, marked.min.js}` | — | SPA: 6 tabs (Projekt / Wiki / Graph / Evaluation / Tutorial / Hilfe); client-side Markdown; hand-rolled force-directed graph explorer. |
 

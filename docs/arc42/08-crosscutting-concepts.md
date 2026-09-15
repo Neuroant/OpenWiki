@@ -194,7 +194,59 @@ preserves the remembered tier; consolidation touches memory, never documents. Th
 assembled memory make the next session better?* — is the cross-session eval (`eval --cross-session`,
 §10). Full design + the staged B0–B6 plan: `docs/path-b-memory.md`.
 
+## 8.16 Observability (ADR-20)
+
+Every Ollama call already returns latency + prompt/eval token counts; historically they were thrown
+away. A pure, stdlib **metrics collector** (`metrics.py` — a thread-safe, bounded ring buffer +
+`parse_ollama_stats`) captures them: the LLM/embedding backends record a `chat`/`embed` event per call
+(best-effort — a metrics failure never breaks the call), the web layer records per-request `http`
+events, and `openwiki build` diffs the collector per stage. It is **always-on, zero-config, no
+dependency, and bounded** (so it's safe to leave running). Surfaced four ways: the CLI `ask` `⏱` footer,
+the web **System** tab (`/api/metrics` — per-kind p50/p95 + token totals + a live event table), per-turn
+`chat()` stats in the agent panel, and per-build-stage **duration + token spend** on the Projekt tab.
+The point is honest visibility (it revealed that one agent "turn" is several model calls, and a slow
+first answer is mostly cold-model *load* time), not a monitoring stack.
+
+## 8.17 Retrieval strategy — layered, and *measured* (ADR-9/21)
+
+Retrieval is a stack of **opt-in** layers over one baseline, each earning its place through `owiki eval`
+rather than assumption:
+
+- **Dense (baseline).** Brute-force cosine over bge-m3 chunk embeddings (`search.py`). Strong on this
+  corpus — which is *why* the add-ons below don't beat it here.
+- **GraphRAG expansion (ADR-6/22).** Seeds + pages reached along graph edges (references / similar /
+  shared-entity / typed **relations** / reinforced), re-ranked by the query. Doesn't lift retrieval
+  *recall* on strong-embedder prose, but lifts **answer quality** + enables global search.
+- **Hybrid (ADR-21).** BM25 (`lexical.py`) fused with dense via reciprocal rank fusion (`search_hybrid`)
+  — catches exact tokens the embedder blurs. Ties dense on prose; **wins decisively on code**.
+- **LLM re-rank (ADR-21).** One chat call reorders a wider candidate pool (`rerank.py`). On this corpus
+  it *doesn't* help (drops MRR).
+
+The discipline (ADR-9) is the crosscutting concept: **add a retriever as a scored row in `owiki eval`
+before trusting it**, and match the technique to where the embedder is weak. Full numbers +
+methodology: `docs/RAG-vs-GraphRAG.md`.
+
+## 8.18 The semantic graph layer — entities, relations, resolution (ADR-12/22/23)
+
+Over the structural + vector graph sits an **opt-in, LLM-extracted** semantic layer, built in three
+deterministic-where-possible stages:
+
+- **Entities (ADR-12).** One LLM call per page extracts typed named entities against a per-project
+  ontology; resolved to a **deterministic** normalized key (`_normalize`) so spelling/plural/word-order
+  variants merge without a model. `Entity` nodes + `Page-[:MENTIONS]->Entity`.
+- **Typed relations (ADR-22).** A second per-page pass extracts subject–predicate–object triples *among a
+  page's entities*, grounded to them and merged across pages into `Entity-[:RELATED_TO {predicate}]->Entity`
+  — co-mention becomes a traversable graph, and expansion follows it (§8.17).
+- **Resolution (ADR-23).** A corpus-wide pass merges same-concept variants the *deterministic* normalizer
+  can't see (spacing, near-synonyms) into **canonical** entities with `aliases` + a `description` —
+  embedding candidate clusters (high recall) confirmed by a small per-cluster LLM call (precision). It
+  never drops an entity, and aliases make acronyms/synonyms findable.
+
+The whole layer is additive (ADR-7, always-created empty) and derived (rebuilt each `graph-build`, never
+snapshotted — unlike the remembered tier, §8.15), so store/agent code degrades gracefully when it's off.
+
 ---
 *Chapter complete. Cross-refs: runtime error paths → §6.8; the memory tier → §8.15 + ADR-14/15/16/18;
-the no-auth risk → §11 R1; the project concept → §5 (project/pipeline/userconfig/merge), ADR-10/11, §7,
-`docs/projects.md`; the boundaries these concepts rest on → §5.1 + ADR-1/2/7/13.*
+observability → §8.16 + ADR-20; retrieval → §8.17 + ADR-9/21 + `docs/RAG-vs-GraphRAG.md`; the semantic
+graph → §8.18 + ADR-12/22/23; the no-auth risk → §11 R1; the project concept → §5, ADR-10/11, §7; the
+boundaries these concepts rest on → §5.1 + ADR-1/2/7/13.*

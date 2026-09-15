@@ -12,13 +12,16 @@ ADR referenced in the last column — see [Architecture Decisions](09-architectu
 | **Local-first via Ollama + protocols** | All inference runs on a local Ollama; access is behind the `Embedder`/`ChatModel` protocols so backends are swappable and the corpus never leaves the machine. | Q1, Q4 | ADR-2 |
 | **Stdlib-leaning, deps isolated** | Web server, MCP server, and 3 of 4 source parsers are stdlib-only; PyMuPDF and Kuzu are confined to single modules and imported lazily. | Q2 | ADR-4, ADR-5 |
 | **Additive knowledge graph (a mirror)** | The Kuzu graph is layered *over* the wiki + index without mutating them; embeddings are mirrored in so traversal + vector search share one query. The index stays authoritative. | Q4 | ADR-3 |
-| **Optional layers as empty-by-default tables** | Entities, communities, and reinforcement edges are always-created (possibly empty) tables, so all store/agent code works with or without them. | Q4 | ADR-7 |
-| **Read-mostly graph, writable for edits** | Read-only by default (concurrent readers); writable (exclusive) only for `serve`/`chat` edits + usage-memory. On the read path, usage is logged and folded in by a writer, so reads reinforce without the lock. | correctness | ADR-8, ADR-17 |
+| **Deep semantic graph layer** | Over the structural graph, an opt-in LLM layer: typed entities (deterministic-normalized), typed `Entity→Entity` **relations** (traversed by GraphRAG), and corpus-wide **entity resolution** (canonical + aliases + descriptions). | Q4, Q5 | ADR-12/22/23 |
+| **Optional layers as empty-by-default tables** | Entities, relations, communities, and reinforcement edges are always-created (possibly empty) tables, so all store/agent code works with or without them. | Q4 | ADR-7 |
+| **Reader-XOR-writer concurrency via a journal** | Kuzu is reader-XOR-writer, so `serve`/`chat` open **read-only by default** (concurrent readers); all writes (reinforce, remember, edit re-sync) queue to a lock-free write-ahead journal a writer folds in. `--sync` is exclusive-writable. | correctness, Q2 | ADR-8/17/19 |
 | **Coexisting document + remembered tiers (Path B)** | In Second Brain mode the graph adds an *authoritative* remembered tier — sessions → reified `Assertion`s, newer facts superseding older — preserved across document rebuilds. Wiki Mode = memory off. | Q4 | ADR-14/15/16/18 |
 | **Borrow GraphRAG ideas, not the library** | Community detection + summaries + global search reimplemented natively/locally. | Q2, Q5 | ADR-6 |
 | **Project manifest + settings precedence** | `openwiki.toml` groups a KB; unset settings resolve `flag > manifest > ~/.openwiki config > built-in default`. | usability | ADR-10 |
-| **Incremental, fingerprinted builds** | Per-stage input+param fingerprints skip unchanged stages. | performance | ADR-11 |
-| **Evaluation-driven design** | A backend-agnostic eval harness turns "is the graph worth it?" into measured findings (RAG vs GraphRAG vs Global). | Q5 | ADR-9 |
+| **Incremental, fingerprinted builds** | Per-stage input+param fingerprints skip unchanged stages; each stage records duration + token spend. | performance | ADR-11, ADR-20 |
+| **Evaluation-driven design** | A backend-agnostic eval harness turns "is the graph / this retrieval add-on worth it?" into measured findings (RAG vs GraphRAG vs Hybrid vs Rerank vs Global) — add-ons are scored *before* they're trusted. | Q5 | ADR-9, ADR-21 |
+| **Always-on observability** | A bounded, in-process metrics collector captures the latency + token counts Ollama returns (per call, per request, per build stage) — surfaced in the CLI, the System tab, and Projekt. | Q5, performance | ADR-20 |
+| **Ship it: `owiki` build + Docker + CI** | Installable/containerizable, with CI running the offline suite (Linux, 3.11–3.13) + Docker build on every push; public publishing is license-gated. | Q2, usability | ADR-24 |
 | **Grounded agents** | RAG/editing agents answer only from provided excerpts and cite provenance; the graph adds context, never ungrounded claims. | correctness, trust | §8.4 |
 
 ## 4.1 How the strategy maps to the top quality goals
@@ -41,16 +44,17 @@ source ──parse_source──▶ ParsedDocument (IR) ──▶ JSON / Markdown
                                │
                    chunk_wiki + Embedder ──▶ SemanticIndex ──▶ output/index/
                                │
-                RAGAgent + ChatModel ──▶ cited answer      (RAG / GraphRAG)
+                RAGAgent + ChatModel ──▶ cited answer   (RAG / GraphRAG / hybrid / rerank)
                                │
               WikiAgent + WikiTools ⇄ ChatModel ──▶ edits pages/*.md
                                │
                     GraphBuilder ──▶ Kuzu graph ──▶ GraphStore
-                               │     (+ communities, + REINFORCES memory)
+                               │  (+ entities/typed relations/resolution, communities, REINFORCES)
        capture_session + GraphStore.remember ──▶ remembered tier   (Path B, Second Brain)
                                │     (Session/Assertion + SUPERSEDES; recall)
-                    WikiWebApp (http.server) ──▶ browser SPA
+                    WikiWebApp (http.server) ──▶ browser SPA (8 tabs, incl. System metrics)
                     MCPStdioServer ──▶ coding agents
+   (every LLM/embed call → metrics.COLLECTOR: latency + tokens, observability)
 ```
 
 ---

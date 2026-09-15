@@ -5,13 +5,13 @@ This is the architecture documentation for **OpenWiki**, structured after the
 into 12 sections, from goals and constraints down to building blocks, runtime, decisions,
 quality, and risks.
 
-> **Status: COMPLETE** (maintained through Path B v0.52). All 12 chapters are complete; diagrams use
-> Mermaid (rendered by GitHub) and have been validated. The **Path B agent-memory** direction is now
-> **complete (B0–B6)** — authoritative graph (B0), read-path reinforcement (B1), contradiction/time-
-> versioning (B4), sleep consolidation (B5), and three-tier context assembly (B6); its load-bearing
-> decisions are recorded as ADR-15/16/17/18/19 (§9), which resolve the §11 debts D1/D2/D6 that
-> ADR-3/ADR-8 flagged (ADR-19 settles the concurrent reader-and-writer model against Kuzu's measured
-> reader-XOR-writer lock). Design detail in `docs/path-b-memory.md`.
+> **Status: COMPLETE** (maintained through v0.66). All 12 chapters are complete; diagrams use Mermaid
+> (rendered by GitHub) and have been validated. The **Path B agent-memory** direction is complete
+> (B0–B6; ADR-14–19). Since then the architecture has grown four more decision clusters (§9), all
+> reflected here: the graph **deepened** — typed `Entity→Entity` relations + relation-aware GraphRAG
+> (ADR-22) and corpus-wide **entity resolution** (ADR-23) — plus **observability** (ADR-20), a *measured*
+> retrieval-add-on discipline (hybrid BM25+dense, LLM re-rank — ADR-21), and a **shipping** story
+> (`owiki` packaging + Docker + CI, ADR-24). Deep detail: `docs/path-b-memory.md`, `docs/RAG-vs-GraphRAG.md`.
 
 ## Audience & relationship to the other docs
 

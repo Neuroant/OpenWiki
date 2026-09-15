@@ -3,7 +3,9 @@
 > arc42 §9 — The important, hard-to-reverse decisions as ADRs. **Status: complete.**
 > Format per ADR: **Status · Context · Decision · Alternatives considered · Consequences (+/−)**.
 > Decisions the agent-memory direction re-opened are marked "refined by ADR-N"; Path B has since
-> **landed** (ADR-14/15/16/17/18) — see those ADRs and §11 (debts D1/D2/D6 resolved).
+> **landed** (ADR-14–19). Later decisions deepen the graph (ADR-22 typed relations + relation-aware
+> GraphRAG, ADR-23 entity resolution) and add **observability** (ADR-20), a *measured* retrieval-add-on
+> discipline (ADR-21), and a **shipping** story (ADR-24 packaging + CI).
 
 ## ADR index
 
@@ -20,7 +22,7 @@
 | [9](#adr-9) | Evaluation-driven claims | Accepted | Q5 |
 | [10](#adr-10) | Project manifest + settings precedence | Accepted | usability |
 | [11](#adr-11) | Incremental builds via a per-stage fingerprint chain | Accepted | performance |
-| [12](#adr-12) | Bounded-deterministic, normalized entity extraction | Accepted | Q3, quality |
+| [12](#adr-12) | Bounded-deterministic, normalized entity extraction | Accepted; refined by [ADR-23](#adr-23) | Q3, quality |
 | [13](#adr-13) | New capabilities as subcommands, not more flags | Accepted | Q4 |
 | [14](#adr-14) | Wiki & Second-Brain coexist as tiers of one substrate (not replacement) | Accepted (Path B) | Q4, modularity |
 | [15](#adr-15) | Remembered facts as reified `Assertion` nodes (not typed edges) | Accepted (Path B / B2–B4) | Q4 |
@@ -28,6 +30,11 @@
 | [17](#adr-17) | Read-path reinforcement via an append-only usage log | Accepted (Path B / B1) | correctness |
 | [18](#adr-18) | Contradiction as append-only supersession (`SUPERSEDES`-edge-only) | Accepted (Path B / B4) | Q4, correctness |
 | [19](#adr-19) | Concurrency as read-only readers + a lock-free write-ahead journal | Accepted (Path B / B1) | correctness, Q2 |
+| [20](#adr-20) | Observability via an in-process, bounded metrics ring buffer | Accepted | Q5, performance |
+| [21](#adr-21) | Retrieval add-ons (hybrid, re-rank) measured, not adopted on faith | Accepted | Q5 |
+| [22](#adr-22) | Typed `Entity→Entity` relations + relation-aware GraphRAG | Accepted | Q4, Q5 |
+| [23](#adr-23) | Corpus-wide entity resolution (embedding candidates + LLM verify) | Accepted | Q3, quality |
+| [24](#adr-24) | Ship as the `owiki` distribution + CI; publishing license-gated | Accepted | Q2, usability |
 
 ---
 
@@ -300,7 +307,94 @@
   is the **honest resolution** of ADR-8/D2's "true concurrent reader-and-writer" question: not achievable
   within Kuzu; the journal is the ceiling.
 
+### ADR-20
+**Observability via an in-process, bounded metrics ring buffer.** *(v0.58 / v0.60)*
+- **Context:** the LLM + embedding backends receive rich per-call telemetry from Ollama (latency +
+  prompt/eval token counts) and **discarded** all of it — there was no visibility into where time or
+  tokens went, at serve-time or build-time.
+- **Decision:** a pure/stdlib `metrics.py` — a thread-safe, **bounded** ring buffer (`MetricsCollector`
+  + module-level `COLLECTOR`) + `parse_ollama_stats` (ns→ms, tokens/sec). `OllamaChat`/`OllamaEmbedder`
+  record a `chat`/`embed` event per call (best-effort — a metrics failure never breaks the call); the
+  web layer records per-request `http` events; `_cmd_build` diffs the collector per stage. Surfaced in
+  the CLI (`ask` footer), the web **System** tab (`/api/metrics`), per-turn `chat()` stats, and
+  per-build-stage timing/tokens on **Projekt**.
+- **Alternatives:** external APM / OpenTelemetry — rejected (a dependency, off-ethos for a local tool);
+  logging only — rejected (not queryable/aggregatable).
+- **Consequences:** + always-on, zero-config, no dependency; immediately useful (revealed that one agent
+  "turn" is several model calls, and a slow first answer is mostly cold-model *load* time). − the bounded
+  buffer under-counts a very large build's per-stage tokens if a stage emits > `maxlen` events (1024
+  comfortably spans a full build); in-process only (not persisted across runs).
+
+### ADR-21
+**Retrieval add-ons are *measured* against pure dense, not adopted on faith.** *(v0.61 / v0.62 — extends [ADR-9](#adr-9))*
+- **Context:** beyond GraphRAG (ADR-6, found *not* to lift retrieval recall on this corpus), the usual
+  next upgrades are **hybrid** lexical+dense retrieval and an **LLM re-rank** pass. Do they help *here*?
+- **Decision:** build both on-ethos and wire each into `owiki eval` as a scored retriever *before*
+  trusting it — LLM re-rank (`rerank.py`: one chat call orders a wider pool) and **hybrid** BM25+dense
+  via reciprocal rank fusion (`lexical.py`: a pure BM25 + RRF, no `rank-bm25` dependency). Ship them
+  opt-in (`--rerank` / `--hybrid`); let the harness decide per corpus.
+- **Alternatives:** a cross-encoder reranker — rejected (a model + dependency, off the local/stdlib
+  ethos); a vector DB / ANN — deferred (the corpus is small).
+- **Consequences:** measured (`docs/RAG-vs-GraphRAG.md` Findings 4): on strong-embedder German prose both
+  **tie or lose** (re-rank *drops* MRR; hybrid ties), but **hybrid wins decisively on a code corpus**
+  (hit@1 57%→86%). + the capabilities exist and are corpus-testable; a clean negative result is as
+  valuable as a positive one. − no default retrieval change — dense stays the baseline.
+
+### ADR-22
+**Typed `Entity→Entity` relations + relation-aware GraphRAG.** *(v0.63 / v0.64 — extends [ADR-6](#adr-6)/[ADR-12](#adr-12))*
+- **Context:** the entity layer (ADR-12) captured **co-mention** only; a real knowledge graph needs typed
+  relations between entities, and retrieval/agents should be able to *traverse* them.
+- **Decision:** an opt-in second per-page LLM pass (`extract_relations`, `--relations`) extracts
+  subject–predicate–object triples *among that page's entities*, grounded to them (unresolved/self
+  dropped), merged across pages into `RELATED_TO {predicate, weight, pages}` edges (always-created,
+  ADR-7). Expansion traverses them: `neighborhood` gains a `relation` group
+  (`MENTIONS→RELATED_TO→MENTIONS`) added to `agent._EXPAND_RELS`, so `ask` / `owiki eval` /
+  `graph_neighbors` are relation-aware; the Graph tab draws the typed edges (predicate on hover).
+- **Alternatives:** reified relation nodes (like Assertions, ADR-15) — rejected (an edge-with-property
+  suffices for aggregate relations); one combined entity+relation call — rejected (risks degrading the
+  tuned entity extraction).
+- **Consequences:** + co-mention becomes a real, traversable, explainable graph. − a second LLM call per
+  entity-rich page (opt-in); on dense corpora relation-connected pages often overlap similar/structural
+  neighbours (the channel's unique value is the pages nothing else connects — a rigorous retrieval-lift
+  measurement needs a relation-targeted eval set).
+
+### ADR-23
+**Corpus-wide entity resolution: block-by-type → embedding candidates → LLM verify.** *(v0.66 — refines [ADR-12](#adr-12))*
+- **Context:** ADR-12 resolves entities by a *deterministic* normalized key (spelling/plural/word-order).
+  Same-concept variants it can't see (spacing, near-synonyms) stay as duplicate nodes, and there are no
+  aliases or descriptions.
+- **Decision:** an opt-in corpus-wide pass (`resolve_entities`, `--resolve-entities`) — **block by type**,
+  generate candidate clusters by **embedding cosine** (≥ 0.80, calibrated for bge-m3), and confirm each
+  multi-member cluster with **one small LLM call** (canonical name + aliases + description). Singletons
+  cost nothing; an entity the model doesn't group survives unchanged. `Entity` gains `aliases` +
+  `description`; `pages_for_entity` / `find_entity` match aliases (search an acronym/synonym → the canonical).
+- **Alternatives:** pure-embedding merge (no LLM) — rejected (over-merges distinct same-kind entities); a
+  full-entity-list LLM canonicalization — rejected (a huge prompt, unreliable, drops entities).
+- **Consequences:** + candidate generation favours *recall*, the LLM provides *precision* (splits a mixed
+  cluster), so cost stays bounded; aliases make variants findable. − acronym↔full-form (≈ 0.40 cosine)
+  isn't embedding-close, so it isn't even a candidate — resolution catches spelling/spacing/plural/
+  word-order/near-synonym variants, not acronyms (a calibrated, honest limitation).
+
+### ADR-24
+**Ship as the `owiki` distribution + CI; public publishing gated on a license.** *(v0.64 / v0.65)*
+- **Context:** the tool needed automated testing + an install/deploy story; the PyPI name `openwiki` is
+  taken, and no license has been chosen.
+- **Decision:** GitHub Actions **CI** runs the offline suite on every push/PR across Python 3.11–3.13 +
+  builds the Docker image. Packaging: distribution name **`owiki`** (the *import* package stays
+  `openwiki`), enriched metadata, a clean `python -m build` / `twine check`, a `Dockerfile` + compose
+  (Ollama stays an external sibling, not bundled), and a **manual** OIDC trusted-publishing workflow.
+  Kept **private/unlicensed** for now → a `Private :: Do Not Upload` classifier hard-blocks accidental
+  upload; publishing awaits a license decision.
+- **Alternatives:** publish immediately — rejected (no license chosen); bundle Ollama + models in the
+  image — rejected (huge; Ollama stays a sibling); a token-based publish — rejected (OIDC trusted
+  publishing needs no stored secret).
+- **Consequences:** + CI guards every change on Linux (proving it isn't locked to its Windows dev host);
+  the project is installable + containerizable; publishing is one deliberate step away. − not on PyPI yet
+  (license-gated); CI is Linux-only so far (no Windows/macOS leg).
+
 ---
-*Chapter complete. The Path-B agent-memory direction has **landed** its load-bearing decisions:
-ADR-14 (coexistence) + ADR-15/16/17/18/19 realize it and resolve the §11 debts D1/D2/D6 that ADR-3/ADR-8
-flagged. Deep design in `docs/path-b-memory.md`. New significant decisions should be appended here with the next id.*
+*Chapter complete. The Path-B agent-memory direction landed via ADR-14/15/16/17/18/19; the graph then
+deepened (ADR-22 typed relations + relation-aware GraphRAG, ADR-23 entity resolution), gained
+**observability** (ADR-20), a *measured* retrieval-add-on discipline (ADR-21), and a **shipping** story
+(ADR-24 packaging + CI). §11 debts D1/D2/D6 are resolved. Deep designs in `docs/path-b-memory.md` and
+`docs/RAG-vs-GraphRAG.md`. New significant decisions should be appended here with the next id.*

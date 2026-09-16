@@ -171,9 +171,10 @@ Setup details in `docs/coding-agents.md`.
 ## Where it stands
 
 - **Corpora:** the NAUTILUS synth manual (269p → 51-page wiki → 815 chunks → graph
-  51/306 SIMILAR_TO/122 REFERENCES + 801 entities) and the informatik CS lecture
-  (16 PDFs → 799p → 76 pages → 2703 chunks → graph 76/760 SIMILAR_TO/32 REFERENCES +
-  entities).
+  51/306 SIMILAR_TO/122 REFERENCES + 801 entities) and the informatik CS lecture, built with
+  the full graph (`--relations --resolve-entities`): 16 PDFs → 799p → 76 pages → 2703 chunks →
+  graph 76/760 SIMILAR_TO/32 REFERENCES/1423 canonical entities (from 1520 raw)/1953 MENTIONS/
+  1364 typed RELATED_TO/6 communities.
 - **Tests:** 220 passing, fully offline (fakes for Ollama/Kuzu).
 - **Stack:** Windows, Python 3.13, local Ollama (bge-m3 + qwen3:30b), Kuzu — minimal /
   stdlib-leaning throughout.

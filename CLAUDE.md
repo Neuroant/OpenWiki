@@ -262,6 +262,7 @@ embeddings; no Ollama call):
 .venv\Scripts\python -m openwiki analyze gaps            # actionable improvement candidates (P3)
 .venv\Scripts\python -m openwiki analyze --json          # the coupling/gaps fingerprint (compare/export)
 .venv\Scripts\python -m openwiki analyze --compare fp.json   # diff two coupling fingerprints (P3b)
+.venv\Scripts\python -m openwiki analyze memory         # Path B memory-tier dynamics (P4)
 ```
 Two modes (positional `coupling` (default) | `gaps`). **`gaps`** (P3, `openwiki/analysis/gaps.py`) is the
 **analysis→improvement loop** — a ranked, offline to-do list: **link_candidates** (page pairs that
@@ -289,7 +290,12 @@ fingerprint against another KB — a saved `analyze --json` file (snapshot/time-
 output dir (`index/` + `graph/`) computed live — printing an A/B/Δ table + the notable rate deltas
 (`openwiki/analysis/compare.py`: `flatten_fingerprint`/`diff_fingerprints`/`notable_differences`; metrics
 are *relative*, so they compare across corpora/embedders/settings). The Analyse tab (P2) is the browser
-surface. Remaining: memory-tier dynamics (P4) — see `docs/roadmap.md`.
+surface. **`analyze memory`** (P4, `openwiki/analysis/memory.py`) analyzes the **Path B memory tier** —
+the part of the world model that *learns over time*: **revision** (SUPERSEDES rate — how much belief has
+been overwritten), **consolidation** (fraction of facts folded into B5 themes + theme-size shape),
+**temperature** (hot/warm/cold buckets by decayed `effective_weight` + per-fact `confidence` re-affirmation),
+**breadth** (distinct subjects/predicates + top predicates), and **growth** (facts per session). Graph-only
+(no index/embeddings), gated on `has_memory()`, decay imported lazily so the analysis package stays light.
 
 **Web UI** — browse + search + chat/edit + graph in the browser (stdlib server):
 ```
@@ -748,8 +754,11 @@ http — count, p50/p95, total time, token in/out) + a live recent-events table,
   is the **compare** half — `flatten_fingerprint` reduces a coupling fingerprint to a flat metric map,
   `diff_fingerprints(a, b)` aligns two into A/B/Δ rows, `notable_differences` picks the biggest *rate*
   deltas; wired as `owiki analyze --compare PATH` (a saved `--json` fingerprint, a project dir, or an
-  output dir). Analysis is to *structure* what `eval.py` is to *retrieval*. Remaining slice (memory-tier
-  dynamics, P4) in `docs/roadmap.md`.
+  output dir). `memory.py` (P4) is `analyze_memory(graph, now, half_life)` — the memory-tier **dynamics**
+  (revision / consolidation / temperature / breadth / growth) over the Path B remembered tier, read from
+  the existing `GraphStore` memory methods (`list_assertions`/`memory_overview`/`memory_concepts`/
+  `concept_assignment`) with `decay` imported lazily; wired as `owiki analyze memory` (graph-only). Analysis
+  is to *structure* what `eval.py` is to *retrieval*. Direction I (world-model analysis) is complete (P1–P4).
 - **`openwiki/merge.py`** — `combine_documents(docs, names)` merges several
   `ParsedDocument`s into one corpus (concatenate pages with a running offset, shift
   table/image page numbers, wrap each source under a synthetic level-1 outline node
@@ -789,8 +798,8 @@ http — count, p50/p95, total time, token in/out) + a live recent-events table,
   (`list`/`use`/`add`/`remove`/`add-source`), `opencode`, `claude-code`, `ontology`, `ingest`,
   `build-wiki`, `index`, `search`, `eval`, `ask` (`--global` = global search),
   `chat`, `graph-build`, `communities`, `decay`, `remember`, `recall`, `consolidate`, `context`,
-  `analyze` (world-model analysis — `coupling` | `gaps`, offline), `hook` (host-lifecycle memory hook —
-  reads the event JSON on stdin), `serve`, and `mcp` subcommands. A shared
+  `analyze` (world-model analysis — `coupling` | `gaps` | `memory`, offline), `hook` (host-lifecycle
+  memory hook — reads the event JSON on stdin), `serve`, and `mcp` subcommands. A shared
   `--project` (parent parser) + `_apply_project(args, project)` fill unset
   path/model/host/split-level args from the active project before dispatch (flags
   override; no project → `./output`). `init`/`project add-source` take **`--session`**

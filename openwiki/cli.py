@@ -27,7 +27,7 @@ from typing import Optional, Sequence
 
 from .agent import RAGAgent
 from .analysis import (
-    analyze_coupling, analyze_gaps, diff_fingerprints, is_coupling_fingerprint,
+    analyze_coupling, analyze_gaps, analyze_memory, diff_fingerprints, is_coupling_fingerprint,
 )
 from .analysis.compare import notable_differences
 from .eval import evaluate, load_eval_set, make_retrievers, run_global_eval
@@ -448,9 +448,10 @@ def _build_argparser() -> argparse.ArgumentParser:
     an_p = sub.add_parser("analyze", parents=[common],
                           help="World-model analysis: measure graph↔semantic coupling, or mine "
                                "actionable gaps (missing refs, near-duplicates, merge candidates).")
-    an_p.add_argument("what", nargs="?", choices=["coupling", "gaps"], default="coupling",
+    an_p.add_argument("what", nargs="?", choices=["coupling", "gaps", "memory"], default="coupling",
                       help="coupling (default) = where the graph agrees with vs. adds to the "
-                           "embedding space; gaps = ranked, actionable improvement candidates.")
+                           "embedding space; gaps = ranked, actionable improvement candidates; "
+                           "memory = Path B memory-tier dynamics (revision/consolidation/temperature).")
     an_p.add_argument("-k", type=int, default=8, dest="k",
                       help="Embedding neighbors per page for the coupling overlap metric (default: 8).")
     an_p.add_argument("--top", type=int, default=15, help="Max candidates per gaps category (default: 15).")
@@ -2443,13 +2444,69 @@ def _resolve_compare_fingerprint(path: str, k: int):
     raise FileNotFoundError(f"nothing to compare at {path}.")
 
 
+def _print_memory_report(res: dict) -> None:
+    """Human-readable rendering of the Path B memory-tier dynamics."""
+    c = res["counts"]
+    print(f"\nMemory-tier dynamics · {c['sessions']} sessions · {c['current']} current facts "
+          f"({c['superseded']} superseded) · {c['themes']} themes\n")
+
+    rev = res["revision"]
+    print(f"  Belief revision:  {rev['revision_rate']:.0%} of all facts have been superseded "
+          f"({rev['superseded']} overwritten)")
+
+    con = res["consolidation"]
+    ts = con["theme_sizes"]
+    print(f"  Consolidation:    {con['coverage']:.0%} of current facts folded into {con['themes']} "
+          f"themes · avg {con['avg_theme_size']} facts/theme (sizes {ts['min']}–{ts['max']})")
+
+    t = res["temperature"]
+    print(f"  Temperature:      {t['hot']} hot / {t['warm']} warm / {t['cold']} cold "
+          f"(half-life {t['half_life_days']:g}d) · mean eff-weight {t['mean_effective_weight']:.2f}")
+    print(f"                    mean confidence {t['mean_confidence']:.2f} · "
+          f"{t['reaffirmed_fraction']:.0%} re-affirmed (>1)")
+
+    b = res["breadth"]
+    tops = ", ".join(f"{p['predicate']}×{p['count']}" for p in b["top_predicates"][:5])
+    print(f"  Breadth:          {b['distinct_subjects']} subjects · {b['distinct_predicates']} "
+          f"predicates{('  ·  top: ' + tops) if tops else ''}")
+
+    growth = res["growth"]
+    if growth:
+        print("\n  Growth (facts per session, oldest first):")
+        peak = max(g["facts"] for g in growth) or 1
+        for g in growth:
+            bar = "█" * max(1, round(20 * g["facts"] / peak))
+            print(f"    {_trunc(g['session_id'], 22):<22} {bar} {g['facts']}")
+    print()
+
+
 def _cmd_analyze(args: argparse.Namespace) -> int:
     """World-model analysis: **coupling** (P1 — where the graph agrees with vs. adds to the
-    embedding space), **gaps** (P3 — ranked, actionable improvement candidates), or a coupling
-    **--compare** diff against another KB (P3b). Read-only + offline (stored embeddings; no Ollama)."""
-    if args.what == "gaps" and args.compare:
-        print("error: --compare works with coupling, not gaps.", file=sys.stderr)
+    embedding space), **gaps** (P3 — ranked improvement candidates), a coupling **--compare**
+    diff (P3b), or **memory** (P4 — Path B memory-tier dynamics). Read-only + offline."""
+    if args.what != "coupling" and args.compare:
+        print("error: --compare works with coupling only.", file=sys.stderr)
         return 2
+
+    if args.what == "memory":            # graph-only (no embeddings needed)
+        graph = _open_graph(args.graph, writable=False)
+        if graph is None:
+            print(f"error: no graph at {args.graph} (build it with `openwiki graph-build`).",
+                  file=sys.stderr)
+            return 2
+        try:
+            res = analyze_memory(graph)
+        finally:
+            graph.close()
+        if not res.get("available"):
+            print("(no memory tier — Second Brain mode with `remember`ed sessions populates it)")
+            return 0
+        if args.as_json:
+            print(json.dumps(res, ensure_ascii=False, indent=2))
+        else:
+            _print_memory_report(res)
+        return 0
+
     if not (args.index / "index.json").is_file():
         print(f"error: no index at {args.index} (run `openwiki index` first).", file=sys.stderr)
         return 2

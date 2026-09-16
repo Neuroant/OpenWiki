@@ -418,8 +418,16 @@ heavier **`[analysis]` extra** (scikit-learn now; umap/networkx later) opt-in.
   corpora / versions / embedders / settings — the "measure + **compare**" the direction is named for.
   *(Verified isolating the k-dependent overlap metrics: current k=20 vs a saved k=8 fingerprint differs
   only on the neighbor-overlap rows, everything else Δ=0.)*
-- **P4 — dynamics** — memory-tier structure (supersession/consolidation ratios, hot vs. cold
-  knowledge) + evolution as sources/sessions accrue.
+- ✅ **P4 (memory-tier dynamics) landed (v0.71)** — `owiki analyze memory`
+  (`openwiki/analysis/memory.py`) analyzes the **Path B remembered tier** — the part of the world model
+  that *learns over time*: **revision** (SUPERSEDES rate — belief overwritten), **consolidation**
+  (fraction of facts folded into B5 themes + theme-size shape), **temperature** (hot/warm/cold by decayed
+  `effective_weight` + per-fact `confidence` re-affirmation), **breadth** (distinct subjects/predicates +
+  top predicates), and **growth** (facts per session). Graph-only, gated on `has_memory()`. *Verified live
+  on a throwaway 3-session tier: a Port 8137→9000 contradiction → 17% revision; a re-affirmed fact → mean
+  confidence 1.2; 4 hot / 1 warm by recency; and a consolidation pass lifting coverage to 100%.* **Direction I
+  (world-model analysis) is complete (P1–P4):** measure (coupling), see (Analyse tab), improve (gaps),
+  compare (fingerprint diff), and the learning tier's dynamics (memory).
 
 ### If you pick one thing next
 **Direction A's re-ranking pass** is the smallest change with an immediately measurable

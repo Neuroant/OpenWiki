@@ -233,6 +233,88 @@ def test_self_diff_is_all_zero():
     assert notable_differences(rows) == []      # identical fingerprints → nothing notable
 
 
+_NOW = 1_000_000_000
+_DAY = 86400
+
+
+class _FakeMemGraph:
+    def __init__(self, facts, themes=None, assignment=None):
+        self._facts = facts
+        self._themes = themes or []
+        self._assignment = assignment or {}
+
+    def has_memory(self):
+        return bool(self._facts)
+
+    def memory_overview(self):
+        current = [f for f in self._facts if not f["superseded"]]
+        return {"sessions": len({f["session_id"] for f in self._facts}),
+                "assertions": len(current), "superseded": len(self._facts) - len(current),
+                "themes": len(self._themes)}
+
+    def list_assertions(self, limit=1_000_000, include_superseded=True):
+        fs = self._facts if include_superseded else [f for f in self._facts if not f["superseded"]]
+        return fs[:limit]
+
+    def memory_concepts(self):
+        return self._themes
+
+    def concept_assignment(self):
+        return self._assignment
+
+
+def _mf(aid, subj, pred, obj, sess, created, conf=1.0, seen=None, sup=False):
+    return {"id": aid, "subject": subj, "predicate": pred, "object": obj, "session_id": sess,
+            "created_at": created, "confidence": conf,
+            "last_seen": seen if seen is not None else created, "superseded": sup}
+
+
+def _mem_scenario():
+    facts = [
+        _mf("a1", "port", "is", "8137", "s1", _NOW, conf=2.0, seen=_NOW),          # hot, re-affirmed
+        _mf("a2", "model", "is", "bge-m3", "s1", _NOW, seen=_NOW),                 # hot
+        _mf("a3", "chunk", "size", "180", "s2", _NOW - 40 * _DAY, seen=_NOW - 40 * _DAY),  # warm
+        _mf("a4", "old", "was", "thing", "s2", _NOW - 120 * _DAY, seen=_NOW - 120 * _DAY),  # cold
+        _mf("a5", "port", "is", "9000", "s3", _NOW - 10 * _DAY, sup=True),         # superseded
+    ]
+    themes = [{"id": 0, "label": "config", "summary": "", "size": 2}]
+    assignment = {"a1": 0, "a2": 0}
+    return _FakeMemGraph(facts, themes, assignment)
+
+
+def test_analyze_memory_unavailable_when_empty():
+    from openwiki.analysis import analyze_memory
+    assert analyze_memory(_FakeMemGraph([]))["available"] is False
+
+
+def test_analyze_memory_counts_and_revision():
+    from openwiki.analysis import analyze_memory
+    res = analyze_memory(_mem_scenario(), now=_NOW)
+    assert res["counts"] == {"sessions": 3, "current": 4, "superseded": 1, "themes": 1}
+    assert res["revision"]["revision_rate"] == 0.2          # 1 of 5 superseded
+
+
+def test_analyze_memory_consolidation_coverage():
+    from openwiki.analysis import analyze_memory
+    con = analyze_memory(_mem_scenario(), now=_NOW)["consolidation"]
+    assert con["consolidated_facts"] == 2 and con["coverage"] == 0.5
+
+
+def test_analyze_memory_temperature_buckets():
+    from openwiki.analysis import analyze_memory
+    t = analyze_memory(_mem_scenario(), now=_NOW, half_life=30)["temperature"]
+    assert t["hot"] == 2 and t["warm"] == 1 and t["cold"] == 1   # a1/a2 hot, a3 warm, a4 cold
+    assert t["reaffirmed_fraction"] == 0.25                       # only a1 has confidence > 1
+    assert t["mean_confidence"] == 1.25                           # (2+1+1+1)/4
+
+
+def test_analyze_memory_growth_is_oldest_first():
+    from openwiki.analysis import analyze_memory
+    growth = analyze_memory(_mem_scenario(), now=_NOW)["growth"]
+    assert sum(g["facts"] for g in growth) == 5                   # counts all facts incl. superseded
+    assert growth[0]["session_id"] == "s2"                        # s2 has the oldest fact (−120d)
+
+
 def test_project_2d_pca_is_normalized_and_shaped():
     from openwiki.analysis.projection import project_2d
     rng = np.random.default_rng(0)

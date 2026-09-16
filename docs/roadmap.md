@@ -377,6 +377,34 @@ point it jumps to P0.</sub>
   (OpenAI-compatible, llama.cpp) — keep Ollama the default.
 - A **persistent cache** for embeddings + LLM calls across runs (speeds eval and rebuilds).
 
+### I — World-model analysis (P1, in progress)
+A built-in toolkit to **measure, compare, and analyze the structure and organization of
+the gathered knowledge** — treating OpenWiki's two representations of the same corpus (the
+symbolic **graph** and the **semantic space**) as facets of one object. *Analysis is to
+structure what `owiki eval` is to retrieval.* Read-only + additive; core is pure NumPy, with a
+heavier **`[analysis]` extra** (scikit-learn now; umap/networkx later) opt-in.
+- ✅ **P1 — graph↔semantic coupling landed (v0.67)** — `openwiki/analysis/coupling.py` +
+  `owiki analyze` (report + `--json` fingerprint), offline. Measures where the graph *agrees*
+  with the embedding geometry (redundant) vs. *adds* non-semantic structure: per-edge-type
+  endpoint-cosine profile vs. a random-pair null, graph-vs-kNN neighbor overlap, Louvain
+  **community_coherence** (silhouette + ARI, sklearn-optional), and the headline **graph_reach**
+  — the fraction of the graph's non-similarity connections the embedder would never rank as
+  neighbors. Extends the RAG-vs-GraphRAG thesis from "does the graph help retrieval?" to "how
+  much structure does the graph encode that similarity alone misses?" *First measured on NAUTILUS:
+  **~36%** non-semantic reach; the embedding space is strongly **anisotropic** (random-pair cosine
+  ≈ 0.74, so lift-over-null is the real signal); communities only weakly separate in embedding
+  space (silhouette +0.09) and only partly match k-means clusters (ARI +0.39) — the graph organizes
+  along axes the geometry doesn't fully capture.*
+- **P2 — the Analyse tab** — the visual layer: metric dashboards, degree/distance histograms,
+  a community×edge-type heatmap, and a **2D semantic map** (embedding projection colored by
+  community/type, graph edges overlaid — "see structure + semantics together"). Needs a projector
+  (PCA pure; UMAP/t-SNE via the extra).
+- **P3 — compare/diff + gap-mining** — `analyze --compare A B` over the fingerprint (radar diffs
+  across corpora / versions / embedders / settings) + **actionable** outputs: missing-link
+  candidates, entity-merge candidates, redundancy, knowledge deserts (the analysis→improvement loop).
+- **P4 — dynamics** — memory-tier structure (supersession/consolidation ratios, hot vs. cold
+  knowledge) + evolution as sources/sessions accrue.
+
 ### If you pick one thing next
 **Direction A's re-ranking pass** is the smallest change with an immediately measurable
 payoff — the eval harness will tell you within one run whether it beats the current

@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Optional, Sequence
 
 from .agent import RAGAgent
+from .analysis import analyze_coupling
 from .eval import evaluate, load_eval_set, make_retrievers, run_global_eval
 from .chat_agent import WikiAgent, summarize_wiki
 from .claude_code_template import scaffold_claude_code
@@ -440,6 +441,18 @@ def _build_argparser() -> argparse.ArgumentParser:
     ctx_p.add_argument("-i", "--index", type=Path, default=None, help="Index dir (for the embedder; default: project's).")
     ctx_p.add_argument("--graph", type=Path, default=None, help="Graph dir (default: project's graph).")
     ctx_p.add_argument("--host", default=None, help="Ollama host URL.")
+
+    an_p = sub.add_parser("analyze", parents=[common],
+                          help="World-model analysis: measure graph↔semantic coupling — where the "
+                               "knowledge graph agrees with vs. adds to the embedding space.")
+    an_p.add_argument("-k", type=int, default=8, dest="k",
+                      help="Embedding neighbors per page for the overlap metric (default: 8).")
+    an_p.add_argument("-i", "--index", type=Path, default=None,
+                      help="Index dir (the embedding space; default: project's).")
+    an_p.add_argument("--graph", type=Path, default=None, help="Graph dir (default: project's graph).")
+    an_p.add_argument("--json", action="store_true", dest="as_json",
+                      help="Emit the raw coupling fingerprint as JSON (for compare/export) "
+                           "instead of the report.")
 
     hook_p = sub.add_parser("hook",
                             help="Host-lifecycle memory hook (reads the event JSON on stdin) — wired "
@@ -1292,6 +1305,9 @@ def _apply_project(args: argparse.Namespace, project: Optional[Project],
         path("index", p.index_dir if p else None, Path("output") / "index")
         path("graph", p.graph_path if p else None, Path("output") / "graph")
         val("host", "models", "host", DEFAULT_HOST)
+    elif cmd == "analyze":
+        path("index", p.index_dir if p else None, Path("output") / "index")
+        path("graph", p.graph_path if p else None, Path("output") / "graph")
 
 
 def _cmd_ingest(args: argparse.Namespace) -> int:
@@ -2269,6 +2285,78 @@ def _cmd_context(args: argparse.Namespace) -> int:
     return 0
 
 
+_KIND_LABEL = {
+    "similar": "SIMILAR_TO", "references": "REFERENCES", "shared_entity": "shared-entity",
+    "relation": "RELATED_TO", "child_of": "CHILD_OF", "next": "NEXT",
+}
+
+
+def _print_coupling_report(res: dict) -> None:
+    """Human-readable rendering of the graph↔semantic coupling fingerprint."""
+    prof = res["edge_profile"]
+    overlap = res["neighbor_overlap"]
+    null = prof.get("_null", {})
+    print(f"\nWorld-model coupling · {res['pages']} pages "
+          f"· random-pair cosine ≈ {null.get('mean', 0):.3f}\n")
+    print(f"  {'edge type':<14}{'n':>6}{'cos(mean)':>11}{'median':>9}"
+          f"{'vs null':>9}{'kNN overlap':>13}")
+    print(f"  {'-' * 61}")
+    for kind in ("similar", "references", "shared_entity", "relation", "child_of", "next"):
+        p = prof.get(kind, {})
+        n = p.get("n", 0)
+        ov = overlap.get(kind)
+        ov_s = "—" if ov is None else f"{ov:.2f}"
+        if not n:
+            print(f"  {_KIND_LABEL[kind]:<14}{0:>6}{'—':>11}{'—':>9}{'—':>9}{ov_s:>13}")
+            continue
+        print(f"  {_KIND_LABEL[kind]:<14}{n:>6}{p['mean']:>11.3f}{p['median']:>9.3f}"
+              f"{p['lift']:>+9.3f}{ov_s:>13}")
+
+    coh = res["community_coherence"]
+    print()
+    if coh.get("available"):
+        print(f"  Community coherence: silhouette {coh['silhouette']:+.3f} · "
+              f"ARI vs k-means {coh['ari']:+.3f}  ({coh['communities']} communities)")
+    else:
+        print(f"  Community coherence: n/a ({coh.get('reason', 'unavailable')})")
+
+    reach = res["graph_reach"]
+    frac = reach.get("non_semantic_fraction")
+    print("\n  ── Headline: graph reach ──")
+    if frac is None:
+        print("  No non-similarity edges (references/shared-entity/relations) to measure —")
+        print("  build entities/relations (`graph-build --relations`) for the reach metric.")
+    else:
+        print(f"  {frac:.0%} of the graph's {reach['pairs']} non-similarity connections link pages")
+        print(f"  the embedder would NOT rank as neighbors (cosine ≤ the random-pair median "
+              f"{reach['null_median']:.3f}).")
+        print(f"  → that much of the graph's structure is reach semantic similarity alone misses.")
+    print()
+
+
+def _cmd_analyze(args: argparse.Namespace) -> int:
+    """World-model analysis (P1): graph↔semantic **coupling** — measure where the knowledge
+    graph agrees with the embedding geometry (redundant) vs. adds non-semantic structure.
+    Read-only + offline (uses the stored embeddings; no Ollama call)."""
+    if not (args.index / "index.json").is_file():
+        print(f"error: no index at {args.index} (run `openwiki index` first).", file=sys.stderr)
+        return 2
+    graph = _open_graph(args.graph, writable=False)
+    if graph is None:
+        print(f"error: no graph at {args.graph} (build it with `openwiki graph-build`).", file=sys.stderr)
+        return 2
+    try:
+        index = SemanticIndex.load(args.index)
+        res = analyze_coupling(index, graph, k=args.k)
+    finally:
+        graph.close()
+    if args.as_json:
+        print(json.dumps(res, ensure_ascii=False, indent=2))
+    else:
+        _print_coupling_report(res)
+    return 0
+
+
 def _cmd_hook(args: argparse.Namespace) -> int:
     """Host-lifecycle memory hook (B6): reads the Claude Code event JSON on stdin and either
     **injects** recalled memory (UserPromptSubmit → stdout) or **captures** the session
@@ -2475,6 +2563,7 @@ _DISPATCH = {
     "remember": _cmd_remember,
     "recall": _cmd_recall,
     "context": _cmd_context,
+    "analyze": _cmd_analyze,
     "hook": _cmd_hook,
 }
 

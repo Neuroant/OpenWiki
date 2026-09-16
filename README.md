@@ -53,6 +53,10 @@ natively (local, stdlib-where-possible, no cloud) and **rigorously measured**:
   measurable retrieval option (`--hybrid` / `--rerank`).
 - **Observability** — the LLM/embedding calls' latency + token counts (per request and
   per build stage), surfaced in the CLI and a live **System** tab.
+- **World-model analysis** (`owiki analyze`) — measure the *structure and organization* of
+  the knowledge: graph↔semantic **coupling** — where the knowledge graph agrees with the
+  embedding space (redundant) vs. adds non-semantic structure the embedder misses (the
+  headline "graph reach"). Read-only + offline; enriched by the `[analysis]` extra.
 
 The sample document is `301357_NAUTILUS_OG_G1.pdf` — the German Korg NAUTILUS
 synthesizer manual (269 pages, 228 outline entries → a 51-page wiki → 815 embedded
@@ -727,5 +731,6 @@ PDF ──PDFParser──▶ ParsedDocument ──▶ JSON / Markdown
 - [x] **Typed `Entity→Entity` relations** — LLM-extracted subject–predicate–object `RELATED_TO` edges (`--relations`), surfaced in `find_entity` + the Graph tab
 - [x] **Relation-aware GraphRAG** — expansion traverses typed relations (`MENTIONS→RELATED_TO→MENTIONS`); a `relation` neighbourhood group in `graph_neighbors`, `ask`, and `owiki eval`
 - [x] **Corpus-wide entity resolution** — `--resolve-entities` merges surface variants into canonical entities with aliases + descriptions (embedding candidates + LLM verify)
+- [x] **World-model analysis (P1)** — `owiki analyze`: graph↔semantic coupling (edge-cosine vs. null, graph-vs-kNN overlap, community coherence, the "graph reach" headline); offline, enriched by the `[analysis]` extra
 - [x] **CI** — GitHub Actions runs the offline suite on every push/PR (Python 3.11–3.13) + builds the Docker image
 - [x] **Packaging** — PyPI-ready build (dist name `owiki`, `twine check` clean) + a `Dockerfile`/compose + a manual PyPI-publish workflow *(publish gated on a license decision)*

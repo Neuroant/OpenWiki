@@ -251,6 +251,31 @@ Options: `-k N` (activation facts; default 8), `--themes N` (default 4), `--max-
 (bounded by the same budget). Scored by `eval --cross-session` (the "assembled" condition is this
 assembler; §7 — assembled beats cold + raw-log).
 
+**Analyze the world model — graph↔semantic coupling (P1)** — the **world-model analysis**
+toolkit: measure the *structure and organization* of the gathered knowledge by treating
+OpenWiki's two representations of the same corpus — the **symbolic graph** and the **semantic
+space** (embeddings) — as one object, and asking *where they agree (redundant) vs. disagree
+(the graph's own, non-semantic structure)*. Read-only + **offline** (uses the stored
+embeddings; no Ollama call):
+```
+.venv\Scripts\python -m openwiki analyze                 # coupling report
+.venv\Scripts\python -m openwiki analyze --json          # the coupling fingerprint (for compare/export)
+```
+Options: `-k N` (embedding neighbors per page for the overlap metric; default 8), `-i/--index DIR`,
+`--graph DIR`, `--json`. Backed by `openwiki/analysis/coupling.py` (pure NumPy; scikit-learn — the
+**`[analysis]` extra** — enriches community coherence, else it degrades to unavailable) +
+`GraphStore.coupling_edges()`. Metrics: **edge_profile** (per edge type, endpoint-cosine distribution
+vs. a random-pair *null* — SIMILAR_TO is the anchor, the gap down to REFERENCES/shared-entity/RELATED_TO
+is that edge's non-semantic reach), **neighbor_overlap** (Jaccard of graph neighbors vs. embedding
+k-NN, by edge type), **community_coherence** (silhouette + ARI of the Louvain communities in embedding
+space), and the headline **graph_reach** — the fraction of the graph's *non-similarity* connections
+whose endpoints are semantically no closer than a random pair (links similarity alone would never
+surface). This extends the RAG-vs-GraphRAG finding from "does the graph help retrieval?" to "how much
+structure does the graph encode that the embedder misses?" (measured on NAUTILUS: **~36%**, and the
+embedding space is strongly **anisotropic** — random-pair cosine ≈ 0.74 — so *lift over null*, not raw
+cosine, is the real signal). First slice of a larger direction (compare/diff, gaps/missing-links, a
+2D semantic-map Analyse tab — see `docs/roadmap.md`).
+
 **Web UI** — browse + search + chat/edit + graph in the browser (stdlib server):
 ```
 .venv\Scripts\python -m openwiki serve --port 8137        # http://127.0.0.1:8137
@@ -681,6 +706,16 @@ http — count, p50/p95, total time, token in/out) + a live recent-events table,
   (v0.47): assembled **100%** vs raw-log **85.7%** vs cold **0%**, judge **3–1** assembled — memory
   helps the next session and concentrating it beats replaying it. `--recall-k N` sets the recalled-
   fact budget. Pure/fake-testable core (`build_probe_messages`/`task_success`/the fake-graph driver).
+- **`openwiki/analysis/`** — the **world-model analysis** toolkit (`owiki analyze`). `coupling.py`
+  is P1: **graph↔semantic coupling**, pure NumPy over `SemanticIndex.embeddings` (collapsed to a
+  per-page mean vector, `page_vectors`) + `GraphStore.coupling_edges()` (undirected page-pair lists per
+  edge kind, guarded so optional layers yield empty). `analyze_coupling(index, graph, k)` returns a
+  JSON fingerprint: `edge_semantic_profile` (endpoint cosine per edge type vs. a random-pair null),
+  `neighbor_overlap` (graph-vs-kNN Jaccard), `graph_reach` (the headline non-semantic-fraction), and
+  `community_coherence` (silhouette + ARI — needs scikit-learn, the `[analysis]` extra; degrades to
+  `{"available": False}` without it). Read-only + additive (never mutates graph/index) + fake-testable
+  (`tests/test_analysis.py`). Analysis is to *structure* what `eval.py` is to *retrieval*. Later slices
+  (compare/diff, gaps/missing-links, a 2D semantic-map Analyse tab) in `docs/roadmap.md`.
 - **`openwiki/merge.py`** — `combine_documents(docs, names)` merges several
   `ParsedDocument`s into one corpus (concatenate pages with a running offset, shift
   table/image page numbers, wrap each source under a synthetic level-1 outline node
@@ -720,8 +755,8 @@ http — count, p50/p95, total time, token in/out) + a live recent-events table,
   (`list`/`use`/`add`/`remove`/`add-source`), `opencode`, `claude-code`, `ontology`, `ingest`,
   `build-wiki`, `index`, `search`, `eval`, `ask` (`--global` = global search),
   `chat`, `graph-build`, `communities`, `decay`, `remember`, `recall`, `consolidate`, `context`,
-  `hook` (host-lifecycle memory hook — reads the event JSON on stdin), `serve`, and `mcp`
-  subcommands. A shared
+  `analyze` (world-model coupling analysis — offline), `hook` (host-lifecycle memory hook — reads
+  the event JSON on stdin), `serve`, and `mcp` subcommands. A shared
   `--project` (parent parser) + `_apply_project(args, project)` fill unset
   path/model/host/split-level args from the active project before dispatch (flags
   override; no project → `./output`). `init`/`project add-source` take **`--session`**

@@ -535,6 +535,40 @@ class GraphStore:
                 add(a, b, min(int(n), 3) * SHARED_ENTITY_WEIGHT)
         return {"pages": pages, "edges": [(a, b, w) for (a, b), w in weights.items()]}
 
+    def coupling_edges(self) -> dict:
+        """Undirected page↔page edge pairs per kind, for the world-model coupling
+        analysis (``openwiki.analysis.coupling``). Each kind maps to a list of distinct
+        ``(a, b)`` slug pairs. Guarded per kind so optional layers (entities/relations)
+        yield an empty list on graphs that lack them, rather than raising."""
+        def undirected(query: str) -> list:
+            try:
+                rows = self._rows(query)
+            except Exception:       # optional table (Entity/RELATED_TO) absent
+                return []
+            seen: set = set()
+            for a, b in rows:
+                if a == b:
+                    continue
+                seen.add((a, b) if a < b else (b, a))
+            return list(seen)
+
+        return {
+            "similar": undirected(
+                "MATCH (a:Page)-[:SIMILAR_TO]->(b:Page) RETURN a.slug, b.slug;"),
+            "references": undirected(
+                "MATCH (a:Page)-[:REFERENCES]->(b:Page) RETURN a.slug, b.slug;"),
+            "shared_entity": undirected(
+                "MATCH (a:Page)-[:MENTIONS]->(:Entity)<-[:MENTIONS]-(b:Page) "
+                "WHERE a.slug <> b.slug RETURN a.slug, b.slug;"),
+            "relation": undirected(
+                "MATCH (a:Page)-[:MENTIONS]->(:Entity)-[:RELATED_TO]-(:Entity)"
+                "<-[:MENTIONS]-(b:Page) WHERE a.slug <> b.slug RETURN a.slug, b.slug;"),
+            "child_of": undirected(
+                "MATCH (a:Page)-[:CHILD_OF]->(b:Page) RETURN a.slug, b.slug;"),
+            "next": undirected(
+                "MATCH (a:Page)-[:NEXT]->(b:Page) RETURN a.slug, b.slug;"),
+        }
+
     def page_snippet(self, slug: str, max_chars: int = 400) -> str:
         """A short text excerpt for a page (its first chunks), for summarization."""
         rows = self._rows("MATCH (c:Chunk {page_slug:$s}) RETURN c.text LIMIT 3;", {"s": slug})

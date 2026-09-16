@@ -162,5 +162,6 @@ def test_cli_imports_the_graph_helpers_it_uses():
     """Guard: the CLI must import the graph functions its build paths call (a missing import
     only shows up when the CLI runs, which the offline suite otherwise doesn't exercise)."""
     import openwiki.cli as cli
-    for fn in ("resolve_entities", "extract_relations", "extract_entities", "build_graph"):
+    for fn in ("resolve_entities", "extract_relations", "extract_entities", "build_graph",
+               "analyze_coupling"):
         assert callable(getattr(cli, fn, None)), f"cli is missing {fn}"

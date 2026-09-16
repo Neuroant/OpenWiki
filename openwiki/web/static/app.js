@@ -110,6 +110,8 @@ function renderActiveTab() {
     renderMemory();
   } else if (state.tab === "system") {
     renderSystem();
+  } else if (state.tab === "analyse") {
+    renderAnalyse();
   } else {
     renderDoc(state.tab);
   }
@@ -173,6 +175,180 @@ async function renderSystem() {
   };
   await draw();
   startMetricsPoll(draw);
+}
+
+// -- Analyse tab: world-model (graph↔semantic) coupling ---------------------
+
+// Edge kinds on the semantic map, with a fixed colour + label. references/relation
+// (the non-semantic "reach" edges) are shown by default; the bulkier / redundant ones
+// (similar, shared-entity, structural) are opt-in toggles.
+const AN_KINDS = [
+  { key: "references",    label: "REFERENCES",    color: "#ffa94d", on: true },
+  { key: "relation",      label: "RELATED_TO",    color: "#da77f2", on: true },
+  { key: "shared_entity", label: "shared-entity", color: "#adb5bd", on: false },
+  { key: "similar",       label: "SIMILAR_TO",    color: "#4dabf7", on: false },
+  { key: "child_of",      label: "CHILD_OF",      color: "#63e6be", on: false },
+  { key: "next",          label: "NEXT",          color: "#82c91e", on: false },
+];
+const AN_LABEL = Object.fromEntries(AN_KINDS.map((k) => [k.key, k.label]));
+const analyse = { data: null, colorMap: {}, show: {}, colorByTheme: true };
+AN_KINDS.forEach((k) => (analyse.show[k.key] = k.on));
+
+function analyseUnavailable(data) {
+  const why = data.reason === "no_index"
+    ? `Kein Suchindex geladen — starte den Server mit <code>-i/--index</code> (oder baue ihn mit <code>openwiki index</code>).`
+    : `Kein Wissensgraph geladen — starte den Server mit <code>--graph</code> (oder baue ihn mit <code>openwiki graph-build</code>).`;
+  return `<div class="an-head"><strong>Weltmodell-Analyse</strong></div><p class="muted">${why}</p>`;
+}
+
+function analyseMetrics(c) {
+  const prof = c.edge_profile || {}, ov = c.neighbor_overlap || {};
+  const order = ["similar", "references", "shared_entity", "relation", "child_of", "next"];
+  const rows = order.map((k) => {
+    const p = prof[k] || {};
+    const ovs = ov[k] == null ? "—" : ov[k].toFixed(2);
+    if (!p.n) return `<tr class="an-dim"><td>${AN_LABEL[k]}</td><td class="num">0</td>
+      <td class="num">—</td><td class="num">—</td><td class="num">${ovs}</td></tr>`;
+    const lift = (p.lift >= 0 ? "+" : "") + p.lift.toFixed(3);
+    return `<tr><td>${AN_LABEL[k]}</td><td class="num">${p.n}</td>
+      <td class="num">${p.mean.toFixed(3)}</td><td class="num">${lift}</td><td class="num">${ovs}</td></tr>`;
+  }).join("");
+  const nul = prof._null || {};
+  const coh = c.community_coherence || {};
+  const cohLine = coh.available
+    ? `Silhouette <b>${coh.silhouette >= 0 ? "+" : ""}${coh.silhouette.toFixed(3)}</b> · ARI vs. k-means <b>${coh.ari >= 0 ? "+" : ""}${coh.ari.toFixed(3)}</b> <span class="muted">(${coh.communities} Communities)</span>`
+    : `<span class="muted">n/a — ${escapeHtml(coh.reason || "nicht verfügbar")}</span>`;
+  const r = c.graph_reach || {};
+  let headline;
+  if (r.non_semantic_fraction == null) {
+    headline = `<p class="muted">Keine Nicht-Ähnlichkeitskanten (REFERENCES/shared-entity/RELATED_TO) —
+      baue Entitäten/Relationen (<code>graph-build --relations</code>) für die Reichweiten-Kennzahl.</p>`;
+  } else {
+    headline = `<div class="an-big">${Math.round(r.non_semantic_fraction * 100)}%</div>
+      <p>der <b>${r.pairs}</b> Nicht-Ähnlichkeitsverbindungen des Graphen verknüpfen Seiten, die der
+      Embedder <b>nicht</b> als Nachbarn einstufen würde (Cosinus ≤ Median eines Zufallspaars,
+      ${r.null_median.toFixed(3)}). → so viel Struktur kodiert der Graph, die reine Ähnlichkeit verpasst.</p>`;
+  }
+  return `<div class="an-metrics">
+    <div class="an-panel">
+      <h3>Kanten im semantischen Raum</h3>
+      <table class="m-table an-tbl"><thead><tr><th>Kantentyp</th><th class="num">n</th>
+        <th class="num">Cos(⌀)</th><th class="num">vs. Null</th><th class="num">kNN-Overlap</th></tr></thead>
+        <tbody>${rows}</tbody></table>
+      <p class="muted an-note">Zufallspaar-Cosinus ≈ ${(nul.mean || 0).toFixed(3)} · SIMILAR_TO ist der Anker
+        (Cosinus-abgeleitet); der Abstand nach unten ist die nicht-semantische Reichweite eines Kantentyps.</p>
+      <div class="an-coh">Community-Kohärenz: ${cohLine}</div>
+    </div>
+    <div class="an-panel an-headline">
+      <h3>Graph-Reichweite</h3>${headline}
+    </div>
+  </div>`;
+}
+
+function analyseControls(data) {
+  const toggles = AN_KINDS.map((k) => {
+    const n = (data.edges[k.key] || []).length;
+    return `<label class="an-tog"><input type="checkbox" data-edge="${k.key}"
+      ${analyse.show[k.key] ? "checked" : ""} ${n ? "" : "disabled"}>
+      <span class="an-sw" style="background:${k.color}"></span>${k.label}
+      <span class="muted">(${n})</span></label>`;
+  }).join("");
+  const legend = (data.communities || []).map((cm) =>
+    `<span class="an-leg"><span class="an-sw" style="background:${analyse.colorMap[cm.id]}"></span>${escapeHtml(cm.label || ("#" + cm.id))}</span>`
+  ).join("");
+  const themeTog = (data.communities || []).length
+    ? `<label class="an-tog"><input type="checkbox" id="an-theme" ${analyse.colorByTheme ? "checked" : ""}>
+        Themenfarben</label>` : "";
+  return `<div class="an-controls">
+      <div class="an-toggles">${toggles}</div>
+      ${themeTog}
+    </div>
+    <div class="an-legend">${legend}</div>`;
+}
+
+function analyseLayout(data) {
+  return `<div class="an-head"><strong>Weltmodell-Analyse</strong>
+      <span class="muted">Graph ↔ semantischer Raum · ${data.projection.points.length} Seiten ·
+      Projektion: ${data.projection.method.toUpperCase()}</span></div>
+    ${analyseMetrics(data.coupling)}
+    <h3 class="an-maph">Semantische Karte <span class="muted">— Seiten im Embedding-Raum, Graphkanten überlagert</span></h3>
+    ${analyseControls(data)}
+    <div id="an-map" class="an-map"></div>`;
+}
+
+function anPointColor(community) {
+  if (analyse.colorByTheme && community != null && analyse.colorMap[community]) return analyse.colorMap[community];
+  return "#4dabf7";
+}
+
+function drawSemanticMap() {
+  const host = $("#an-map");
+  if (!host || !analyse.data) return;
+  const data = analyse.data, pad = 26;
+  const pts = data.projection.points;
+  const svg = svgEl("svg", { viewBox: `0 0 ${GW} ${GH}`, class: "an-svg" });
+  const px = (x) => pad + x * (GW - 2 * pad);
+  const py = (y) => pad + (1 - y) * (GH - 2 * pad);   // flip: y up
+  const at = {};
+  pts.forEach((p) => (at[p.slug] = p));
+  // edges first (under the points), only the toggled kinds
+  AN_KINDS.forEach((k) => {
+    if (!analyse.show[k.key]) return;
+    (data.edges[k.key] || []).forEach(([a, b]) => {
+      const pa = at[a], pb = at[b];
+      if (!pa || !pb) return;
+      svg.appendChild(svgEl("line", {
+        x1: px(pa.x), y1: py(pa.y), x2: px(pb.x), y2: py(pb.y),
+        stroke: k.color, "stroke-width": 1, "stroke-opacity": 0.35,
+      }));
+    });
+  });
+  // points on top
+  pts.forEach((p) => {
+    const c = svgEl("circle", {
+      cx: px(p.x), cy: py(p.y), r: 5, fill: anPointColor(p.community),
+      stroke: "#1b1e24", "stroke-width": 1, class: "an-node", "data-slug": p.slug,
+    });
+    const t = svgEl("title", {});
+    t.textContent = p.title + (p.community != null ? "  ·  Community " + p.community : "");
+    c.appendChild(t);
+    svg.appendChild(c);
+  });
+  svg.addEventListener("click", (e) => {
+    const slug = e.target && e.target.getAttribute && e.target.getAttribute("data-slug");
+    if (slug) loadPage(slug);
+  });
+  host.innerHTML = "";
+  host.appendChild(svg);
+}
+
+function wireAnalyse() {
+  document.querySelectorAll('#an input[data-edge]').forEach((cb) =>
+    cb.addEventListener("change", () => { analyse.show[cb.dataset.edge] = cb.checked; drawSemanticMap(); }));
+  const theme = $("#an-theme");
+  if (theme) theme.addEventListener("change", () => { analyse.colorByTheme = theme.checked; drawSemanticMap(); });
+}
+
+async function renderAnalyse() {
+  const content = $("#content");
+  content.innerHTML = `<div id="an"><p class="muted">Analyse wird berechnet…</p></div>`;
+  let data;
+  try {
+    data = await getJSON("/api/analyze");
+  } catch (e) {
+    $("#an").innerHTML = `<p class="muted">Fehler: ${escapeHtml(e.message)}</p>`;
+    return;
+  }
+  const an = $("#an");
+  if (!an) return;   // tab switched away mid-fetch
+  if (!data.available) { an.innerHTML = analyseUnavailable(data); return; }
+  analyse.data = data;
+  analyse.colorMap = {};
+  (data.communities || []).forEach((cm) => (analyse.colorMap[cm.id] = COMMUNITY_PALETTE[cm.id % COMMUNITY_PALETTE.length]));
+  analyse.colorByTheme = (data.communities || []).length > 0;
+  an.innerHTML = analyseLayout(data);
+  wireAnalyse();
+  drawSemanticMap();
 }
 
 // -- Memory (Gedächtnis / Second Brain) tab ---------------------------------

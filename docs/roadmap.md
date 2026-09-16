@@ -395,10 +395,14 @@ heavier **`[analysis]` extra** (scikit-learn now; umap/networkx later) opt-in.
   ≈ 0.74, so lift-over-null is the real signal); communities only weakly separate in embedding
   space (silhouette +0.09) and only partly match k-means clusters (ARI +0.39) — the graph organizes
   along axes the geometry doesn't fully capture.*
-- **P2 — the Analyse tab** — the visual layer: metric dashboards, degree/distance histograms,
-  a community×edge-type heatmap, and a **2D semantic map** (embedding projection colored by
-  community/type, graph edges overlaid — "see structure + semantics together"). Needs a projector
-  (PCA pure; UMAP/t-SNE via the extra).
+- ✅ **P2 — the Analyse tab landed (v0.68)** — the visual layer in the web UI: the coupling
+  metric table (endpoint cosine vs. null + kNN overlap per edge type), the **graph-reach headline**,
+  community coherence, and a hand-rolled SVG **2-D semantic map** — pages projected by PCA (or UMAP
+  with the extra, `openwiki/analysis/projection.py`), coloured by community, with graph edges overlaid
+  and per-edge-type toggles (references/relation on by default; click a node → open the page). Backed
+  by `WikiWebApp.analyze()` → `/api/analyze`. Read-only + offline. *The reference edges visibly span
+  long distances across the embedding layout — the 36% non-semantic reach, made visual.* Remaining
+  P2 polish (histograms, a community×edge-type heatmap) is optional.
 - **P3 — compare/diff + gap-mining** — `analyze --compare A B` over the fingerprint (radar diffs
   across corpora / versions / embedders / settings) + **actionable** outputs: missing-link
   candidates, entity-merge candidates, redundancy, knowledge deserts (the analysis→improvement loop).

@@ -338,3 +338,31 @@ header {
 .mem-table td.m-name { font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; font-size: 12px; color: var(--muted); }
 .mem-table tr.sup { display: none; }
 .mem-table.show-sup tr.sup { display: table-row; opacity: .6; }
+
+/* -- Analyse tab: world-model coupling ------------------------------------ */
+.an-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 12px; }
+.an-head strong { font-size: 15px; }
+.an-metrics { display: grid; grid-template-columns: 1.4fr 1fr; gap: 14px; margin-bottom: 8px; }
+.an-panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+.an-panel h3 { margin: 0 0 8px; font-size: 13px; }
+.an-tbl { width: 100%; }
+.an-tbl td, .an-tbl th { padding: 3px 6px; }
+.an-tbl tr.an-dim { color: var(--muted); }
+.an-note { font-size: 11.5px; margin: 8px 0 6px; }
+.an-coh { font-size: 13px; border-top: 1px solid var(--line); padding-top: 8px; }
+.an-headline { display: flex; flex-direction: column; }
+.an-big { font-size: 44px; font-weight: 700; color: var(--accent); line-height: 1.1; }
+.an-headline p { font-size: 13px; margin: 6px 0 0; }
+.an-maph { margin: 16px 0 6px; font-size: 13px; }
+.an-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 14px; margin-bottom: 6px; }
+.an-toggles { display: flex; flex-wrap: wrap; gap: 12px; }
+.an-tog { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; cursor: pointer; }
+.an-tog input[disabled] { opacity: .4; }
+.an-sw { display: inline-block; width: 11px; height: 11px; border-radius: 3px; }
+.an-legend { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 8px; }
+.an-leg { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted); }
+.an-map { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.an-svg { display: block; width: 100%; height: auto; }
+.an-node { cursor: pointer; transition: r .1s; }
+.an-node:hover { r: 7; stroke: var(--accent); stroke-width: 2; }
+@media (max-width: 900px) { .an-metrics { grid-template-columns: 1fr; } }

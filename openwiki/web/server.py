@@ -402,6 +402,40 @@ class WikiWebApp:
         from .. import metrics as m
         return m.COLLECTOR.snapshot(limit=limit)
 
+    # -- world-model analysis (Analyse tab) ----------------------------------
+
+    def analyze(self, k: int = 8, method: str = "auto", max_edges: int = 400) -> dict:
+        """Graph↔semantic coupling metrics + a 2-D semantic map for the Analyse tab
+        (``/api/analyze``). Read-only + offline (stored embeddings). ``available: false``
+        (with a ``reason``) when the index or graph is missing."""
+        if self.index is None:
+            return {"available": False, "reason": "no_index"}
+        if self.graph is None:
+            return {"available": False, "reason": "no_graph"}
+        from ..analysis.coupling import analyze_coupling, page_vectors
+        from ..analysis.projection import project_2d
+
+        coupling = analyze_coupling(self.index, self.graph, k=k)
+        slugs, vecs = page_vectors(self.index)
+        coords, used = project_2d(vecs, method=method)
+        titles = {p["slug"]: p.get("title", p["slug"]) for p in self.manifest().get("pages", [])}
+        community_of = {s: cid for cid, members in self.graph.community_members().items()
+                        for s in members}
+        points = [{
+            "slug": s, "title": titles.get(s, s),
+            "x": round(float(coords[i][0]), 4), "y": round(float(coords[i][1]), 4),
+            "community": community_of.get(s),
+        } for i, s in enumerate(slugs)]
+        present = set(slugs)
+        edges = {}
+        for kind, pairs in self.graph.coupling_edges().items():
+            kept = [[a, b] for a, b in pairs if a in present and b in present]
+            edges[kind] = kept[:max_edges]           # cap per kind so the overlay stays light
+        communities = [{"id": c["id"], "label": c["label"]} for c in self.communities()]
+        return {"available": True, "coupling": coupling,
+                "projection": {"method": used, "points": points},
+                "edges": edges, "communities": communities}
+
     # -- memory tier (Path B / Second Brain) ---------------------------------
 
     def _memory_embedder(self):
@@ -568,6 +602,11 @@ def make_handler(app: WikiWebApp):
                     return self._json(app.memory_info())
                 if path == "/api/communities":
                     return self._json({"communities": app.communities()})
+                if path == "/api/analyze":
+                    query = parse_qs(urlparse(self.path).query)
+                    k = int(query.get("k", ["8"])[0])
+                    method = query.get("method", ["auto"])[0]
+                    return self._json(app.analyze(k=k, method=method))
                 if path == "/api/answer-eval":
                     return self._json(app.answer_eval_status())
                 if path.startswith("/api/pages/"):

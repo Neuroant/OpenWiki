@@ -15,5 +15,6 @@ degrades gracefully.
 """
 
 from .coupling import analyze_coupling, page_vectors
+from .projection import project_2d
 
-__all__ = ["analyze_coupling", "page_vectors"]
+__all__ = ["analyze_coupling", "page_vectors", "project_2d"]

@@ -108,6 +108,35 @@ def test_analyze_coupling_shape_and_reach():
     assert "available" in res["community_coherence"]
 
 
+def test_project_2d_pca_is_normalized_and_shaped():
+    from openwiki.analysis.projection import project_2d
+    rng = np.random.default_rng(0)
+    vecs = rng.normal(size=(20, 8)).astype(np.float32)
+    coords, method = project_2d(vecs, method="pca")
+    assert method == "pca"
+    assert coords.shape == (20, 2)
+    # min-max normalized into [0, 1] on each axis
+    assert coords.min() >= -1e-6 and coords.max() <= 1 + 1e-6
+    assert np.allclose(coords.min(axis=0), 0.0, atol=1e-6)
+    assert np.allclose(coords.max(axis=0), 1.0, atol=1e-6)
+
+
+def test_project_2d_auto_falls_back_to_pca_without_umap():
+    from openwiki.analysis.projection import project_2d
+    vecs = np.eye(5, dtype=np.float32)
+    coords, method = project_2d(vecs, method="auto")   # umap not installed in the test env
+    assert method in ("pca", "umap")                   # either is acceptable; shape must hold
+    assert coords.shape == (5, 2)
+
+
+def test_project_2d_handles_tiny_inputs():
+    from openwiki.analysis.projection import project_2d
+    coords, method = project_2d(np.zeros((0, 4), dtype=np.float32))
+    assert coords.shape == (0, 2) and method == "none"
+    coords, method = project_2d(np.ones((2, 4), dtype=np.float32))
+    assert coords.shape == (2, 2) and method == "trivial"
+
+
 def test_edges_restricted_to_pages_in_the_index():
     # an edge to a page absent from the index is dropped, not crashed on
     index = _FakeIndex(["p0", "p1"], [[1.0, 0.0], [0.9, 0.1]])

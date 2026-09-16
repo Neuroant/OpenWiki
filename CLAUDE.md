@@ -565,7 +565,8 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   (`WikiWebApp.metrics()` → `metrics.COLLECTOR.snapshot()`), `/api/memory` = the Path B
   memory-tier overview (`memory_info()`: identity + counts + themes + browsable assertions),
   `/api/recall` (POST) = decay-weighted `recall`, `/api/context` (POST) = the assembled
-  three-tier `context_for`) plus static files
+  three-tier `context_for`, `/api/analyze?k=&method=` = the world-model coupling analysis +
+  2-D semantic map (`WikiWebApp.analyze()` → `analysis.analyze_coupling` + `project_2d`)) plus static files
   (served `no-cache`); `serve()` runs it. Every `/api/*` request is timed and recorded
   as an `http` metrics event (`_observe_request`), and `chat()` returns per-turn LLM
   telemetry (`_turn_stats` over the collector events since the turn began).
@@ -578,8 +579,15 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   `COMMUNITY_PALETTE`, keyed by the node's `community` id from `_page_gnode` →
   `GraphStore._community_of`), with a swatch legend + a "Themenfarben" toggle
   (fetched from `/api/communities`; neutral blue when off or no communities) — no JS libraries. `static/` = a no-build vanilla-JS SPA with client-side Markdown via a
-  vendored `marked.min.js`. The center pane has eight tabs (**Projekt / Wiki /
-  Graph / Gedächtnis / Evaluation / System / Tutorial / Hilfe**). The **Gedächtnis (Memory)
+  vendored `marked.min.js`. The center pane has nine tabs (**Projekt / Wiki /
+  Graph / Analyse / Gedächtnis / Evaluation / System / Tutorial / Hilfe**). The **Analyse tab**
+  (`renderAnalyse` → `/api/analyze`) is the **world-model analysis** surface (P2): the coupling
+  metric table (per edge type: endpoint cosine vs. null + kNN overlap), the **graph-reach headline**
+  (the non-semantic-fraction %), community coherence, and a hand-rolled SVG **semantic map** — the
+  pages projected to 2-D (PCA, or UMAP with the `[analysis]` extra), coloured by community
+  (`COMMUNITY_PALETTE`), with graph edges overlaid and per-edge-type toggles (REFERENCES + RELATED_TO
+  on by default — the non-semantic "reach" edges; click a node → open the page). Read-only + offline;
+  graceful empty states (no index / no graph). The **Gedächtnis (Memory)
 tab** (`renderMemory` → `/api/memory`) surfaces **Path B** in the browser: the identity
 (DNA) + stat chips (Sitzungen / Fakten / überholt / Themen), a **recall/context box**
 (`/api/recall` decay-weighted facts, `/api/context` the assembled three-tier context),
@@ -713,9 +721,13 @@ http — count, p50/p95, total time, token in/out) + a live recent-events table,
   JSON fingerprint: `edge_semantic_profile` (endpoint cosine per edge type vs. a random-pair null),
   `neighbor_overlap` (graph-vs-kNN Jaccard), `graph_reach` (the headline non-semantic-fraction), and
   `community_coherence` (silhouette + ARI — needs scikit-learn, the `[analysis]` extra; degrades to
-  `{"available": False}` without it). Read-only + additive (never mutates graph/index) + fake-testable
-  (`tests/test_analysis.py`). Analysis is to *structure* what `eval.py` is to *retrieval*. Later slices
-  (compare/diff, gaps/missing-links, a 2D semantic-map Analyse tab) in `docs/roadmap.md`.
+  `{"available": False}` without it). `projection.py` (P2) is `project_2d(vecs, method)` — pure-NumPy
+  **PCA** (SVD, min-max to [0,1]) always available, **UMAP** via the extra (`method="auto"`/`"umap"`,
+  falls back to PCA). Read-only + additive (never mutates graph/index) + fake-testable
+  (`tests/test_analysis.py`). Surfaced by `owiki analyze` (CLI) **and** the web **Analyse tab**
+  (`WikiWebApp.analyze()` → `/api/analyze`: coupling metrics + a 2-D semantic map with graph edges
+  overlaid). Analysis is to *structure* what `eval.py` is to *retrieval*. Later slices (compare/diff,
+  gaps/missing-links, memory-tier dynamics) in `docs/roadmap.md`.
 - **`openwiki/merge.py`** — `combine_documents(docs, names)` merges several
   `ParsedDocument`s into one corpus (concatenate pages with a running offset, shift
   table/image page numbers, wrap each source under a synthetic level-1 outline node

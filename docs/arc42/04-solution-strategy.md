@@ -20,6 +20,7 @@ ADR referenced in the last column — see [Architecture Decisions](09-architectu
 | **Project manifest + settings precedence** | `openwiki.toml` groups a KB; unset settings resolve `flag > manifest > ~/.openwiki config > built-in default`. | usability | ADR-10 |
 | **Incremental, fingerprinted builds** | Per-stage input+param fingerprints skip unchanged stages; each stage records duration + token spend. | performance | ADR-11, ADR-20 |
 | **Evaluation-driven design** | A backend-agnostic eval harness turns "is the graph / this retrieval add-on worth it?" into measured findings (RAG vs GraphRAG vs Hybrid vs Rerank vs Global) — add-ons are scored *before* they're trusted. | Q5 | ADR-9, ADR-21 |
+| **World-model analysis (measure the structure)** | A read-only, additive `analysis/` toolkit (`owiki analyze`) measures the *structure* of the knowledge — graph↔semantic **coupling** (+ a 2-D map), **gaps**, fingerprint **compare**, and memory-tier **dynamics**. Analysis is to structure what eval is to retrieval; pure-NumPy core, heavier bits behind `[analysis]`. | Q5, Q4 | ADR-25 |
 | **Always-on observability** | A bounded, in-process metrics collector captures the latency + token counts Ollama returns (per call, per request, per build stage) — surfaced in the CLI, the System tab, and Projekt. | Q5, performance | ADR-20 |
 | **Ship it: `owiki` build + Docker + CI** | Installable/containerizable, with CI running the offline suite (Linux, 3.11–3.13) + Docker build on every push; public publishing is license-gated. | Q2, usability | ADR-24 |
 | **Grounded agents** | RAG/editing agents answer only from provided excerpts and cite provenance; the graph adds context, never ungrounded claims. | correctness, trust | §8.4 |
@@ -52,9 +53,10 @@ source ──parse_source──▶ ParsedDocument (IR) ──▶ JSON / Markdown
                                │  (+ entities/typed relations/resolution, communities, REINFORCES)
        capture_session + GraphStore.remember ──▶ remembered tier   (Path B, Second Brain)
                                │     (Session/Assertion + SUPERSEDES; recall)
-                    WikiWebApp (http.server) ──▶ browser SPA (8 tabs, incl. System metrics)
+                    WikiWebApp (http.server) ──▶ browser SPA (9 tabs, incl. System metrics + Analyse)
                     MCPStdioServer ──▶ coding agents
    (every LLM/embed call → metrics.COLLECTOR: latency + tokens, observability)
+   analysis/ (owiki analyze) ──▶ world-model coupling / gaps / compare / memory dynamics (read-only)
 ```
 
 ---

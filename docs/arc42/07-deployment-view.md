@@ -33,6 +33,7 @@ flowchart TB
 | Aspect | Detail |
 |---|---|
 | **Dev install** | `py -m venv .venv` → `pip install -e ".[dev]"` → the `openwiki` console script + pytest. |
+| **Optional extras** | `pip install -e ".[analysis]"` adds **scikit-learn** (and, later, UMAP) for the world-model analysis toolkit (ADR-25) — enriches `owiki analyze` (community coherence + the 2-D semantic map). Purely opt-in: the base install runs `analyze` on pure NumPy (PCA + core metrics), degrading gracefully without it. |
 | **Global install** | `pipx`-based (`install-openwiki.ps1`) exposes `openwiki` and the short alias `owiki` on PATH. |
 | **Runtime prerequisite** | A running **Ollama** with the models pulled (`ollama pull bge-m3`; the chat model). |
 | **Web server** | `owiki serve --port 8137` binds `127.0.0.1` by default; the SPA is served from `web/static/`. |

@@ -245,8 +245,35 @@ deterministic-where-possible stages:
 The whole layer is additive (ADR-7, always-created empty) and derived (rebuilt each `graph-build`, never
 snapshotted — unlike the remembered tier, §8.15), so store/agent code degrades gracefully when it's off.
 
+## 8.19 World-model analysis (ADR-25)
+
+OpenWiki holds two representations of the *same* corpus — the symbolic **graph** and the continuous
+**semantic space** — plus a memory tier that changes over time. The `analysis/` package (`owiki analyze`)
+measures their **structure and organization**; it is to *structure* what the eval harness (§8.17) is to
+*retrieval*. All of it is **read-only + additive** (never mutates graph/index, per ADR-3) and **offline**
+where possible (it reads the *stored* embeddings — no Ollama). The core is pure NumPy; the heavier bits
+(silhouette/ARI, UMAP) sit behind an opt-in `[analysis]` extra and degrade gracefully.
+
+- **Coupling** — the central, OpenWiki-specific idea: *where does the graph agree with the embedding
+  geometry (redundant) vs. add non-semantic structure?* Per-edge-type endpoint-cosine **against a
+  random-pair null** (the space is anisotropic, so lift-over-null, not raw cosine, is the signal), graph-vs-
+  kNN neighbor overlap, community coherence, and the headline **graph reach** — the fraction of non-similarity
+  edges the embedder would never rank as neighbors. This quantifies the RAG-vs-GraphRAG finding (≈36%).
+- **Semantic map** — a 2-D projection (PCA, or UMAP with the extra) of the pages, coloured by community,
+  graph edges overlaid — the Analyse tab makes the reach *visible*.
+- **Gaps** — the analysis→improvement loop: ranked missing-cross-reference, near-duplicate, isolated-page,
+  and entity-merge candidates (a to-do list, not just a dashboard).
+- **Compare** — a coupling **fingerprint** is a compact, *relative*-metric description, so two diff directly
+  (across corpora / versions / embedders / settings).
+- **Memory dynamics** — over the Path B tier (§8.15): revision (supersession rate), consolidation coverage,
+  temperature (hot/cold by decayed weight + confidence), breadth, and growth per session — the *learning*
+  tier made legible.
+
+Interpretability rests on **baselines** (the random-pair null, `--compare`), not absolute thresholds — the
+same measured-claims discipline as ADR-9.
+
 ---
 *Chapter complete. Cross-refs: runtime error paths → §6.8; the memory tier → §8.15 + ADR-14/15/16/18;
 observability → §8.16 + ADR-20; retrieval → §8.17 + ADR-9/21 + `docs/RAG-vs-GraphRAG.md`; the semantic
-graph → §8.18 + ADR-12/22/23; the no-auth risk → §11 R1; the project concept → §5, ADR-10/11, §7; the
-boundaries these concepts rest on → §5.1 + ADR-1/2/7/13.*
+graph → §8.18 + ADR-12/22/23; world-model analysis → §8.19 + ADR-25; the no-auth risk → §11 R1; the project
+concept → §5, ADR-10/11, §7; the boundaries these concepts rest on → §5.1 + ADR-1/2/7/13.*

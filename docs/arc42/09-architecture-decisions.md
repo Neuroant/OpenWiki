@@ -5,7 +5,8 @@
 > Decisions the agent-memory direction re-opened are marked "refined by ADR-N"; Path B has since
 > **landed** (ADR-14–19). Later decisions deepen the graph (ADR-22 typed relations + relation-aware
 > GraphRAG, ADR-23 entity resolution) and add **observability** (ADR-20), a *measured* retrieval-add-on
-> discipline (ADR-21), and a **shipping** story (ADR-24 packaging + CI).
+> discipline (ADR-21), a **shipping** story (ADR-24 packaging + CI), and a **world-model analysis** toolkit
+> (ADR-25, Direction I).
 
 ## ADR index
 
@@ -35,6 +36,7 @@
 | [22](#adr-22) | Typed `Entity→Entity` relations + relation-aware GraphRAG | Accepted | Q4, Q5 |
 | [23](#adr-23) | Corpus-wide entity resolution (embedding candidates + LLM verify) | Accepted | Q3, quality |
 | [24](#adr-24) | Ship as the `owiki` distribution + CI; publishing license-gated | Accepted | Q2, usability |
+| [25](#adr-25) | World-model analysis as a read-only, additive toolkit (`owiki analyze`) | Accepted | Q5, Q4 |
 
 ---
 
@@ -392,9 +394,39 @@
   the project is installable + containerizable; publishing is one deliberate step away. − not on PyPI yet
   (license-gated); CI is Linux-only so far (no Windows/macOS leg).
 
+### ADR-25
+**World-model analysis as a read-only, additive toolkit (`owiki analyze`).** *(v0.67–v0.71, Direction I)*
+- **Context:** OpenWiki holds two representations of the *same* corpus — the symbolic **graph** and the
+  continuous **semantic space** (embeddings) — plus a memory tier that changes over time. Nothing measured
+  the *structure and organization* of that knowledge: only runtime metrics (ADR-20) and retrieval quality
+  (ADR-9) existed. The question "is this knowledge base well-organized, and how much does the graph actually
+  add over the embeddings?" had no numeric answer.
+- **Decision:** a new `openwiki/analysis/` package + an `owiki analyze` subcommand (ADR-13), **read-only +
+  additive** (never mutates graph/index, like ADR-3) and **offline** where possible (uses the *stored*
+  embeddings; no Ollama). Five capabilities: **coupling** (where the graph agrees with vs. adds to the
+  embedding geometry — the headline *graph reach*), a **2-D semantic map** (Analyse tab, `/api/analyze`),
+  **gaps** (ranked, actionable improvement candidates), **compare** (a coupling-fingerprint diff across
+  corpora / versions / embedders / settings), and **memory** dynamics (the Path B tier's
+  revision / consolidation / temperature / growth). The core is **pure NumPy**; the heavier bits (silhouette
+  + ARI, UMAP projection) live behind an opt-in **`[analysis]` extra** (ADR-4/5), degrading gracefully when
+  absent. *Analysis is to structure what `owiki eval` (ADR-9) is to retrieval* — it turns a qualitative
+  question into measured, comparable numbers.
+- **Alternatives:** fold the metrics into `eval` — rejected (a different question: structure vs. retrieval
+  quality); require the extra always — rejected (keeps the base install lean, ADR-4); take a heavyweight
+  graph-analytics dependency (networkx/igraph) as *core* — rejected (hand-rolled pure-NumPy suffices at this
+  scale, per the `community.py` Louvain precedent).
+- **Consequences:** + a principled, *measured* account of the graph's marginal value — it extends the
+  RAG-vs-GraphRAG finding (≈36% of the graph's non-similarity edges are reach the embedder misses; the space
+  is strongly anisotropic, so lift-over-null is the real signal); + an **analysis→improvement loop** (gaps
+  surfaced a real source typo, entity-name variants, and a duplicate-titled page); + **comparability** across
+  KBs/versions; + the memory analysis makes the "learning over time" tier legible. − metrics need
+  baselines/nulls to be interpretable (addressed by the random-pair null + `--compare`); − the O(n²)
+  page-scale computations are fine now but won't scale to very large corpora (same class as R3/D3).
+
 ---
 *Chapter complete. The Path-B agent-memory direction landed via ADR-14/15/16/17/18/19; the graph then
 deepened (ADR-22 typed relations + relation-aware GraphRAG, ADR-23 entity resolution), gained
-**observability** (ADR-20), a *measured* retrieval-add-on discipline (ADR-21), and a **shipping** story
-(ADR-24 packaging + CI). §11 debts D1/D2/D6 are resolved. Deep designs in `docs/path-b-memory.md` and
-`docs/RAG-vs-GraphRAG.md`. New significant decisions should be appended here with the next id.*
+**observability** (ADR-20), a *measured* retrieval-add-on discipline (ADR-21), a **shipping** story
+(ADR-24 packaging + CI), and a **world-model analysis** toolkit (ADR-25, Direction I). §11 debts D1/D2/D6
+are resolved. Deep designs in `docs/path-b-memory.md` and `docs/RAG-vs-GraphRAG.md`. New significant
+decisions should be appended here with the next id.*

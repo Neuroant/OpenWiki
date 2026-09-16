@@ -126,6 +126,7 @@ files, network/Ollama, or Kuzu).
 | `web/server.py` | I/O (http, Kuzu) | `WikiWebApp` (state + methods) + `make_handler(app)` + `serve(app, host, port)`. See §5.3. |
 | `mcp_server.py` | I/O (stdio) | `build_server(wiki_dir, index, graph, agent) -> MCPStdioServer`; `.handle(msg)` is pure. |
 | `eval.py` | pure (drivers inject I/O) | Metrics (`reciprocal_rank`, `hit_at_k`, `recall_at_k`, `grounding`, `community_grounding`, `judge_pairwise`, `task_success`) + drivers (`evaluate`, `make_retrievers`, `hybrid_pages`, `make_reranker`/`reranking_retriever` (ADR-21), `run_answer_eval`, `run_global_eval`, `run_cross_session_eval`). |
+| `analysis/` | pure (+NumPy; graph read-only) | **World-model analysis** (ADR-25, Direction I), the structural analog of `eval.py`. `coupling.py` (`analyze_coupling`, `page_vectors` — graph↔semantic edge-cosine-vs-null, neighbor overlap, community coherence, the *graph-reach* headline); `projection.py` (`project_2d` — PCA, or UMAP via the `[analysis]` extra); `gaps.py` (`analyze_gaps` — missing-ref / near-duplicate / isolated-page / entity-merge candidates); `compare.py` (`flatten_fingerprint`/`diff_fingerprints`/`notable_differences`); `memory.py` (`analyze_memory` — Path B revision / consolidation / temperature / breadth / growth). Read-only, offline where possible; the `[analysis]` extra (scikit-learn) enriches, never required. |
 | `project.py` | I/O (files) | `Project.load/find/resolve`; `out_dir`/`wiki_dir`/`index_dir`/`graph_path`; `setting(section, key)`; `render_manifest`. |
 | `pipeline.py` | pure | `compute_fingerprints`, `stale_stages`, `BuildState` (incremental build state). |
 | `userconfig.py` | I/O (files) | `UserConfig` + `Registry` under `~/.openwiki/`. |
@@ -183,7 +184,7 @@ serves static files; `web/static/` is a no-build vanilla-JS SPA.
 
 | Block | kind | Key interface |
 |---|---|---|
-| `WikiWebApp` | I/O (Kuzu/Ollama/files) | `manifest`, `get_page`, `search`, `chat` (+ per-turn stats), `graph_explore`/`graph_expand`/`graph_neighborhood`, `project_info`, `communities`, `ask_global`, `run_eval`, `compare`, `health_stats`, `start_answer_eval`/`answer_eval_status`, `metrics` (ADR-20), `memory_info`/`memory_recall`/`memory_context` (Path B). Serves an 8-tab SPA (Projekt · Wiki · Graph · Gedächtnis · Evaluation · System · Tutorial · Hilfe). |
+| `WikiWebApp` | I/O (Kuzu/Ollama/files) | `manifest`, `get_page`, `search`, `chat` (+ per-turn stats), `graph_explore`/`graph_expand`/`graph_neighborhood`, `project_info`, `communities`, `ask_global`, `run_eval`, `compare`, `health_stats`, `start_answer_eval`/`answer_eval_status`, `metrics` (ADR-20), `memory_info`/`memory_recall`/`memory_context` (Path B), `analyze` (ADR-25 — coupling metrics + a 2-D semantic map, `/api/analyze`). Serves a 9-tab SPA (Projekt · Wiki · Graph · **Analyse** · Gedächtnis · Evaluation · System · Tutorial · Hilfe). |
 | `make_handler(app)` / `serve(app, host, port)` | I/O (http) | JSON API + static file serving on `ThreadingHTTPServer`. |
 | `web/static/{index.html, app.js, style.css, marked.min.js}` | — | SPA: 6 tabs (Projekt / Wiki / Graph / Evaluation / Tutorial / Hilfe); client-side Markdown; hand-rolled force-directed graph explorer. |
 

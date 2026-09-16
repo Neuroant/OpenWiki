@@ -63,6 +63,12 @@
 | **Observability / metrics collector** | The in-process, bounded ring buffer (`metrics.py`, `COLLECTOR`) capturing per-call latency + tokens Ollama returns; surfaced in the CLI `ask` footer, the **System** tab (`/api/metrics`), chat turns, and per-build-stage on Projekt (ADR-20). |
 | **owiki (distribution)** | The PyPI distribution name (the *import* package stays `openwiki`; `openwiki` is taken on PyPI). Ships a wheel/sdist + a Docker image; publishing is license-gated (ADR-24). |
 | **bge-m3 / qwen3** | Default embedding / chat models (multilingual, strong on the German corpora). |
+| **World-model analysis (`owiki analyze`)** | The read-only, offline `analysis/` toolkit measuring the *structure* of the knowledge — coupling, gaps, compare, memory dynamics (ADR-25, §8.19). To *structure* what eval is to *retrieval*; enriched by the `[analysis]` extra. |
+| **Graph↔semantic coupling / graph reach** | How the symbolic graph agrees with vs. adds to the embedding geometry; **graph reach** = the fraction of non-similarity edges the embedder would never rank as neighbors (≈36% on NAUTILUS) — the graph's non-semantic structure, quantified. |
+| **Coupling fingerprint** | The compact, *relative*-metric dict `analyze_coupling` returns; two diff directly via `analyze --compare` (across corpora / versions / embedders / settings). |
+| **Semantic map** | The 2-D projection (PCA, or UMAP via the extra) of pages in the Analyse tab — coloured by community, graph edges overlaid. |
+| **Gap-mining** | The analysis→improvement loop (`analyze gaps`): ranked missing-cross-reference, near-duplicate, isolated-page, and entity-merge candidates. |
+| **Memory-tier dynamics** | `analyze memory` over the Path B tier: revision (supersession rate), consolidation coverage, temperature (hot/cold), breadth, growth — the *learning* tier made legible. |
 
 ## 12.5 Acronyms
 
@@ -76,6 +82,8 @@
 | **CI** | Continuous Integration (GitHub Actions runs the offline suite + Docker build, ADR-24) |
 | **OIDC** | OpenID Connect (PyPI *trusted publishing* — token-less publish, ADR-24) |
 | **PyPI** | The Python Package Index (distribution `owiki`, ADR-24) |
+| **PCA / UMAP** | Principal Component Analysis / Uniform Manifold Approximation — the 2-D semantic-map projectors (PCA pure, UMAP via the `[analysis]` extra, ADR-25) |
+| **ARI** | Adjusted Rand Index — community-vs-k-means agreement in the coupling analysis (needs the `[analysis]` extra, ADR-25) |
 | **RRF** | Reciprocal Rank Fusion (blends dense + BM25 rankings, ADR-21) |
 | **HNSW** | Hierarchical Navigable Small World (Kuzu's vector index; mirrored, not used for retrieval) |
 | **HTTP / JSON** | HyperText Transfer Protocol / JavaScript Object Notation (the web API) |
@@ -91,4 +99,5 @@
 ---
 *Chapter complete. Path B terms landed (ADR-14–18); later terms cover the deepened graph (typed
 relations, entity resolution — ADR-22/23), retrieval variants (hybrid, BM25, RRF, re-ranking — ADR-21),
-observability (ADR-20), and shipping (owiki, CI, OIDC — ADR-24).*
+observability (ADR-20), shipping (owiki, CI, OIDC — ADR-24), and world-model analysis (coupling, graph
+reach, fingerprint, semantic map, PCA/UMAP/ARI — ADR-25).*

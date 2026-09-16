@@ -17,6 +17,7 @@ flowchart LR
   P --> P1["No cloud calls"] & P2["Data stays on disk"]
   M --> M1["Modularity (IR + boundaries)"] & M2["Testability (offline)"] & M3["Minimal dependencies"]
   F --> F1["Grounded, cited answers"] & F2["Global sensemaking"] & F3["Cross-session memory (Path B)"]
+  F --> F4["World-model analysis (owiki analyze)"]
   E --> E1["Small-corpus latency"] & E2["Incremental builds"] & E3["Observability (per-call metrics)"]
   M --> M4["CI (offline suite, Linux)"]
   I --> I1["CLI / HTTP / MCP"]
@@ -41,15 +42,17 @@ Scenarios are written as *stimulus → expected response* so they can be checked
 | QS-10 | Usability | should | `openwiki init … && openwiki build && openwiki serve` → a browsable, searchable wiki with no extra config. |
 | QS-11 | Observability | should | A run fails (e.g. Ollama down) → a clear, actionable message; **and** every LLM/embedding call's latency + token counts are captured (`metrics.py`, ADR-20) and surfaced in the CLI `⏱` footer, the **System** tab (`/api/metrics`), per-turn chat stats, and per-build-stage on Projekt. |
 | QS-12 | Cross-session memory | should | In Second Brain mode, establish a fact in one session and change it in a later one → `recall` returns the **current** fact, not the stale one (contradiction handling, ADR-18); the memory survives a `graph-build` (ADR-16); `eval --cross-session` measures assembled memory beating cold-start + raw-log. |
+| QS-13 | Measurability (structure) | should | Ask "how well-organized is this KB / how much does the graph add?" → `owiki analyze` (coupling / gaps / compare / memory, ADR-25) returns reproducible structural metrics (e.g. the *graph-reach* headline) — offline, read-only; two KBs compare via `--compare`. |
 
 ## 10.3 Current evidence & gaps
 
-- **Met:** QS-2 (the suite — **362 tests** — runs offline, and in **CI** on every push across Python
+- **Met:** QS-2 (the suite — **386 tests** — runs offline, and in **CI** on every push across Python
   3.11–3.13 + a Docker build, ADR-24); QS-5 (four findings in `docs/RAG-vs-GraphRAG.md`, incl. hybrid
   winning on a code corpus); QS-11 by the metrics collector (ADR-20 — per-call latency/tokens in the CLI,
-  System tab, and per-build-stage); QS-1 / QS-3 / QS-4 / QS-6 / QS-8 / QS-9 are architectural (enforced by
-  boundaries + tests); QS-7 by the fingerprint chain (ADR-11); QS-12 by the memory tests + the
-  cross-session eval (Path B, §8.15).
+  System tab, and per-build-stage); QS-13 by the world-model analysis toolkit (ADR-25, §8.19 — `owiki
+  analyze` coupling/gaps/compare/memory, offline + read-only); QS-1 / QS-3 / QS-4 / QS-6 / QS-8 / QS-9 are
+  architectural (enforced by boundaries + tests); QS-7 by the fingerprint chain (ADR-11); QS-12 by the
+  memory tests + the cross-session eval (Path B, §8.15).
 - **Not formally measured (performance):** there is no latency/throughput *budget* yet — though the
   observability layer (ADR-20) now surfaces per-run p50/p95 latency + tokens, so measurement is a query
   away. Known scale on the reference corpus (informatik): 16 PDFs → 76 wiki pages → 2 703 chunks → a graph

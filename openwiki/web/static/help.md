@@ -13,8 +13,10 @@ Die Oberfläche hat drei Bereiche:
 
 - **Links — Suche & Navigation:** ein Feld für die semantische Suche und der
   Navigationsbaum aller Wiki-Seiten (aus der Kapitelstruktur des Handbuchs).
-- **Mitte — Inhalt:** die gerenderte Seite. Über die Reiter **Wiki**, **Hilfe**,
-  **Tutorial**, **Graph** und **Projekt** wechseln Sie die Ansicht.
+- **Mitte — Inhalt:** die gerenderte Seite. Über die Reiter **Projekt**, **Wiki**,
+  **Graph**, **Analyse**, **Gedächtnis**, **Evaluation**, **System**, **Tutorial** und
+  **Hilfe** wechseln Sie die Ansicht. (Reiter, deren Artefakte fehlen — z. B. ohne Graph
+  oder ohne Gedächtnis — zeigen einen Hinweis statt Inhalt.)
 - **Rechts — Agent:** ein Chat mit dem KI-Agenten, der Fragen beantwortet *und*
   Seiten bearbeiten kann.
 
@@ -122,6 +124,17 @@ Die Kanten (mit farbiger Legende) sind:
   Handbuchs, aufgelöst auf die passende Wiki-Seite.
 - **Gemeinsame Begriffe** — Seiten, die dieselben benannten Konzepte (Modi,
   Effekte, Funktionen, Parameter …) erwähnen. Nur mit `graph-build --entities`.
+- **Beziehung** — Seiten, die eine **getypte Beziehung** zwischen ihren Begriffen
+  verbindet (Subjekt–Prädikat–Objekt, z. B. „X *besteht aus* Y"). Nur mit
+  `graph-build --relations` — macht aus Ko-Erwähnung einen echten Graphen.
+- **Verstärkt** — „genutzte" Verbindungen aus der Nutzungs­erinnerung (nur im
+  Second-Brain-Modus, mit Halbwertszeit gealtert).
+
+Mit `graph-build --resolve-entities` werden Schreibvarianten desselben Begriffs zu
+**kanonischen** Entitäten mit Aliassen zusammengeführt — so findet die Suche nach
+einer Abkürzung auch die ausgeschriebene Form. Sind **Communities** (Themen) berechnet
+(`openwiki communities`), färbt der Reiter die Seitenknoten **nach Thema** ein
+(umschaltbar über „Themenfarben") und zeigt eine Themen-Legende.
 
 Bedienung:
 
@@ -156,16 +169,82 @@ siehe „Ein neues Wiki anlegen"), zeigt der Reiter **Projekt** dessen Zustand �
 der Projektname erscheint als Abzeichen (📁) oben in der Kopfzeile. Angezeigt wird:
 
 - **Quellen** — die deklarierten Eingabedokumente (mit ✓, falls vorhanden).
-- **Build-Status** je Stufe (`ingest`, `wiki`, `index`, `graph`) als **aktuell**,
-  **veraltet** oder **fehlt**, mit Kennzahlen (Seiten, Chunks …). So sehen Sie auf
-  einen Blick, was ein `openwiki build` neu bauen würde.
+- **Build-Status** je Stufe (`ingest`, `wiki`, `index`, `graph`, `memory`) als
+  **aktuell**, **veraltet** oder **fehlt**, mit Kennzahlen (Seiten, Chunks …) sowie
+  **Dauer** und **LLM-Verbrauch** (Tokens) der letzten Ausführung. So sehen Sie auf
+  einen Blick, was ein `openwiki build` neu bauen würde und was es gekostet hat.
 - **Modelle & Einstellungen** — Einbettungs- und Chat-Modell, Ollama-Host,
-  `split_level` und Chunk-Größe aus dem Manifest.
+  `split_level`, Chunk-Größe und die **Begriffs-Ontologie** aus dem Manifest, plus
+  Live-Graphstatistiken (Knoten/Kanten, Verteilung der Entitätstypen).
+- **Themen (Communities)** — sind Communities berechnet (`openwiki communities`),
+  erscheinen sie hier als Karten (Thema + Größe + LLM-Zusammenfassung). Über die
+  **Globale Suche** stellen Sie eine *thematische* Frage („Wie hängen die Hauptthemen
+  zusammen?"), die aus den Zusammenfassungen beantwortet wird — das kann die reine
+  Abschnitts-Suche nicht.
 - **Registrierte Projekte** — alle per `openwiki project add` bekannten Projekte
   (das aktive ist mit ★ markiert).
 
 Läuft der Server ohne Projekt (mit direkten `--wiki`/`--index`-Pfaden), weist der
 Reiter darauf hin und verweist auf `openwiki init`.
+
+## Analyse (Reiter „Analyse")
+
+Der Reiter **Analyse** vermisst die **Struktur und Organisation** des Wissens selbst
+— er behandelt die beiden Darstellungen desselben Korpus (den symbolischen **Graphen**
+und den **semantischen Raum** der Einbettungen) als *ein* Objekt und fragt: *Wo stimmen
+sie überein (redundant), und wo fügt der Graph Struktur hinzu, die reine Ähnlichkeit
+nicht sieht?* Alles nur lesend und ohne Ollama-Aufruf (aus den gespeicherten
+Einbettungen).
+
+- Eine **Kennzahlentabelle** je Kantentyp: mittlerer Kosinus der Endpunkte gegen ein
+  Zufallspaar (**vs. Null**) und der **Overlap** mit den Einbettungs-Nachbarn.
+- Die **Graph-Reichweite** (Schlagzeile): der Anteil der Nicht-Ähnlichkeitskanten, die
+  Seiten verbinden, die der Embedder *nicht* als Nachbarn einstufen würde — so viel
+  nicht-semantische Struktur kodiert der Graph.
+- **Community-Kohärenz** (Silhouette + ARI) und eine **semantische Karte**: die Seiten
+  in 2D projiziert, nach Thema eingefärbt, mit überlagerten Graphkanten (Kantentypen
+  ein-/ausschaltbar; Klick auf einen Knoten öffnet die Seite).
+
+Auf der Kommandozeile stehen zusätzlich `openwiki analyze gaps` (konkrete
+Verbesserungs­vorschläge: fehlende Querverweise, Beinah-Duplikate, zusammenführbare
+Begriffe), `analyze --compare` (zwei Wissensstände vergleichen) und `analyze memory`
+(Gedächtnis-Dynamik). Die Kohärenz-Kennzahl und die UMAP-Karte benötigen das
+optionale Zusatzpaket `pip install "owiki[analysis]"` (sonst PCA + Kernkennzahlen).
+
+## Gedächtnis (Reiter „Gedächtnis")
+
+Im **Second-Brain-Modus** (`[memory] enabled = true` im Manifest) führt der Graph
+zusätzlich einen **Gedächtnis-Tier**: Fakten, die aus Sitzungen *erinnert* werden
+(`openwiki remember`) und in einer späteren Sitzung *wieder abgerufen* werden
+(`recall`) — inklusive Widerspruchs­behandlung (ein neuerer Fakt **überschreibt** einen
+älteren) und einer „Schlaf"-Konsolidierung zu Themen. Der Reiter zeigt:
+
+- die **Identität** (DNA) des Projekts und Kennzahlen (Sitzungen / Fakten / überholt /
+  Themen);
+- ein **Recall/Kontext-Feld** — geben Sie eine Frage ein und sehen Sie die
+  gewichtsverfallenen relevanten Fakten bzw. den zusammengesetzten Drei-Tier-Kontext;
+- **Themen-Karten** (konsolidierte Konzepte) und eine durchsuchbare **Faktentabelle**
+  (aktuell vs. überholt, mit Konfidenz).
+
+Nur lesend; ohne Sitzungen (oder im Wiki-Modus) zeigt der Reiter einen Hinweis.
+
+## Evaluation (Reiter „Evaluation")
+
+Der Reiter **Evaluation** führt den Retrieval-Benchmark des Projekts (`eval.jsonl`)
+live aus und vergleicht **RAG** gegen **GraphRAG** (Kennzahlen­tabelle mit Schiebereglern
+für `top_k`/`expand_k`, Fehl-Analyse). Dazu ein **Live-A/B** (eine Frage durch beide
+Retriever nebeneinander), eine **Antwortqualität**-Auswertung (Zitat-Treffer + LLM-Richter,
+als Hintergrundjob) und ein **KB-Health**-Panel (Konnektivität, verwaiste Seiten,
+Begriffs-Hubs). Alles nur lesend.
+
+## System (Reiter „System")
+
+Der Reiter **System** ist die **Beobachtbarkeit** (Observability): Jeder Chat-,
+Einbettungs- und API-Aufruf wird mit **Latenz** und **Token-Zahl** erfasst (was Ollama
+zurückmeldet). Angezeigt werden Zusammenfassungskarten je Art (Aufrufe, p50/p95,
+Gesamtzeit, Tokens) und eine Liste der letzten Ereignisse, die sich alle 2 s
+aktualisiert. Dieselben Zahlen erscheinen auch im CLI (`⏱`-Fußzeile bei `ask`) und je
+Build-Stufe im Reiter **Projekt**.
 
 ## Ein neues Wiki anlegen
 
@@ -225,8 +304,16 @@ openwiki index output/mein-handbuch.json
 openwiki graph-build output/mein-handbuch.json
 # mit Entitäten (langsamer, ein LLM-Aufruf pro Seite):
 openwiki graph-build output/mein-handbuch.json --entities
+# volle Tiefe: getypte Beziehungen + kanonische Entitäten (Aliasse):
+openwiki graph-build output/mein-handbuch.json --relations --resolve-entities
 # → output/graph/
+# optional: Themen/Communities berechnen (für Themenfarben + globale Suche):
+openwiki communities
 ```
+
+Im **Projekt-Modus** genügt es, im `openwiki.toml` unter `[graph]` die Schalter
+`entities`/`relations`/`resolve_entities` zu setzen und `openwiki build` erneut
+auszuführen — der Gedächtnis-Tier bleibt dabei erhalten.
 
 **5. Web-Oberfläche starten:**
 
@@ -287,6 +374,9 @@ Ordner mitzunehmen.
   Änderung klar zu benennen.
 - Schreibzugriffe sind auf den `pages`-Ordner des Wikis beschränkt; mit
   `--dry-run` werden Änderungen nur *vorgeschlagen*, nicht geschrieben.
+- Auf der Kommandozeile bietet `openwiki ask` messbare Varianten: `--hybrid`
+  (BM25 + Vektor), `--rerank` (LLM-Neusortierung) und `--global` (thematische
+  Antwort aus den Communities). Ob sie sich lohnen, zeigt `openwiki eval`.
 
 ## Datenschutz & lokaler Betrieb
 

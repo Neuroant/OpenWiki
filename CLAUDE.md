@@ -261,6 +261,7 @@ embeddings; no Ollama call):
 .venv\Scripts\python -m openwiki analyze                 # coupling report (default)
 .venv\Scripts\python -m openwiki analyze gaps            # actionable improvement candidates (P3)
 .venv\Scripts\python -m openwiki analyze --json          # the coupling/gaps fingerprint (compare/export)
+.venv\Scripts\python -m openwiki analyze --compare fp.json   # diff two coupling fingerprints (P3b)
 ```
 Two modes (positional `coupling` (default) | `gaps`). **`gaps`** (P3, `openwiki/analysis/gaps.py`) is the
 **analysis→improvement loop** — a ranked, offline to-do list: **link_candidates** (page pairs that
@@ -283,8 +284,12 @@ whose endpoints are semantically no closer than a random pair (links similarity 
 surface). This extends the RAG-vs-GraphRAG finding from "does the graph help retrieval?" to "how much
 structure does the graph encode that the embedder misses?" (measured on NAUTILUS: **~36%**, and the
 embedding space is strongly **anisotropic** — random-pair cosine ≈ 0.74 — so *lift over null*, not raw
-cosine, is the real signal). First slice of a larger direction (compare/diff, gaps/missing-links, a
-2D semantic-map Analyse tab — see `docs/roadmap.md`).
+cosine, is the real signal). **`--compare PATH`** (P3b, coupling only) diffs the current coupling
+fingerprint against another KB — a saved `analyze --json` file (snapshot/time-travel), a project dir, or an
+output dir (`index/` + `graph/`) computed live — printing an A/B/Δ table + the notable rate deltas
+(`openwiki/analysis/compare.py`: `flatten_fingerprint`/`diff_fingerprints`/`notable_differences`; metrics
+are *relative*, so they compare across corpora/embedders/settings). The Analyse tab (P2) is the browser
+surface. Remaining: memory-tier dynamics (P4) — see `docs/roadmap.md`.
 
 **Web UI** — browse + search + chat/edit + graph in the browser (stdlib server):
 ```
@@ -739,9 +744,12 @@ http — count, p50/p95, total time, token in/out) + a live recent-events table,
   `entity_merge_candidates`, the last via `difflib` + a `_numbered_siblings` precision guard) off the
   stored embeddings + `GraphStore` (`shared_entity_pairs`/`all_entities`/`health`) — no Ollama. Surfaced
   by `owiki analyze [coupling|gaps]` (CLI) **and** the web **Analyse tab** (`WikiWebApp.analyze()` →
-  `/api/analyze`: coupling metrics + a 2-D semantic map with graph edges overlaid). Analysis is to
-  *structure* what `eval.py` is to *retrieval*. Remaining slices (compare/diff across corpora/versions,
-  memory-tier dynamics) in `docs/roadmap.md`.
+  `/api/analyze`: coupling metrics + a 2-D semantic map with graph edges overlaid). `compare.py` (P3b)
+  is the **compare** half — `flatten_fingerprint` reduces a coupling fingerprint to a flat metric map,
+  `diff_fingerprints(a, b)` aligns two into A/B/Δ rows, `notable_differences` picks the biggest *rate*
+  deltas; wired as `owiki analyze --compare PATH` (a saved `--json` fingerprint, a project dir, or an
+  output dir). Analysis is to *structure* what `eval.py` is to *retrieval*. Remaining slice (memory-tier
+  dynamics, P4) in `docs/roadmap.md`.
 - **`openwiki/merge.py`** — `combine_documents(docs, names)` merges several
   `ParsedDocument`s into one corpus (concatenate pages with a running offset, shift
   table/image page numbers, wrap each source under a synthetic level-1 outline node

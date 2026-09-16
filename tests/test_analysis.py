@@ -188,6 +188,51 @@ def test_analyze_gaps_shape():
     assert res["isolated_pages"]["structural_orphans"] == [{"slug": "p3", "title": "Lonely"}]
 
 
+def _fp(pages, reach, sil, ref_overlap):
+    return {
+        "pages": pages,
+        "edge_profile": {"_null": {"mean": 0.74},
+                         "references": {"n": 10, "mean": 0.80, "lift": 0.06}},
+        "neighbor_overlap": {"references": ref_overlap},
+        "graph_reach": {"non_semantic_fraction": reach},
+        "community_coherence": {"available": True, "silhouette": sil, "ari": 0.40},
+    }
+
+
+def test_is_coupling_fingerprint():
+    from openwiki.analysis import is_coupling_fingerprint
+    assert is_coupling_fingerprint(_fp(50, 0.36, 0.09, 0.24))
+    assert not is_coupling_fingerprint({"link_candidates": []})   # a gaps report
+    assert not is_coupling_fingerprint("nope")
+
+
+def test_diff_fingerprints_deltas():
+    from openwiki.analysis import diff_fingerprints
+    rows = diff_fingerprints(_fp(50, 0.36, 0.09, 0.24), _fp(60, 0.40, 0.15, 0.30))
+    d = {r["metric"]: r for r in rows}
+    assert d["pages"]["delta"] == 10
+    assert d["graph_reach"]["delta"] == 0.04
+    assert d["references.overlap"]["delta"] == 0.06
+    assert d["coherence.silhouette"]["delta"] == 0.06
+
+
+def test_notable_differences_skips_counts():
+    from openwiki.analysis import diff_fingerprints
+    from openwiki.analysis.compare import notable_differences
+    rows = diff_fingerprints(_fp(50, 0.36, 0.09, 0.24), _fp(500, 0.37, 0.10, 0.25))
+    nd = notable_differences(rows, top=3)
+    assert all(r["metric"] != "pages" and not r["metric"].endswith(".n") for r in nd)
+
+
+def test_self_diff_is_all_zero():
+    from openwiki.analysis import diff_fingerprints
+    from openwiki.analysis.compare import notable_differences
+    a = _fp(50, 0.36, 0.09, 0.24)
+    rows = diff_fingerprints(a, a)
+    assert all(r["delta"] in (0, 0.0) for r in rows if r["delta"] is not None)
+    assert notable_differences(rows) == []      # identical fingerprints → nothing notable
+
+
 def test_project_2d_pca_is_normalized_and_shaped():
     from openwiki.analysis.projection import project_2d
     rng = np.random.default_rng(0)

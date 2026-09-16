@@ -14,8 +14,10 @@ Read-only + additive (never mutates the graph or index). numpy core; scikit-lear
 degrades gracefully.
 """
 
+from .compare import diff_fingerprints, flatten_fingerprint, is_coupling_fingerprint
 from .coupling import analyze_coupling, page_vectors
 from .gaps import analyze_gaps
 from .projection import project_2d
 
-__all__ = ["analyze_coupling", "analyze_gaps", "page_vectors", "project_2d"]
+__all__ = ["analyze_coupling", "analyze_gaps", "diff_fingerprints", "flatten_fingerprint",
+           "is_coupling_fingerprint", "page_vectors", "project_2d"]

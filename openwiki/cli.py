@@ -26,7 +26,10 @@ from pathlib import Path
 from typing import Optional, Sequence
 
 from .agent import RAGAgent
-from .analysis import analyze_coupling, analyze_gaps
+from .analysis import (
+    analyze_coupling, analyze_gaps, diff_fingerprints, is_coupling_fingerprint,
+)
+from .analysis.compare import notable_differences
 from .eval import evaluate, load_eval_set, make_retrievers, run_global_eval
 from .chat_agent import WikiAgent, summarize_wiki
 from .claude_code_template import scaffold_claude_code
@@ -451,6 +454,9 @@ def _build_argparser() -> argparse.ArgumentParser:
     an_p.add_argument("-k", type=int, default=8, dest="k",
                       help="Embedding neighbors per page for the coupling overlap metric (default: 8).")
     an_p.add_argument("--top", type=int, default=15, help="Max candidates per gaps category (default: 15).")
+    an_p.add_argument("--compare", metavar="PATH", default=None,
+                      help="Compare the coupling fingerprint against another KB: a saved "
+                           "`analyze --json` file, a project dir, or an output dir (index/ + graph/).")
     an_p.add_argument("-i", "--index", type=Path, default=None,
                       help="Index dir (the embedding space; default: project's).")
     an_p.add_argument("--graph", type=Path, default=None, help="Graph dir (default: project's graph).")
@@ -2381,10 +2387,69 @@ def _print_gaps_report(res: dict) -> None:
     print()
 
 
+def _fmt_num(v, signed: bool = False) -> str:
+    if v is None:
+        return "—"
+    if isinstance(v, float):
+        return (f"{v:+.3f}" if signed else f"{v:.3f}")
+    return (f"{v:+d}" if signed and isinstance(v, int) else str(v))
+
+
+def _print_compare_report(rows: list, label_a: str, label_b: str) -> None:
+    """Side-by-side world-model fingerprint diff (A = current, B = the --compare target)."""
+    print(f"\nWorld-model comparison\n  A = {label_a}\n  B = {label_b}\n")
+    print(f"  {'metric':<20}{'A':>10}{'B':>10}{'Δ (B−A)':>12}")
+    print("  " + "-" * 52)
+    for r in rows:
+        print(f"  {r['metric']:<20}{_fmt_num(r['a']):>10}{_fmt_num(r['b']):>10}"
+              f"{_fmt_num(r['delta'], signed=True):>12}")
+    notable = notable_differences(rows, top=3)
+    if notable:
+        print("\n  Notable differences:")
+        for r in notable:
+            direction = "higher" if r["delta"] > 0 else "lower"
+            print(f"    B's {r['metric']} is {direction} by {abs(r['delta']):.3f}")
+    else:
+        print("\n  No rate differences — the two world models are structurally equivalent.")
+    print()
+
+
+def _resolve_compare_fingerprint(path: str, k: int):
+    """Load the fingerprint to compare against: a saved `analyze --json` file, or compute it
+    live from a project dir / an output dir (index/ + graph/). Returns ``(fingerprint, label)``."""
+    p = Path(path)
+    if p.is_file():
+        fp = json.loads(p.read_text(encoding="utf-8"))
+        return fp, p.name
+    if p.is_dir():
+        if (p / "openwiki.toml").is_file():
+            proj = Project.load(p)
+            index_dir, graph_dir = proj.index_dir, proj.graph_path
+        elif (p / "index" / "index.json").is_file():
+            index_dir, graph_dir = p / "index", p / "graph"
+        else:
+            raise FileNotFoundError(
+                f"{p} is not a project (openwiki.toml) or an output dir (index/ + graph/).")
+        if not (index_dir / "index.json").is_file():
+            raise FileNotFoundError(f"no index at {index_dir}.")
+        other = SemanticIndex.load(index_dir)
+        g = _open_graph(graph_dir, writable=False)
+        if g is None:
+            raise FileNotFoundError(f"no graph at {graph_dir}.")
+        try:
+            return analyze_coupling(other, g, k=k), str(p)
+        finally:
+            g.close()
+    raise FileNotFoundError(f"nothing to compare at {path}.")
+
+
 def _cmd_analyze(args: argparse.Namespace) -> int:
     """World-model analysis: **coupling** (P1 — where the graph agrees with vs. adds to the
-    embedding space) or **gaps** (P3 — ranked, actionable improvement candidates). Read-only
-    + offline (uses the stored embeddings; no Ollama call)."""
+    embedding space), **gaps** (P3 — ranked, actionable improvement candidates), or a coupling
+    **--compare** diff against another KB (P3b). Read-only + offline (stored embeddings; no Ollama)."""
+    if args.what == "gaps" and args.compare:
+        print("error: --compare works with coupling, not gaps.", file=sys.stderr)
+        return 2
     if not (args.index / "index.json").is_file():
         print(f"error: no index at {args.index} (run `openwiki index` first).", file=sys.stderr)
         return 2
@@ -2400,6 +2465,24 @@ def _cmd_analyze(args: argparse.Namespace) -> int:
             res = analyze_coupling(index, graph, k=args.k)
     finally:
         graph.close()
+
+    if args.compare:                     # coupling-only (guarded above)
+        try:
+            other, label_b = _resolve_compare_fingerprint(args.compare, args.k)
+        except (FileNotFoundError, ValueError, json.JSONDecodeError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+        if not is_coupling_fingerprint(other):
+            print(f"error: {args.compare} is not a coupling fingerprint "
+                  "(save one with `analyze --json`).", file=sys.stderr)
+            return 2
+        rows = diff_fingerprints(res, other)
+        if args.as_json:
+            print(json.dumps({"a": res, "b": other, "diff": rows}, ensure_ascii=False, indent=2))
+        else:
+            _print_compare_report(rows, str(args.index), label_b)
+        return 0
+
     if args.as_json:
         print(json.dumps(res, ensure_ascii=False, indent=2))
     elif args.what == "gaps":

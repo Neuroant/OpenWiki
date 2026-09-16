@@ -411,8 +411,13 @@ heavier **`[analysis]` extra** (scikit-learn now; umap/networkx later) opt-in.
   numbered-sibling guard so `Effect Control 1`≠`2`). *On NAUTILUS it surfaced a real source typo
   (`SEQUECER`), spacing variants (`Drum Kit`≈`Drumkit`), plural pairs the normalizer missed, and two
   pages both titled "Quick Layer/Split" (cos 0.97).*
-- **P3b — compare/diff** (remaining) — `analyze --compare A B` over the fingerprint (radar diffs across
-  corpora / versions / embedders / settings) — the "measure + compare" the world-model direction is for.
+- ✅ **P3b (compare/diff) landed (v0.70)** — `owiki analyze --compare PATH` diffs the current coupling
+  fingerprint against another KB — a saved `analyze --json` file (snapshot/time-travel), a project dir, or
+  an output dir (computed live) — printing an A/B/Δ table + the notable rate deltas
+  (`openwiki/analysis/compare.py`, pure/testable). The metrics are *relative*, so it compares across
+  corpora / versions / embedders / settings — the "measure + **compare**" the direction is named for.
+  *(Verified isolating the k-dependent overlap metrics: current k=20 vs a saved k=8 fingerprint differs
+  only on the neighbor-overlap rows, everything else Δ=0.)*
 - **P4 — dynamics** — memory-tier structure (supersession/consolidation ratios, hot vs. cold
   knowledge) + evolution as sources/sessions accrue.
 

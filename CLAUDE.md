@@ -258,10 +258,20 @@ space** (embeddings) — as one object, and asking *where they agree (redundant)
 (the graph's own, non-semantic structure)*. Read-only + **offline** (uses the stored
 embeddings; no Ollama call):
 ```
-.venv\Scripts\python -m openwiki analyze                 # coupling report
-.venv\Scripts\python -m openwiki analyze --json          # the coupling fingerprint (for compare/export)
+.venv\Scripts\python -m openwiki analyze                 # coupling report (default)
+.venv\Scripts\python -m openwiki analyze gaps            # actionable improvement candidates (P3)
+.venv\Scripts\python -m openwiki analyze --json          # the coupling/gaps fingerprint (compare/export)
 ```
-Options: `-k N` (embedding neighbors per page for the overlap metric; default 8), `-i/--index DIR`,
+Two modes (positional `coupling` (default) | `gaps`). **`gaps`** (P3, `openwiki/analysis/gaps.py`) is the
+**analysis→improvement loop** — a ranked, offline to-do list: **link_candidates** (page pairs that
+co-mention entities but have no reference edge → missing cross-refs), **redundant_pages** (near-duplicate
+embeddings → merge candidates), **isolated_pages** (semantic outliers by nearest-neighbor cosine +
+structural orphans), **entity_merge_candidates** (same-type near-duplicate names via `difflib`, with a
+numbered-sibling precision guard so `Effect Control 1`≠`2`). *Measured on NAUTILUS it surfaced a source
+typo (`SEQUECER`), spacing variants (`Drum Kit`≈`Drumkit`), plural pairs the normalizer missed, and two
+pages both titled "Quick Layer/Split" (cos 0.97).* Options: `--top N` (per category; default 15), `-i/--index
+DIR`, `--graph DIR`, `--json`.
+Options (coupling): `-k N` (embedding neighbors per page for the overlap metric; default 8), `-i/--index DIR`,
 `--graph DIR`, `--json`. Backed by `openwiki/analysis/coupling.py` (pure NumPy; scikit-learn — the
 **`[analysis]` extra** — enriches community coherence, else it degrades to unavailable) +
 `GraphStore.coupling_edges()`. Metrics: **edge_profile** (per edge type, endpoint-cosine distribution
@@ -724,10 +734,14 @@ http — count, p50/p95, total time, token in/out) + a live recent-events table,
   `{"available": False}` without it). `projection.py` (P2) is `project_2d(vecs, method)` — pure-NumPy
   **PCA** (SVD, min-max to [0,1]) always available, **UMAP** via the extra (`method="auto"`/`"umap"`,
   falls back to PCA). Read-only + additive (never mutates graph/index) + fake-testable
-  (`tests/test_analysis.py`). Surfaced by `owiki analyze` (CLI) **and** the web **Analyse tab**
-  (`WikiWebApp.analyze()` → `/api/analyze`: coupling metrics + a 2-D semantic map with graph edges
-  overlaid). Analysis is to *structure* what `eval.py` is to *retrieval*. Later slices (compare/diff,
-  gaps/missing-links, memory-tier dynamics) in `docs/roadmap.md`.
+  (`tests/test_analysis.py`). `gaps.py` (P3) is the actionable half — `analyze_gaps(index, graph, top)`
+  mines ranked, **offline** improvement candidates (`link_candidates`/`redundant_pages`/`isolated_pages`/
+  `entity_merge_candidates`, the last via `difflib` + a `_numbered_siblings` precision guard) off the
+  stored embeddings + `GraphStore` (`shared_entity_pairs`/`all_entities`/`health`) — no Ollama. Surfaced
+  by `owiki analyze [coupling|gaps]` (CLI) **and** the web **Analyse tab** (`WikiWebApp.analyze()` →
+  `/api/analyze`: coupling metrics + a 2-D semantic map with graph edges overlaid). Analysis is to
+  *structure* what `eval.py` is to *retrieval*. Remaining slices (compare/diff across corpora/versions,
+  memory-tier dynamics) in `docs/roadmap.md`.
 - **`openwiki/merge.py`** — `combine_documents(docs, names)` merges several
   `ParsedDocument`s into one corpus (concatenate pages with a running offset, shift
   table/image page numbers, wrap each source under a synthetic level-1 outline node
@@ -767,8 +781,8 @@ http — count, p50/p95, total time, token in/out) + a live recent-events table,
   (`list`/`use`/`add`/`remove`/`add-source`), `opencode`, `claude-code`, `ontology`, `ingest`,
   `build-wiki`, `index`, `search`, `eval`, `ask` (`--global` = global search),
   `chat`, `graph-build`, `communities`, `decay`, `remember`, `recall`, `consolidate`, `context`,
-  `analyze` (world-model coupling analysis — offline), `hook` (host-lifecycle memory hook — reads
-  the event JSON on stdin), `serve`, and `mcp` subcommands. A shared
+  `analyze` (world-model analysis — `coupling` | `gaps`, offline), `hook` (host-lifecycle memory hook —
+  reads the event JSON on stdin), `serve`, and `mcp` subcommands. A shared
   `--project` (parent parser) + `_apply_project(args, project)` fill unset
   path/model/host/split-level args from the active project before dispatch (flags
   override; no project → `./output`). `init`/`project add-source` take **`--session`**

@@ -403,9 +403,16 @@ heavier **`[analysis]` extra** (scikit-learn now; umap/networkx later) opt-in.
   by `WikiWebApp.analyze()` → `/api/analyze`. Read-only + offline. *The reference edges visibly span
   long distances across the embedding layout — the 36% non-semantic reach, made visual.* Remaining
   P2 polish (histograms, a community×edge-type heatmap) is optional.
-- **P3 — compare/diff + gap-mining** — `analyze --compare A B` over the fingerprint (radar diffs
-  across corpora / versions / embedders / settings) + **actionable** outputs: missing-link
-  candidates, entity-merge candidates, redundancy, knowledge deserts (the analysis→improvement loop).
+- ✅ **P3 (gap-mining) landed (v0.69)** — the **analysis→improvement loop**: `owiki analyze gaps`
+  (`openwiki/analysis/gaps.py`), an offline, ranked to-do list — **link_candidates** (pages that
+  co-mention entities but have no reference edge → missing cross-refs), **redundant_pages**
+  (near-duplicate embeddings → merge candidates), **isolated_pages** (semantic outliers + structural
+  orphans), **entity_merge_candidates** (same-type near-duplicate names via `difflib`, with a
+  numbered-sibling guard so `Effect Control 1`≠`2`). *On NAUTILUS it surfaced a real source typo
+  (`SEQUECER`), spacing variants (`Drum Kit`≈`Drumkit`), plural pairs the normalizer missed, and two
+  pages both titled "Quick Layer/Split" (cos 0.97).*
+- **P3b — compare/diff** (remaining) — `analyze --compare A B` over the fingerprint (radar diffs across
+  corpora / versions / embedders / settings) — the "measure + compare" the world-model direction is for.
 - **P4 — dynamics** — memory-tier structure (supersession/consolidation ratios, hot vs. cold
   knowledge) + evolution as sources/sessions accrue.
 

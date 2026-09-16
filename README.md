@@ -731,6 +731,6 @@ PDF ──PDFParser──▶ ParsedDocument ──▶ JSON / Markdown
 - [x] **Typed `Entity→Entity` relations** — LLM-extracted subject–predicate–object `RELATED_TO` edges (`--relations`), surfaced in `find_entity` + the Graph tab
 - [x] **Relation-aware GraphRAG** — expansion traverses typed relations (`MENTIONS→RELATED_TO→MENTIONS`); a `relation` neighbourhood group in `graph_neighbors`, `ask`, and `owiki eval`
 - [x] **Corpus-wide entity resolution** — `--resolve-entities` merges surface variants into canonical entities with aliases + descriptions (embedding candidates + LLM verify)
-- [x] **World-model analysis** — `owiki analyze`: graph↔semantic coupling (edge-cosine vs. null, graph-vs-kNN overlap, community coherence, the "graph reach" headline) + an **Analyse tab** with a 2-D semantic map (graph edges overlaid); offline, enriched by the `[analysis]` extra
+- [x] **World-model analysis** — `owiki analyze`: graph↔semantic **coupling** (edge-cosine vs. null, graph-vs-kNN overlap, community coherence, the "graph reach" headline) + an **Analyse tab** with a 2-D semantic map, plus **`analyze gaps`** (missing cross-refs, near-duplicate pages, isolated pages, entity-merge candidates — the analysis→improvement loop); offline, enriched by the `[analysis]` extra
 - [x] **CI** — GitHub Actions runs the offline suite on every push/PR (Python 3.11–3.13) + builds the Docker image
 - [x] **Packaging** — PyPI-ready build (dist name `owiki`, `twine check` clean) + a `Dockerfile`/compose + a manual PyPI-publish workflow *(publish gated on a license decision)*

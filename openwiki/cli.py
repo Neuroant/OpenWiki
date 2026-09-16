@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Optional, Sequence
 
 from .agent import RAGAgent
-from .analysis import analyze_coupling
+from .analysis import analyze_coupling, analyze_gaps
 from .eval import evaluate, load_eval_set, make_retrievers, run_global_eval
 from .chat_agent import WikiAgent, summarize_wiki
 from .claude_code_template import scaffold_claude_code
@@ -443,10 +443,14 @@ def _build_argparser() -> argparse.ArgumentParser:
     ctx_p.add_argument("--host", default=None, help="Ollama host URL.")
 
     an_p = sub.add_parser("analyze", parents=[common],
-                          help="World-model analysis: measure graph↔semantic coupling — where the "
-                               "knowledge graph agrees with vs. adds to the embedding space.")
+                          help="World-model analysis: measure graph↔semantic coupling, or mine "
+                               "actionable gaps (missing refs, near-duplicates, merge candidates).")
+    an_p.add_argument("what", nargs="?", choices=["coupling", "gaps"], default="coupling",
+                      help="coupling (default) = where the graph agrees with vs. adds to the "
+                           "embedding space; gaps = ranked, actionable improvement candidates.")
     an_p.add_argument("-k", type=int, default=8, dest="k",
-                      help="Embedding neighbors per page for the overlap metric (default: 8).")
+                      help="Embedding neighbors per page for the coupling overlap metric (default: 8).")
+    an_p.add_argument("--top", type=int, default=15, help="Max candidates per gaps category (default: 15).")
     an_p.add_argument("-i", "--index", type=Path, default=None,
                       help="Index dir (the embedding space; default: project's).")
     an_p.add_argument("--graph", type=Path, default=None, help="Graph dir (default: project's graph).")
@@ -2334,10 +2338,53 @@ def _print_coupling_report(res: dict) -> None:
     print()
 
 
+def _trunc(s: str, n: int) -> str:
+    s = s or ""
+    return s if len(s) <= n else s[: n - 1] + "…"
+
+
+def _print_gaps_report(res: dict) -> None:
+    """Human-readable rendering of the gap/hygiene mining — an actionable to-do list."""
+    links = res["link_candidates"]
+    print("\n── Missing cross-references ── (co-mention entities, but neither cites the other)")
+    if not links:
+        print("  none — every entity-sharing page pair is already connected (or no entities).")
+    for c in links:
+        print(f"  {c['shared_entities']:>2} shared · cos {c['cosine']:.2f}  "
+              f"{_trunc(c['a_title'], 32):<32} ↔ {_trunc(c['b_title'], 32)}")
+
+    red = res["redundant_pages"]
+    print("\n── Near-duplicate pages ── (very high embedding similarity)")
+    if not red:
+        print("  none above the redundancy threshold.")
+    for c in red:
+        print(f"  cos {c['cosine']:.3f}  {_trunc(c['a_title'], 32):<32} ↔ {_trunc(c['b_title'], 32)}")
+
+    iso = res["isolated_pages"]
+    print("\n── Isolated pages ──")
+    print("  semantic outliers (nearest neighbor is far):")
+    for p in iso["semantic_outliers"]:
+        print(f"    nn-cos {p['nn_cosine']:.3f}  {_trunc(p['title'], 48)}")
+    orphans = iso["structural_orphans"]
+    if orphans:
+        print("  structural orphans (no similar / reference / entity edge):")
+        for o in orphans:
+            print(f"    {_trunc(o.get('title', o.get('slug', '?')), 48)}")
+
+    ents = res["entity_merge_candidates"]
+    print("\n── Entity-merge candidates ── (same type, near-duplicate names, not resolved)")
+    if not ents:
+        print("  none — run `graph-build --resolve-entities`, or the graph has no entities.")
+    for e in ents:
+        print(f"  sim {e['similarity']:.2f}  [{_trunc(e['type'], 14):<14}]  "
+              f"{_trunc(e['a'], 26):<26} ≈ {_trunc(e['b'], 26)}")
+    print()
+
+
 def _cmd_analyze(args: argparse.Namespace) -> int:
-    """World-model analysis (P1): graph↔semantic **coupling** — measure where the knowledge
-    graph agrees with the embedding geometry (redundant) vs. adds non-semantic structure.
-    Read-only + offline (uses the stored embeddings; no Ollama call)."""
+    """World-model analysis: **coupling** (P1 — where the graph agrees with vs. adds to the
+    embedding space) or **gaps** (P3 — ranked, actionable improvement candidates). Read-only
+    + offline (uses the stored embeddings; no Ollama call)."""
     if not (args.index / "index.json").is_file():
         print(f"error: no index at {args.index} (run `openwiki index` first).", file=sys.stderr)
         return 2
@@ -2347,11 +2394,16 @@ def _cmd_analyze(args: argparse.Namespace) -> int:
         return 2
     try:
         index = SemanticIndex.load(args.index)
-        res = analyze_coupling(index, graph, k=args.k)
+        if args.what == "gaps":
+            res = analyze_gaps(index, graph, top=args.top)
+        else:
+            res = analyze_coupling(index, graph, k=args.k)
     finally:
         graph.close()
     if args.as_json:
         print(json.dumps(res, ensure_ascii=False, indent=2))
+    elif args.what == "gaps":
+        _print_gaps_report(res)
     else:
         _print_coupling_report(res)
     return 0

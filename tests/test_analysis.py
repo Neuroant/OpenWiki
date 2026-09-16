@@ -28,9 +28,12 @@ class _FakeIndex:
 
 
 class _FakeGraph:
-    def __init__(self, edges, communities):
+    def __init__(self, edges, communities, shared=None, entities=None, orphans=None):
         self._edges = edges
         self._communities = communities
+        self._shared = shared or []          # [(a, b, n)]
+        self._entities = entities or []       # [{"name", "type"}]
+        self._orphans = orphans or []
 
     def coupling_edges(self):
         # mirror GraphStore.coupling_edges: every kind present (possibly empty)
@@ -41,6 +44,18 @@ class _FakeGraph:
 
     def community_members(self):
         return self._communities
+
+    def shared_entity_pairs(self):
+        return self._shared
+
+    def all_entities(self):
+        return self._entities
+
+    def has_entities(self):
+        return bool(self._entities)
+
+    def health(self):
+        return {"orphans": self._orphans}
 
 
 def _scenario():
@@ -106,6 +121,71 @@ def test_analyze_coupling_shape_and_reach():
     assert res["graph_reach"]["non_semantic_fraction"] == 1.0
     assert "community_coherence" in res            # present whether or not sklearn is installed
     assert "available" in res["community_coherence"]
+
+
+def _gaps_scenario():
+    slugs = ["p0", "p1", "p2", "p3"]
+    vecs = [[1.0, 0.0], [1.0, 0.0], [0.0, 1.0], [0.0, 1.0]]
+    index = _FakeIndex(slugs, vecs)
+    graph = _FakeGraph(
+        edges={},                                   # no references / structural links
+        communities={},
+        shared=[("p0", "p2", 3), ("p0", "p1", 1)],  # p0/p2 co-mention 3 entities, uncited
+        entities=[{"name": "Signal", "type": "K"}, {"name": "Signale", "type": "K"},
+                  {"name": "Effekt", "type": "K"}],
+        orphans=[{"slug": "p3", "title": "Lonely"}],
+    )
+    return index, graph
+
+
+def test_link_candidates_rank_shared_entities_without_reference():
+    from openwiki.analysis.gaps import link_candidates
+    index, graph = _gaps_scenario()
+    cands = link_candidates(index, graph, top=5)
+    assert cands, "expected missing-cross-reference candidates"
+    top = cands[0]
+    assert {top["a"], top["b"]} == {"p0", "p2"}      # 3 shared > 1 shared ranks first
+    assert top["shared_entities"] == 3
+
+
+def test_link_candidates_exclude_existing_references():
+    from openwiki.analysis.gaps import link_candidates
+    index, graph = _gaps_scenario()
+    graph._edges = {"references": [("p0", "p2")]}     # now p0↔p2 is cited
+    cands = link_candidates(index, graph, top=5)
+    assert all({c["a"], c["b"]} != {"p0", "p2"} for c in cands)
+
+
+def test_redundant_pages_finds_near_duplicates():
+    from openwiki.analysis.gaps import redundant_pages
+    index, graph = _gaps_scenario()
+    red = redundant_pages(index, top=5, min_cos=0.9)
+    assert any(r["cosine"] >= 0.9 for r in red)       # p0≡p1 and p2≡p3 are identical
+
+
+def test_entity_merge_candidates_catch_name_variants():
+    from openwiki.analysis.gaps import entity_merge_candidates
+    _, graph = _gaps_scenario()
+    cands = entity_merge_candidates(graph, min_sim=0.8)
+    assert any({c["a"], c["b"]} == {"Signal", "Signale"} for c in cands)
+
+
+def test_entity_merge_skips_numbered_siblings():
+    from openwiki.analysis.gaps import entity_merge_candidates
+    graph = _FakeGraph(edges={}, communities={}, entities=[
+        {"name": "Effect Control 1", "type": "P"}, {"name": "Effect Control 2", "type": "P"}])
+    # distinct numbered parameters must NOT be proposed as a merge
+    assert entity_merge_candidates(graph, min_sim=0.8) == []
+
+
+def test_analyze_gaps_shape():
+    from openwiki.analysis.gaps import analyze_gaps
+    index, graph = _gaps_scenario()
+    res = analyze_gaps(index, graph, top=5)
+    assert set(res) == {"link_candidates", "redundant_pages",
+                        "isolated_pages", "entity_merge_candidates"}
+    assert "semantic_outliers" in res["isolated_pages"]
+    assert res["isolated_pages"]["structural_orphans"] == [{"slug": "p3", "title": "Lonely"}]
 
 
 def test_project_2d_pca_is_normalized_and_shaped():

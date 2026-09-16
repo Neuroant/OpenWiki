@@ -569,6 +569,29 @@ class GraphStore:
                 "MATCH (a:Page)-[:NEXT]->(b:Page) RETURN a.slug, b.slug;"),
         }
 
+    def shared_entity_pairs(self) -> list:
+        """Distinct ``(a, b, n)`` page pairs (``a < b``) that co-mention ``n`` entities — the
+        raw material for missing-cross-reference detection (``analysis.gaps``). Empty without
+        entities."""
+        if not self.has_entities():
+            return []
+        try:
+            rows = self._rows(
+                "MATCH (a:Page)-[:MENTIONS]->(:Entity)<-[:MENTIONS]-(b:Page) "
+                "WHERE a.slug < b.slug RETURN a.slug, b.slug, count(*) AS n;")
+        except Exception:
+            return []
+        return [(a, b, int(n)) for a, b, n in rows]
+
+    def all_entities(self) -> list:
+        """``[{"name", "type"}, …]`` for every entity — for entity-merge-candidate mining.
+        Empty without entities."""
+        try:
+            rows = self._rows("MATCH (e:Entity) RETURN e.name, e.type;")
+        except Exception:
+            return []
+        return [{"name": r[0], "type": r[1]} for r in rows]
+
     def page_snippet(self, slug: str, max_chars: int = 400) -> str:
         """A short text excerpt for a page (its first chunks), for summarization."""
         rows = self._rows("MATCH (c:Chunk {page_slug:$s}) RETURN c.text LIMIT 3;", {"s": slug})

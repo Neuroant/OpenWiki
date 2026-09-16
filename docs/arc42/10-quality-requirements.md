@@ -55,9 +55,10 @@ Scenarios are written as *stimulus → expected response* so they can be checked
   memory tests + the cross-session eval (Path B, §8.15).
 - **Not formally measured (performance):** there is no latency/throughput *budget* yet — though the
   observability layer (ADR-20) now surfaces per-run p50/p95 latency + tokens, so measurement is a query
-  away. Known scale on the reference corpus (informatik): 16 PDFs → 76 wiki pages → 2 703 chunks → a graph
-  of 76 pages / 760 `SIMILAR_TO` / 32 `REFERENCES`; retrieval is brute-force O(n) (fine here, won't scale
-  — §11 R3/D3). A concrete budget (index throughput, `ask` p50/p95) is an open item, gated mostly on the
+  away. Known scale on the reference corpus (informatik), built with the full graph (`--relations
+  --resolve-entities`): 16 PDFs → 76 wiki pages → 2 703 chunks → a graph of 76 pages / 760 `SIMILAR_TO` /
+  32 `REFERENCES` / 1 423 canonical entities (from 1 520 raw) / 1 953 `MENTIONS` / 1 364 typed `RELATED_TO`
+  / 6 communities; retrieval is brute-force O(n) (fine here, won't scale — §11 R3/D3). A concrete budget (index throughput, `ask` p50/p95) is an open item, gated mostly on the
   local model + hardware.
 
 ---

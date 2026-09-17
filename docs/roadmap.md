@@ -175,7 +175,7 @@ Setup details in `docs/coding-agents.md`.
   the full graph (`--relations --resolve-entities`): 16 PDFs → 799p → 76 pages → 2703 chunks →
   graph 76/760 SIMILAR_TO/32 REFERENCES/1423 canonical entities (from 1520 raw)/1953 MENTIONS/
   1364 typed RELATED_TO/6 communities.
-- **Tests:** 220 passing, fully offline (fakes for Ollama/Kuzu).
+- **Tests:** 386 passing, fully offline (fakes for Ollama/Kuzu), in CI on every push.
 - **Stack:** Windows, Python 3.13, local Ollama (bge-m3 + qwen3:30b), Kuzu — minimal /
   stdlib-leaning throughout.
 

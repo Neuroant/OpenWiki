@@ -291,12 +291,25 @@ function analyseControls(data) {
     <div class="an-legend">${legend}</div>`;
 }
 
+function analyseMapControls(data) {
+  const actual = (data.projection.method || "").toLowerCase();
+  const projBtns = ["pca", "umap"].map((m) =>
+    `<button class="an-proj${actual === m ? " active" : ""}" data-method="${m}">${m.toUpperCase()}</button>`).join("");
+  const focusSel = (data.communities || []).length
+    ? `<label class="an-focus-l">Fokus <select id="an-focus"><option value="">alle Themen</option>` +
+      data.communities.map((c) =>
+        `<option value="${c.id}"${String(analyse.focus) === String(c.id) ? " selected" : ""}>${escapeHtml(c.label || ("#" + c.id))}</option>`).join("") +
+      `</select></label>` : "";
+  return `<div class="an-mapctl"><span class="an-projtog">Projektion: ${projBtns}</span>${focusSel}</div>`;
+}
+
 function analyseLayout(data) {
   return `<div class="an-head"><strong>Weltmodell-Analyse</strong>
       <span class="muted">Graph ↔ semantischer Raum · ${data.projection.points.length} Seiten ·
       Projektion: ${data.projection.method.toUpperCase()}</span></div>
     ${analyseMetrics(data.coupling)}
     <h3 class="an-maph">Semantische Karte <span class="muted">— Seiten im Embedding-Raum, Graphkanten überlagert</span></h3>
+    ${analyseMapControls(data)}
     ${analyseControls(data)}
     <div id="an-map" class="an-map"></div>`;
 }
@@ -311,6 +324,8 @@ function drawSemanticMap() {
   if (!host || !analyse.data) return;
   const data = analyse.data, pad = 26;
   const pts = data.projection.points;
+  const focus = analyse.focus;   // "" = all; else a community id to isolate
+  const inFocus = (p) => !focus || String(p.community) === String(focus);
   const svg = svgEl("svg", { viewBox: `0 0 ${GW} ${GH}`, class: "an-svg" });
   const px = (x) => pad + x * (GW - 2 * pad);
   const py = (y) => pad + (1 - y) * (GH - 2 * pad);   // flip: y up
@@ -322,9 +337,10 @@ function drawSemanticMap() {
     (data.edges[k.key] || []).forEach(([a, b]) => {
       const pa = at[a], pb = at[b];
       if (!pa || !pb) return;
+      const dim = focus && !(inFocus(pa) && inFocus(pb));
       svg.appendChild(svgEl("line", {
         x1: px(pa.x), y1: py(pa.y), x2: px(pb.x), y2: py(pb.y),
-        stroke: k.color, "stroke-width": 1, "stroke-opacity": 0.35,
+        stroke: k.color, "stroke-width": 1, "stroke-opacity": dim ? 0.05 : 0.35,
       }));
     });
   });
@@ -333,6 +349,7 @@ function drawSemanticMap() {
     const c = svgEl("circle", {
       cx: px(p.x), cy: py(p.y), r: 5, fill: anPointColor(p.community),
       stroke: "#1b1e24", "stroke-width": 1, class: "an-node", "data-slug": p.slug,
+      opacity: inFocus(p) ? 1 : 0.12,
     });
     const t = svgEl("title", {});
     t.textContent = p.title + (p.community != null ? "  ·  Community " + p.community : "");
@@ -348,10 +365,15 @@ function drawSemanticMap() {
 }
 
 function wireAnalyse() {
-  document.querySelectorAll('#an input[data-edge]').forEach((cb) =>
+  document.querySelectorAll('#an-view input[data-edge]').forEach((cb) =>
     cb.addEventListener("change", () => { analyse.show[cb.dataset.edge] = cb.checked; drawSemanticMap(); }));
   const theme = $("#an-theme");
   if (theme) theme.addEventListener("change", () => { analyse.colorByTheme = theme.checked; drawSemanticMap(); });
+  // U11: projection (PCA/UMAP) refetches; community focus is a client-side redraw
+  document.querySelectorAll('#an-view .an-proj').forEach((b) =>
+    b.addEventListener("click", () => { analyse.method = b.dataset.method; renderCoupling(); }));
+  const focus = $("#an-focus");
+  if (focus) focus.addEventListener("change", () => { analyse.focus = focus.value; drawSemanticMap(); });
 }
 
 const AN_VIEWS = [
@@ -384,7 +406,7 @@ async function renderCoupling() {
   host.innerHTML = `<p class="muted">Kopplung wird berechnet…</p>`;
   let data;
   try {
-    data = await getJSON("/api/analyze");
+    data = await getJSON("/api/analyze?method=" + (analyse.method || "auto"));
   } catch (e) {
     if ($("#an-view")) $("#an-view").innerHTML = `<p class="muted">Fehler: ${escapeHtml(e.message)}</p>`;
     return;
@@ -1742,6 +1764,22 @@ $("#theme-toggle").addEventListener("click", () => {
   applyThemeIcon();
 });
 applyThemeIcon();
+
+// -- collapsible panels (sidebar / chat) ------------------------------------
+function _panelToggle(btnId, cls, key) {
+  const btn = $("#" + btnId);
+  if (!btn) return;
+  if (localStorage.getItem(key) === "1") $("#layout").classList.add(cls);
+  const sync = () => btn.classList.toggle("active", $("#layout").classList.contains(cls));
+  sync();
+  btn.addEventListener("click", () => {
+    const on = $("#layout").classList.toggle(cls);
+    try { localStorage.setItem(key, on ? "1" : "0"); } catch (e) { /* ignore */ }
+    sync();
+  });
+}
+_panelToggle("toggle-sidebar", "hide-sidebar", "owiki-hide-sidebar");
+_panelToggle("toggle-chat", "hide-chat", "owiki-hide-chat");
 async function runSearch(q) {
   const box = $("#search-results");
   try {

@@ -457,9 +457,13 @@ The CLI/back-end outran the browser; this direction closes the gap.
 - ✅ **U8 — dark mode landed (v0.76)** — a header theme toggle (light/dark via `:root[data-theme=dark]`
   CSS-var overrides), persisted in localStorage, applied pre-paint (no flash).
 - ✅ **U9 — citation UX** — already delivered by U1 (Ask answers show clickable **seed vs. +Graph** source chips).
-- **U10** — responsive / collapsible panels (next).
-- **U11** — Analyse-map enrichment (PCA/UMAP toggle, community focus; next).
-- **U7** — streaming chat responses (the large one; its own increment).
+- ✅ **U10 — collapsible panels landed (v0.77)** — header toggles collapse the sidebar + chat (each
+  pinned to its own grid column so hiding one doesn't reflow the others), persisted in localStorage —
+  a focus/reading mode + better narrow-screen use.
+- ✅ **U11 — Analyse-map enrichment landed (v0.77)** — the semantic map gained a **PCA/UMAP** projection
+  toggle (`/api/analyze?method=`) and a **community focus** dropdown (isolate one theme, dim the rest);
+  also fixed a U2 regression where the map's edge toggles queried a stale container id.
+- **U7** — streaming chat responses (the large one; its own increment, v0.78).
 
 ### If you pick one thing next
 **Direction A's re-ranking pass** is the smallest change with an immediately measurable

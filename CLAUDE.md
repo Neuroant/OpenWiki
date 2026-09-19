@@ -611,7 +611,10 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   (fetched from `/api/communities`; neutral blue when off or no communities) — no JS libraries. `static/` = a no-build vanilla-JS SPA with client-side Markdown via a
   vendored `marked.min.js`. A **header theme toggle** switches light/dark (`:root[data-theme="dark"]`
   CSS-var overrides, persisted in `localStorage`, applied pre-paint by an inline `<head>` script — U8);
-  the sidebar search has a **Hybrid (BM25+dense)** toggle (`/api/search` `hybrid` flag → `search_hybrid`, U5).
+  the sidebar search has a **Hybrid (BM25+dense)** toggle (`/api/search` `hybrid` flag → `search_hybrid`, U5);
+  header **panel toggles** collapse the sidebar/chat (each pinned to its grid column so hiding one doesn't
+  reflow the others; persisted — U10); the Analyse map has a **PCA/UMAP** projection toggle + a **community
+  focus** dropdown (U11).
   The center pane has ten tabs (**Projekt / Wiki /
   Graph / Begriffe / Analyse / Gedächtnis / Evaluation / System / Tutorial / Hilfe**). The **Begriffe tab**
   (`renderEntities` → `/api/entities` + `/api/entity/{name}`, U3) is a **canonical-entity browser**: a

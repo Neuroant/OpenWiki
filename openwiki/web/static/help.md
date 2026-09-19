@@ -23,6 +23,10 @@ Die Oberfläche hat drei Bereiche:
 - **Rechts — Agent:** ein Chat mit dem KI-Agenten, der Fragen beantwortet *und*
   Seiten bearbeiten kann.
 
+Über die Kopfzeile lassen sich **Seitenleiste** (☰) und **Agent-Panel** (💬) ein- und
+ausblenden (Fokus-/Lesemodus) und das **Design** (🌙/☀️) umschalten — alle Einstellungen
+werden gespeichert.
+
 ## Seiten lesen
 
 - Klicken Sie im Navigationsbaum auf einen Eintrag, um die Seite zu öffnen;
@@ -234,7 +238,9 @@ Graph Struktur hinzu, die reine Ähnlichkeit nicht sieht?*
   nicht-semantische Struktur kodiert der Graph.
 - **Community-Kohärenz** (Silhouette + ARI) und eine **semantische Karte**: die Seiten
   in 2D projiziert, nach Thema eingefärbt, mit überlagerten Graphkanten (Kantentypen
-  ein-/ausschaltbar; Klick auf einen Knoten öffnet die Seite).
+  ein-/ausschaltbar; Klick auf einen Knoten öffnet die Seite). Über der Karte wählen Sie
+  die **Projektion** (PCA/UMAP) und einen **Fokus** auf ein einzelnes Thema (der Rest wird
+  abgeblendet).
 
 **Lücken** — eine umsetzbare **To-do-Liste** zur Verbesserung des Wikis: *fehlende
 Querverweise* (Seiten, die dieselben Begriffe erwähnen, sich aber nicht zitieren),

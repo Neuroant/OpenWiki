@@ -34,8 +34,15 @@ header {
 #layout {
   flex: 1; min-height: 0;
   display: grid;
-  grid-template-columns: 280px 1fr 360px;
+  grid-template-columns: var(--sidebar-w, 280px) 1fr var(--chat-w, 360px);
 }
+#layout.hide-sidebar { --sidebar-w: 0px; }
+#layout.hide-chat { --chat-w: 0px; }
+/* Pin each panel to its column so hiding one doesn't reflow the others into a 0px track. */
+#sidebar { grid-column: 1; }
+#center { grid-column: 2; }
+#chat { grid-column: 3; }
+#layout.hide-sidebar #sidebar, #layout.hide-chat #chat { display: none; }
 
 #sidebar, #chat { background: var(--panel); overflow-y: auto; }
 #sidebar { border-right: 1px solid var(--line); padding: 14px; }
@@ -163,7 +170,7 @@ header {
 }
 .chat-form button:disabled { opacity: .55; cursor: default; }
 
-@media (max-width: 1100px) { #layout { grid-template-columns: 240px 1fr; } #chat { display: none; } }
+@media (max-width: 1100px) { #layout { --sidebar-w: 240px; --chat-w: 0px; } #chat { display: none; } }
 
 /* -- project tab + header badge -- */
 .project-badge {
@@ -437,8 +444,11 @@ header {
 .search-results .hit .src { color: var(--accent); font-size: 11px; font-weight: 600; margin-top: 1px; }
 
 /* -- theme toggle + search options --------------------------------------- */
-.theme-toggle { margin-left: auto; border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 8px; padding: 4px 9px; font-size: 15px; line-height: 1; cursor: pointer; }
-.theme-toggle:hover { border-color: var(--accent); }
+.theme-toggle, .panel-toggle { border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 8px; padding: 4px 9px; font-size: 15px; line-height: 1; cursor: pointer; }
+.theme-toggle { margin-left: 6px; }
+.theme-toggle:hover, .panel-toggle:hover { border-color: var(--accent); }
+#toggle-sidebar { margin-right: 6px; }
+.panel-toggle.right { margin-left: auto; }   /* pushes the right-hand button group */
 .search-opt { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); margin: 6px 0 0; cursor: pointer; }
 
 /* -- dark theme (opt-in via <html data-theme="dark">) -------------------- */
@@ -457,3 +467,11 @@ header {
 :root[data-theme="dark"] #search:focus { background: var(--panel); }
 :root[data-theme="dark"] .graph-filter { background: var(--panel); }
 :root[data-theme="dark"] .src-chip.related .src-badge { color: #e0a060; background: #3a2a17; }
+
+/* -- Analyse map controls (projection + community focus, U11) ------------- */
+.an-mapctl { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-bottom: 8px; font-size: 12.5px; }
+.an-projtog { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+.an-proj { border: 1px solid var(--line); background: var(--panel); color: var(--muted); font: inherit; font-size: 12px; font-weight: 600; padding: 2px 10px; border-radius: 7px; cursor: pointer; }
+.an-proj.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+.an-focus-l { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+.an-focus-l select { padding: 3px 8px; border: 1px solid var(--line); border-radius: 7px; font: inherit; font-size: 12.5px; background: var(--panel); color: var(--ink); }

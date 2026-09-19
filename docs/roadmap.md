@@ -442,7 +442,11 @@ The CLI/back-end outran the browser; this direction closes the gap.
   with clickable page refs), and **Dynamik** (P4 memory-tier dynamics — revision / consolidation /
   temperature / breadth / growth). Backed by `/api/analyze/gaps` + `/api/analyze/memory` (thin wrappers
   over the existing `analyze_gaps`/`analyze_memory`). Verified live on informatik.
-- **U3** — an entity/concept browser (canonical entities · aliases · description · relations).
+- ✅ **U3 — entity/concept browser landed (v0.74)** — a new **Begriffe** tab: a searchable, type-filtered,
+  mention-ranked list of **canonical entities**, and a detail pane with the entity's description + aliases
+  (from resolution), its mention pages (clickable), and its typed relations (walk entity→entity). Backed by
+  `GraphStore.list_entities`/`entity_detail` → `/api/entities` + `/api/entity/{name}`. Surfaces the
+  resolution + relation layers as a first-class view. Verified live on informatik.
 - **U4** — source filter + provenance across nav/search/graph (timely for the merged multi-book corpus).
 - **U5–U11** — hybrid toggle in sidebar search; promote global; streaming chat; dark mode; citation UX;
   responsive/mobile; Analyse-map enrichment. (See the UI review.)

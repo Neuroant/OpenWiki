@@ -456,6 +456,31 @@ class WikiWebApp:
         from ..analysis.memory import analyze_memory
         return analyze_memory(self.graph)
 
+    # -- entity/concept browser (Begriffe tab) -------------------------------
+
+    def entities(self, query: str = "", etype: str = "", limit: int = 200) -> dict:
+        """Browse canonical entities for the Begriffe tab (`/api/entities`): a filtered,
+        mention-ranked list + the available types (for the filter). Read-only; ``available:
+        false`` when there is no graph or no entity layer."""
+        if self.graph is None:
+            return {"available": False, "reason": "no_graph"}
+        if not self.graph.has_entities():
+            return {"available": False, "reason": "no_entities"}
+        types = [t["type"] for t in self.graph.stats().get("entity_types", [])]
+        return {"available": True, "types": types,
+                "has_relations": self.graph.has_relations(),
+                "entities": self.graph.list_entities(query, etype, limit)}
+
+    def entity(self, name: str) -> dict:
+        """Full record for one canonical entity (`/api/entity/{name}`): description, aliases,
+        the pages that mention it, and its typed relations. Read-only."""
+        if self.graph is None or not self.graph.has_entities():
+            raise RuntimeError("No entity layer in the graph.")
+        detail = self.graph.entity_detail(name)
+        if detail is None:
+            raise KeyError(f"entity '{name}' not found")
+        return detail
+
     # -- memory tier (Path B / Second Brain) ---------------------------------
 
     def _memory_embedder(self):
@@ -671,6 +696,19 @@ def make_handler(app: WikiWebApp):
                     return self._json(app.analyze_gaps(top=int(query.get("top", ["15"])[0])))
                 if path == "/api/analyze/memory":
                     return self._json(app.analyze_memory())
+                if path == "/api/entities":
+                    query = parse_qs(urlparse(self.path).query)
+                    return self._json(app.entities(
+                        query.get("q", [""])[0], query.get("type", [""])[0],
+                        int(query.get("limit", ["200"])[0])))
+                if path.startswith("/api/entity/"):
+                    name = unquote(path[len("/api/entity/"):])
+                    try:
+                        return self._json(app.entity(name))
+                    except KeyError as exc:
+                        return self._json({"error": str(exc)}, 404)
+                    except RuntimeError as exc:
+                        return self._json({"error": str(exc)}, 503)
                 if path == "/api/answer-eval":
                     return self._json(app.answer_eval_status())
                 if path.startswith("/api/pages/"):

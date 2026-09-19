@@ -182,6 +182,16 @@ def test_analyze_memory_without_graph(app):
     assert out["available"] is False and out["reason"] == "no_graph"
 
 
+def test_entities_without_graph(app):
+    out = app.entities()                              # fixture has no graph
+    assert out["available"] is False and out["reason"] == "no_graph"
+
+
+def test_entity_detail_without_graph(app):
+    with pytest.raises(RuntimeError):
+        app.entity("Reverb")
+
+
 def test_metrics_snapshot_shape(app):
     snap = app.metrics()
     assert set(snap) == {"events", "summary", "total_events"}

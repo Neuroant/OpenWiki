@@ -112,6 +112,8 @@ function renderActiveTab() {
     renderSystem();
   } else if (state.tab === "analyse") {
     renderAnalyse();
+  } else if (state.tab === "entities") {
+    renderEntities();
   } else {
     renderDoc(state.tab);
   }
@@ -472,6 +474,121 @@ async function renderDynamics() {
     return;
   }
   $("#an-view").innerHTML = dynamicsLayout(d);
+}
+
+// -- Begriffe (entity / concept browser) ------------------------------------
+
+const entState = { types: [], hasRelations: false, q: "", type: "", timer: 0 };
+
+function entUnavailable(reason) {
+  const msg = reason === "no_graph"
+    ? `Kein Wissensgraph geladen — starte den Server mit <code>--graph</code>.`
+    : `Der Graph enthält keine Begriffe — baue ihn mit <code>graph-build --entities</code> ` +
+      `(kanonisch + Aliasse mit <code>--resolve-entities</code>).`;
+  return `<div class="ent-head"><strong>Begriffe</strong></div><p class="muted">${msg}</p>`;
+}
+
+function entCard(e) {
+  const n = (e.aliases || []).length;
+  const al = n ? ` · ${n} Alias${n > 1 ? "se" : ""}` : "";
+  return `<button class="ent-card" data-name="${escapeHtml(e.name)}">` +
+    `<span class="ent-name">${escapeHtml(e.name)}</span>` +
+    `<span class="ent-meta"><span class="ent-type">${escapeHtml(e.type)}</span> ${e.mentions}×${al}</span></button>`;
+}
+
+function renderEntList(data) {
+  const list = $("#ent-list");
+  if (!list) return;
+  const items = data.entities || [];
+  list.innerHTML = items.length ? items.map(entCard).join("") : `<p class="muted">keine Treffer</p>`;
+  list.querySelectorAll(".ent-card").forEach((el) =>
+    el.addEventListener("click", () => {
+      list.querySelectorAll(".ent-card").forEach((c) => c.classList.remove("active"));
+      el.classList.add("active");
+      loadEntity(el.dataset.name);
+    }));
+}
+
+async function fetchEntities() {
+  const list = $("#ent-list");
+  if (list) list.innerHTML = `<p class="muted">Lädt…</p>`;
+  try {
+    const qs = `?q=${encodeURIComponent(entState.q)}&type=${encodeURIComponent(entState.type)}`;
+    const data = await getJSON("/api/entities" + qs);
+    if (state.tab !== "entities" || !data.available) return;
+    entState.hasRelations = data.has_relations;
+    renderEntList(data);
+  } catch (e) {
+    if (list) list.innerHTML = `<p class="muted">Fehler: ${escapeHtml(e.message)}</p>`;
+  }
+}
+
+function entRelRow(r) {
+  const arrow = r.direction === "out" ? "→" : "←";
+  return `<div class="gap-row"><span class="gap-metric">${escapeHtml(r.predicate)} <span class="muted">(${r.weight})</span></span>` +
+    `<span class="muted">${arrow}</span> <button class="ent-rel" data-name="${escapeHtml(r.other)}">${escapeHtml(r.other)}</button></div>`;
+}
+
+function renderEntDetail(d) {
+  const detail = $("#ent-detail");
+  if (!detail) return;
+  const desc = d.description ? `<p class="ent-desc">${escapeHtml(d.description)}</p>` : "";
+  const aliases = (d.aliases || []).length
+    ? `<div class="ent-aliases">${d.aliases.map((a) => `<span class="ent-alias">${escapeHtml(a)}</span>`).join("")}</div>` : "";
+  const pages = (d.pages || []).map((p) =>
+    `<button class="gap-page" data-slug="${escapeHtml(p.slug)}">${escapeHtml(p.title || p.slug)}</button>`).join("") || `<span class="muted">—</span>`;
+  const rels = (d.relations || []).length
+    ? d.relations.map(entRelRow).join("") : `<p class="muted">keine typisierten Beziehungen</p>`;
+  detail.innerHTML =
+    `<div class="ent-dhead"><h3>${escapeHtml(d.name)}</h3> <span class="ent-type">${escapeHtml(d.type)}</span> ` +
+    `<span class="muted">${d.mentions}× erwähnt</span></div>${desc}${aliases}` +
+    `<h4>Erwähnt auf ${(d.pages || []).length} Seite(n)</h4><div class="ent-pages">${pages}</div>` +
+    `<h4>Beziehungen</h4><div class="ent-rels">${rels}</div>`;
+  detail.querySelectorAll(".gap-page").forEach((el) => el.addEventListener("click", () => loadPage(el.dataset.slug)));
+  detail.querySelectorAll(".ent-rel").forEach((el) => el.addEventListener("click", () => loadEntity(el.dataset.name)));
+}
+
+async function loadEntity(name) {
+  const detail = $("#ent-detail");
+  if (detail) detail.innerHTML = `<p class="muted">Lädt…</p>`;
+  try {
+    renderEntDetail(await getJSON("/api/entity/" + encodeURIComponent(name)));
+  } catch (e) {
+    if (detail) detail.innerHTML = `<p class="muted">Fehler: ${escapeHtml(e.message)}</p>`;
+  }
+}
+
+async function renderEntities() {
+  const content = $("#content");
+  content.innerHTML = `<p class="muted">Begriffe werden geladen…</p>`;
+  let data;
+  try {
+    data = await getJSON(`/api/entities?q=${encodeURIComponent(entState.q)}&type=${encodeURIComponent(entState.type)}`);
+  } catch (e) {
+    content.innerHTML = `<p class="muted">Fehler: ${escapeHtml(e.message)}</p>`;
+    return;
+  }
+  if (state.tab !== "entities") return;
+  if (!data.available) { content.innerHTML = entUnavailable(data.reason); return; }
+  entState.types = data.types || [];
+  entState.hasRelations = data.has_relations;
+  const typeOpts = `<option value="">alle Typen</option>` + entState.types.map((t) =>
+    `<option value="${escapeHtml(t)}"${t === entState.type ? " selected" : ""}>${escapeHtml(t)}</option>`).join("");
+  content.innerHTML =
+    `<div class="ent-head"><strong>Begriffe</strong> <span class="muted">— kanonische Entitäten aus dem ` +
+    `Wissensgraphen (Auflösung + Beziehungen)</span></div>` +
+    `<div class="ent-controls"><input id="ent-search" type="search" placeholder="Begriff oder Alias suchen…" ` +
+    `value="${escapeHtml(entState.q)}"><select id="ent-type">${typeOpts}</select></div>` +
+    `<div class="ent-layout"><div id="ent-list" class="ent-list"></div>` +
+    `<div id="ent-detail" class="ent-detail"><p class="muted">Wähle links einen Begriff, um Beschreibung, ` +
+    `Aliasse, Seiten und Beziehungen zu sehen.</p></div></div>`;
+  renderEntList(data);
+  $("#ent-search").addEventListener("input", (e) => {
+    entState.q = e.target.value;
+    clearTimeout(entState.timer);
+    entState.timer = setTimeout(fetchEntities, 250);
+  });
+  $("#ent-type").addEventListener("change", (e) => { entState.type = e.target.value; fetchEntities(); });
 }
 
 // -- Memory (Gedächtnis / Second Brain) tab ---------------------------------

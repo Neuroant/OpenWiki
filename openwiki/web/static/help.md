@@ -14,8 +14,8 @@ Die Oberfläche hat drei Bereiche:
 - **Links — Suche & Navigation:** ein Feld für die semantische Suche und der
   Navigationsbaum aller Wiki-Seiten (aus der Kapitelstruktur des Handbuchs).
 - **Mitte — Inhalt:** die gerenderte Seite. Über die Reiter **Projekt**, **Wiki**,
-  **Graph**, **Analyse**, **Gedächtnis**, **Evaluation**, **System**, **Tutorial** und
-  **Hilfe** wechseln Sie die Ansicht. (Reiter, deren Artefakte fehlen — z. B. ohne Graph
+  **Graph**, **Begriffe**, **Analyse**, **Gedächtnis**, **Evaluation**, **System**, **Tutorial**
+  und **Hilfe** wechseln Sie die Ansicht. (Reiter, deren Artefakte fehlen — z. B. ohne Graph
   oder ohne Gedächtnis — zeigen einen Hinweis statt Inhalt.)
 - **Rechts — Agent:** ein Chat mit dem KI-Agenten, der Fragen beantwortet *und*
   Seiten bearbeiten kann.
@@ -195,6 +195,20 @@ der Projektname erscheint als Abzeichen (📁) oben in der Kopfzeile. Angezeigt 
 
 Läuft der Server ohne Projekt (mit direkten `--wiki`/`--index`-Pfaden), weist der
 Reiter darauf hin und verweist auf `openwiki init`.
+
+## Begriffe (Reiter „Begriffe")
+
+Der Reiter **Begriffe** ist ein durchsuchbarer Browser der **kanonischen Entitäten** des
+Wissensgraphen. Links eine nach Erwähnungen sortierte Liste (mit Suchfeld + Typ-Filter),
+rechts das Detail des gewählten Begriffs:
+
+- die **Beschreibung** und die **Aliasse** (aus der Entitäts-Auflösung, `--resolve-entities`) —
+  so finden Sie einen Begriff auch über eine Schreibvariante oder Abkürzung;
+- die **Seiten**, die ihn erwähnen (anklickbar → öffnet die Wiki-Seite);
+- die **getypten Beziehungen** (`--relations`): Prädikat + Richtung + verbundener Begriff —
+  ein Klick springt zu *dessen* Detail, sodass Sie den Beziehungsgraphen entlangwandern können.
+
+Fehlt die Entitätsschicht, weist der Reiter darauf hin (`graph-build --entities`).
 
 ## Analyse (Reiter „Analyse")
 

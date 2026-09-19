@@ -591,7 +591,10 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   `/api/recall` (POST) = decay-weighted `recall`, `/api/context` (POST) = the assembled
   three-tier `context_for`, `/api/analyze?k=&method=` = the world-model coupling analysis +
   2-D semantic map (`WikiWebApp.analyze()` → `analysis.analyze_coupling` + `project_2d`), `/api/analyze/gaps`
-  = P3 gap-mining (`analyze_gaps`), `/api/analyze/memory` = P4 memory-tier dynamics (`analyze_memory`)) plus static files
+  = P3 gap-mining (`analyze_gaps`), `/api/analyze/memory` = P4 memory-tier dynamics (`analyze_memory`),
+  `/api/entities?q=&type=` = the canonical-entity browser (`entities()` → `GraphStore.list_entities`),
+  `/api/entity/{name}` = one entity's detail (`entity()` → `GraphStore.entity_detail`: description + aliases +
+  pages + typed relations)) plus static files
   (served `no-cache`); `serve()` runs it. Every `/api/*` request is timed and recorded
   as an `http` metrics event (`_observe_request`), and `chat()` returns per-turn LLM
   telemetry (`_turn_stats` over the collector events since the turn began).
@@ -604,8 +607,12 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   `COMMUNITY_PALETTE`, keyed by the node's `community` id from `_page_gnode` →
   `GraphStore._community_of`), with a swatch legend + a "Themenfarben" toggle
   (fetched from `/api/communities`; neutral blue when off or no communities) — no JS libraries. `static/` = a no-build vanilla-JS SPA with client-side Markdown via a
-  vendored `marked.min.js`. The center pane has nine tabs (**Projekt / Wiki /
-  Graph / Analyse / Gedächtnis / Evaluation / System / Tutorial / Hilfe**). The **Analyse tab**
+  vendored `marked.min.js`. The center pane has ten tabs (**Projekt / Wiki /
+  Graph / Begriffe / Analyse / Gedächtnis / Evaluation / System / Tutorial / Hilfe**). The **Begriffe tab**
+  (`renderEntities` → `/api/entities` + `/api/entity/{name}`, U3) is a **canonical-entity browser**: a
+  searchable, type-filtered, mention-ranked list (master) + a detail pane (description + alias chips +
+  clickable mention pages + typed relations you can walk entity→entity) — surfacing the resolution + relation
+  layers as a first-class view; graceful when the graph has no entities. The **Analyse tab**
   (`renderAnalyse`) is the **world-model analysis** surface, split into three sub-tabs (U2):
   **Kopplung** (`renderCoupling` → `/api/analyze`) — the coupling metric table (endpoint cosine vs. null
   + kNN overlap per edge type), the **graph-reach headline**, community coherence, and a hand-rolled SVG

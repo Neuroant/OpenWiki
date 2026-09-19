@@ -337,6 +337,69 @@ class GraphStore:
         return [{"entity": r[0], "type": r[1], "slug": r[2], "title": r[3],
                  "description": r[4] or "", "aliases": self._aliases(r[5])} for r in rows]
 
+    def list_entities(self, query: str = "", etype: str = "", limit: int = 200) -> list[dict]:
+        """Browse **canonical** entities (name · type · description · aliases · mention count),
+        filtered by a name/alias substring and/or type, ranked by mentions — for the Begriffe
+        tab. Empty without entities."""
+        if not self.has_entities():
+            return []
+        clauses, params = [], {"k": int(limit)}
+        if query:
+            clauses.append("(contains(lower(e.name), lower($q)) OR contains(lower(e.aliases), lower($q)))")
+            params["q"] = str(query)
+        if etype:
+            clauses.append("e.type = $t")
+            params["t"] = str(etype)
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        try:
+            rows = self._rows(
+                f"MATCH (e:Entity){where} OPTIONAL MATCH (e)<-[m:MENTIONS]-(:Page) "
+                "WITH e, count(m) AS n RETURN e.name, e.type, e.description, e.aliases, n "
+                "ORDER BY n DESC, e.name LIMIT $k;", params)
+        except Exception:   # pre-0.66 graph without description/aliases columns
+            q2 = query and "contains(lower(e.name), lower($q))"
+            where2 = " WHERE " + " AND ".join(c for c in (q2, etype and "e.type = $t") if c) if (query or etype) else ""
+            rows = [(r[0], r[1], "", "", r[2]) for r in self._rows(
+                f"MATCH (e:Entity){where2} OPTIONAL MATCH (e)<-[m:MENTIONS]-(:Page) "
+                "WITH e, count(m) AS n RETURN e.name, e.type, n ORDER BY n DESC, e.name LIMIT $k;", params)]
+        return [{"name": r[0], "type": r[1], "description": r[2] or "",
+                 "aliases": self._aliases(r[3]), "mentions": int(r[4])} for r in rows]
+
+    def entity_detail(self, name: str) -> Optional[dict]:
+        """Full record for one canonical entity (exact ``name``): type, description, aliases,
+        mention count, the pages that mention it, and its typed relations (both directions,
+        each with the ``other`` endpoint + direction). ``None`` if not found."""
+        if not self.has_entities():
+            return None
+        try:
+            rows = self._rows(
+                "MATCH (e:Entity {name:$n}) OPTIONAL MATCH (e)<-[m:MENTIONS]-(:Page) "
+                "RETURN e.name, e.type, e.description, e.aliases, count(m);", {"n": str(name)})
+        except Exception:
+            rows = [(r[0], r[1], "", "", r[2]) for r in self._rows(
+                "MATCH (e:Entity {name:$n}) OPTIONAL MATCH (e)<-[m:MENTIONS]-(:Page) "
+                "RETURN e.name, e.type, count(m);", {"n": str(name)})]
+        if not rows or rows[0][0] is None:
+            return None
+        r = rows[0]
+        pages = self._rows(
+            "MATCH (:Entity {name:$n})<-[:MENTIONS]-(p:Page) "
+            "RETURN DISTINCT p.slug, p.title ORDER BY p.title;", {"n": str(name)})
+        try:
+            rel_rows = self._rows(
+                "MATCH (a:Entity)-[r:RELATED_TO]->(b:Entity) WHERE a.name = $n OR b.name = $n "
+                "RETURN a.name, r.predicate, b.name, r.weight ORDER BY r.weight DESC, a.name LIMIT 40;",
+                {"n": str(name)})
+        except Exception:
+            rel_rows = []
+        relations = [{"subject": x[0], "predicate": x[1], "object": x[2], "weight": x[3],
+                      "other": (x[2] if x[0] == name else x[0]),
+                      "direction": ("out" if x[0] == name else "in")} for x in rel_rows]
+        return {"name": r[0], "type": r[1], "description": r[2] or "",
+                "aliases": self._aliases(r[3]), "mentions": int(r[4] or 0),
+                "pages": [{"slug": p[0], "title": p[1]} for p in pages],
+                "relations": relations}
+
     # -- typed entity relations (Direction B) --------------------------
 
     def has_relations(self) -> bool:

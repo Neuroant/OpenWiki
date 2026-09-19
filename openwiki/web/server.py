@@ -507,6 +507,45 @@ class WikiWebApp:
             "stats": _turn_stats(m.COLLECTOR.since(start)),
         }
 
+    def ask(self, question: str, use_graph: bool = True, hybrid: bool = False,
+            rerank: bool = False, k: int = 5, expand_k: int = 3) -> dict:
+        """RAG question-answering for the chat pane's **Ask** mode: retrieve → cited answer,
+        with the measured retrieval options chosen *per request* (GraphRAG / hybrid / re-rank /
+        ``k``). Builds a one-shot `RAGAgent` (like `compare`), read-only (never edits), and
+        returns the answer + its cited sources (seed vs graph-expanded) + per-turn stats. The
+        browser twin of the CLI ``ask``; the **Global** mode routes to `ask_global` instead."""
+        from ..agent import RAGAgent
+        from .. import metrics as m
+
+        question = (question or "").strip()
+        if not question:
+            raise RuntimeError("empty question")
+        if self.index is None:
+            raise RuntimeError("No search index is loaded.")
+        chat = getattr(self.agent, "chat", None)
+        if chat is None:
+            raise RuntimeError("No chat model is available.")
+        k = max(1, min(int(k), 20))
+        expand_k = max(0, min(int(expand_k), 10))
+        graph = self.graph if (use_graph and self.graph is not None) else None
+        start = m.COLLECTOR.seq
+        with self._lock:
+            agent = RAGAgent(self.index, chat, top_k=k, graph=graph, expand_k=expand_k,
+                             hybrid=bool(hybrid), rerank=bool(rerank))
+            result = agent.answer(question)
+        return {
+            "question": question,
+            "answer": result.answer,
+            "cited": sorted(result.cited_markers()),
+            "sources": [{"marker": s.marker, "slug": s.page_slug, "title": s.page_title,
+                         "kind": s.kind, "score": round(float(s.score), 3)}
+                        for s in result.sources],
+            "options": {"graph": graph is not None, "hybrid": bool(hybrid),
+                        "rerank": bool(rerank), "k": k, "expand_k": expand_k},
+            "graph_available": self.graph is not None,
+            "stats": _turn_stats(m.COLLECTOR.since(start)),
+        }
+
 
 def _turn_stats(events) -> Optional[dict]:
     """Aggregate the chat-model calls made during one agent turn (a tool loop can make
@@ -643,6 +682,17 @@ def make_handler(app: WikiWebApp):
                     if not message:
                         return self._json({"error": "empty message"}, 400)
                     return self._json(app.chat(message))
+                if path == "/api/ask":
+                    question = (data.get("question") or "").strip()
+                    if not question:
+                        return self._json({"error": "empty question"}, 400)
+                    return self._json(app.ask(
+                        question,
+                        use_graph=bool(data.get("graph", True)),
+                        hybrid=bool(data.get("hybrid", False)),
+                        rerank=bool(data.get("rerank", False)),
+                        k=int(data.get("k", 5)),
+                        expand_k=int(data.get("expand_k", 3))))
                 if path == "/api/compare":
                     question = (data.get("question") or "").strip()
                     if not question:

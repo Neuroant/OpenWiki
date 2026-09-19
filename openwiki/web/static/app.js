@@ -1567,13 +1567,132 @@ async function sendChat(message) {
   }
 }
 
+// -- Ask mode (RAG question-answering, read-only) ---------------------------
+
+function askSourceChips(sources) {
+  if (!sources || !sources.length) return null;
+  const wrap = document.createElement("div");
+  wrap.className = "src-chips";
+  sources.forEach((s) => {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "src-chip" + (s.kind === "related" ? " related" : "");
+    chip.title = "Seite öffnen · Score " + s.score;
+    chip.innerHTML =
+      `<span class="src-badge">${s.kind === "related" ? "+Graph" : "Seed"}</span>` +
+      `[${s.marker}] ${escapeHtml(s.title || s.slug)}`;
+    chip.addEventListener("click", () => loadPage(s.slug));
+    wrap.appendChild(chip);
+  });
+  return wrap;
+}
+
+function renderAskAnswer(bubble, data) {
+  bubble.classList.add("md");
+  bubble.innerHTML = data.answer ? marked.parse(data.answer) : "(keine Antwort)";
+  const chips = askSourceChips(data.sources);
+  if (chips) bubble.appendChild(chips);
+  const o = data.options || {};
+  const flags = [];
+  if (o.graph) flags.push("GraphRAG");
+  if (o.hybrid) flags.push("Hybrid");
+  if (o.rerank) flags.push("Re-rank");
+  flags.push("k=" + o.k);
+  const meta = document.createElement("div");
+  meta.className = "msg-meta";
+  meta.textContent = flags.join(" · ");
+  bubble.appendChild(meta);
+  renderChatStats(bubble, data.stats);
+  $("#chat-log").scrollTop = $("#chat-log").scrollHeight;
+}
+
+function renderGlobalAnswer(bubble, data) {
+  bubble.classList.add("md");
+  bubble.innerHTML = data.answer ? marked.parse(data.answer) : "(keine Antwort)";
+  const cited = new Set(data.cited || []);
+  const comms = data.communities || [];
+  if (comms.length) {
+    const wrap = document.createElement("div");
+    wrap.className = "src-chips";
+    comms.forEach((c) => {
+      const chip = document.createElement("span");
+      chip.className = "src-chip comm" + (cited.has(c.marker) ? " cited" : "");
+      chip.innerHTML = `<span class="src-badge">[${c.marker}]</span>${escapeHtml(c.label)} ` +
+        `<span class="muted">(${c.size})</span>`;
+      wrap.appendChild(chip);
+    });
+    bubble.appendChild(wrap);
+  }
+  const meta = document.createElement("div");
+  meta.className = "msg-meta";
+  meta.textContent = "Global · " + comms.length + " Themen";
+  bubble.appendChild(meta);
+  $("#chat-log").scrollTop = $("#chat-log").scrollHeight;
+}
+
+async function sendAsk(question) {
+  question = (question || "").trim();
+  if (!question) return;
+  addMsg("user", question);
+  const btn = $("#chat-send");
+  btn.disabled = true;
+  const global = $("#ask-global").checked;
+  const bubble = addMsg("agent", "…");
+  try {
+    if (global) {
+      renderGlobalAnswer(bubble, await postJSON("/api/global", { question }));
+    } else {
+      renderAskAnswer(bubble, await postJSON("/api/ask", {
+        question,
+        graph: $("#ask-graph").checked,
+        hybrid: $("#ask-hybrid").checked,
+        rerank: $("#ask-rerank").checked,
+        k: parseInt($("#ask-k").value, 10) || 5,
+      }));
+    }
+  } catch (err) {
+    bubble.textContent = "Fehler: " + err.message;
+  } finally {
+    btn.disabled = false;
+    $("#chat-input").focus();
+  }
+}
+
+let _askCapsProbed = false;
+async function ensureAskCaps() {
+  if (_askCapsProbed) return;
+  _askCapsProbed = true;
+  try {
+    const { communities } = await getJSON("/api/communities");
+    if (!communities || !communities.length) {
+      const g = $("#ask-global");
+      g.checked = false;
+      g.disabled = true;
+      g.closest("label").classList.add("disabled");
+      g.closest("label").title = "keine Communities — `openwiki communities` ausführen";
+    }
+  } catch (_) { /* leave enabled; the server reports if it can't answer */ }
+}
+
+function setChatMode(mode) {
+  state.chatMode = mode;
+  document.querySelectorAll(".chat-mode").forEach((b) => b.classList.toggle("active", b.dataset.mode === mode));
+  $("#ask-controls").hidden = mode !== "ask";
+  $("#chat-input").placeholder = mode === "ask"
+    ? "Frage stellen (RAG, mit Quellen)…"
+    : "Frage oder Änderungswunsch…";
+  if (mode === "ask") ensureAskCaps();
+}
+document.querySelectorAll(".chat-mode").forEach((b) =>
+  b.addEventListener("click", () => setChatMode(b.dataset.mode)));
+
 $("#chat-form").addEventListener("submit", (e) => {
   e.preventDefault();
   const input = $("#chat-input");
   const message = input.value.trim();
   if (!message) return;
   input.value = "";
-  sendChat(message);
+  (state.chatMode === "ask" ? sendAsk : sendChat)(message);
 });
 $("#chat-input").addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("#chat-form").requestSubmit(); }

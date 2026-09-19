@@ -142,7 +142,7 @@ header {
 .content img { max-width: 100%; }
 .muted { color: var(--muted); }
 
-.chat-head { padding: 12px 14px; border-bottom: 1px solid var(--line); font-weight: 600; }
+.chat-head { padding: 10px 14px; border-bottom: 1px solid var(--line); font-weight: 600; display: flex; align-items: center; gap: 8px; }
 .chat-log { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
 .msg { padding: 9px 12px; border-radius: 10px; max-width: 92%; white-space: pre-wrap; font-size: 14px; }
 .msg.user { align-self: flex-end; background: var(--accent); color: #fff; border-bottom-right-radius: 3px; }
@@ -366,3 +366,23 @@ header {
 .an-node { cursor: pointer; transition: r .1s; }
 .an-node:hover { r: 7; stroke: var(--accent); stroke-width: 2; }
 @media (max-width: 900px) { .an-metrics { grid-template-columns: 1fr; } }
+
+/* -- Ask mode (chat pane) ------------------------------------------------- */
+.chat-modes { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.chat-mode { border: 0; background: var(--panel); color: var(--muted); font: inherit; font-size: 12.5px; font-weight: 600; padding: 3px 12px; cursor: pointer; }
+.chat-mode.active { background: var(--accent); color: #fff; }
+.ask-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 12px; padding: 8px 14px; border-bottom: 1px solid var(--line); background: var(--bg); font-size: 12.5px; }
+.ask-controls label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; font-weight: 500; }
+.ask-controls label.disabled { opacity: .45; cursor: not-allowed; }
+.ask-controls .ask-k input { width: 46px; }
+.src-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.src-chip { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; border: 1px solid var(--line); background: var(--panel); border-radius: 12px; padding: 2px 8px; font-size: 11.5px; color: var(--ink); cursor: pointer; text-align: left; line-height: 1.5; }
+.src-chip:hover { border-color: var(--accent); }
+.src-chip.comm { cursor: default; }
+.src-chip.comm.cited { border-color: var(--accent); background: var(--accent-soft); }
+.src-badge { font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; color: var(--muted); background: var(--code-bg); border-radius: 6px; padding: 1px 5px; }
+.src-chip.related .src-badge { color: #b5651d; background: #fff3e6; }
+.msg.md { white-space: normal; }
+.msg.md > :first-child { margin-top: 0; }
+.msg.md > :last-child { margin-bottom: 0; }
+.msg.md p { margin: 0 0 8px; }

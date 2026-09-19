@@ -50,8 +50,17 @@ Textabschnitten des Wikis verglichen.
 ## Der Agent
 
 Der Chat rechts wird von einem lokalen Sprachmodell
-(**qwen3:30b-a3b-instruct-2507**) angetrieben. Der Agent kann **Werkzeuge**
-aufrufen, um im Wiki zu suchen, Seiten zu lesen und Seiten zu **bearbeiten**.
+(**qwen3:30b-a3b-instruct-2507**) angetrieben. Oben schalten Sie zwischen zwei Modi um:
+
+- **Agent** — der mehrschrittige Werkzeug-Agent: sucht, liest und **bearbeitet** Seiten
+  (siehe unten).
+- **Ask** — reine **Frage-Antwort (RAG)**, nur lesend, mit Quellenangaben. Eine
+  Schalterleiste steuert das Retrieval: **GraphRAG** (Seeds entlang der Graphkanten
+  erweitern), **Hybrid** (BM25 + Vektor), **Re-rank** (LLM-Neusortierung), **Global**
+  (Antwort aus den Themen-Zusammenfassungen) und **k** (Anzahl der Seed-Treffer). Jede
+  Antwort zeigt anklickbare Quellen-Chips — **Seed** (semantischer Treffer) vs.
+  **+Graph** (per Graph ergänzt) — plus eine ⏱-Zeile mit Dauer und Tokens. Das ist die
+  Browser-Entsprechung von `openwiki ask` auf der Kommandozeile.
 
 ### Fragen beantworten
 

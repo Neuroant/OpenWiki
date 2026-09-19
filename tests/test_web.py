@@ -139,6 +139,39 @@ def test_chat_edits_page(app):
     assert out["stats"] is None               # a fake (non-Ollama) chat records nothing
 
 
+class _RagChat:
+    """A minimal RAG-answering fake: `chat(messages) -> str` (what RAGAgent.answer calls)."""
+    name = "ragfake"
+
+    def chat(self, messages):
+        return "Die Lautstärke steht auf Seite [1]."
+
+
+def test_ask_returns_cited_sources(app):
+    app.agent.chat = _RagChat()                      # give the agent a RAG-capable chat model
+    out = app.ask("lautstarke", use_graph=False, k=2)
+    assert out["answer"].startswith("Die Lautstärke")
+    assert out["cited"] == [1]                        # the [1] marker is parsed
+    assert "000-a" in [s["slug"] for s in out["sources"]]
+    assert out["sources"][0]["kind"] == "seed"         # no graph → seed source
+    assert out["options"] == {"graph": False, "hybrid": False, "rerank": False,
+                              "k": 2, "expand_k": 3}
+    assert out["graph_available"] is False and "stats" in out
+
+
+def test_ask_hybrid_path_runs(app):
+    app.agent.chat = _RagChat()
+    out = app.ask("lautstarke", use_graph=False, hybrid=True, k=2)
+    assert out["options"]["hybrid"] is True           # BM25+dense seed path exercised
+    assert out["sources"]                              # still returns sources
+
+
+def test_ask_needs_a_chat_model(app):
+    app.agent = None
+    with pytest.raises(RuntimeError):
+        app.ask("lautstarke")
+
+
 def test_metrics_snapshot_shape(app):
     snap = app.metrics()
     assert set(snap) == {"events", "summary", "total_events"}

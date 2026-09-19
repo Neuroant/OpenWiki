@@ -575,7 +575,10 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   under *Conventions & gotchas*.
 - **`openwiki/web/`** — the web UI. `server.py` = `WikiWebApp` (state) + a
   `ThreadingHTTPServer` handler exposing a JSON API (`/api/wiki`,
-  `/api/pages/{slug}`, `/api/search`, `/api/chat`, `/api/graph/{slug}` = explore,
+  `/api/pages/{slug}`, `/api/search`, `/api/chat` (editing agent), `/api/ask` (POST) = **RAG
+  question-answering** for the chat pane's **Ask** mode (`WikiWebApp.ask` builds a per-request
+  `RAGAgent` with `graph`/`hybrid`/`rerank`/`k` — the browser twin of CLI `ask`; returns the answer
+  + cited seed/`related` sources + stats), `/api/graph/{slug}` = explore,
   `/api/graph/expand`, `/api/project` = the active project's full overview,
   `/api/eval?top_k=&expand_k=&eval_set=` = the retrieval benchmark, `/api/eval-sets`
   = the project's `*.jsonl` eval sets, `/api/compare` (POST) = one question through
@@ -840,8 +843,12 @@ http — count, p50/p95, total time, token in/out) + a live recent-events table,
 - The web UI (`serve`) is stdlib-only; the SPA is no-build and renders Markdown
   client-side via the vendored `openwiki/web/static/marked.min.js`. Internal
   `*.md` links are intercepted to route within the SPA; after an agent write tool
-  the open page + nav auto-refresh. The chat panel is hidden below a 1100px
-  viewport (CSS breakpoint), and a `favicon.ico` 404 in the console is benign.
+  the open page + nav auto-refresh. The chat panel has an **Agent | Ask** mode toggle:
+  *Agent* is the multi-turn tool/editing agent (`/api/chat`); *Ask* is read-only RAG
+  question-answering (`/api/ask`) with a controls row — **Global / GraphRAG / Hybrid /
+  Re-rank / k** — surfacing the measured retrieval variants in the browser (Global routes
+  to `/api/global`; answers show clickable seed vs. +Graph source chips). The chat panel is
+  hidden below a 1100px viewport (CSS breakpoint), and a `favicon.ico` 404 in the console is benign.
   `test_web.py` covers the app + a live-socket round-trip offline.
 - Tutorial `run:` links: `marked` URL-encodes the arg (spaces → `%20`, umlauts →
   `%C3%A4`), so `wireRunActions()` in `app.js` `decodeURIComponent`s it before

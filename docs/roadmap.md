@@ -430,6 +430,19 @@ heavier **`[analysis]` extra** (scikit-learn now; umap/networkx later) opt-in.
   (world-model analysis) is complete (P1–P4):** measure (coupling), see (Analyse tab), improve (gaps),
   compare (fingerprint diff), and the learning tier's dynamics (memory).
 
+### J — Web UI: surface the features (P1, in progress)
+The CLI/back-end outran the browser; this direction closes the gap.
+- ✅ **U1 — Ask mode landed (v0.72)** — the chat pane gained an **Agent | Ask** toggle. *Ask* is
+  read-only RAG (`WikiWebApp.ask` → `/api/ask`) with a controls row (**GraphRAG / Hybrid / Re-rank /
+  Global / k**), rendering the answer + clickable **seed vs. +Graph** source chips + a ⏱ stats line —
+  the browser twin of CLI `ask`, making the measured retrieval variants interactive. Verified live on
+  the informatik corpus (answered a software-architecture question with cross-book graph expansion).
+- **U2** — complete the Analyse tab (surface P3 gaps + P4 memory-dynamics, not just coupling).
+- **U3** — an entity/concept browser (canonical entities · aliases · description · relations).
+- **U4** — source filter + provenance across nav/search/graph (timely for the merged multi-book corpus).
+- **U5–U11** — hybrid toggle in sidebar search; promote global; streaming chat; dark mode; citation UX;
+  responsive/mobile; Analyse-map enrichment. (See the UI review.)
+
 ### If you pick one thing next
 **Direction A's re-ranking pass** is the smallest change with an immediately measurable
 payoff — the eval harness will tell you within one run whether it beats the current

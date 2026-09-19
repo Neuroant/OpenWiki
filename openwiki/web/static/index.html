@@ -38,7 +38,20 @@
     </main>
 
     <aside id="chat">
-      <div class="chat-head">Agent <span class="muted" id="chat-model"></span></div>
+      <div class="chat-head">
+        <span class="chat-modes" role="tablist">
+          <button type="button" class="chat-mode active" data-mode="agent" title="Mehrschrittiger Werkzeug-Agent: sucht, liest und bearbeitet Seiten">Agent</button>
+          <button type="button" class="chat-mode" data-mode="ask" title="RAG-Frage-Antwort mit Quellenangaben (nur lesend)">Ask</button>
+        </span>
+        <span class="muted" id="chat-model"></span>
+      </div>
+      <div id="ask-controls" class="ask-controls" hidden>
+        <label title="Antworten aus den Themen-Zusammenfassungen (Communities)"><input type="checkbox" id="ask-global"> Global</label>
+        <label title="Seed-Seiten entlang der Graphkanten erweitern"><input type="checkbox" id="ask-graph" checked> GraphRAG</label>
+        <label title="BM25 + Vektor-Suche fusionieren"><input type="checkbox" id="ask-hybrid"> Hybrid</label>
+        <label title="Trefferliste per LLM neu sortieren"><input type="checkbox" id="ask-rerank"> Re-rank</label>
+        <label class="ask-k" title="Anzahl der Seed-Treffer">k <input type="number" id="ask-k" min="1" max="20" value="5"></label>
+      </div>
       <div id="chat-log" class="chat-log">
         <div class="msg agent">
           Frag mich etwas über das Handbuch — oder bitte mich, eine Seite zu bearbeiten.

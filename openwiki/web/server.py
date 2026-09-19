@@ -436,6 +436,26 @@ class WikiWebApp:
                 "projection": {"method": used, "points": points},
                 "edges": edges, "communities": communities}
 
+    def analyze_gaps(self, top: int = 15) -> dict:
+        """P3 gap-mining for the Analyse tab (`/api/analyze/gaps`): missing cross-refs,
+        near-duplicates, isolated pages, entity-merge candidates. Read-only + offline;
+        ``available: false`` (with a reason) when the index or graph is missing."""
+        if self.index is None:
+            return {"available": False, "reason": "no_index"}
+        if self.graph is None:
+            return {"available": False, "reason": "no_graph"}
+        from ..analysis.gaps import analyze_gaps
+        return {"available": True, **analyze_gaps(self.index, self.graph, top=top)}
+
+    def analyze_memory(self) -> dict:
+        """P4 memory-tier dynamics for the Analyse tab (`/api/analyze/memory`): revision,
+        consolidation, temperature, breadth, growth. Read-only; ``available: false`` when
+        there is no graph or no remembered tier."""
+        if self.graph is None:
+            return {"available": False, "reason": "no_graph"}
+        from ..analysis.memory import analyze_memory
+        return analyze_memory(self.graph)
+
     # -- memory tier (Path B / Second Brain) ---------------------------------
 
     def _memory_embedder(self):
@@ -646,6 +666,11 @@ def make_handler(app: WikiWebApp):
                     k = int(query.get("k", ["8"])[0])
                     method = query.get("method", ["auto"])[0]
                     return self._json(app.analyze(k=k, method=method))
+                if path == "/api/analyze/gaps":
+                    query = parse_qs(urlparse(self.path).query)
+                    return self._json(app.analyze_gaps(top=int(query.get("top", ["15"])[0])))
+                if path == "/api/analyze/memory":
+                    return self._json(app.analyze_memory())
                 if path == "/api/answer-eval":
                     return self._json(app.answer_eval_status())
                 if path.startswith("/api/pages/"):

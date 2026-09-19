@@ -329,26 +329,149 @@ function wireAnalyse() {
   if (theme) theme.addEventListener("change", () => { analyse.colorByTheme = theme.checked; drawSemanticMap(); });
 }
 
-async function renderAnalyse() {
+const AN_VIEWS = [
+  { key: "coupling", label: "Kopplung" },
+  { key: "gaps", label: "Lücken" },
+  { key: "memory", label: "Dynamik" },
+];
+
+function renderAnalyse() {
   const content = $("#content");
-  content.innerHTML = `<div id="an"><p class="muted">Analyse wird berechnet…</p></div>`;
+  if (!analyse.view) analyse.view = "coupling";
+  content.innerHTML =
+    `<div class="an-subtabs">` +
+    AN_VIEWS.map((v) => `<button class="an-subtab" data-view="${v.key}">${v.label}</button>`).join("") +
+    `</div><div id="an-view"><p class="muted">Wird geladen…</p></div>`;
+  document.querySelectorAll(".an-subtab").forEach((b) =>
+    b.addEventListener("click", () => { analyse.view = b.dataset.view; renderAnalyseView(); }));
+  renderAnalyseView();
+}
+
+function renderAnalyseView() {
+  document.querySelectorAll(".an-subtab").forEach((b) => b.classList.toggle("active", b.dataset.view === analyse.view));
+  if (analyse.view === "gaps") return renderGaps();
+  if (analyse.view === "memory") return renderDynamics();
+  return renderCoupling();
+}
+
+async function renderCoupling() {
+  const host = $("#an-view");
+  host.innerHTML = `<p class="muted">Kopplung wird berechnet…</p>`;
   let data;
   try {
     data = await getJSON("/api/analyze");
   } catch (e) {
-    $("#an").innerHTML = `<p class="muted">Fehler: ${escapeHtml(e.message)}</p>`;
+    if ($("#an-view")) $("#an-view").innerHTML = `<p class="muted">Fehler: ${escapeHtml(e.message)}</p>`;
     return;
   }
-  const an = $("#an");
-  if (!an) return;   // tab switched away mid-fetch
-  if (!data.available) { an.innerHTML = analyseUnavailable(data); return; }
+  if (!$("#an-view") || analyse.view !== "coupling") return;   // switched away mid-fetch
+  if (!data.available) { $("#an-view").innerHTML = analyseUnavailable(data); return; }
   analyse.data = data;
   analyse.colorMap = {};
   (data.communities || []).forEach((cm) => (analyse.colorMap[cm.id] = COMMUNITY_PALETTE[cm.id % COMMUNITY_PALETTE.length]));
   analyse.colorByTheme = (data.communities || []).length > 0;
-  an.innerHTML = analyseLayout(data);
+  $("#an-view").innerHTML = analyseLayout(data);
   wireAnalyse();
   drawSemanticMap();
+}
+
+// -- Analyse · Lücken (P3 gap-mining) ---------------------------------------
+
+function gapPage(slug, title) {
+  return `<button class="gap-page" data-slug="${escapeHtml(slug)}" title="Seite öffnen">${escapeHtml(title || slug)}</button>`;
+}
+
+function gapsLayout(d) {
+  const rows = (arr, fn) => (arr && arr.length ? arr.map(fn).join("") : `<p class="muted">keine</p>`);
+  const links = rows(d.link_candidates, (c) =>
+    `<div class="gap-row"><span class="gap-metric">${c.shared_entities} geteilt · cos ${c.cosine.toFixed(2)}</span>` +
+    `${gapPage(c.a, c.a_title)} <span class="muted">↔</span> ${gapPage(c.b, c.b_title)}</div>`);
+  const red = (d.redundant_pages && d.redundant_pages.length)
+    ? d.redundant_pages.map((c) =>
+        `<div class="gap-row"><span class="gap-metric">cos ${c.cosine.toFixed(3)}</span>` +
+        `${gapPage(c.a, c.a_title)} <span class="muted">↔</span> ${gapPage(c.b, c.b_title)}</div>`).join("")
+    : `<p class="muted">keine über dem Schwellwert</p>`;
+  const iso = d.isolated_pages || {};
+  const outliers = rows(iso.semantic_outliers, (p) =>
+    `<div class="gap-row"><span class="gap-metric">nn-cos ${p.nn_cosine.toFixed(3)}</span> ${gapPage(p.slug, p.title)}</div>`);
+  const orphans = rows(iso.structural_orphans, (o) => `<div class="gap-row">${gapPage(o.slug, o.title)}</div>`);
+  const ents = rows(d.entity_merge_candidates, (e) =>
+    `<div class="gap-row"><span class="gap-metric">sim ${e.similarity.toFixed(2)} · ${escapeHtml(e.type)}</span>` +
+    `<b>${escapeHtml(e.a)}</b> <span class="muted">≈</span> <b>${escapeHtml(e.b)}</b></div>`);
+  return `<div class="an-head"><strong>Lücken &amp; Hygiene</strong> ` +
+    `<span class="muted">— umsetzbare Verbesserungsvorschläge (nur lesend)</span></div>` +
+    `<div class="gap-panel"><h3>Fehlende Querverweise <span class="muted">(teilen Begriffe, zitieren sich aber nicht)</span></h3>${links}</div>` +
+    `<div class="gap-panel"><h3>Beinahe-Duplikate <span class="muted">(sehr ähnliche Einbettungen)</span></h3>${red}</div>` +
+    `<div class="gap-panel"><h3>Isolierte Seiten</h3>` +
+    `<div class="muted an-note">semantische Ausreißer (nächster Nachbar ist fern):</div>${outliers}` +
+    `<div class="muted an-note">strukturelle Waisen (keine Ähnlich-/Verweis-/Begriffskante):</div>${orphans}</div>` +
+    `<div class="gap-panel"><h3>Zusammenführbare Begriffe <span class="muted">(gleicher Typ, ähnliche Namen — Kandidaten für <code>--resolve-entities</code>)</span></h3>${ents}</div>`;
+}
+
+async function renderGaps() {
+  const host = $("#an-view");
+  host.innerHTML = `<p class="muted">Lücken werden ermittelt…</p>`;
+  let d;
+  try {
+    d = await getJSON("/api/analyze/gaps");
+  } catch (e) {
+    if ($("#an-view")) $("#an-view").innerHTML = `<p class="muted">Fehler: ${escapeHtml(e.message)}</p>`;
+    return;
+  }
+  if (!$("#an-view") || analyse.view !== "gaps") return;
+  if (!d.available) { $("#an-view").innerHTML = analyseUnavailable(d); return; }
+  $("#an-view").innerHTML = gapsLayout(d);
+  document.querySelectorAll("#an-view .gap-page").forEach((el) =>
+    el.addEventListener("click", () => loadPage(el.dataset.slug)));
+}
+
+// -- Analyse · Dynamik (P4 memory-tier dynamics) ----------------------------
+
+function dynamicsLayout(d) {
+  const c = d.counts, rev = d.revision, con = d.consolidation, t = d.temperature, b = d.breadth;
+  const total = (t.hot + t.warm + t.cold) || 1;
+  const seg = (n, cls) => n ? `<span class="temp-seg ${cls}" style="width:${(100 * n / total).toFixed(1)}%" title="${n}"></span>` : "";
+  const tops = (b.top_predicates || []).map((p) => `${escapeHtml(p.predicate)}×${p.count}`).join(", ");
+  const peak = Math.max(1, ...(d.growth || []).map((g) => g.facts));
+  const growth = (d.growth || []).map((g) =>
+    `<div class="gap-row"><span class="gap-metric">${escapeHtml(g.session_id)}</span>` +
+    `<span class="grow-bar" style="width:${Math.max(4, Math.round(140 * g.facts / peak))}px"></span> ${g.facts}</div>`).join("") ||
+    `<p class="muted">—</p>`;
+  return `<div class="an-head"><strong>Gedächtnis-Dynamik</strong> ` +
+    `<span class="muted">— ${c.sessions} Sitzungen · ${c.current} aktuelle Fakten (${c.superseded} überholt) · ${c.themes} Themen</span></div>` +
+    `<div class="an-metrics">` +
+    `<div class="an-panel"><h3>Revision & Konsolidierung</h3>` +
+    `<div class="m-row"><span>Überschrieben (superseded)</span><b>${(rev.revision_rate * 100).toFixed(0)}% · ${rev.superseded}</b></div>` +
+    `<div class="m-row"><span>In Themen konsolidiert</span><b>${(con.coverage * 100).toFixed(0)}% · ⌀ ${con.avg_theme_size}/Thema</b></div>` +
+    `<div class="m-row"><span>Themengrößen</span><b>${con.theme_sizes.min}–${con.theme_sizes.max}</b></div></div>` +
+    `<div class="an-panel"><h3>Temperatur <span class="muted">(heiß = jung/oft bestätigt)</span></h3>` +
+    `<div class="temp-bar">${seg(t.hot, "hot")}${seg(t.warm, "warm")}${seg(t.cold, "cold")}</div>` +
+    `<div class="muted an-note">${t.hot} heiß · ${t.warm} warm · ${t.cold} kalt · Halbwertszeit ${t.half_life_days}d</div>` +
+    `<div class="m-row"><span>⌀ Konfidenz</span><b>${t.mean_confidence}</b></div>` +
+    `<div class="m-row"><span>Wiederbestätigt (&gt;1)</span><b>${(t.reaffirmed_fraction * 100).toFixed(0)}%</b></div></div></div>` +
+    `<div class="gap-panel"><h3>Breite</h3><div class="muted">${b.distinct_subjects} Subjekte · ${b.distinct_predicates} Prädikate` +
+    `${tops ? " · top: " + tops : ""}</div></div>` +
+    `<div class="gap-panel"><h3>Wachstum <span class="muted">(Fakten je Sitzung, älteste zuerst)</span></h3>${growth}</div>`;
+}
+
+async function renderDynamics() {
+  const host = $("#an-view");
+  host.innerHTML = `<p class="muted">Gedächtnis-Dynamik wird berechnet…</p>`;
+  let d;
+  try {
+    d = await getJSON("/api/analyze/memory");
+  } catch (e) {
+    if ($("#an-view")) $("#an-view").innerHTML = `<p class="muted">Fehler: ${escapeHtml(e.message)}</p>`;
+    return;
+  }
+  if (!$("#an-view") || analyse.view !== "memory") return;
+  if (!d.available) {
+    $("#an-view").innerHTML = `<div class="an-head"><strong>Gedächtnis-Dynamik</strong></div>` +
+      `<p class="muted">Kein Gedächtnis-Tier — im <b>Second-Brain-Modus</b> mit <code>openwiki remember</code> ` +
+      `erfassten Sitzungen wird es gefüllt (siehe Reiter <b>Gedächtnis</b>).</p>`;
+    return;
+  }
+  $("#an-view").innerHTML = dynamicsLayout(d);
 }
 
 // -- Memory (Gedächtnis / Second Brain) tab ---------------------------------

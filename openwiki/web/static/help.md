@@ -200,10 +200,11 @@ Reiter darauf hin und verweist auf `openwiki init`.
 
 Der Reiter **Analyse** vermisst die **Struktur und Organisation** des Wissens selbst
 — er behandelt die beiden Darstellungen desselben Korpus (den symbolischen **Graphen**
-und den **semantischen Raum** der Einbettungen) als *ein* Objekt und fragt: *Wo stimmen
-sie überein (redundant), und wo fügt der Graph Struktur hinzu, die reine Ähnlichkeit
-nicht sieht?* Alles nur lesend und ohne Ollama-Aufruf (aus den gespeicherten
-Einbettungen).
+und den **semantischen Raum** der Einbettungen) als *ein* Objekt. Er hat drei Unterreiter
+(alles nur lesend, ohne Ollama-Aufruf):
+
+**Kopplung** — *Wo stimmen Graph und Einbettungen überein (redundant), und wo fügt der
+Graph Struktur hinzu, die reine Ähnlichkeit nicht sieht?*
 
 - Eine **Kennzahlentabelle** je Kantentyp: mittlerer Kosinus der Endpunkte gegen ein
   Zufallspaar (**vs. Null**) und der **Overlap** mit den Einbettungs-Nachbarn.
@@ -214,11 +215,20 @@ Einbettungen).
   in 2D projiziert, nach Thema eingefärbt, mit überlagerten Graphkanten (Kantentypen
   ein-/ausschaltbar; Klick auf einen Knoten öffnet die Seite).
 
-Auf der Kommandozeile stehen zusätzlich `openwiki analyze gaps` (konkrete
-Verbesserungs­vorschläge: fehlende Querverweise, Beinah-Duplikate, zusammenführbare
-Begriffe), `analyze --compare` (zwei Wissensstände vergleichen) und `analyze memory`
-(Gedächtnis-Dynamik). Die Kohärenz-Kennzahl und die UMAP-Karte benötigen das
-optionale Zusatzpaket `pip install "owiki[analysis]"` (sonst PCA + Kernkennzahlen).
+**Lücken** — eine umsetzbare **To-do-Liste** zur Verbesserung des Wikis: *fehlende
+Querverweise* (Seiten, die dieselben Begriffe erwähnen, sich aber nicht zitieren),
+*Beinahe-Duplikate* (fast identische Einbettungen), *isolierte Seiten* (semantische
+Ausreißer + strukturelle Waisen) und *zusammenführbare Begriffe* (gleicher Typ, ähnliche
+Namen — Kandidaten für `--resolve-entities`). Seitenverweise sind anklickbar.
+
+**Dynamik** — die **Gedächtnis-Dynamik** (nur im Second-Brain-Modus mit erfassten
+Sitzungen): Revision (überschriebene Fakten), Konsolidierung (Anteil in Themen),
+Temperatur (heiß/warm/kalt nach Aktualität + Konfidenz), Breite und Wachstum je Sitzung.
+
+Dieselben Auswertungen gibt es auf der Kommandozeile: `openwiki analyze [coupling|gaps|memory]`
+und `analyze --compare` (zwei Wissensstände vergleichen). Die Kohärenz-Kennzahl und die
+UMAP-Karte benötigen das optionale Zusatzpaket `pip install "owiki[analysis]"` (sonst PCA +
+Kernkennzahlen).
 
 ## Gedächtnis (Reiter „Gedächtnis")
 

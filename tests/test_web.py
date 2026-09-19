@@ -172,6 +172,16 @@ def test_ask_needs_a_chat_model(app):
         app.ask("lautstarke")
 
 
+def test_analyze_gaps_without_graph(app):
+    out = app.analyze_gaps()                          # fixture has no graph
+    assert out["available"] is False and out["reason"] == "no_graph"
+
+
+def test_analyze_memory_without_graph(app):
+    out = app.analyze_memory()                        # fixture has no graph
+    assert out["available"] is False and out["reason"] == "no_graph"
+
+
 def test_metrics_snapshot_shape(app):
     snap = app.metrics()
     assert set(snap) == {"events", "summary", "total_events"}

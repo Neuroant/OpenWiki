@@ -590,7 +590,8 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   memory-tier overview (`memory_info()`: identity + counts + themes + browsable assertions),
   `/api/recall` (POST) = decay-weighted `recall`, `/api/context` (POST) = the assembled
   three-tier `context_for`, `/api/analyze?k=&method=` = the world-model coupling analysis +
-  2-D semantic map (`WikiWebApp.analyze()` → `analysis.analyze_coupling` + `project_2d`)) plus static files
+  2-D semantic map (`WikiWebApp.analyze()` → `analysis.analyze_coupling` + `project_2d`), `/api/analyze/gaps`
+  = P3 gap-mining (`analyze_gaps`), `/api/analyze/memory` = P4 memory-tier dynamics (`analyze_memory`)) plus static files
   (served `no-cache`); `serve()` runs it. Every `/api/*` request is timed and recorded
   as an `http` metrics event (`_observe_request`), and `chat()` returns per-turn LLM
   telemetry (`_turn_stats` over the collector events since the turn began).
@@ -605,13 +606,15 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   (fetched from `/api/communities`; neutral blue when off or no communities) — no JS libraries. `static/` = a no-build vanilla-JS SPA with client-side Markdown via a
   vendored `marked.min.js`. The center pane has nine tabs (**Projekt / Wiki /
   Graph / Analyse / Gedächtnis / Evaluation / System / Tutorial / Hilfe**). The **Analyse tab**
-  (`renderAnalyse` → `/api/analyze`) is the **world-model analysis** surface (P2): the coupling
-  metric table (per edge type: endpoint cosine vs. null + kNN overlap), the **graph-reach headline**
-  (the non-semantic-fraction %), community coherence, and a hand-rolled SVG **semantic map** — the
-  pages projected to 2-D (PCA, or UMAP with the `[analysis]` extra), coloured by community
-  (`COMMUNITY_PALETTE`), with graph edges overlaid and per-edge-type toggles (REFERENCES + RELATED_TO
-  on by default — the non-semantic "reach" edges; click a node → open the page). Read-only + offline;
-  graceful empty states (no index / no graph). The **Gedächtnis (Memory)
+  (`renderAnalyse`) is the **world-model analysis** surface, split into three sub-tabs (U2):
+  **Kopplung** (`renderCoupling` → `/api/analyze`) — the coupling metric table (endpoint cosine vs. null
+  + kNN overlap per edge type), the **graph-reach headline**, community coherence, and a hand-rolled SVG
+  **semantic map** (pages projected 2-D via PCA/UMAP, coloured by community, graph edges overlaid with
+  per-edge-type toggles, click a node → open the page); **Lücken** (`renderGaps` → `/api/analyze/gaps`) —
+  the P3 improvement to-do list (missing cross-refs, near-duplicates, isolated pages, entity-merge
+  candidates; page refs clickable); **Dynamik** (`renderDynamics` → `/api/analyze/memory`) — the P4
+  memory-tier dynamics (revision / consolidation / temperature bars / breadth / growth). Read-only +
+  offline; graceful empty states (no index / no graph / no memory). The **Gedächtnis (Memory)
 tab** (`renderMemory` → `/api/memory`) surfaces **Path B** in the browser: the identity
 (DNA) + stat chips (Sitzungen / Fakten / überholt / Themen), a **recall/context box**
 (`/api/recall` decay-weighted facts, `/api/context` the assembled three-tier context),

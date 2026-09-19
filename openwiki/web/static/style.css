@@ -386,3 +386,20 @@ header {
 .msg.md > :first-child { margin-top: 0; }
 .msg.md > :last-child { margin-bottom: 0; }
 .msg.md p { margin: 0 0 8px; }
+
+/* -- Analyse sub-tabs (Kopplung / Lücken / Dynamik) ----------------------- */
+.an-subtabs { display: flex; gap: 4px; margin-bottom: 14px; border-bottom: 1px solid var(--line); }
+.an-subtab { border: 0; background: transparent; font: inherit; font-weight: 600; font-size: 13px; color: var(--muted); padding: 6px 14px; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.an-subtab:hover { color: var(--ink); }
+.an-subtab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.gap-panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; margin-bottom: 12px; }
+.gap-panel h3 { margin: 0 0 8px; font-size: 13px; }
+.gap-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 3px 0; font-size: 13px; }
+.gap-metric { display: inline-block; min-width: 130px; color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.gap-page { border: 1px solid var(--line); background: var(--bg); border-radius: 8px; padding: 2px 8px; font: inherit; font-size: 12.5px; color: var(--ink); cursor: pointer; }
+.gap-page:hover { border-color: var(--accent); color: var(--accent); }
+.temp-bar { display: flex; height: 14px; border-radius: 7px; overflow: hidden; background: var(--code-bg); margin: 4px 0 6px; }
+.temp-seg.hot { background: #ff8787; }
+.temp-seg.warm { background: #ffd43b; }
+.temp-seg.cold { background: #adb5bd; }
+.grow-bar { display: inline-block; height: 10px; border-radius: 5px; background: var(--accent); }

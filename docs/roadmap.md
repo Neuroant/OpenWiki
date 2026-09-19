@@ -437,7 +437,11 @@ The CLI/back-end outran the browser; this direction closes the gap.
   Global / k**), rendering the answer + clickable **seed vs. +Graph** source chips + a ⏱ stats line —
   the browser twin of CLI `ask`, making the measured retrieval variants interactive. Verified live on
   the informatik corpus (answered a software-architecture question with cross-book graph expansion).
-- **U2** — complete the Analyse tab (surface P3 gaps + P4 memory-dynamics, not just coupling).
+- ✅ **U2 — Analyse tab completed (v0.73)** — split into three sub-tabs: **Kopplung** (coupling + map),
+  **Lücken** (P3 gaps — missing cross-refs / near-duplicates / isolated pages / entity-merge candidates,
+  with clickable page refs), and **Dynamik** (P4 memory-tier dynamics — revision / consolidation /
+  temperature / breadth / growth). Backed by `/api/analyze/gaps` + `/api/analyze/memory` (thin wrappers
+  over the existing `analyze_gaps`/`analyze_memory`). Verified live on informatik.
 - **U3** — an entity/concept browser (canonical entities · aliases · description · relations).
 - **U4** — source filter + provenance across nav/search/graph (timely for the merged multi-book corpus).
 - **U5–U11** — hybrid toggle in sidebar search; promote global; streaming chat; dark mode; citation UX;

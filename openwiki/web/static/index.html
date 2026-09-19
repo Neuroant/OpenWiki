@@ -5,17 +5,23 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>OpenWiki</title>
   <link rel="stylesheet" href="/static/style.css" />
+  <script>
+    // Apply the saved theme before first paint (no flash of the wrong theme).
+    try { var t = localStorage.getItem("owiki-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+  </script>
 </head>
 <body>
   <header>
     <div class="brand">Open<span>Wiki</span></div>
     <div id="doc-title" class="doc-title"></div>
     <div id="project-badge" class="project-badge" hidden></div>
+    <button id="theme-toggle" class="theme-toggle" title="Hell/Dunkel umschalten" aria-label="Design umschalten">🌙</button>
   </header>
 
   <div id="layout">
     <aside id="sidebar">
       <input id="search" type="search" placeholder="Semantische Suche…" autocomplete="off" />
+      <label class="search-opt" title="BM25 + Vektor-Suche fusionieren (findet exakte Begriffe)"><input type="checkbox" id="search-hybrid"> Hybrid (BM25 + Vektor)</label>
       <select id="source-filter" class="source-filter" hidden aria-label="Quelle filtern"></select>
       <div id="search-results" class="search-results" hidden></div>
       <nav id="nav" class="nav"></nav>

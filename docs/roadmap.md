@@ -451,8 +451,15 @@ The CLI/back-end outran the browser; this direction closes the gap.
   (merged source file) + `book` (`sources/` subfolder, via the project's source order); the sidebar gains a
   **source/book filter** that scopes the nav + search, and search hits show their origin source. Verified
   live on informatik: filters the lecture (76p) vs. *Lehrbuch der Softwaretechnik* (43p).
-- **U5–U11** — hybrid toggle in sidebar search; promote global; streaming chat; dark mode; citation UX;
-  responsive/mobile; Analyse-map enrichment. (See the UI review.)
+- ✅ **U5 — hybrid sidebar search landed (v0.76)** — a **Hybrid (BM25 + Vektor)** toggle by the search box
+  (`/api/search?hybrid`), surfacing the RRF fusion in the browser.
+- ✅ **U6 — global search** — already delivered by U1 (the Ask mode's **Global** toggle → `/api/global`).
+- ✅ **U8 — dark mode landed (v0.76)** — a header theme toggle (light/dark via `:root[data-theme=dark]`
+  CSS-var overrides), persisted in localStorage, applied pre-paint (no flash).
+- ✅ **U9 — citation UX** — already delivered by U1 (Ask answers show clickable **seed vs. +Graph** source chips).
+- **U10** — responsive / collapsible panels (next).
+- **U11** — Analyse-map enrichment (PCA/UMAP toggle, community focus; next).
+- **U7** — streaming chat responses (the large one; its own increment).
 
 ### If you pick one thing next
 **Direction A's re-ranking pass** is the smallest change with an immediately measurable

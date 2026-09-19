@@ -42,6 +42,10 @@ Textabschnitten des Wikis verglichen.
   **PDF-Seitenbereich** und einen Textausschnitt.
 - Ein Klick auf einen Treffer öffnet die zugehörige Seite.
 - Weil das Modell multilingual ist, funktionieren auch Umschreibungen und Synonyme.
+- Die Option **Hybrid (BM25 + Vektor)** mischt die Vektorsuche mit einer lexikalischen
+  BM25-Suche — hilfreich für exakte Begriffe, Bezeichner und Abkürzungen.
+- Über den 🌙/☀️-Schalter oben rechts wechseln Sie zwischen hellem und dunklem Design
+  (die Wahl wird gespeichert).
 
 **Beispiel-Suchen:**
 

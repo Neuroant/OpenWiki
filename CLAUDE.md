@@ -609,7 +609,10 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   `COMMUNITY_PALETTE`, keyed by the node's `community` id from `_page_gnode` →
   `GraphStore._community_of`), with a swatch legend + a "Themenfarben" toggle
   (fetched from `/api/communities`; neutral blue when off or no communities) — no JS libraries. `static/` = a no-build vanilla-JS SPA with client-side Markdown via a
-  vendored `marked.min.js`. The center pane has ten tabs (**Projekt / Wiki /
+  vendored `marked.min.js`. A **header theme toggle** switches light/dark (`:root[data-theme="dark"]`
+  CSS-var overrides, persisted in `localStorage`, applied pre-paint by an inline `<head>` script — U8);
+  the sidebar search has a **Hybrid (BM25+dense)** toggle (`/api/search` `hybrid` flag → `search_hybrid`, U5).
+  The center pane has ten tabs (**Projekt / Wiki /
   Graph / Begriffe / Analyse / Gedächtnis / Evaluation / System / Tutorial / Hilfe**). The **Begriffe tab**
   (`renderEntities` → `/api/entities` + `/api/entity/{name}`, U3) is a **canonical-entity browser**: a
   searchable, type-filtered, mention-ranked list (master) + a detail pane (description + alias chips +

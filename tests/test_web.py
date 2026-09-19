@@ -107,6 +107,12 @@ def test_search(app):
     assert results and results[0]["slug"] == "000-a"
 
 
+def test_search_hybrid(app):
+    out = app.search("lautstarke", k=3, hybrid=True)   # BM25 + dense fusion path
+    assert out["hybrid"] is True
+    assert "000-a" in [r["slug"] for r in out["results"]]
+
+
 def test_run_eval(app, tmp_path):
     assert app.run_eval()["exists"] is False           # no eval.jsonl yet
     (tmp_path / "eval.jsonl").write_text(

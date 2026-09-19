@@ -1724,10 +1724,29 @@ $("#search").addEventListener("input", (e) => {
   if (!q) { box.hidden = true; box.innerHTML = ""; return; }
   searchTimer = setTimeout(() => runSearch(q), 250);
 });
+$("#search-hybrid").addEventListener("change", () => {
+  const q = $("#search").value.trim();
+  if (q) runSearch(q);          // re-run the current query with the new mode
+});
+
+// -- theme (light / dark) ---------------------------------------------------
+function applyThemeIcon() {
+  const btn = $("#theme-toggle");
+  if (btn) btn.textContent = document.documentElement.dataset.theme === "dark" ? "☀️" : "🌙";
+}
+$("#theme-toggle").addEventListener("click", () => {
+  const next = document.documentElement.dataset.theme === "dark" ? "" : "dark";
+  if (next) document.documentElement.dataset.theme = next;
+  else delete document.documentElement.dataset.theme;
+  try { localStorage.setItem("owiki-theme", next); } catch (e) { /* ignore */ }
+  applyThemeIcon();
+});
+applyThemeIcon();
 async function runSearch(q) {
   const box = $("#search-results");
   try {
-    let { results } = await postJSON("/api/search", { query: q, k: 8 });
+    const hybrid = !!($("#search-hybrid") && $("#search-hybrid").checked);
+    let { results } = await postJSON("/api/search", { query: q, k: 8, hybrid });
     results = results || [];
     if (state.filterValue) results = results.filter((r) => inSourceFilter(state.pages[r.slug] || {}));
     box.innerHTML = "";

@@ -115,11 +115,11 @@ class WikiWebApp:
             raise KeyError(markdown)
         return {"slug": slug, "markdown": markdown}
 
-    def search(self, query: str, k: int = 8) -> dict:
+    def search(self, query: str, k: int = 8, hybrid: bool = False) -> dict:
         if self.index is None:
             raise RuntimeError("No search index is loaded. Run `openwiki index` first.")
-        results = self.index.search(query, k=k)
-        return {"results": [
+        results = self.index.search_hybrid(query, k=k) if hybrid else self.index.search(query, k=k)
+        return {"hybrid": bool(hybrid), "results": [
             {"score": r.score, "slug": r.page_slug, "title": r.page_title,
              "pdf_page_start": r.pdf_page_start, "pdf_page_end": r.pdf_page_end,
              "text": r.text}
@@ -791,7 +791,8 @@ def make_handler(app: WikiWebApp):
                 data = self._body_json()
                 if path == "/api/search":
                     query = (data.get("query") or "").strip()
-                    return self._json(app.search(query, int(data.get("k", 8))) if query else {"results": []})
+                    return self._json(app.search(query, int(data.get("k", 8)), bool(data.get("hybrid", False)))
+                                      if query else {"results": []})
                 if path == "/api/chat":
                     message = (data.get("message") or "").strip()
                     if not message:

@@ -45,11 +45,34 @@ function renderNav() {
     return li;
   };
   const ul = document.createElement("ul");
-  pages.filter((p) => !p.parent).forEach((r) => ul.appendChild(build(r)));
+  pages.filter((p) => !p.parent && inSourceFilter(p)).forEach((r) => ul.appendChild(build(r)));
   const nav = $("#nav");
   nav.innerHTML = "";
+  if (!ul.children.length) ul.innerHTML = `<li class="muted">keine Seiten für diese Quelle</li>`;
   nav.appendChild(ul);
   setActive(state.currentSlug);
+}
+
+// Source/book provenance filter (multi-source corpora): which field to filter on and the
+// active value; a page passes when unfiltered or its field matches.
+function inSourceFilter(p) {
+  return !state.filterValue || p[state.filterField] === state.filterValue;
+}
+
+function buildSourceFilter() {
+  const sel = $("#source-filter");
+  if (!sel) return;
+  const m = state.manifest || {};
+  const books = m.books || [];
+  state.filterField = books.length ? "book" : "source";
+  const opts = books.length ? books : (m.sources || []);
+  if (opts.length <= 1) { sel.hidden = true; return; }   // nothing to filter
+  const label = books.length ? "alle Bücher" : "alle Quellen";
+  sel.innerHTML = `<option value="">${label}</option>` +
+    opts.map((o) => `<option value="${escapeHtml(o)}">${escapeHtml(o)}</option>`).join("");
+  sel.value = state.filterValue || "";
+  sel.hidden = false;
+  sel.onchange = () => { state.filterValue = sel.value; renderNav(); };
 }
 function setActive(slug) {
   document.querySelectorAll("#nav a").forEach((a) => a.classList.toggle("active", a.dataset.slug === slug));
@@ -1704,16 +1727,20 @@ $("#search").addEventListener("input", (e) => {
 async function runSearch(q) {
   const box = $("#search-results");
   try {
-    const { results } = await postJSON("/api/search", { query: q, k: 8 });
+    let { results } = await postJSON("/api/search", { query: q, k: 8 });
+    results = results || [];
+    if (state.filterValue) results = results.filter((r) => inSourceFilter(state.pages[r.slug] || {}));
     box.innerHTML = "";
-    if (!results || !results.length) {
+    if (!results.length) {
       box.innerHTML = `<div class="hit"><div class="s">Keine Treffer</div></div>`;
     } else {
       results.forEach((r) => {
+        const src = (state.pages[r.slug] || {}).source || "";
         const div = document.createElement("div");
         div.className = "hit";
-        div.innerHTML = `<div class="t"></div><div class="s"></div><div class="x"></div>`;
+        div.innerHTML = `<div class="t"></div><div class="src"></div><div class="s"></div><div class="x"></div>`;
         div.querySelector(".t").textContent = r.title;
+        div.querySelector(".src").textContent = src;
         div.querySelector(".s").textContent = `${r.score.toFixed(3)} · PDF S.${r.pdf_page_start}–${r.pdf_page_end}`;
         div.querySelector(".x").textContent = r.text;
         div.addEventListener("click", () => { box.hidden = true; loadPage(r.slug); });
@@ -1817,7 +1844,8 @@ function askSourceChips(sources) {
     const chip = document.createElement("button");
     chip.type = "button";
     chip.className = "src-chip" + (s.kind === "related" ? " related" : "");
-    chip.title = "Seite öffnen · Score " + s.score;
+    const src = (state.pages[s.slug] || {}).source;
+    chip.title = (src ? src + " · " : "") + "Seite öffnen · Score " + s.score;
     chip.innerHTML =
       `<span class="src-badge">${s.kind === "related" ? "+Graph" : "Seed"}</span>` +
       `[${s.marker}] ${escapeHtml(s.title || s.slug)}`;
@@ -1958,6 +1986,7 @@ async function init() {
     const pages = state.manifest.pages || [];
     state.firstSlug = pages.length ? pages[0].slug : null;
     renderNav();
+    buildSourceFilter();
     const hash = location.hash.replace(/^#/, "");
     const start = hash && state.pages[hash] ? hash : state.firstSlug;
     if (start) loadPage(start);

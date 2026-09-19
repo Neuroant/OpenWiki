@@ -13,6 +13,9 @@ Die Oberfläche hat drei Bereiche:
 
 - **Links — Suche & Navigation:** ein Feld für die semantische Suche und der
   Navigationsbaum aller Wiki-Seiten (aus der Kapitelstruktur des Handbuchs).
+  Bei einem Korpus aus **mehreren Quellen** erscheint darüber ein **Quellen-/Bücher-Filter**,
+  der Navigationsbaum und Suche auf eine Quelle (bzw. ein Buch) einschränkt; Suchtreffer
+  zeigen zudem ihre Herkunftsquelle an.
 - **Mitte — Inhalt:** die gerenderte Seite. Über die Reiter **Projekt**, **Wiki**,
   **Graph**, **Begriffe**, **Analyse**, **Gedächtnis**, **Evaluation**, **System**, **Tutorial**
   und **Hilfe** wechseln Sie die Ansicht. (Reiter, deren Artefakte fehlen — z. B. ohne Graph

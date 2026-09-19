@@ -76,6 +76,23 @@ def test_manifest(app):
     assert {p["slug"] for p in manifest["pages"]} == {"000-a", "001-b"}
 
 
+def test_manifest_provenance(app):
+    manifest = app.manifest()
+    # both pages are their own top-level source (no parent); no project → no books
+    by_slug = {p["slug"]: p for p in manifest["pages"]}
+    assert by_slug["000-a"]["source"] == "Alpha"
+    assert by_slug["001-b"]["source"] == "Beta"
+    assert manifest["sources"] == ["Alpha", "Beta"]
+    assert "books" not in manifest              # single-file sources, no project mapping
+
+
+def test_book_label_extracts_subfolder():
+    from openwiki.web.server import WikiWebApp
+    assert WikiWebApp._book_label("sources/Lehrbuch der Softwaretechnik/1 - X.pdf") == "Lehrbuch der Softwaretechnik"
+    assert WikiWebApp._book_label("G:/p/sources/Lehrbuch/9 - Y.pdf") == "Lehrbuch"
+    assert WikiWebApp._book_label("sources/1 - Grundbegriffe.pdf") == ""   # top-level → no book
+
+
 def test_get_page(app):
     assert "Alpha" in app.get_page("000-a")["markdown"]
 

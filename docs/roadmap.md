@@ -447,7 +447,10 @@ The CLI/back-end outran the browser; this direction closes the gap.
   (from resolution), its mention pages (clickable), and its typed relations (walk entity→entity). Backed by
   `GraphStore.list_entities`/`entity_detail` → `/api/entities` + `/api/entity/{name}`. Surfaces the
   resolution + relation layers as a first-class view. Verified live on informatik.
-- **U4** — source filter + provenance across nav/search/graph (timely for the merged multi-book corpus).
+- ✅ **U4 — source filter + provenance landed (v0.75)** — `manifest()` tags each page with its `source`
+  (merged source file) + `book` (`sources/` subfolder, via the project's source order); the sidebar gains a
+  **source/book filter** that scopes the nav + search, and search hits show their origin source. Verified
+  live on informatik: filters the lecture (76p) vs. *Lehrbuch der Softwaretechnik* (43p).
 - **U5–U11** — hybrid toggle in sidebar search; promote global; streaming chat; dark mode; citation UX;
   responsive/mobile; Analyse-map enrichment. (See the UI review.)
 

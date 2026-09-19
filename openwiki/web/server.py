@@ -47,15 +47,67 @@ class WikiWebApp:
         self._ans_lock = threading.Lock()          # guards the answer-eval job state
         self._ans_job = {"status": "idle"}
 
+    _MAIN_BOOK = "(Hauptverzeichnis)"
+
     def manifest(self) -> dict:
         manifest_path = self.wiki_dir / "wiki.json"
         if manifest_path.is_file():
-            return json.loads(manifest_path.read_text(encoding="utf-8"))
-        pages = [
-            {"slug": f.stem, "title": _first_heading(f), "parent": None, "children": []}
-            for f in sorted((self.wiki_dir / "pages").glob("*.md"))
-        ]
-        return {"title": self.wiki_dir.name, "pages": pages}
+            data = json.loads(manifest_path.read_text(encoding="utf-8"))
+        else:
+            pages = [
+                {"slug": f.stem, "title": _first_heading(f), "parent": None, "children": []}
+                for f in sorted((self.wiki_dir / "pages").glob("*.md"))
+            ]
+            data = {"title": self.wiki_dir.name, "pages": pages}
+        self._annotate_provenance(data)
+        return data
+
+    @staticmethod
+    def _book_label(path) -> str:
+        """The ``sources/`` subfolder a source file lives in (its 'book'), or '' for a
+        top-level source — used to group merged multi-source corpora by origin."""
+        m = re.search(r"(?:^|/)sources/([^/]+)/", str(path).replace("\\", "/"))
+        return m.group(1) if m else ""
+
+    def _annotate_provenance(self, data: dict) -> None:
+        """Tag each page with its ``source`` (top-level-ancestor title, i.e. the source file it
+        came from after the multi-source merge) and — when a project maps the per-source
+        top-level nodes to their files, in order — a ``book`` (the ``sources/`` subfolder, else
+        ``(Hauptverzeichnis)``). Adds ``sources`` (+ ``books``) lists. Best-effort: leaves pages
+        untagged on any mismatch (single-source passthrough, count mismatch, no project)."""
+        pages = data.get("pages") or []
+        by_slug = {p["slug"]: p for p in pages}
+
+        def root_of(page):
+            seen = set()
+            while page.get("parent") and page["parent"] in by_slug and page["slug"] not in seen:
+                seen.add(page["slug"])
+                page = by_slug[page["parent"]]
+            return page
+
+        roots = [p for p in pages if not p.get("parent")]
+        book_of_root = {}
+        if self.project is not None:
+            try:
+                paths = self.project.source_paths()   # doc sources, manifest order
+                if len(paths) == len(roots):           # order-aligned with merge output
+                    book_of_root = {r["slug"]: (self._book_label(p) or self._MAIN_BOOK)
+                                    for r, p in zip(roots, paths)}
+            except Exception:
+                book_of_root = {}
+        sources, books = [], []
+        for p in pages:
+            r = root_of(p)
+            p["source"] = r.get("title", r["slug"])
+            if p["source"] not in sources:
+                sources.append(p["source"])
+            if book_of_root:
+                p["book"] = book_of_root.get(r["slug"], self._MAIN_BOOK)
+                if p["book"] not in books:
+                    books.append(p["book"])
+        data["sources"] = sources
+        if books:
+            data["books"] = books
 
     def get_page(self, slug: str) -> dict:
         markdown = self.tools.read_page(slug)

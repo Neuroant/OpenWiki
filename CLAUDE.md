@@ -574,7 +574,9 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   them at `serve`/`chat` start+shutdown, in `decay`, and on the next `remember`. See the concurrency note
   under *Conventions & gotchas*.
 - **`openwiki/web/`** — the web UI. `server.py` = `WikiWebApp` (state) + a
-  `ThreadingHTTPServer` handler exposing a JSON API (`/api/wiki`,
+  `ThreadingHTTPServer` handler exposing a JSON API (`/api/wiki` — the page tree, each page tagged with
+  its **`source`** (top-level-ancestor = the merged source file) + **`book`** (`sources/` subfolder, via
+  `_annotate_provenance`; drives the sidebar source/book filter, U4),
   `/api/pages/{slug}`, `/api/search`, `/api/chat` (editing agent), `/api/ask` (POST) = **RAG
   question-answering** for the chat pane's **Ask** mode (`WikiWebApp.ask` builds a per-request
   `RAGAgent` with `graph`/`hybrid`/`rerank`/`k` — the browser twin of CLI `ask`; returns the answer

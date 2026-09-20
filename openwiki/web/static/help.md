@@ -34,6 +34,10 @@ werden gespeichert.
 - Jede Seite zeigt oben eine **Brotkrumen-Navigation** (Home › Kapitel › Seite)
   und den zugehörigen **PDF-Seitenbereich**.
 - Querverweise innerhalb einer Seite sind anklickbar und springen direkt zum Ziel.
+- Unter jeder Seite erscheint ein **„Verwandte Seiten"**-Bereich, der die Vernetzung aus
+  dem Wissensgraphen als anklickbare Links zeigt: **Verweise** und **Erwähnt in**
+  (Rückverweise), **Verwandte Themen** (getypte Beziehungen), **Ähnliche Seiten** und
+  **Gemeinsame Begriffe** — so wird jede Seite zum Knotenpunkt, ohne den Quelltext zu ändern.
 
 ## Semantische Suche
 

@@ -475,3 +475,12 @@ header {
 .an-proj.active { background: var(--accent); color: #fff; border-color: var(--accent); }
 .an-focus-l { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
 .an-focus-l select { padding: 3px 8px; border: 1px solid var(--line); border-radius: 7px; font: inherit; font-size: 12.5px; background: var(--panel); color: var(--ink); }
+
+/* -- "Verwandte Seiten" panel (graph connectivity under a page) ----------- */
+.related { margin-top: 32px; padding-top: 16px; border-top: 2px solid var(--line); }
+.related-h { font-size: 15px; margin: 0 0 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.rel-group { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; margin-bottom: 8px; }
+.rel-label { flex: 0 0 auto; min-width: 150px; font-size: 12.5px; font-weight: 600; color: var(--muted); }
+.rel-link { border: 1px solid var(--line); background: var(--panel); color: var(--accent); border-radius: 8px; padding: 3px 10px; font: inherit; font-size: 13px; cursor: pointer; }
+.rel-link:hover { border-color: var(--accent); background: var(--accent-soft); }
+@media (max-width: 700px) { .rel-label { min-width: 100%; } }

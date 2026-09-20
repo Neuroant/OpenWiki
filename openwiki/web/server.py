@@ -115,6 +115,34 @@ class WikiWebApp:
             raise KeyError(markdown)
         return {"slug": slug, "markdown": markdown}
 
+    # The graph connectivity a page's prose doesn't hyperlink, surfaced as a "See also"
+    # panel: outgoing cross-references + backlinks (#1) and semantic neighbours (#2). The
+    # structural spine (parent/child/prev/next) is already linked in the page, so it's omitted.
+    _RELATED_GROUPS = [
+        ("references", "Verweise"), ("referenced_by", "Erwähnt in"),
+        ("relation", "Verwandte Themen"), ("similar", "Ähnliche Seiten"),
+        ("shared_entity", "Gemeinsame Begriffe"),
+    ]
+
+    def related(self, slug: str) -> dict:
+        """Related pages for the **Verwandte Seiten** panel under a wiki page — the graph's
+        connectivity (references + backlinks + typed relations + similar + shared-entity) as
+        clickable links. Read-only; ``available: false`` without a graph or for an unknown page."""
+        if self.graph is None:
+            return {"available": False, "reason": "no_graph"}
+        try:
+            nb = self.graph.neighborhood(slug)
+        except Exception:                       # KeyError (unknown page) or a graph hiccup
+            return {"available": False, "reason": "not_in_graph"}
+        by_rel: dict = {}
+        for n in nb.get("nodes", []):
+            rel = n.get("rel")
+            if rel and rel != "center":
+                by_rel.setdefault(rel, []).append({"slug": n["slug"], "title": n["title"]})
+        groups = [{"key": k, "label": label, "pages": by_rel[k]}
+                  for k, label in self._RELATED_GROUPS if by_rel.get(k)]
+        return {"available": True, "groups": groups}
+
     def search(self, query: str, k: int = 8, hybrid: bool = False) -> dict:
         if self.index is None:
             raise RuntimeError("No search index is loaded. Run `openwiki index` first.")
@@ -816,6 +844,8 @@ def make_handler(app: WikiWebApp):
                         return self._json(app.get_page(slug))
                     except KeyError as exc:
                         return self._json({"error": str(exc)}, 404)
+                if path.startswith("/api/related/"):
+                    return self._json(app.related(unquote(path[len("/api/related/"):])))
                 if path.startswith("/api/graph/"):
                     slug = unquote(path[len("/api/graph/"):])
                     try:

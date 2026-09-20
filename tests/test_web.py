@@ -102,6 +102,42 @@ def test_get_missing_page(app):
         app.get_page("404-x")
 
 
+class _RelGraph:
+    """Fake graph exposing neighborhood() for the related-pages panel test."""
+    def neighborhood(self, slug, similar_k=6):
+        if slug == "missing":
+            raise KeyError(slug)
+        return {"center": slug, "edges": [], "nodes": [
+            {"slug": slug, "title": "Self", "rel": "center"},
+            {"slug": "p-parent", "title": "Parent", "rel": "parent"},          # structural → omitted
+            {"slug": "p-ref", "title": "Ref Target", "rel": "references"},
+            {"slug": "p-back", "title": "Backlink", "rel": "referenced_by"},
+            {"slug": "p-sim", "title": "Similar", "rel": "similar"},
+            {"slug": "p-ent", "title": "Shared", "rel": "shared_entity"},
+            {"slug": "p-rel", "title": "Related", "rel": "relation"},
+        ]}
+
+
+def test_related_groups(app):
+    app.graph = _RelGraph()
+    out = app.related("p0")
+    assert out["available"] is True
+    # curated order (structural parent/child/prev/next omitted)
+    assert [g["key"] for g in out["groups"]] == [
+        "references", "referenced_by", "relation", "similar", "shared_entity"]
+    refs = next(g for g in out["groups"] if g["key"] == "references")
+    assert refs["label"] == "Verweise" and refs["pages"][0]["slug"] == "p-ref"
+
+
+def test_related_without_graph(app):
+    assert app.related("p0")["available"] is False   # fixture has no graph
+
+
+def test_related_unknown_page(app):
+    app.graph = _RelGraph()
+    assert app.related("missing")["available"] is False
+
+
 def test_search(app):
     results = app.search("lautstarke", k=3)["results"]
     assert results and results[0]["slug"] == "000-a"

@@ -106,6 +106,28 @@ async function loadPage(slug) {
   }
 }
 
+// "Verwandte Seiten": the graph connectivity a page's prose doesn't hyperlink — its
+// cross-references + backlinks + semantic/typed-relation neighbours — appended as clickable
+// links under the page (read-only; silently absent when there's no graph or no neighbours).
+async function renderRelated(slug) {
+  let data;
+  try {
+    data = await getJSON("/api/related/" + encodeURIComponent(slug));
+  } catch (e) { return; }
+  if (state.tab !== "wiki" || state.currentSlug !== slug) return;   // navigated away mid-fetch
+  if (!data.available || !(data.groups || []).length) return;
+  const groups = data.groups.map((g) =>
+    `<div class="rel-group"><span class="rel-label">${escapeHtml(g.label)}</span>` +
+    g.pages.map((p) => `<button class="rel-link" data-slug="${escapeHtml(p.slug)}">${escapeHtml(p.title || p.slug)}</button>`).join("") +
+    `</div>`).join("");
+  const el = document.createElement("aside");
+  el.className = "related";
+  el.innerHTML = `<h2 class="related-h">Verwandte Seiten</h2>${groups}`;
+  el.querySelectorAll(".rel-link").forEach((b) =>
+    b.addEventListener("click", () => loadPage(b.dataset.slug)));
+  $("#content").appendChild(el);
+}
+
 // -- tabs: Wiki / Hilfe / Tutorial -----------------------------------------
 
 function activateTab(tab) {
@@ -123,6 +145,7 @@ function renderActiveTab() {
       : `<p class="muted">Keine Seite ausgewählt.</p>`;
     interceptLinks();
     content.scrollTop = 0;
+    if (state.currentSlug) renderRelated(state.currentSlug);   // append "Verwandte Seiten"
   } else if (state.tab === "graph") {
     renderGraph();
   } else if (state.tab === "project") {

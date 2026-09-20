@@ -577,7 +577,12 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   `ThreadingHTTPServer` handler exposing a JSON API (`/api/wiki` — the page tree, each page tagged with
   its **`source`** (top-level-ancestor = the merged source file) + **`book`** (`sources/` subfolder, via
   `_annotate_provenance`; drives the sidebar source/book filter, U4),
-  `/api/pages/{slug}`, `/api/search`, `/api/chat` (editing agent), `/api/ask/stream` (POST) = **streaming
+  `/api/pages/{slug}`, `/api/related/{slug}` = the **"Verwandte Seiten"** panel (`WikiWebApp.related` →
+  `GraphStore.neighborhood`: the graph connectivity the prose doesn't hyperlink — **Verweise** (REFERENCES)
+  + **Erwähnt in** (backlinks) + **Verwandte Themen** (typed relations) + **Ähnliche Seiten** (SIMILAR_TO) +
+  **Gemeinsame Begriffe** (shared entities), all clickable; structural parent/child/prev/next omitted since
+  the page already links those. A read-only overlay — the source `.md` stays verbatim, turning link-sparse
+  pages into hubs), `/api/search`, `/api/chat` (editing agent), `/api/ask/stream` (POST) = **streaming
   RAG** for the Ask mode (Server-Sent Events: a `sources` event, then `delta` token events, then `done`;
   `WikiWebApp.ask_stream` → `RAGAgent.stream` → `OllamaChat.chat_stream`, U7 — lock held only around
   retrieval so generation streams lock-free), `/api/ask` (POST) = the non-streaming **RAG

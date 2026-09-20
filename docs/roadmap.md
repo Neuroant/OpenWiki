@@ -751,6 +751,48 @@ second-brain tier is no longer CLI/MCP-only. Then **pipeline/build-stage observa
 wall time + LLM token spend on the Projekt tab + `openwiki status`, extending the v0.58 collector into build time
 (see Direction F). Remaining non-memory directions: retrieval quality (hybrid/re-rank, Direction A), packaging/CI (F).
 
+### Path B+ — Second-Brain refinements (next; from the cognitive-memory report)
+
+An external survey of cognitive-memory substrates ("From Cellular Self-Organization to the Artificial
+Second Brain and GraphRAG": Kauffman attractors → CLS theory → CoALA → Graphiti bi-temporal graphs →
+GraphRAG/Leiden → recursive knowledge synthesis) maps almost 1:1 onto Path B — **validating the
+architecture** rather than calling for a rewrite. The mapping is exact:
+
+| Report concept | OpenWiki today |
+|---|---|
+| Three tiers (DNA / epigenetic / attractor) | `context_for` = identity + activation + attractors |
+| CLS: hippocampus (episodic, one-shot) vs neocortex (semantic, slow) | `Assertion`/`Session` (`remember`) vs `MemoryConcept` themes |
+| Non-REM "sleep" consolidation | `consolidate` (Louvain clusters → LLM theme summaries) |
+| Attention decay / synaptic downscaling | `decay.py` (exp half-life + prune) |
+| Hebbian "strengthen on use" | `REINFORCES` edges (B1) |
+| Hybrid vector+graph / shared-UUID substrate | graph mirrors the index; assertions carry embeddings |
+| GraphRAG communities + global sensemaking | communities + summaries + `ask --global` |
+| Non-lossy contradiction | `SUPERSEDES` (history kept, B4) |
+
+The **genuine gaps** it surfaces — adopted in OpenWiki's measured, local, minimal way (we cite our own
+`eval` numbers, not the report's):
+
+- **B7 — Bi-temporal assertions (P0, do next).** Our supersession is single-axis (`created_at`/`last_seen`
+  + a `SUPERSEDES` edge). Add **valid-time** (`valid_from`/`valid_to`) + **transaction-time** so `recall`
+  can answer *point-in-time* ("what was true as of …?") and full provenance ("when did we learn vs. when it
+  became true?"). Invalidate-not-just-supersede (Graphiti's model). Kuzu column additions; extends B4; B0
+  preserves them across rebuild.
+- **A2 — Hierarchical communities (P1).** Ours are **flat** Louvain; the report's GraphRAG builds a
+  bottom-up **tree** of communities → meta-summaries (better global sensemaking now that informatik is 119
+  pages). Recursive detection (or add Leiden) + a level in `MemoryConcept`/`Community` + `ask --global`
+  traversal.
+- **Temporal-reasoning eval (P1).** An `eval_temporal.jsonl` (LongMemEval-style point-in-time +
+  "when did X change" scenarios) to *measure* B7 — the same eval-first discipline as RAG-vs-GraphRAG.
+- **B8 — Spreading-activation priming (P2, measure-first).** Session-scoped activation boost over graph
+  neighbors of a retrieved node (+ decay), to resolve ambiguous follow-ups. Close to REINFORCES+decay but
+  intra-session; A/B against plain recall before trusting it (the GraphRAG finding is the cautionary tale).
+
+**Deliberately out of scope** (against the local/minimal/single-user ethos): full **RKS** multi-agent
+generator/checker/auditor + SHACL (heavy; our entity-resolution already has a lightweight generate-then-
+verify we can extend if needed); **multi-agent swarm / stigmergy** (single-user tool); procedural **"Skill
+Vaults"** (task-agent territory, not a knowledge substrate). The "edge of chaos / K≈2" framing is a *lens*
+for the world-model **coupling** analysis (Direction I), not a build item. Design detail: `path-b-memory.md` §12.
+
 ### Honest guardrails
 
 - **Contradiction (Phase 3 / B4) is belief revision** — a decades-old AI problem, not a graph

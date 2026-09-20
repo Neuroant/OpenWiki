@@ -40,6 +40,7 @@
 9. [Relationship to the current code](#9-relationship-to-the-current-code)
 10. [Recommended first slice](#10-recommended-first-slice)
 11. [Prior art & learnings — "Cognitive Substrate"](#11-prior-art--learnings--cognitive-substrate)
+12. [Second-Brain refinements (B7 / A2 / B8) — next](#12-second-brain-refinements-b7--a2--b8--next)
 
 ---
 
@@ -620,6 +621,40 @@ pipelines** built; k-core **blocked by missing tooling** — i.e. *consolidation
 unfinished part*, which is exactly why our plan front-loads a measurable thin vertical (§10).
 
 *Source: `G:\Claude\Cognitive Substrate\docs\ARCHITECTURE.md` + `ROADMAP.md` (v3), read 2026-09.*
+
+## 12. Second-Brain refinements (B7 / A2 / B8) — next
+
+A second external survey (*"Evolution of Cognitive Memory Substrates: From Cellular Self-Organization
+to the Artificial Second Brain and GraphRAG"* — Kauffman attractors → CLS → CoALA → Graphiti bi-temporal
+graphs → GraphRAG/Leiden → recursive knowledge synthesis) maps almost 1:1 onto the shipped B0–B6 design
+(three tiers = `context_for`'s identity/activation/attractors; CLS = `Assertion`s vs `MemoryConcept`s;
+Non-REM sleep = `consolidate`; decay/Hebbian = `decay`/`REINFORCES`; non-lossy contradiction = `SUPERSEDES`;
+hybrid vector+graph = the index-mirroring graph). It **validates** the architecture and isolates three
+concrete refinements, adopted the OpenWiki way (measured against our own `eval`, local, minimal):
+
+- **B7 — Bi-temporal assertions (do next).** Today an `Assertion` is single-axis (`created_at` + `last_seen`
+  + a `SUPERSEDES` edge; §4/B4 already made remembered edges append-only). B7 makes time **two-axis** —
+  **valid-time** (`valid_from`/`valid_to`: when a fact was true in the world) + **transaction-time** (when
+  we learned/superseded it) — so a contradiction *invalidates* (closes `valid_to`) rather than only linking
+  `SUPERSEDES`, and `recall --as-of DATE` answers point-in-time + provenance ("what was true then / when did
+  it change / when did we learn it"). Additive Kuzu columns; B0 snapshots them across rebuild; the existing
+  `recall` (current-only) is `valid_to IS NULL`.
+- **A2 — Hierarchical communities.** Distinct from the *stability* question §11/§8 already resolved
+  (warm-start Louvain, v0.56): A2 adds **levels** — a bottom-up tree of communities → meta-summaries (the
+  GraphRAG/Leiden pattern), so `ask --global` can answer at the right granularity on large corpora
+  (informatik is now 119 pages). Recursive `detect_communities` (or Leiden) + a `level` on
+  `Community`/`MemoryConcept`.
+- **B8 — Spreading-activation priming (measure-first).** The report's "epigenetic" priming: on retrieval,
+  transiently boost a node's graph neighbors (then decay) so a within-session follow-up resolves to the
+  primed subgraph. Close to `REINFORCES`+`decay` but intra-session and query-facing; **A/B it against plain
+  `recall`** before adopting (the RAG-vs-GraphRAG result is the cautionary precedent).
+
+Plus a **temporal-reasoning eval** (`eval_temporal.jsonl`, LongMemEval-style) to score B7. **Out of scope**
+(local/minimal/single-user ethos): full RKS multi-agent generate/check/audit + SHACL (our entity-resolution
+already has a lightweight generate-then-verify); multi-agent swarm/stigmergy; procedural "Skill Vaults".
+Plan overview: `roadmap.md` → "Path B+ — Second-Brain refinements".
+
+*Source: the cognitive-memory-substrates report, read 2026-09; mapping distilled above.*
 
 ---
 

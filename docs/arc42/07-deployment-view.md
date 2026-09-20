@@ -51,6 +51,9 @@ flowchart TB
   page files live and defer their graph re-sync to a lock-free journal a writer folds in (at
   start/shutdown). `--sync` restores an exclusive **writable** connection (live edit-sync, blocks
   other graph access). `owiki decay`/`remember` open writable transiently with retry-backoff.
+- **`serve`** also streams: the Ask mode's answers are delivered token-by-token over a
+  **Server-Sent-Events** response (`POST /api/ask/stream`) from the `ThreadingHTTPServer`, with the
+  graph lock held only around retrieval so generation streams without blocking other readers (ADR-26).
 - **`mcp`** opens the graph **read-only** (coding agents only read).
 - **Ollama** is an independent local service shared by all of the above.
 

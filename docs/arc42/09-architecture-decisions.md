@@ -5,8 +5,8 @@
 > Decisions the agent-memory direction re-opened are marked "refined by ADR-N"; Path B has since
 > **landed** (ADR-14–19). Later decisions deepen the graph (ADR-22 typed relations + relation-aware
 > GraphRAG, ADR-23 entity resolution) and add **observability** (ADR-20), a *measured* retrieval-add-on
-> discipline (ADR-21), a **shipping** story (ADR-24 packaging + CI), and a **world-model analysis** toolkit
-> (ADR-25, Direction I).
+> discipline (ADR-21), a **shipping** story (ADR-24 packaging + CI), a **world-model analysis** toolkit
+> (ADR-25, Direction I), and a **capability-complete web UI** (ADR-26, Direction J).
 
 ## ADR index
 
@@ -37,6 +37,7 @@
 | [23](#adr-23) | Corpus-wide entity resolution (embedding candidates + LLM verify) | Accepted | Q3, quality |
 | [24](#adr-24) | Ship as the `owiki` distribution + CI; publishing license-gated | Accepted | Q2, usability |
 | [25](#adr-25) | World-model analysis as a read-only, additive toolkit (`owiki analyze`) | Accepted | Q5, Q4 |
+| [26](#adr-26) | Capability-complete no-build SPA + SSE streaming (Direction J) | Accepted | usability, Q2 |
 
 ---
 
@@ -423,10 +424,36 @@
   baselines/nulls to be interpretable (addressed by the random-pair null + `--compare`); − the O(n²)
   page-scale computations are fine now but won't scale to very large corpora (same class as R3/D3).
 
+### ADR-26
+**Surface the backend in the browser: a capability-complete, no-build SPA (+ SSE streaming).** *(v0.72–v0.78, Direction J)*
+- **Context:** the CLI/back-end had outrun the web UI — GraphRAG / hybrid / re-rank / global retrieval, the
+  world-model analysis toolkit (ADR-25), the entity-resolution + typed-relation layers (ADR-22/23), and
+  multi-source provenance were reachable only from the CLI or the agent's tools. The browser showed a small
+  slice.
+- **Decision:** a UI direction (U1–U11) that makes the SPA *surface the backend*, holding the stdlib
+  server + **no-build vanilla-JS** constraint (ADR-4) throughout: an **Ask** mode with interactive retrieval
+  controls (GraphRAG/hybrid/re-rank/global/`k`); the **Analyse** tab completed (coupling + gaps + memory
+  dynamics + a PCA/UMAP map with community focus); a **Begriffe** entity/concept browser (canonical
+  entities · aliases · description · relations); **source/book provenance** filtering; and chrome polish
+  (dark mode, hybrid sidebar search, collapsible panels). Answers **stream token-by-token** over a
+  **Server-Sent-Events** endpoint (`/api/ask/stream` → `WikiWebApp.ask_stream` → `RAGAgent.stream` →
+  `OllamaChat.chat_stream`), with the graph lock held **only around retrieval** so generation streams
+  lock-free (consistent with the reader-XOR-writer model, ADR-19). All read-only + graceful when a layer is
+  absent (ADR-7).
+- **Alternatives:** adopt a JS framework/build step for the richer UI — rejected (breaks ADR-4's no-build
+  SPA + zero-dependency serve); WebSocket streaming — rejected (SSE is simpler, one-way, and works from the
+  stdlib `ThreadingHTTPServer` with a chunked write); stream the Agent tool-loop too — deferred (its reply
+  is short after tool calls; streaming a multi-step tool loop is a separate problem).
+- **Consequences:** + the browser is now capability-complete — every major backend feature is explorable
+  without the CLI; + streaming makes long grounded answers feel responsive; + still no build tooling, no JS
+  dependencies. − more client state in one `app.js`; − the SSE path bypasses the JSON `_json` handler (a
+  second response shape to maintain); − the Agent mode stays blocking (asymmetry with Ask).
+
 ---
 *Chapter complete. The Path-B agent-memory direction landed via ADR-14/15/16/17/18/19; the graph then
 deepened (ADR-22 typed relations + relation-aware GraphRAG, ADR-23 entity resolution), gained
 **observability** (ADR-20), a *measured* retrieval-add-on discipline (ADR-21), a **shipping** story
-(ADR-24 packaging + CI), and a **world-model analysis** toolkit (ADR-25, Direction I). §11 debts D1/D2/D6
+(ADR-24 packaging + CI), a **world-model analysis** toolkit (ADR-25, Direction I), and a
+**capability-complete web UI** (ADR-26, Direction J — U1–U11, incl. SSE streaming). §11 debts D1/D2/D6
 are resolved. Deep designs in `docs/path-b-memory.md` and `docs/RAG-vs-GraphRAG.md`. New significant
 decisions should be appended here with the next id.*

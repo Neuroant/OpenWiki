@@ -112,8 +112,8 @@ files, network/Ollama, or Kuzu).
 
 | Block | kind | Responsibility & key interface |
 |---|---|---|
-| `llm.py` | I/O (Ollama) | `ChatModel` protocol (`chat`, `chat_raw`, `name`) + `OllamaChat` (`/api/chat`, tool calls). Records per-call telemetry to `metrics.COLLECTOR` + `last_stats` (ADR-20). |
-| `agent.py` | I/O (via injected deps) | `RAGAgent(index, chat, top_k, graph, expand_k, rerank, hybrid)`; `retrieve(q) -> [Source]`; `answer(q) -> RAGAnswer`. RAG + GraphRAG (expands along typed **relations** too, ADR-22) + memory reinforcement; optional **hybrid** seed + LLM **re-rank** (ADR-21). |
+| `llm.py` | I/O (Ollama) | `ChatModel` protocol (`chat`, `chat_raw`, `name`) + `OllamaChat` (`/api/chat`, tool calls); `chat_stream` yields token deltas (Ollama `stream=true`) for the web Ask mode (ADR-26); pure `parse_stream_line`. Records per-call telemetry to `metrics.COLLECTOR` + `last_stats` (ADR-20). |
+| `agent.py` | I/O (via injected deps) | `RAGAgent(index, chat, top_k, graph, expand_k, rerank, hybrid)`; `retrieve(q) -> [Source]`; `answer(q) -> RAGAnswer`; `stream(q)` yields (`sources`, then `delta`s, then `done`) for SSE streaming (ADR-26). RAG + GraphRAG (expands along typed **relations** too, ADR-22) + memory reinforcement; optional **hybrid** seed + LLM **re-rank** (ADR-21). |
 | `tools.py` | I/O (files/graph) | `WikiTools`: `read_page`, `list_pages`, `search_wiki`, `edit_page`, `append_section`, `create_page`, `graph_neighbors`, `find_path`, `find_entity`, `schemas()`, `dispatch(name, args)`. |
 | `chat_agent.py` | I/O (via tools/chat) | `WikiAgent(chat, tools).send(msg) -> AgentTurn`; `summarize_wiki(dir)`. Multi-turn tool loop. |
 
@@ -184,7 +184,7 @@ serves static files; `web/static/` is a no-build vanilla-JS SPA.
 
 | Block | kind | Key interface |
 |---|---|---|
-| `WikiWebApp` | I/O (Kuzu/Ollama/files) | `manifest`, `get_page`, `search`, `chat` (+ per-turn stats), `graph_explore`/`graph_expand`/`graph_neighborhood`, `project_info`, `communities`, `ask_global`, `run_eval`, `compare`, `health_stats`, `start_answer_eval`/`answer_eval_status`, `metrics` (ADR-20), `memory_info`/`memory_recall`/`memory_context` (Path B), `analyze` (ADR-25 — coupling metrics + a 2-D semantic map, `/api/analyze`). Serves a 9-tab SPA (Projekt · Wiki · Graph · **Analyse** · Gedächtnis · Evaluation · System · Tutorial · Hilfe). |
+| `WikiWebApp` | I/O (Kuzu/Ollama/files) | `manifest` (+ per-page `source`/`book` provenance), `get_page`, `search` (+ `hybrid`), `chat` (+ per-turn stats), `ask`/`ask_stream` (RAG for the Ask mode — non-streaming + SSE, ADR-26), `entities`/`entity` (Begriffe browser), `graph_explore`/`graph_expand`/`graph_neighborhood`, `project_info`, `communities`, `ask_global`, `run_eval`, `compare`, `health_stats`, `start_answer_eval`/`answer_eval_status`, `metrics` (ADR-20), `memory_info`/`memory_recall`/`memory_context` (Path B), `analyze`/`analyze_gaps`/`analyze_memory` (ADR-25). Serves a **10-tab, no-build SPA** (Projekt · Wiki · Graph · **Begriffe** · **Analyse** · Gedächtnis · Evaluation · System · Tutorial · Hilfe) with an **Ask** chat mode, dark theme, collapsible panels, and token-streaming answers (ADR-26). |
 | `make_handler(app)` / `serve(app, host, port)` | I/O (http) | JSON API + static file serving on `ThreadingHTTPServer`. |
 | `web/static/{index.html, app.js, style.css, marked.min.js}` | — | SPA: 6 tabs (Projekt / Wiki / Graph / Evaluation / Tutorial / Hilfe); client-side Markdown; hand-rolled force-directed graph explorer. |
 

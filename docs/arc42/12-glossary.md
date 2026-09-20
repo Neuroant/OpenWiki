@@ -69,6 +69,10 @@
 | **Semantic map** | The 2-D projection (PCA, or UMAP via the extra) of pages in the Analyse tab — coloured by community, graph edges overlaid. |
 | **Gap-mining** | The analysis→improvement loop (`analyze gaps`): ranked missing-cross-reference, near-duplicate, isolated-page, and entity-merge candidates. |
 | **Memory-tier dynamics** | `analyze memory` over the Path B tier: revision (supersession rate), consolidation coverage, temperature (hot/cold), breadth, growth — the *learning* tier made legible. |
+| **Ask mode** | The chat pane's read-only RAG mode (vs. the *Agent* tool/editing mode): interactive retrieval controls (GraphRAG/hybrid/re-rank/global/`k`) + **streamed**, cited answers (ADR-26). |
+| **SSE streaming** | Server-Sent Events (`text/event-stream`) from the stdlib server: Ask answers stream token-by-token (`/api/ask/stream` → `ask_stream` → `RAGAgent.stream` → `chat_stream`), the graph lock held only around retrieval (ADR-26). |
+| **Begriffe browser** | The web UI's canonical-entity explorer (name · type · aliases · description · mention pages · typed relations you can walk entity→entity) — surfaces resolution + relations (ADR-26, §8.20). |
+| **Provenance (source / book)** | Each page's origin after a multi-source merge: its top-level-ancestor file (`source`) + the `sources/` subfolder (`book`); drives the sidebar filter over nav + search (ADR-26). |
 
 ## 12.5 Acronyms
 
@@ -85,6 +89,7 @@
 | **PCA / UMAP** | Principal Component Analysis / Uniform Manifold Approximation — the 2-D semantic-map projectors (PCA pure, UMAP via the `[analysis]` extra, ADR-25) |
 | **ARI** | Adjusted Rand Index — community-vs-k-means agreement in the coupling analysis (needs the `[analysis]` extra, ADR-25) |
 | **RRF** | Reciprocal Rank Fusion (blends dense + BM25 rankings, ADR-21) |
+| **SSE** | Server-Sent Events (`text/event-stream`) — the web UI's token-streaming Ask answers (ADR-26) |
 | **HNSW** | Hierarchical Navigable Small World (Kuzu's vector index; mirrored, not used for retrieval) |
 | **HTTP / JSON** | HyperText Transfer Protocol / JavaScript Object Notation (the web API) |
 | **IR** | Intermediate Representation (`ParsedDocument`) |
@@ -99,5 +104,6 @@
 ---
 *Chapter complete. Path B terms landed (ADR-14–18); later terms cover the deepened graph (typed
 relations, entity resolution — ADR-22/23), retrieval variants (hybrid, BM25, RRF, re-ranking — ADR-21),
-observability (ADR-20), shipping (owiki, CI, OIDC — ADR-24), and world-model analysis (coupling, graph
-reach, fingerprint, semantic map, PCA/UMAP/ARI — ADR-25).*
+observability (ADR-20), shipping (owiki, CI, OIDC — ADR-24), world-model analysis (coupling, graph
+reach, fingerprint, semantic map, PCA/UMAP/ARI — ADR-25), and the web UI (Ask mode, SSE streaming,
+Begriffe browser, provenance — ADR-26).*

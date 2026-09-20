@@ -272,8 +272,29 @@ where possible (it reads the *stored* embeddings — no Ollama). The core is pur
 Interpretability rests on **baselines** (the random-pair null, `--compare`), not absolute thresholds — the
 same measured-claims discipline as ADR-9.
 
+## 8.20 The web UI — surfacing the backend (ADR-26)
+
+The browser SPA is a **delivery surface**, not a source of truth: it only calls the same read paths the
+CLI/MCP use. Direction J (U1–U11) made it **capability-complete** — every major backend feature is now
+explorable without the CLI — while holding the **stdlib server + no-build vanilla-JS** constraint (ADR-4):
+no framework, no bundler, Markdown via one vendored `marked.min.js`.
+
+- **Ten tabs** map to back-end methods (Projekt/Wiki/Graph/Begriffe/Analyse/Gedächtnis/Evaluation/System +
+  the two doc tabs). The **Begriffe** browser surfaces entity resolution + relations (§8.18); the **Analyse**
+  tab surfaces the world-model toolkit (§8.19); **provenance** tagging (`source`/`book`) filters a merged
+  multi-source corpus (§8.14).
+- The chat pane has an **Agent | Ask** split: *Agent* is the multi-turn tool/editing loop (§8.4); *Ask* is
+  read-only RAG with interactive retrieval controls (GraphRAG/hybrid/re-rank/global/`k`, §8.17).
+- **Streaming (SSE):** Ask answers stream token-by-token — `OllamaChat.chat_stream` → `RAGAgent.stream` →
+  `WikiWebApp.ask_stream` → a `text/event-stream` response from the `ThreadingHTTPServer`, consumed by a
+  `fetch`+`ReadableStream` client. Crucially the graph lock is held **only around retrieval**, so the long
+  generation streams **lock-free** — consistent with the reader-XOR-writer model (§8.6, ADR-19).
+- Everything is **read-only + graceful**: a tab whose artifact is absent (no graph, no memory, no entities)
+  shows a hint, not an error (ADR-7).
+
 ---
 *Chapter complete. Cross-refs: runtime error paths → §6.8; the memory tier → §8.15 + ADR-14/15/16/18;
 observability → §8.16 + ADR-20; retrieval → §8.17 + ADR-9/21 + `docs/RAG-vs-GraphRAG.md`; the semantic
-graph → §8.18 + ADR-12/22/23; world-model analysis → §8.19 + ADR-25; the no-auth risk → §11 R1; the project
-concept → §5, ADR-10/11, §7; the boundaries these concepts rest on → §5.1 + ADR-1/2/7/13.*
+graph → §8.18 + ADR-12/22/23; world-model analysis → §8.19 + ADR-25; the web UI → §8.20 + ADR-26; the
+no-auth risk → §11 R1; the project concept → §5, ADR-10/11, §7; the boundaries these concepts rest on →
+§5.1 + ADR-1/2/7/13.*

@@ -577,7 +577,10 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   `ThreadingHTTPServer` handler exposing a JSON API (`/api/wiki` — the page tree, each page tagged with
   its **`source`** (top-level-ancestor = the merged source file) + **`book`** (`sources/` subfolder, via
   `_annotate_provenance`; drives the sidebar source/book filter, U4),
-  `/api/pages/{slug}`, `/api/search`, `/api/chat` (editing agent), `/api/ask` (POST) = **RAG
+  `/api/pages/{slug}`, `/api/search`, `/api/chat` (editing agent), `/api/ask/stream` (POST) = **streaming
+  RAG** for the Ask mode (Server-Sent Events: a `sources` event, then `delta` token events, then `done`;
+  `WikiWebApp.ask_stream` → `RAGAgent.stream` → `OllamaChat.chat_stream`, U7 — lock held only around
+  retrieval so generation streams lock-free), `/api/ask` (POST) = the non-streaming **RAG
   question-answering** for the chat pane's **Ask** mode (`WikiWebApp.ask` builds a per-request
   `RAGAgent` with `graph`/`hybrid`/`rerank`/`k` — the browser twin of CLI `ask`; returns the answer
   + cited seed/`related` sources + stats), `/api/graph/{slug}` = explore,
@@ -862,10 +865,11 @@ http — count, p50/p95, total time, token in/out) + a live recent-events table,
   client-side via the vendored `openwiki/web/static/marked.min.js`. Internal
   `*.md` links are intercepted to route within the SPA; after an agent write tool
   the open page + nav auto-refresh. The chat panel has an **Agent | Ask** mode toggle:
-  *Agent* is the multi-turn tool/editing agent (`/api/chat`); *Ask* is read-only RAG
-  question-answering (`/api/ask`) with a controls row — **Global / GraphRAG / Hybrid /
-  Re-rank / k** — surfacing the measured retrieval variants in the browser (Global routes
-  to `/api/global`; answers show clickable seed vs. +Graph source chips). The chat panel is
+  *Agent* is the multi-turn tool/editing agent (`/api/chat`, blocking); *Ask* is read-only RAG
+  question-answering that **streams token-by-token** (`/api/ask/stream` SSE, U7) with a controls row —
+  **Global / GraphRAG / Hybrid / Re-rank / k** — surfacing the measured retrieval variants in the browser
+  (Global routes to `/api/global`; answers show clickable seed vs. +Graph source chips + a stats line).
+  The chat panel is
   hidden below a 1100px viewport (CSS breakpoint), and a `favicon.ico` 404 in the console is benign.
   `test_web.py` covers the app + a live-socket round-trip offline.
 - Tutorial `run:` links: `marked` URL-encodes the arg (spaces → `%20`, umlauts →

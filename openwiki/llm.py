@@ -18,6 +18,25 @@ from .metrics import COLLECTOR, parse_ollama_stats
 Message = dict  # {"role": "system" | "user" | "assistant", "content": str}
 
 
+def parse_stream_line(line) -> "tuple[str, bool, dict]":
+    """Parse one line of Ollama's streaming ``/api/chat`` response → ``(content_delta,
+    done, stats)``. Each line is a JSON object ``{"message":{"content":…},"done":bool,…}``;
+    the final (``done``) line carries the token counters. Blank/malformed lines →
+    ``("", False, {})``. Pure — unit-testable without a server."""
+    if isinstance(line, (bytes, bytearray)):
+        line = line.decode("utf-8", "replace")
+    line = line.strip()
+    if not line:
+        return "", False, {}
+    try:
+        data = json.loads(line)
+    except Exception:
+        return "", False, {}
+    content = (data.get("message") or {}).get("content", "") or ""
+    done = bool(data.get("done"))
+    return content, done, (parse_ollama_stats(data) if done else {})
+
+
 @runtime_checkable
 class ChatModel(Protocol):
     @property
@@ -90,6 +109,54 @@ class OllamaChat:
             ) from exc
         self._record(data, (time.perf_counter() - t0) * 1000.0)
         return data.get("message", {}) or {}
+
+    def chat_stream(self, messages: Sequence[Message]):
+        """Yield the assistant's text **deltas** as they generate (Ollama ``stream=true``).
+        Records the same per-call telemetry as ``chat_raw`` from the final ``done`` line.
+        Used by the web Ask mode's streaming answers; other call sites use ``chat``/``chat_raw``."""
+        body = {
+            "model": self.model,
+            "messages": list(messages),
+            "stream": True,
+            "options": {"temperature": self.temperature, **self.options},
+        }
+        payload = json.dumps(body).encode("utf-8")
+        request = urllib.request.Request(
+            f"{self.host}/api/chat", data=payload,
+            headers={"Content-Type": "application/json"},
+        )
+        t0 = time.perf_counter()
+        try:
+            response = urllib.request.urlopen(request, timeout=self.timeout)
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", "replace")
+            raise RuntimeError(
+                f"Ollama chat failed ({exc.code}) for model '{self.model}': {detail}. "
+                f"Is it pulled? Try `ollama pull {self.model}`."
+            ) from exc
+        except urllib.error.URLError as exc:
+            raise RuntimeError(
+                f"Could not reach Ollama at {self.host} (is it running?): {exc}"
+            ) from exc
+        with response:
+            for raw in response:                       # newline-delimited JSON objects
+                content, done, stats = parse_stream_line(raw)
+                if content:
+                    yield content
+                if done:
+                    self._record_stream(stats, (time.perf_counter() - t0) * 1000.0)
+                    break
+
+    def _record_stream(self, stats: dict, wall_ms: float) -> None:
+        """Telemetry for a streamed call — ``stats`` already parsed from the done line."""
+        try:
+            self.last_stats = {"duration_ms": round(wall_ms, 1), **stats}
+            COLLECTOR.record("chat", self.name, duration_ms=wall_ms,
+                             prompt_tokens=stats.get("prompt_tokens"),
+                             eval_tokens=stats.get("eval_tokens"),
+                             tokens_per_sec=stats.get("tokens_per_sec"))
+        except Exception:  # pragma: no cover - telemetry must not break a chat call
+            pass
 
     def _record(self, data: dict, wall_ms: float) -> None:
         """Capture per-call telemetry (Ollama's counters + measured latency) into

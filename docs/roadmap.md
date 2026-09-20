@@ -463,7 +463,12 @@ The CLI/back-end outran the browser; this direction closes the gap.
 - ✅ **U11 — Analyse-map enrichment landed (v0.77)** — the semantic map gained a **PCA/UMAP** projection
   toggle (`/api/analyze?method=`) and a **community focus** dropdown (isolate one theme, dim the rest);
   also fixed a U2 regression where the map's edge toggles queried a stale container id.
-- **U7** — streaming chat responses (the large one; its own increment, v0.78).
+- ✅ **U7 — streaming Ask answers landed (v0.78)** — the Ask (RAG) mode now streams token-by-token:
+  `OllamaChat.chat_stream` (Ollama `stream=true`) → `RAGAgent.stream` (sources, then deltas, then the
+  cleaned answer) → `WikiWebApp.ask_stream` (SSE event dicts; graph lock held only around retrieval) →
+  a `POST /api/ask/stream` **Server-Sent-Events** endpoint → a `fetch`+`ReadableStream` client that
+  appends deltas live and finalizes into markdown + seed/+Graph chips + stats. The Agent (tool/editing)
+  mode stays blocking. **Direction J (web UI) is complete (U1–U11).**
 
 ### If you pick one thing next
 **Direction A's re-ranking pass** is the smallest change with an immediately measurable

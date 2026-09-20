@@ -65,7 +65,8 @@ Der Chat rechts wird von einem lokalen Sprachmodell
 
 - **Agent** — der mehrschrittige Werkzeug-Agent: sucht, liest und **bearbeitet** Seiten
   (siehe unten).
-- **Ask** — reine **Frage-Antwort (RAG)**, nur lesend, mit Quellenangaben. Eine
+- **Ask** — reine **Frage-Antwort (RAG)**, nur lesend, mit Quellenangaben; die Antwort
+  wird **Token für Token gestreamt** (erscheint während der Generierung). Eine
   Schalterleiste steuert das Retrieval: **GraphRAG** (Seeds entlang der Graphkanten
   erweitern), **Hybrid** (BM25 + Vektor), **Re-rank** (LLM-Neusortierung), **Global**
   (Antwort aus den Themen-Zusammenfassungen) und **k** (Anzahl der Seed-Treffer). Jede

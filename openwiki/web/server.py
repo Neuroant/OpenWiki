@@ -508,6 +508,53 @@ class WikiWebApp:
         from ..analysis.memory import analyze_memory
         return analyze_memory(self.graph)
 
+    def ask_stream(self, question: str, use_graph: bool = True, hybrid: bool = False,
+                   rerank: bool = False, k: int = 5, expand_k: int = 3):
+        """Streaming Ask (RAG) for `/api/ask/stream` — a generator of SSE event dicts:
+        ``{type:"sources",…}`` then ``{type:"delta",text}``… then ``{type:"done",…}``.
+        Fail-soft (yields ``{type:"error"}`` instead of raising). The graph lock is held only
+        around retrieval (the first generator step); the token stream runs lock-free so other
+        readers aren't blocked during the (long) generation."""
+        from ..agent import RAGAgent
+        from .. import metrics as m
+
+        question = (question or "").strip()
+        if not question:
+            yield {"type": "error", "error": "empty question"}; return
+        if self.index is None:
+            yield {"type": "error", "error": "No search index is loaded."}; return
+        chat = getattr(self.agent, "chat", None)
+        if chat is None:
+            yield {"type": "error", "error": "No chat model is available."}; return
+        k = max(1, min(int(k), 20))
+        expand_k = max(0, min(int(expand_k), 10))
+        graph = self.graph if (use_graph and self.graph is not None) else None
+        opts = {"graph": graph is not None, "hybrid": bool(hybrid),
+                "rerank": bool(rerank), "k": k, "expand_k": expand_k}
+        start = m.COLLECTOR.seq
+        agent = RAGAgent(self.index, chat, top_k=k, graph=graph, expand_k=expand_k,
+                         hybrid=bool(hybrid), rerank=bool(rerank))
+        try:
+            gen = agent.stream(question)
+            with self._lock:                # retrieval touches the graph → hold the lock here
+                ev = next(gen)              # ("sources", [...])
+            while True:
+                if ev[0] == "sources":
+                    yield {"type": "sources", "options": opts,
+                           "sources": [{"marker": s.marker, "slug": s.page_slug, "title": s.page_title,
+                                        "kind": s.kind, "score": round(float(s.score), 3)} for s in ev[1]]}
+                elif ev[0] == "delta":
+                    yield {"type": "delta", "text": ev[1]}
+                elif ev[0] == "done":
+                    yield {"type": "done", "answer": ev[1], "cited": ev[2],
+                           "stats": _turn_stats(m.COLLECTOR.since(start))}
+                try:
+                    ev = next(gen)
+                except StopIteration:
+                    break
+        except Exception as exc:            # network/model failure mid-stream
+            yield {"type": "error", "error": str(exc)}
+
     # -- entity/concept browser (Begriffe tab) -------------------------------
 
     def entities(self, query: str = "", etype: str = "", limit: int = 200) -> dict:
@@ -783,10 +830,41 @@ def make_handler(app: WikiWebApp):
             finally:
                 _observe_request("GET", path, self._status, (time.perf_counter() - t0) * 1000.0)
 
+        def _stream_ask(self, t0):
+            """Server-Sent-Events stream for POST /api/ask/stream (bypasses the JSON path):
+            emit `data: {event}` lines as the RAG answer generates. Fail-soft on a dropped
+            client (BrokenPipe)."""
+            path = "/api/ask/stream"
+            try:
+                data = self._body_json()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+                self.send_header("Cache-Control", "no-cache")
+                self.send_header("X-Accel-Buffering", "no")   # disable proxy buffering
+                self.end_headers()
+                for event in app.ask_stream(
+                    (data.get("question") or "").strip(),
+                    bool(data.get("graph", True)), bool(data.get("hybrid", False)),
+                    bool(data.get("rerank", False)), int(data.get("k", 5)),
+                    int(data.get("expand_k", 3))):
+                    self.wfile.write(("data: " + json.dumps(event, ensure_ascii=False) + "\n\n").encode("utf-8"))
+                    self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError):
+                pass                                          # client navigated away
+            except Exception as exc:                          # pragma: no cover
+                try:
+                    self.wfile.write(("data: " + json.dumps({"type": "error", "error": str(exc)}) + "\n\n").encode("utf-8"))
+                except Exception:
+                    pass
+            finally:
+                _observe_request("POST", path, self._status, (time.perf_counter() - t0) * 1000.0)
+
         def do_POST(self):
             t0 = time.perf_counter()
             self._status = 200
             path = urlparse(self.path).path
+            if path == "/api/ask/stream":
+                return self._stream_ask(t0)
             try:
                 data = self._body_json()
                 if path == "/api/search":

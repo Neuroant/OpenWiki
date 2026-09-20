@@ -166,3 +166,30 @@ class RAGAgent:
             question=question, answer=answer, sources=sources,
             model=self.chat.name, messages=messages,
         )
+
+    def stream(self, question: str, top_k: int | None = None):
+        """Streaming variant of :meth:`answer`. Yields, in order:
+        ``("sources", list[Source])`` — after (synchronous) retrieval;
+        ``("delta", text)`` — for each generated chunk;
+        ``("done", answer, [cited_markers])`` — the cleaned answer + its citations.
+        Falls back to a single ``delta`` when the chat model has no ``chat_stream``.
+        Retrieval happens on the first ``next()`` (so a caller can hold a lock only there)."""
+        sources = self.retrieve(question, top_k)
+        yield ("sources", sources)
+        if not sources:
+            yield ("done", "Im Index wurden keine passenden Inhalte gefunden.", [])
+            return
+        messages = build_messages(question, sources)
+        if hasattr(self.chat, "chat_stream"):
+            parts: list[str] = []
+            for delta in self.chat.chat_stream(messages):
+                parts.append(delta)
+                yield ("delta", delta)
+            raw = "".join(parts)
+        else:                                   # backend without streaming → one chunk
+            raw = self.chat.chat(messages)
+            yield ("delta", raw)
+        answer = _THINK.sub("", raw).strip()
+        cited = sorted(RAGAnswer(question=question, answer=answer, sources=sources,
+                                 model=self.chat.name).cited_markers())
+        yield ("done", answer, cited)

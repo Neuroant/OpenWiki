@@ -195,6 +195,45 @@ def test_ask_needs_a_chat_model(app):
         app.ask("lautstarke")
 
 
+def test_parse_stream_line():
+    from openwiki.llm import parse_stream_line
+    assert parse_stream_line('{"message":{"content":"Hallo"},"done":false}') == ("Hallo", False, {})
+    c, done, stats = parse_stream_line(
+        b'{"message":{"content":""},"done":true,"eval_count":10,"prompt_eval_count":5}')
+    assert c == "" and done is True and stats.get("eval_tokens") == 10 and stats.get("prompt_tokens") == 5
+    assert parse_stream_line("") == ("", False, {})
+    assert parse_stream_line("not json") == ("", False, {})
+
+
+class _RagStreamChat:
+    """A fake chat model with streaming: chat_stream yields deltas, chat returns the whole."""
+    name = "ragstream"
+
+    def chat_stream(self, messages):
+        for t in ["Die Lautstärke ", "steht auf ", "Seite [1]."]:
+            yield t
+
+    def chat(self, messages):
+        return "Die Lautstärke steht auf Seite [1]."
+
+
+def test_ask_stream_events(app):
+    app.agent.chat = _RagStreamChat()
+    events = list(app.ask_stream("lautstarke", use_graph=False, k=2))
+    assert events[0]["type"] == "sources"
+    assert "000-a" in [s["slug"] for s in events[0]["sources"]]
+    deltas = [e["text"] for e in events if e["type"] == "delta"]
+    assert "".join(deltas) == "Die Lautstärke steht auf Seite [1]."
+    done = events[-1]
+    assert done["type"] == "done"
+    assert done["answer"] == "Die Lautstärke steht auf Seite [1]." and done["cited"] == [1]
+
+
+def test_ask_stream_error_without_chat_model(app):
+    app.agent = None
+    assert list(app.ask_stream("x")) == [{"type": "error", "error": "No chat model is available."}]
+
+
 def test_analyze_gaps_without_graph(app):
     out = app.analyze_gaps()                          # fixture has no graph
     assert out["available"] is False and out["reason"] == "no_graph"

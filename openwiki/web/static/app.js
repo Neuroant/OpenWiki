@@ -1967,20 +1967,53 @@ async function sendAsk(question) {
     if (global) {
       renderGlobalAnswer(bubble, await postJSON("/api/global", { question }));
     } else {
-      renderAskAnswer(bubble, await postJSON("/api/ask", {
-        question,
-        graph: $("#ask-graph").checked,
-        hybrid: $("#ask-hybrid").checked,
-        rerank: $("#ask-rerank").checked,
-        k: parseInt($("#ask-k").value, 10) || 5,
-      }));
+      await streamAsk(bubble, question);   // token-by-token (SSE)
     }
   } catch (err) {
+    bubble.classList.remove("md");
     bubble.textContent = "Fehler: " + err.message;
   } finally {
     btn.disabled = false;
     $("#chat-input").focus();
   }
+}
+
+// Stream a RAG answer token-by-token via SSE (POST + ReadableStream), then finalize
+// with the full markdown + source chips via renderAskAnswer.
+async function streamAsk(bubble, question) {
+  const resp = await fetch("/api/ask/stream", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      question, graph: $("#ask-graph").checked, hybrid: $("#ask-hybrid").checked,
+      rerank: $("#ask-rerank").checked, k: parseInt($("#ask-k").value, 10) || 5,
+    }),
+  });
+  if (!resp.ok || !resp.body) throw new Error("HTTP " + resp.status);
+  const reader = resp.body.getReader();
+  const dec = new TextDecoder();
+  const log = $("#chat-log");
+  let buf = "", acc = "", meta = {};
+  bubble.textContent = "";                       // clear the "…" placeholder
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let i;
+    while ((i = buf.indexOf("\n\n")) >= 0) {
+      const line = buf.slice(0, i); buf = buf.slice(i + 2);
+      if (!line.startsWith("data:")) continue;
+      const ev = JSON.parse(line.slice(5).trim());
+      if (ev.type === "sources") { meta.sources = ev.sources; meta.options = ev.options; }
+      else if (ev.type === "delta") { acc += ev.text; bubble.textContent = acc; log.scrollTop = log.scrollHeight; }
+      else if (ev.type === "done") { meta.answer = ev.answer; meta.cited = ev.cited; meta.stats = ev.stats; }
+      else if (ev.type === "error") { throw new Error(ev.error); }
+    }
+  }
+  renderAskAnswer(bubble, {                        // finalize: markdown + seed/+Graph chips + stats
+    answer: meta.answer != null ? meta.answer : acc,
+    sources: meta.sources || [], options: meta.options || {},
+    cited: meta.cited || [], stats: meta.stats || null,
+  });
 }
 
 let _askCapsProbed = false;

@@ -582,7 +582,10 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   + **Erwähnt in** (backlinks) + **Verwandte Themen** (typed relations) + **Ähnliche Seiten** (SIMILAR_TO) +
   **Gemeinsame Begriffe** (shared entities), all clickable; structural parent/child/prev/next omitted since
   the page already links those. A read-only overlay — the source `.md` stays verbatim, turning link-sparse
-  pages into hubs), `/api/search`, `/api/chat` (editing agent), `/api/ask/stream` (POST) = **streaming
+  pages into hubs; its payload also carries the page's canonical **entities**, which the client
+  **auto-links** — the first mention of each in the prose gets a dotted link → the Begriffe view (`app.js`
+  `autolinkEntities`, TreeWalk over text nodes, first-mention/whole-word, skips links/headings/code)),
+  `/api/search`, `/api/chat` (editing agent), `/api/ask/stream` (POST) = **streaming
   RAG** for the Ask mode (Server-Sent Events: a `sources` event, then `delta` token events, then `done`;
   `WikiWebApp.ask_stream` → `RAGAgent.stream` → `OllamaChat.chat_stream`, U7 — lock held only around
   retrieval so generation streams lock-free), `/api/ask` (POST) = the non-streaming **RAG

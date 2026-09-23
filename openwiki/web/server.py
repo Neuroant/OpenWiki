@@ -141,7 +141,15 @@ class WikiWebApp:
                 by_rel.setdefault(rel, []).append({"slug": n["slug"], "title": n["title"]})
         groups = [{"key": k, "label": label, "pages": by_rel[k]}
                   for k, label in self._RELATED_GROUPS if by_rel.get(k)]
-        return {"available": True, "groups": groups}
+        # canonical entities mentioned on the page — for client-side auto-linking (#3)
+        entities = []
+        try:
+            if self.graph.has_entities():
+                entities = [{"name": e["name"], "aliases": e.get("aliases", [])}
+                            for e in self.graph.entities_for_page(slug)]
+        except Exception:
+            pass
+        return {"available": True, "groups": groups, "entities": entities}
 
     def search(self, query: str, k: int = 8, hybrid: bool = False) -> dict:
         if self.index is None:

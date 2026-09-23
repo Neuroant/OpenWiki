@@ -103,7 +103,7 @@ def test_get_missing_page(app):
 
 
 class _RelGraph:
-    """Fake graph exposing neighborhood() for the related-pages panel test."""
+    """Fake graph exposing neighborhood() + entities for the related-panel / auto-link tests."""
     def neighborhood(self, slug, similar_k=6):
         if slug == "missing":
             raise KeyError(slug)
@@ -117,6 +117,12 @@ class _RelGraph:
             {"slug": "p-rel", "title": "Related", "rel": "relation"},
         ]}
 
+    def has_entities(self):
+        return True
+
+    def entities_for_page(self, slug):
+        return [{"name": "Rekursion", "type": "K", "description": "", "aliases": ["Recursion"]}]
+
 
 def test_related_groups(app):
     app.graph = _RelGraph()
@@ -127,6 +133,8 @@ def test_related_groups(app):
         "references", "referenced_by", "relation", "similar", "shared_entity"]
     refs = next(g for g in out["groups"] if g["key"] == "references")
     assert refs["label"] == "Verweise" and refs["pages"][0]["slug"] == "p-ref"
+    # #3: page entities (for client-side auto-linking) ride along in the same payload
+    assert out["entities"] == [{"name": "Rekursion", "aliases": ["Recursion"]}]
 
 
 def test_related_without_graph(app):

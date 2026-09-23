@@ -115,7 +115,9 @@ async function renderRelated(slug) {
     data = await getJSON("/api/related/" + encodeURIComponent(slug));
   } catch (e) { return; }
   if (state.tab !== "wiki" || state.currentSlug !== slug) return;   // navigated away mid-fetch
-  if (!data.available || !(data.groups || []).length) return;
+  if (!data.available) return;
+  autolinkEntities(data.entities);                                  // #3: link first mentions in the prose
+  if (!(data.groups || []).length) return;
   const groups = data.groups.map((g) =>
     `<div class="rel-group"><span class="rel-label">${escapeHtml(g.label)}</span>` +
     g.pages.map((p) => `<button class="rel-link" data-slug="${escapeHtml(p.slug)}">${escapeHtml(p.title || p.slug)}</button>`).join("") +
@@ -126,6 +128,61 @@ async function renderRelated(slug) {
   el.querySelectorAll(".rel-link").forEach((b) =>
     b.addEventListener("click", () => loadPage(b.dataset.slug)));
   $("#content").appendChild(el);
+}
+
+// #3 Entity auto-linking: link the *first* mention of each canonical entity (or alias) in the
+// page prose to its Begriffe entry — Wikipedia-style, without touching the source .md. Longest
+// terms first (so a longer name isn't shadowed by a shorter alias); each entity linked once;
+// skips links/headings/code and the "Verwandte Seiten" panel.
+function autolinkEntities(entities) {
+  const root = $("#content");
+  if (!root || !(entities || []).length) return;
+  const terms = [];
+  entities.forEach((e) => [e.name, ...(e.aliases || [])].forEach((t) => {
+    if (t && t.length >= 3) terms.push({ term: t, name: e.name });
+  }));
+  terms.sort((a, b) => b.term.length - a.term.length);
+  const linked = new Set();
+  for (const { term, name } of terms) {
+    if (!linked.has(name) && _linkFirstMention(root, term, name)) linked.add(name);
+  }
+}
+const _AUTOLINK_SKIP = new Set(["A", "H1", "H2", "H3", "H4", "CODE", "PRE", "BUTTON"]);
+function _isWordChar(c) { return c && /[A-Za-zÀ-ÿ0-9]/.test(c); }
+function _linkFirstMention(root, term, name) {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      let p = node.parentElement;
+      while (p && p !== root) {
+        if (_AUTOLINK_SKIP.has(p.tagName) || p.classList.contains("related")) return NodeFilter.FILTER_REJECT;
+        p = p.parentElement;
+      }
+      return NodeFilter.FILTER_ACCEPT;
+    },
+  });
+  let node;
+  while ((node = walker.nextNode())) {
+    const s = node.nodeValue;
+    const i = s.indexOf(term);
+    if (i < 0) continue;
+    if (_isWordChar(s[i - 1]) || _isWordChar(s[i + term.length])) continue;   // whole-word only
+    const mid = node.splitText(i);
+    mid.splitText(term.length);                                                // mid = just the term
+    const a = document.createElement("a");
+    a.className = "entity-link";
+    a.href = "#";
+    a.dataset.entity = name;
+    a.title = "Begriff öffnen: " + name;
+    a.textContent = term;
+    a.addEventListener("click", (e) => { e.preventDefault(); openEntity(name); });
+    mid.parentNode.replaceChild(a, mid);
+    return true;
+  }
+  return false;
+}
+function openEntity(name) {
+  entState.pending = name;      // renderEntities loads it once the tab is built
+  activateTab("entities");
 }
 
 // -- tabs: Wiki / Hilfe / Tutorial -----------------------------------------
@@ -657,6 +714,11 @@ async function renderEntities() {
     entState.timer = setTimeout(fetchEntities, 250);
   });
   $("#ent-type").addEventListener("change", (e) => { entState.type = e.target.value; fetchEntities(); });
+  if (entState.pending) {                       // arrived via an auto-linked entity in a page
+    const name = entState.pending;
+    entState.pending = null;
+    loadEntity(name);
+  }
 }
 
 // -- Memory (Gedächtnis / Second Brain) tab ---------------------------------

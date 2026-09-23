@@ -38,6 +38,8 @@ werden gespeichert.
   dem Wissensgraphen als anklickbare Links zeigt: **Verweise** und **Erwähnt in**
   (Rückverweise), **Verwandte Themen** (getypte Beziehungen), **Ähnliche Seiten** und
   **Gemeinsame Begriffe** — so wird jede Seite zum Knotenpunkt, ohne den Quelltext zu ändern.
+- Im Fließtext wird die **erste Erwähnung** jedes bekannten Begriffs (gepunktet unterstrichen)
+  automatisch verlinkt — ein Klick öffnet den Begriff im Reiter **Begriffe**.
 
 ## Semantische Suche
 

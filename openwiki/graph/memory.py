@@ -50,7 +50,9 @@ CAPTURE_SYSTEM = (
     "You extract the durable facts worth remembering from a conversation, as a JSON array "
     'of {"subject","predicate","object"} triples. Capture stable, reusable facts — decisions, '
     "preferences, definitions, states, commitments — not chit-chat, greetings, or one-off "
-    "phrasing. Keep subject/object as short noun phrases and predicate as a short verb phrase. "
+    "phrasing — and not ephemeral session details (temporary file paths, task or process ids, a "
+    'single run\'s timing, "was pushed / tagged / committed" events). Keep subject/object as short '
+    "noun phrases and predicate as a short verb phrase. "
     'Add "valid_from" (an ISO date: YYYY-MM-DD, or YYYY-MM / YYYY) ONLY when the conversation '
     'explicitly says when the fact became true or takes effect ("since September 1", "from '
     'October on") — resolve relative dates against the session date if one is given; never '
@@ -107,17 +109,55 @@ COEXIST_SYSTEM = (
 )
 
 
-def facts_coexist(chat, older: str, newer: str) -> bool:
+def facts_coexist(chat, older: str, newer: str, subjects: Optional[tuple] = None) -> bool:
     """B7: can two facts about the same subject + relation hold **at the same time**? One
     deterministic yes/no call — asked only when a new fact would otherwise invalidate an old
     one, because the capture model's per-fact ``cardinality`` tag is noisy (measured: qwen3
     tags "OpenWiki also uses Ollama" as ``"one"`` in 2 of 3 samples) while the concrete pair
     question is reliable. Neutral framing on purpose ("newer replaces older?" biased it to
-    *replace*). Anything but a clear yes → ``False`` (replace — the pre-B7 behavior)."""
+    *replace*). ``subjects`` (B9) = the two facts' subjects, which attribute resolution put in
+    one group: when they are named differently ("owiki" / "openwiki") the model is told they are
+    the same thing — and nothing more (saying "the same *property*" biased it to *replace* even a
+    wrongly grouped description like "OpenWiki is versioned in git"). Anything but a clear yes →
+    ``False`` (replace — the pre-B7 behavior)."""
+    a, b = subjects or ("", "")
+    context = (f'Note: "{a}" and "{b}" are two names for the same thing.\n'
+               if a and b and a.strip().lower() != b.strip().lower() else "")
     raw = chat.chat([{"role": "system", "content": COEXIST_SYSTEM},
-                     {"role": "user", "content": f"1. {older}\n2. {newer}"}])
+                     {"role": "user", "content": f"{context}1. {older}\n2. {newer}"}])
     answer = _THINK.sub("", raw or "").strip().lower()
     return answer.startswith(("yes", "ja"))
+
+
+ATTRIBUTE_SYSTEM = (
+    "You match a newly remembered fact to an attribute already in memory. An attribute is ONE "
+    "property of ONE specific thing, holding one current value (e.g. the web UI server's port, the "
+    "project's version, the default chat model, the number of passing tests). Pick the existing "
+    "attribute that is the SAME property of the SAME thing as the new fact, so the new fact's value "
+    "re-states or updates it — even if it is worded differently. Answer 0 when the new fact is about "
+    "a different thing (another project, component or file), a different property of the same thing, "
+    'or an event rather than a state ("was pushed", "was renamed"). Answer with the number of the '
+    "matching attribute, or 0. Output only the number."
+)
+_FIRST_INT = re.compile(r"\d+")
+
+
+def choose_attribute(chat, fact: str, candidates: list) -> Optional[int]:
+    """B9 fact identity: which existing attribute (``candidates`` — ``"subject | predicate
+    (e.g. value)"`` labels, nearest first) is the *same property of the same thing* as ``fact``
+    (``"subject | predicate | object"``)? One deterministic call → a 0-based index, or ``None``.
+    Captured facts phrase one attribute many ways across sessions ("project | has version" /
+    "is versioned" / "uses version") — measured on the real dogfooding memory: 43 version facts on
+    23 keys — and the valid-time merge only sees facts under one key. Anything unparseable or out
+    of range → ``None`` (keep the fact's own key: fragmentation is safer than a wrong merge)."""
+    if not candidates:
+        return None
+    listing = "\n".join(f"{n}. {c}" for n, c in enumerate(candidates, 1))
+    raw = chat.chat([{"role": "system", "content": ATTRIBUTE_SYSTEM},
+                     {"role": "user", "content": f"New fact: {fact}\nExisting attributes:\n{listing}"}])
+    m = _FIRST_INT.search(_THINK.sub("", raw or ""))
+    pick = int(m.group(0)) if m else 0
+    return pick - 1 if 1 <= pick <= len(candidates) else None
 
 
 def capture_session(chat, transcript: str, session_date: Optional[int] = None) -> list:

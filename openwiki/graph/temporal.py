@@ -34,6 +34,7 @@ _YEAR_MIN, _YEAR_MAX = 1900, 2200     # outside this a "date" is noise, not a fa
 
 MANY = "many"
 ONE = "one"
+MAX_RIVAL_CHECKS = 6          # coexistence checks per new fact against overlapping rivals
 _MANY_WORDS = {"many", "multi", "multiple", "several", "set", "list"}
 
 
@@ -172,7 +173,8 @@ def valid_to_known_at(rec: dict, known_at: Optional[int], closed: dict):
 # -- the merge rule --------------------------------------------------------------
 
 def plan_merge(records: Iterable[dict], okey: str, valid_from: int,
-               cardinality: str = ONE, correct: bool = False, coexists=None) -> dict:
+               cardinality: str = ONE, correct: bool = False, coexists=None,
+               batch=frozenset()) -> dict:
     """How a new fact ``(…, object→okey)`` valid from ``valid_from`` slots into the history
     of its ``(subject, predicate)`` — ``records`` are that group's existing records. Ordered
     by **valid time**, not processing order (the B7 fix for out-of-order backfills).
@@ -195,12 +197,18 @@ def plan_merge(records: Iterable[dict], okey: str, valid_from: int,
     on top of it; ``superseded_by`` names that later record). A ``"many"`` fact coexists with
     other objects and only ever re-affirms / extends / adds.
 
-    ``coexists(record) -> bool`` (optional — an LLM "can both be true at once?" check) vetoes
-    a tag-based rival: the capture model's per-fact cardinality tag is noisy, so the store
-    asks about the *actual* pair before invalidating. It is consulted lazily, only for the
-    rivals that matter (those holding at ``valid_from`` + the next later one), never with
-    ``correct`` (an explicit correction wins); vetoed ids are returned as ``coexist`` so the
-    caller can mark the pair multi-valued."""
+    ``coexists(record) -> bool`` (optional — an LLM "can both be true at once?" check) then
+    **decides rivalry by itself**: every believed record with a different object is a candidate
+    rival — the capture model's cardinality tags (and ``"many"`` marks) are ignored, because
+    they are noisy and a single wrong one would exempt a record from supersession for good
+    (measured in the dogfooding memory). It is consulted lazily, only for the rivals that matter
+    (those holding at ``valid_from`` — at most ``MAX_RIVAL_CHECKS``, most recent first — + the
+    next later one), never with ``correct`` (an explicit correction wins — then the tags
+    decide); vetoed ids are returned as ``coexist``. Without ``coexists`` the tags decide.
+
+    ``batch`` = ids created earlier in the *same* capture: a same-instant rival from the batch is
+    **closed** (a zero-length interval — an ordered change within one session, "0.43 → 0.44"),
+    not retracted; transcript order is time order, and a correction needs ``correct``."""
     V = int(valid_from)
     believed = [r for r in records if r.get("expired_at") is None]
     covering = [r for r in believed if valid_at(r, V)]
@@ -213,18 +221,25 @@ def plan_merge(records: Iterable[dict], okey: str, valid_from: int,
     functional = coerce_cardinality(cardinality) != MANY
     coexist: list = []
 
+    judged = coexists is not None and not correct   # the LLM check decides, not the tags
+
     def tag_rival(r):
         return functional and r.get("okey") != okey and r.get("cardinality") != MANY
 
-    def rival(r):                                  # a tag rival the coexistence check doesn't veto
-        if not tag_rival(r):
-            return False
-        if coexists is not None and not correct and coexists(r):
-            coexist.append(r["id"])
-            return False
-        return True
+    def rival(r):                                  # a candidate the coexistence check doesn't veto
+        if judged:
+            if r.get("okey") == okey:
+                return False
+            if coexists(r):
+                coexist.append(r["id"])
+                return False
+            return True
+        return tag_rival(r)
 
-    rivals = [r for r in covering if rival(r)]
+    candidates = [r for r in covering if r.get("okey") != okey]
+    if judged:                                     # bound the calls for big multi-valued groups
+        candidates = sorted(candidates, key=lambda r: -(r.get("valid_from") or 0))[:MAX_RIVAL_CHECKS]
+    rivals = [r for r in candidates if rival(r)]
     nxt = None                                     # the next later record that bounds the new one
     for r in sorted((r for r in believed if (r.get("valid_from") or 0) > V),
                     key=lambda r: r["valid_from"]):
@@ -242,7 +257,7 @@ def plan_merge(records: Iterable[dict], okey: str, valid_from: int,
 
     close, expire = [], []
     for r in rivals:
-        if correct or r["valid_from"] >= V:        # same instant or an explicit correction
+        if correct or (r["valid_from"] >= V and r["id"] not in batch):   # same instant / correction
             expire.append(r["id"])
         else:                                      # the world changed at V
             close.append((r["id"], V))

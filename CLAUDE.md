@@ -610,6 +610,36 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   memory stage, the hook capture and the eval harness (`cli._coexist_check`); the journal fold uses it
   when the caller passes one. Neutral framing matters: "does the newer *replace* the older?" biased
   qwen3 to *replace* even for Kuzu→Ollama.
+  **B9 fact identity (v0.85):** capture phrases one attribute many ways across sessions ("project | has
+  version" / "is versioned" / "uses version") and the merge only sees facts under one key — the
+  dogfooding memory had 43 version facts on 23 keys. So `Assertion.attr` holds a **canonical attribute
+  key** (`store.attr_key` = normalized subject ␟ predicate; `_key_of(rec)` = `attr` else the exact key),
+  and `remember(…, resolve=)` resolves a fact whose exact key is new: candidate groups = those with a
+  member at fact-embedding cosine ≥ `RESOLVE_THRESHOLD` (0.75, calibrated on the real memory: ~1 call
+  per 4 facts), top `RESOLVE_K` (6), shown with their latest value to `memory.choose_attribute(chat,
+  fact, labels)` — one deterministic "which is the *same property of the same thing*? (number / 0)" call;
+  a pick joins that group (counted `resolved`) and the valid-time merge then orders the paraphrases.
+  An **alias map** (exact wording → resolved key, rebuilt on load from each record's own
+  subject/predicate vs `attr`) means a wording is only ever resolved once. Joining a group never
+  invalidates anything by itself: with a coexistence checker present, **the check decides rivalry by
+  itself** (`temporal.plan_merge` — every believed record with a different object is a candidate, the
+  noisy capture tags and any `"many"` mark are ignored, at most `MAX_RIVAL_CHECKS` = 6 overlapping
+  rivals checked per new fact, most recent first) and verdicts are **not persisted** — a first B9 run
+  marked coexisting pairs `"many"`, and one grouped *description* ("OpenWiki is versioned in git")
+  thereby exempted a whole version group from supersession. The check is told only that differently named
+  subjects are the same thing (`facts_coexist(…, subjects=)` — "owiki" / "openwiki"); saying "same
+  property" biased it to *replace* that git description. Same-instant rivals created **earlier in the
+  same capture** are closed (an ordered change, zero-length interval), not retracted (`plan_merge(batch=)`),
+  and a "stated" date on the **same day** as a timed session yields to the session time (the capture model
+  habitually states the session's own date). Wired into `remember`, `build`, the hook worker,
+  `backfill`, the journal folds (`cli._attribute_resolver`) and the eval harness; `timeline` groups by
+  `attr`. Companion fixes: backfill windows are valid from their **first turn's timestamp**
+  (`split_transcripts_by_window`) not the day's midnight; `last_seen` counts from when a fact was
+  **said** (`min(now, session date)`), so backfilled history decays properly; the capture prompt skips
+  session trivia (temp paths, task ids, "was pushed/tagged" events). **Measured** on the dogfooding memory
+  (same captured facts replayed through the merge): current facts 1,355 → 1,195, closed history 15 → 251,
+  retractions 43 → 0, OpenWiki-version facts still "current" 23 → 11 (≈4 declined merges + milestones /
+  other things + junk); temporal eval stays 13/13 (`docs/path-b-memory.md` §12.3).
   **B5 consolidation ("sleep"):** the `consolidate` command clusters the *current* assertions by
   embedding similarity (`GraphStore.assertion_graph` → `community.detect_communities`), LLM-summarizes
   each cluster into a theme (`community.summarize_facts`), and writes `MemoryConcept` + `CONSOLIDATES`

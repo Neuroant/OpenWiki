@@ -565,29 +565,170 @@ def test_facts_coexist_parses_a_yes_no_verdict():
         assert facts_coexist(_C(out), "a", "b") is False  # unclear → replace (pre-B7 behavior)
 
 
-def test_remember_with_coexist_keeps_both_and_marks_many(tmp_path):
+def test_remember_with_coexist_keeps_both_without_sticky_marks(tmp_path):
+    """The coexistence check decides each *pair*; nothing is persisted as "many" — a single
+    verdict must not exempt an attribute from supersession for good (dogfooding finding)."""
     store, emb = _store(tmp_path), _TEmbedder()
     calls = []
 
-    def coexist(older, newer):
-        calls.append((older, newer))
+    def coexist(older, newer, subjects=None):
+        calls.append((older, newer, subjects))
         return "project uses" in older                    # tools co-hold; ports would not
 
     try:
         store.remember("s1", [MemoryFact("the project", "uses", "Kuzu")], emb, now=T("2025-09-01"))
         r = store.remember("s2", [MemoryFact("the project", "uses", "Ollama")], emb,
                            now=T("2025-09-02"), coexist=coexist)
-        assert r["superseded"] == 0 and calls == [("the project uses Kuzu", "the project uses Ollama")]
+        assert r["superseded"] == 0
+        assert calls == [("the project uses Kuzu", "the project uses Ollama",
+                          ("the project", "the project"))]
         got = sorted(_objs(store.recall("project uses", emb, k=5, now=T("2025-09-03"))))
         assert got == ["Kuzu", "Ollama"]
-        assert {x["cardinality"] for x in store.list_assertions()} == {"many"}
-        # now multi-valued: a third tool needs no further check
+        assert {x["cardinality"] for x in store.list_assertions()} == {"one"}   # no sticky marks
         store.remember("s3", [MemoryFact("the project", "uses", "NumPy")], emb,
                        now=T("2025-09-04"), coexist=coexist)
-        assert len(calls) == 1
-        # a genuinely functional pair is still replaced
-        store.remember("p1", [_port("port 8137")], emb, now=T("2025-09-01"), coexist=coexist)
+        assert len(calls) == 3                             # checked against both current values
+        assert len(_objs(store.recall("project uses", emb, k=5, now=T("2025-09-05")))) == 3
+        # a genuinely functional pair is still replaced — even if a capture tag said "many"
+        store.remember("p1", [_port("port 8137", cardinality="many")], emb, now=T("2025-09-01"),
+                       coexist=coexist)
         r = store.remember("p2", [_port("port 9000")], emb, now=T("2025-09-05"), coexist=coexist)
         assert r["superseded"] == 1
+    finally:
+        store.close()
+
+
+def test_same_batch_change_is_ordered_not_retracted(tmp_path):
+    """Two values for one attribute in one capture = a change during the session (closed),
+    not a correction (retracted) — the batch keeps transcript order."""
+    store, emb = _store(tmp_path), _TEmbedder()
+    try:
+        r = store.remember("s1", [_port("port 8137"), _port("port 9000")], emb, now=T("2025-09-01"))
+        assert r["superseded"] == 1 and r["retracted"] == 0
+        st = {x["object"]: x["status"] for x in store.list_assertions()}
+        assert st == {"port 8137": "past", "port 9000": "current"}
+    finally:
+        store.close()
+
+
+# -- B9 fact identity: paraphrased attributes resolve onto one key ------------------
+
+def test_choose_attribute_parses_a_number():
+    from openwiki.graph.memory import choose_attribute
+
+    class _C:
+        def __init__(self, out):
+            self.out, self.calls = out, 0
+
+        def chat(self, messages):
+            self.calls += 1
+            self.seen = messages
+            return self.out
+
+    c = _C("<think>same property</think> 2")
+    assert choose_attribute(c, "project | is versioned | 0.6.0", ["a | b (e.g. x)", "project | has version (e.g. 0.3.0)"]) == 1
+    assert "New fact: project | is versioned | 0.6.0" in c.seen[1]["content"]
+    assert "2. project | has version" in c.seen[1]["content"]
+    for out in ("0", "none", "", "7"):
+        assert choose_attribute(_C(out), "f", ["a", "b"]) is None      # none / garbage / out of range
+    empty = _C("1")
+    assert choose_attribute(empty, "f", []) is None and empty.calls == 0   # nothing to ask
+
+
+def _version(obj):
+    return MemoryFact("the project", "has version", obj)
+
+
+def test_resolve_joins_a_paraphrase_and_supersedes(tmp_path):
+    store, emb = _store(tmp_path), _TEmbedder()
+    asked = []
+
+    def resolve(fact, candidates):
+        asked.append((fact, candidates))
+        return next((i for i, c in enumerate(candidates) if "version" in c), None)
+
+    try:
+        store.remember("s1", [_version("0.3.0")], emb, now=T("2025-08-01"), resolve=resolve)
+        assert asked == []                                           # nothing to match yet
+        r = store.remember("s2", [MemoryFact("the project", "is versioned", "0.6.0")], emb,
+                           now=T("2025-08-10"), resolve=resolve)
+        assert r["resolved"] == 1 and r["superseded"] == 1           # same attribute → B7 merge
+        assert asked[0][0] == "the project | is versioned | 0.6.0"
+        assert "the project | has version" in asked[0][1][0] and "0.3.0" in asked[0][1][0]
+        now = T("2025-08-20")
+        assert _objs(store.recall("project", emb, k=5, now=now)) == ["0.6.0"]
+        (g,) = [g for g in store.timeline("project version", emb, now=now) if len(g["records"]) > 1]
+        assert [x["object"] for x in g["records"]] == ["0.3.0", "0.6.0"]
+        assert [x["predicate"] for x in g["records"]] == ["has version", "is versioned"]
+        # the exact key now exists → no chooser call for a third paraphrase-free restatement
+        store.remember("s3", [MemoryFact("the project", "is versioned", "0.7.0")], emb,
+                       now=T("2025-08-15"), resolve=resolve)
+        assert len(asked) == 1
+    finally:
+        store.close()
+
+
+def test_resolve_declined_or_unrelated_keeps_the_own_key(tmp_path):
+    store, emb = _store(tmp_path), _TEmbedder()
+    asked = []
+    try:
+        store.remember("s1", [_version("0.3.0")], emb, now=T("2025-08-01"))
+        r = store.remember("s2", [MemoryFact("the project", "is versioned", "0.6.0")], emb,
+                           now=T("2025-08-10"), resolve=lambda f, c: asked.append(f))   # → None
+        assert r["resolved"] == 0 and r["superseded"] == 0 and len(asked) == 1
+        assert sorted(_objs(store.recall("project", emb, k=5, now=T("2025-08-20")))) == ["0.3.0", "0.6.0"]
+        store.remember("s3", [_port("port 9000")], emb, now=T("2025-08-11"),
+                       resolve=lambda f, c: asked.append(f))
+        assert len(asked) == 1                                        # nothing near → no call
+    finally:
+        store.close()
+
+
+def test_resolved_attr_survives_a_rebuild(tmp_path):
+    store, emb = _store(tmp_path), _TEmbedder()
+    try:
+        store.remember("s1", [_version("0.3.0")], emb, now=T("2025-08-01"))
+        store.remember("s2", [MemoryFact("the project", "is versioned", "0.6.0")], emb,
+                       now=T("2025-08-10"), resolve=lambda f, c: 0)
+    finally:
+        store.close()
+    store = _store(tmp_path)                                          # rebuild the doc tier
+    try:
+        attrs = {r[0]: r[1] for r in store._rows("MATCH (a:Assertion) RETURN a.object, a.attr;")}
+        assert attrs["0.6.0"] == attrs["0.3.0"] and attrs["0.3.0"].endswith("has version")
+        assert _objs(store.recall("project", emb, k=5, now=T("2025-08-20"))) == ["0.6.0"]
+    finally:
+        store.close()
+
+
+def test_recency_counts_from_when_a_fact_was_said(tmp_path):
+    """A backfilled fact (session in the past) decays from its session time, not from 'now'."""
+    store, emb = _store(tmp_path), _TEmbedder()
+    try:
+        store.remember("2025-06-01", [_port("port 8137")], emb, now=T("2025-09-20"))
+        store.remember("live", [MemoryFact("the database", "is", "Kuzu")], emb, now=T("2025-09-20"))
+        seen = {r["object"]: r["last_seen"] for r in store.list_assertions()}
+        assert seen["port 8137"] == T("2025-06-01") and seen["Kuzu"] == T("2025-09-20")
+    finally:
+        store.close()
+
+
+def test_a_stated_session_day_yields_to_the_precise_session_time(tmp_path):
+    """The capture model often 'states' the session's own date; a timed session (a backfill
+    window's first turn) is more precise — same-day changes must stay ordered."""
+    store, emb = _store(tmp_path), _TEmbedder()
+    morning, evening = T("2025-09-05T09:00:00"), T("2025-09-05T18:00:00")
+    try:
+        store.remember("d", [_port("port 8137", valid_from=T("2025-09-05"))], emb,
+                       now=T("2025-09-06"), session_date=morning)
+        r = store.remember("d", [_port("port 9000", valid_from=T("2025-09-05"))], emb,
+                           now=T("2025-09-06"), session_date=evening)
+        assert r["superseded"] == 1 and r["retracted"] == 0           # a change, not a correction
+        rows = {x["object"]: x for x in store.list_assertions()}
+        assert rows["port 8137"]["valid_to"] == evening and rows["port 9000"]["valid_from"] == evening
+        # a genuinely stated *other* date is still honored
+        store.remember("d2", [_port("port 9100", valid_from=T("2025-10-01"))], emb,
+                       now=T("2025-09-06"), session_date=evening)
+        assert {x["object"]: x["valid_from"] for x in store.list_assertions()}["port 9100"] == T("2025-10-01")
     finally:
         store.close()

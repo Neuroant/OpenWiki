@@ -176,3 +176,12 @@ def test_hook_worker_mode_reads_and_removes_its_payload(tmp_path, monkeypatch):
     assert cli.main(["hook", "capture", "--project", str(proj), "--payload", str(job)]) == 0
     assert seen == [("capture", {"session_id": "s1", "transcript_path": "t.jsonl", "_worker": True})]
     assert not job.exists()
+
+
+def test_split_by_window_carries_each_windows_start():
+    from openwiki.claude_code_template import split_transcripts_by_window
+
+    days = split_transcripts_by_window([_transcript()], max_chars=40)
+    (day1, w1), (day2, w2) = days
+    assert w1[0][0] == "2026-08-01T09:00:00Z"                   # window = (first turn's ts, text)
+    assert [ts for ts, _ in w2] == ["2026-08-02T09:00:00Z", "2026-08-02T09:00:03Z"]

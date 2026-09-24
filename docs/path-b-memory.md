@@ -778,6 +778,48 @@ Durable facts recall well ("embedding uses bge-m3 (since 2026-07-31)", "Python v
    above the answer ("default chat model is …"). → tighten the capture prompt; consider consolidation
    (`consolidate` → themes) for the attractor tier.
 
+### 12.3 B9 — fact identity (v0.85), as built and measured
+
+**Mechanism.** `Assertion.attr` = a canonical attribute key (normalized subject ␟ predicate). A fact whose
+exact key is new is matched against existing groups: candidates = groups with a member at fact-embedding
+cosine ≥ 0.75 (calibrated on the real memory — the version family sits at median 0.69 vs random pairs 0.40,
+random p99 0.67–0.77, so similarity alone can't decide), the 6 nearest shown with their latest value to
+one deterministic LLM choice ("which is the *same property of the same thing*? number or 0"). An alias map
+(each record keeps its own wording + its `attr`) resolves every wording once. ~1 call per 4 facts.
+
+**First real run → three merge flaws.** Re-backfilling the 28 days with B9 halved version-key
+fragmentation (23 → 11 keys, 166 paraphrases resolved) but 20 version facts stayed "current" and
+retractions *rose* (43 → 96). Diagnosis on the data:
+1. *Sticky "many".* The chooser also groups related *descriptions* ("OpenWiki is versioned in git", "owiki
+   can be updated to 0.27.1"); the coexistence check rightly says those co-hold with a version value — and
+   v0.82 then **persisted** `"many"` on both records, exempting them from supersession forever; one such
+   verdict froze a whole group. → with a checker present, the check decides rivalry **per pair**, nothing is
+   persisted, the capture's cardinality tags are only the no-checker fallback (bounded: ≤ 6 checks per fact).
+2. *Names.* "owiki 0.38.1" vs "openwiki 0.38.2" → "can both be true" (different names). → the check is told
+   that differently named subjects are one thing — only that: telling it "same *property*" made it replace
+   the git description (7/7 correct on the probe set with the subject-only note).
+3. *In-session changes read as corrections.* Facts from one capture share one instant, so "0.43 → 0.44 →
+   0.45" retracted each other. → a same-instant rival created earlier in the same capture is *closed* (an
+   ordered change), and a "stated" date equal to the session's own day yields to the (timed) session.
+
+**Measured** by replaying the same captured facts (1,446) through the fixed merge — isolating merge logic from
+capture noise:
+
+| | pre-B9 | B9 first run | B9 + fixes |
+|---|---|---|---|
+| current facts | 1,355 | 1,343 | **1,195** |
+| closed history (past) | 15 | 9 | **251** |
+| retracted | 43 | 96 | **0** |
+| OpenWiki-version facts still "current" | 23 | 20 | **11** |
+
+The 11: ~4 merges the chooser declined as "a different thing" ("web UI is versioned", "graph version",
+`__init__.__version__`, the very first "OpenWiki is versioned 0.2.0"), ~5 that *should* stay (another project's
+version, a Python-version constraint, "enabled in version 0.53.0" / "version bump" milestones) and 2 junk
+("v0.82.0 has version v0.82.0"). Temporal eval with B9 on: 13/13 (no regression). **Limits:** the chooser
+errs toward "different thing" (safe: fragmentation over a wrong merge); descriptions grouped with values cost
+extra coexistence calls; subject identity is only inferred inside a resolved group (no general
+subject resolution).
+
 ---
 
 *Cross-refs: overview → [`docs/roadmap.md`](roadmap.md#path-b--the-second-brain-memory-model);

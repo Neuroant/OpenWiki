@@ -459,7 +459,7 @@ def run_cross_session_eval(items, graph, embedder, chat, judge=None, recall_k: i
     honest test of whether concentrated memory beats replaying the log. ``graph`` must be a
     **writable** throwaway (scenarios are isolated via ``forget_all``). Backend-agnostic —
     ``graph``/``embedder``/``chat`` injected; capture/format reused from the memory tier."""
-    from .graph.memory import assemble_context, capture_session, facts_coexist
+    from .graph.memory import assemble_context, capture_session, choose_attribute, facts_coexist
     from .graph.temporal import parse_date, session_date
 
     items = list(items)
@@ -477,7 +477,8 @@ def run_cross_session_eval(items, graph, embedder, chat, judge=None, recall_k: i
             facts = capture_session(chat, transcript, session_date=sdate)
             graph.remember(sid, facts, embedder, now=parse_date(meta.get("recorded")),
                            session_date=sdate, correct=bool(meta.get("correct")),
-                           coexist=lambda a, b: facts_coexist(chat, a, b))
+                           coexist=lambda a, b, subjects=None: facts_coexist(chat, a, b, subjects),
+                           resolve=lambda f, c: choose_attribute(chat, f, c))
         recalled = graph.recall(item.question, embedder, k=recall_k,
                                 as_of=parse_date(item.as_of), known_at=parse_date(item.known_at))
         # B6: the "assembled" condition is now the three-tier context_for assembler —

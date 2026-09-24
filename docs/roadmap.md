@@ -819,12 +819,17 @@ The **genuine gaps** it surfaces — adopted in OpenWiki's measured, local, mini
   **fact identity** is the dominant failure — 43 version facts landed on **23 different subject+predicate
   keys**, so B7 never saw them as the same fact (23 stay "current"); ~2% obvious session trivia; 43
   "retractions" are a day-granularity artifact (same-day changes share one `valid_from`).
-- **B9 — Fact identity (P0, next; from the dogfooding).** Resolve paraphrased subjects/predicates ("project
-  version is" / "has version" / "is versioned as") onto one attribute key before the valid-time merge —
-  embedding candidates over `subject predicate` + one LLM verify per unmatched fact (the ADR-23 entity-
-  resolution pattern, applied to attributes). Plus the cheap follow-ups: per-window timestamps for backfill
-  (intra-day order), decay by *stated* time for backfilled facts, and a capture prompt that drops session
-  trivia. Measure on the backfilled memory: version-key fragmentation 23 → ~1.
+- **B9 — Fact identity. ✅ (v0.85).** Paraphrased attributes ("project | has version" / "is versioned" /
+  "uses version") resolve onto one key (`Assertion.attr`) before the valid-time merge: embedding candidates
+  (fact cosine ≥ 0.75, top 6) + one LLM "same property of the same thing?" choice per new wording (the
+  ADR-23 pattern, applied to attributes; an alias map resolves each wording once). The first real run exposed
+  three merge flaws, all fixed: sticky `"many"` marks (one grouped description froze a whole version group) →
+  the coexistence check now decides rivalry per pair, nothing persisted, tags only a fallback; subject names
+  ("owiki"/"openwiki") → the check is told they're one thing; same-capture changes read as corrections →
+  closed in capture order. Plus per-window backfill timestamps, decay from *stated* time, a trivia-dropping
+  capture prompt. **Measured on the dogfooding memory** (replay of the same captured facts): stale current
+  facts 1,355 → 1,195, closed history 15 → 251, retractions 43 → 0, OpenWiki-version facts still "current"
+  23 → 11; temporal eval stays 13/13. Details: `path-b-memory.md` §12.3; arc42 ADR-29.
 - **B8 — Spreading-activation priming (P2, measure-first).** Session-scoped activation boost over graph
   neighbors of a retrieved node (+ decay), to resolve ambiguous follow-ups. Close to REINFORCES+decay but
   intra-session; A/B against plain recall before trusting it (the GraphRAG finding is the cautionary tale).

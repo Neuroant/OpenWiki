@@ -35,7 +35,8 @@ from .chat_agent import WikiAgent, summarize_wiki
 from .claude_code_template import scaffold_claude_code
 from .opencode_template import scaffold_opencode
 from .graph import (
-    GraphStore, answer_global, build_graph, capture_session, detect_communities, facts_coexist,
+    GraphStore, answer_global, build_graph, capture_session, choose_attribute, detect_communities,
+    facts_coexist,
     detect_page_offset, extract_entities, extract_references, extract_references_multi,
     extract_relations, format_memory, resolve_entities, summarize_community, summarize_facts,
 )
@@ -532,12 +533,20 @@ def _build_argparser() -> argparse.ArgumentParser:
     return parser
 
 
+def _attribute_resolver(model, host):
+    """B9: the ``resolve(fact, candidates)`` callable for ``GraphStore.remember`` — one
+    deterministic chat call per fact whose exact attribute key is new *and* has near
+    candidates, mapping paraphrases ("is versioned" / "has version") onto one attribute."""
+    judge = OllamaChat(model=model, host=host, temperature=0.0)
+    return lambda fact, candidates: choose_attribute(judge, fact, candidates)
+
+
 def _coexist_check(model, host):
     """B7: the ``coexist(older, newer)`` callable for ``GraphStore.remember`` — one deterministic
     chat call per actual conflict ("can both be true at once?"), overriding the noisy capture
     cardinality tag."""
     judge = OllamaChat(model=model, host=host, temperature=0.0)
-    return lambda older, newer: facts_coexist(judge, older, newer)
+    return lambda older, newer, subjects=None: facts_coexist(judge, older, newer, subjects)
 
 
 def _date_arg(value: str) -> int:
@@ -1225,6 +1234,7 @@ def _cmd_build(args: argparse.Namespace) -> int:
                 return 2
             chat = OllamaChat(model=models.get("chat", DEFAULT_CHAT), host=host, temperature=0.2)
             coexist = _coexist_check(models.get("chat", DEFAULT_CHAT), host)
+            resolve = _attribute_resolver(models.get("chat", DEFAULT_CHAT), host)
             total = 0
             try:
                 print(f"  memory: capturing {len(session_paths)} session(s) with {chat.name} …",
@@ -1233,7 +1243,7 @@ def _cmd_build(args: argparse.Namespace) -> int:
                     sid = Path(spath).stem
                     facts = capture_session(chat, Path(spath).read_text(encoding="utf-8"),
                                             session_date=session_date_of(sid))
-                    res = graph.remember(sid, facts, index.embedder, coexist=coexist)
+                    res = graph.remember(sid, facts, index.embedder, coexist=coexist, resolve=resolve)
                     total += res["added"]
                     print(f"    · '{sid}' → {res['added']} new, {res['duplicates']} dup "
                           f"({res['facts']} captured)", file=sys.stderr)
@@ -2372,10 +2382,11 @@ def _cmd_remember(args: argparse.Namespace) -> int:
                   f"journal; they'll be folded on the next writable pass → {args.graph}")
             return 0
         coexist = _coexist_check(args.model, args.host)
+        resolve = _attribute_resolver(args.model, args.host)
         result = graph.remember(session_id, facts, index.embedder, session_date=sdate,
-                                correct=args.correct, coexist=coexist)
+                                correct=args.correct, coexist=coexist, resolve=resolve)
         try:
-            graph.fold_journal(index.embedder, coexist=coexist)   # drain older queued ops
+            graph.fold_journal(index.embedder, coexist=coexist, resolve=resolve)   # drain queued ops
         except Exception:
             pass
     finally:
@@ -2384,6 +2395,8 @@ def _cmd_remember(args: argparse.Namespace) -> int:
     if result.get("retracted"):
         sup += f" ({result['retracted']} retracted)"
     hist = f", {result['historical']} historical" if result.get("historical") else ""
+    if result.get("resolved"):
+        hist += f", {result['resolved']} matched to an existing attribute"
     when = f" [session {format_date(sdate)}]" if sdate is not None else ""
     print(f"Remembered '{session_id}'{when}: {result['added']} new, {result['duplicates']} duplicate"
           f"{sup}{hist} ({result['facts']} captured) → {args.graph}")
@@ -2396,7 +2409,7 @@ def _cmd_backfill(args: argparse.Namespace) -> int:
     one dated session (``<prefix>YYYY-MM-DD``), cut into bounded capture windows, so the
     valid-time merge orders facts by when they happened (a later day's change closes an earlier
     value). Host-injected blocks + compaction summaries are skipped. Needs a writable graph."""
-    from .claude_code_template import split_transcripts_by_day
+    from .claude_code_template import split_transcripts_by_window
 
     project = getattr(args, "project_obj", None)
     if project is not None and not project.memory_enabled:
@@ -2410,8 +2423,8 @@ def _cmd_backfill(args: argparse.Namespace) -> int:
     if not files:
         print("error: no Claude Code transcript (.jsonl) found.", file=sys.stderr)
         return 2
-    days = split_transcripts_by_day([f.read_text(encoding="utf-8", errors="ignore") for f in files],
-                                    max_chars=max(2000, int(args.max_chars)))
+    days = split_transcripts_by_window([f.read_text(encoding="utf-8", errors="ignore") for f in files],
+                                       max_chars=max(2000, int(args.max_chars)))
     lo = format_date(args.since) if args.since is not None else ""
     hi = format_date(args.until) if args.until is not None else "9999"
     days = [(d, w) for d, w in days if lo <= d <= hi]
@@ -2421,7 +2434,7 @@ def _cmd_backfill(args: argparse.Namespace) -> int:
     if args.dry_run or not days:
         for day, windows in days:
             print(f"  {args.prefix}{day}: {len(windows)} window(s), "
-                  f"{sum(len(w) for w in windows) // 1000}k chars")
+                  f"{sum(len(w) for _, w in windows) // 1000}k chars")
         return 0
     if not (args.index / "index.json").is_file():
         print(f"error: no index at {args.index} (run `openwiki build` — needed for the embedder).",
@@ -2438,7 +2451,9 @@ def _cmd_backfill(args: argparse.Namespace) -> int:
         return 2
     chat = _capture_chat(args.model, args.host)
     coexist = _coexist_check(args.model, args.host)
-    totals = {"facts": 0, "added": 0, "duplicates": 0, "superseded": 0, "retracted": 0, "historical": 0}
+    resolve = _attribute_resolver(args.model, args.host)
+    totals = {"facts": 0, "added": 0, "duplicates": 0, "superseded": 0, "retracted": 0,
+              "historical": 0, "resolved": 0}
     failed: list = []
     skipped = 0
     started = time.time()
@@ -2450,10 +2465,13 @@ def _cmd_backfill(args: argparse.Namespace) -> int:
             if sid in done:                     # resume: this day is already in memory
                 skipped += 1
                 continue
-            for j, window in enumerate(windows, 1):
+            for j, (start, window) in enumerate(windows, 1):
+                # valid from the window's first turn (intra-day order), else the day
+                wdate = parse_date(start[:19]) or sdate
                 try:                            # one bad window (timeout, garbage) never aborts the run
-                    facts = capture_session(chat, window, session_date=sdate)
-                    res = graph.remember(sid, facts, index.embedder, session_date=sdate, coexist=coexist)
+                    facts = capture_session(chat, window, session_date=wdate)
+                    res = graph.remember(sid, facts, index.embedder, session_date=wdate,
+                                         coexist=coexist, resolve=resolve)
                 except Exception as exc:
                     failed.append(f"{sid}#{j}")
                     print(f"  ! {sid} window {j}/{len(windows)} failed: {exc}", file=sys.stderr, flush=True)
@@ -2461,13 +2479,15 @@ def _cmd_backfill(args: argparse.Namespace) -> int:
                 for key in totals:
                     totals[key] += res.get(key, 0)
             print(f"  [{i}/{len(days)}] {sid}: {len(windows)} window(s) · {totals['added']} new / "
-                  f"{totals['duplicates']} dup / {totals['superseded']} superseded so far "
+                  f"{totals['duplicates']} dup / {totals['resolved']} resolved / "
+                  f"{totals['superseded']} superseded so far "
                   f"({(time.time() - started) / 60:.1f} min)", file=sys.stderr, flush=True)
     finally:
         graph.close()
     note = f", {skipped} day(s) already in memory skipped" if skipped else ""
     print(f"Backfilled {len(days) - skipped} day(s): {totals['added']} new fact(s), {totals['duplicates']} "
-          f"re-affirmed, {totals['superseded']} superseded ({totals['retracted']} retracted), "
+          f"re-affirmed, {totals['resolved']} matched to an existing attribute, "
+          f"{totals['superseded']} superseded ({totals['retracted']} retracted), "
           f"{totals['facts']} captured{note} → {args.graph}")
     if failed:
         print(f"  {len(failed)} window(s) failed ({', '.join(failed[:8])}{' …' if len(failed) > 8 else ''}) "
@@ -2963,9 +2983,10 @@ def _hook_capture(project: Project, payload: dict) -> None:
     try:
         if getattr(graph, "writable", False):
             coexist = _coexist_check(model, host)
-            graph.remember(sid, facts, embedder, coexist=coexist)
+            resolve = _attribute_resolver(model, host)
+            graph.remember(sid, facts, embedder, coexist=coexist, resolve=resolve)
             try:
-                graph.fold_journal(embedder, coexist=coexist)
+                graph.fold_journal(embedder, coexist=coexist, resolve=resolve)
             except Exception:
                 pass
         else:

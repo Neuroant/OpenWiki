@@ -28,7 +28,7 @@ import numpy as np
 from .builder import CHUNK_VECTOR_INDEX
 from .community import REFERENCE_WEIGHT, SHARED_ENTITY_WEIGHT
 from .decay import (
-    DEFAULT_BOOST, DEFAULT_FLOOR, DEFAULT_HALF_LIFE_DAYS,
+    DAY_SECONDS, DEFAULT_BOOST, DEFAULT_FLOOR, DEFAULT_HALF_LIFE_DAYS,
     confidence_weight, effective_weight, reinforced_weight,
 )
 from .entities import _normalize
@@ -49,6 +49,20 @@ from .usage import append_usage, clear_usage, read_usage, usage_log_path
 _A_BASE = ("id", "subject", "predicate", "object", "session_id", "created_at")
 _A_CONF = ("confidence", "last_seen")                                     # v0.54
 _A_B7 = ("valid_from", "valid_to", "expired_at", "cardinality")           # B7 bi-temporal
+_A_B9 = ("attr",)                                                         # B9 attribute key
+ATTR_SEP = "\x1f"                     # canonical attribute key = normalized subject ␟ predicate
+RESOLVE_THRESHOLD = 0.75              # min fact-embedding cosine for an attribute candidate (B9)
+RESOLVE_K = 6                         # candidates shown to the attribute chooser
+
+
+def attr_key(subject: str, predicate: str) -> str:
+    """The exact (pre-B9) attribute key of a fact: normalized subject ␟ lowercased predicate."""
+    return f"{_normalize(subject)}{ATTR_SEP}{(predicate or '').strip().lower()}"
+
+
+def _key_of(rec: dict) -> str:
+    """A record's attribute key: its resolved ``attr`` (B9), else its own exact key."""
+    return rec.get("attr") or attr_key(rec["subject"], rec["predicate"])
 
 
 class GraphStore:
@@ -888,7 +902,8 @@ class GraphStore:
         """How many deferred-write ops (remember/reindex) are queued (0 if none)."""
         return pending_journal(self._journal_path)
 
-    def fold_journal(self, embedder, now: Optional[int] = None, coexist=None) -> dict:
+    def fold_journal(self, embedder, now: Optional[int] = None, coexist=None,
+                     resolve=None) -> dict:
         """B1: drain the write-ahead journal (queued `remember` + `reindex` ops) into the
         graph and clear it. Writable-only; needs an ``embedder`` (facts + page chunks are
         embedded at fold time). A queued `remember` keeps the time it was *queued* as its
@@ -916,7 +931,8 @@ class GraphStore:
                         res = self.remember(str(rec.get("session") or "session"), facts, embedder,
                                             now=int(rec.get("t") or now),
                                             session_date=rec.get("session_date"),
-                                            correct=bool(rec.get("correct")), coexist=coexist)
+                                            correct=bool(rec.get("correct")), coexist=coexist,
+                                            resolve=resolve)
                         remembered += res.get("added", 0)
                 elif rec.get("op") == "reindex":
                     slug = str(rec.get("slug") or "")
@@ -941,7 +957,7 @@ class GraphStore:
             "session_date INT64, PRIMARY KEY(id));",
             f"CREATE NODE TABLE IF NOT EXISTS Assertion(id STRING, subject STRING, predicate STRING, "
             f"object STRING, session_id STRING, created_at INT64, confidence DOUBLE, last_seen INT64, "
-            f"valid_from INT64, valid_to INT64, expired_at INT64, cardinality STRING, "
+            f"valid_from INT64, valid_to INT64, expired_at INT64, cardinality STRING, attr STRING, "
             f"emb FLOAT[{int(dim)}], PRIMARY KEY(id));",
             "CREATE REL TABLE IF NOT EXISTS ASSERTS(FROM Session TO Assertion);",
             "CREATE REL TABLE IF NOT EXISTS SUPERSEDES(FROM Assertion TO Assertion);",   # B4
@@ -959,6 +975,7 @@ class GraphStore:
                         "ALTER TABLE Assertion ADD valid_to INT64;",
                         "ALTER TABLE Assertion ADD expired_at INT64;",
                         "ALTER TABLE Assertion ADD cardinality STRING;",
+                        "ALTER TABLE Assertion ADD attr STRING;",                     # B9
                         "ALTER TABLE Session ADD session_date INT64;"):
                 try:
                     self._exec(ddl)
@@ -1012,7 +1029,7 @@ class GraphStore:
         of an unmigrated graph), B7. Missing validity is derived from the ``SUPERSEDES`` edges
         exactly as the migration would, so every reader sees one model. ``[]`` without the table."""
         rows, cols = None, ()
-        for extra in (_A_CONF + _A_B7, _A_CONF, ()):
+        for extra in (_A_CONF + _A_B7 + _A_B9, _A_CONF + _A_B7, _A_CONF, ()):
             fields = _A_BASE + extra + (("emb",) if with_emb else ())
             try:
                 rows = self._rows("MATCH (a:Assertion) RETURN "
@@ -1029,7 +1046,7 @@ class GraphStore:
             r["created_at"] = int(r.get("created_at") or 0)
             r["confidence"] = float(r["confidence"]) if r.get("confidence") is not None else 1.0
             r["last_seen"] = int(r.get("last_seen") or 0)
-            for c in _A_B7:
+            for c in _A_B7 + _A_B9:
                 r.setdefault(c, None)
             r["cardinality"] = r["cardinality"] or ONE
             recs.append(r)
@@ -1054,7 +1071,7 @@ class GraphStore:
 
     def remember(self, session_id: str, facts, embedder, now: Optional[int] = None,
                  session_date: Optional[int] = None, correct: bool = False,
-                 coexist=None) -> dict:
+                 coexist=None, resolve=None, resolve_threshold: float = RESOLVE_THRESHOLD) -> dict:
         """B3 merge + B4 contradiction handling + **B7 bi-temporal validity**: embed each fact,
         persist Session + Assertion + ASSERTS, and slot each fact into the history of its
         (subject, predicate) by **valid time** (``temporal.plan_merge``), not processing order —
@@ -1071,18 +1088,29 @@ class GraphStore:
         ``coexist(older_text, newer_text) -> bool`` (optional, e.g. ``memory.facts_coexist``
         bound to a chat model) is asked before a tag-based rival is invalidated — a pair that
         can hold at once is kept and both records are marked ``"many"`` (verdicts cached per
-        call; see ``temporal.plan_merge``). Without it the capture tags alone decide."""
+        call; see ``temporal.plan_merge``). Without it the capture tags alone decide.
+
+        ``resolve(fact_text, candidate_labels) -> index | None`` (optional, e.g.
+        ``memory.choose_attribute`` bound to a chat model) is **B9 fact identity**: a fact whose
+        exact attribute key is new is matched against the existing attribute groups whose
+        members are nearest in embedding space (cosine ≥ ``resolve_threshold``, top
+        ``RESOLVE_K``); if the chooser picks one, the fact joins that group (its ``attr``) — so
+        "project | is versioned" and "project | has version" are merged by valid time instead of
+        both staying current. Counted as ``resolved``."""
         if not self.writable:
             raise RuntimeError("GraphStore is read-only; open it writable to remember.")
         facts = list(facts)
         empty = {"facts": 0, "added": 0, "duplicates": 0, "superseded": 0,
-                 "retracted": 0, "historical": 0}
+                 "retracted": 0, "historical": 0, "resolved": 0}
         if not facts:
             return empty
         if embedder is None:
             raise ValueError("remember needs an embedder.")
         now = int(now if now is not None else time.time())
         sdate = int(session_date) if session_date is not None else session_date_of(session_id)
+        # recency counts from when the fact was *said* (a backfilled session), not from when it was
+        # recorded — else a whole backfilled history looks equally fresh ("hot") today
+        said_at = min(now, sdate) if sdate is not None else now
         emb = embedder.embed_documents([f.text() for f in facts]).astype(np.float32)
         norms = np.linalg.norm(emb, axis=1, keepdims=True)
         norms[norms == 0] = 1.0
@@ -1092,39 +1120,60 @@ class GraphStore:
         with self._lock:
             self._exec("MERGE (s:Session {id:$id}) ON CREATE SET s.created_at=$t, s.session_date=$d;",
                        {"id": session_id, "t": now, "d": sdate})
-            # Every record (current or not) grouped by normalized (subject, predicate): the
-            # merge needs the group's whole valid-time history, not just the current fact.
+            # Every record (current or not) grouped by attribute key (B9 ``attr``, else the exact
+            # normalized subject+predicate): the merge needs the group's whole valid-time history.
             groups: dict = {}
-            for r in self._load_assertions():
+            aliases: dict = {}                             # B9: exact key → the attribute it resolved to
+            members: list = []                             # (key, normalized emb) — for B9 candidates
+            for r in self._load_assertions(with_emb=resolve is not None):
                 r["okey"] = _normalize(r["object"])
-                key = (_normalize(r["subject"]), (r["predicate"] or "").strip().lower())
+                key = _key_of(r)
                 groups.setdefault(key, []).append(r)
+                own = attr_key(r["subject"], r["predicate"])
+                if own != key:
+                    aliases[own] = key
+                if resolve is not None and r.get("emb") is not None:
+                    v = np.asarray(r.pop("emb"), dtype=np.float32)
+                    members.append((key, v / (np.linalg.norm(v) or 1.0)))
             verdicts: dict = {}                            # (old okey, new okey) → coexist?
-            for fact, vec in zip(facts, emb):
+            batch_ids: set = set()                         # records created by this call
+            for idx, (fact, vec) in enumerate(zip(facts, emb)):
                 ns, pp, no = fact.key()
-                group = groups.setdefault((ns, pp), [])
+                own = attr_key(fact.subject, fact.predicate)
+                key = aliases.get(own, own)              # a wording already resolved → no new call
+                if key not in groups and resolve is not None and members:
+                    chosen = self._resolve_attribute(fact, vec, groups, members, resolve,
+                                                     resolve_threshold)
+                    if chosen is not None:
+                        key = aliases[own] = chosen
+                        n["resolved"] += 1
+                group = groups.setdefault(key, [])
                 by_id = {r["id"]: r for r in group}
                 vf = fact.valid_from if fact.valid_from is not None else (
                     sdate if sdate is not None else now)
+                # the capture model often "states" the session's own date (midnight) — no more
+                # informative than the session, and less precise than a timed one (a backfill
+                # window's first turn): keep the session time so same-day changes stay ordered
+                if (fact.valid_from is not None and sdate is not None
+                        and fact.valid_from // DAY_SECONDS == sdate // DAY_SECONDS):
+                    vf = sdate
 
                 def coexists(r, fact=fact, no=no):
                     key = (r["okey"], no)
                     if key not in verdicts:
                         try:
                             verdicts[key] = bool(coexist(
-                                f"{r['subject']} {r['predicate']} {r['object']}", fact.text()))
+                                f"{r['subject']} {r['predicate']} {r['object']}", fact.text(),
+                                subjects=(r["subject"], fact.subject)))
                         except Exception:              # a failed check never blocks the merge
                             verdicts[key] = False
                     return verdicts[key]
                 plan = plan_merge(group, no, int(vf), fact.cardinality, correct,
-                                  coexists=coexists if coexist is not None else None)
+                                  coexists=coexists if coexist is not None else None,
+                                  batch=batch_ids)
+                # the captured tag is kept as-is — a coexistence verdict applies to *that pair*
+                # only; persisting it as "many" would exempt the records from supersession for good
                 card = fact.cardinality or ONE
-                if plan.get("coexist"):                    # the pair holds at once → multi-valued
-                    card = MANY
-                    for rid in plan["coexist"]:
-                        self._exec("MATCH (a:Assertion {id:$id}) SET a.cardinality=$c;",
-                                   {"id": rid, "c": MANY})
-                        by_id[rid]["cardinality"] = MANY
                 for rid, vt in plan["close"]:              # the world changed at vf
                     self._exec("MATCH (a:Assertion {id:$id}) SET a.valid_to=$vt;",
                                {"id": rid, "vt": int(vt)})
@@ -1138,29 +1187,33 @@ class GraphStore:
                 if plan["action"] in ("reaffirm", "extend"):   # same fact → B6: raise confidence
                     tgt = by_id[plan["target"]]
                     conf = reinforced_weight(tgt["confidence"], DEFAULT_BOOST)
+                    seen = max(int(tgt.get("last_seen") or 0), said_at)
                     self._exec("MATCH (a:Assertion {id:$id}) "
                                "SET a.confidence=$c, a.last_seen=$t, a.valid_from=$vf;",
-                               {"id": tgt["id"], "c": conf, "t": now, "vf": int(plan["valid_from"])})
-                    tgt.update(confidence=conf, last_seen=now, valid_from=int(plan["valid_from"]))
+                               {"id": tgt["id"], "c": conf, "t": seen, "vf": int(plan["valid_from"])})
+                    tgt.update(confidence=conf, last_seen=seen, valid_from=int(plan["valid_from"]))
                     aid = tgt["id"]
                     n["duplicates"] += 1
                 else:
                     aid = uuid.uuid4().hex
                     rec = {"id": aid, "subject": fact.subject, "predicate": fact.predicate,
                            "object": fact.object, "okey": no, "session_id": session_id,
-                           "created_at": now, "confidence": 1.0, "last_seen": now,
+                           "created_at": now, "confidence": 1.0, "last_seen": said_at,
                            "valid_from": int(plan["valid_from"]), "valid_to": plan["valid_to"],
-                           "expired_at": None, "cardinality": card}
+                           "expired_at": None, "cardinality": card, "attr": key}
                     self._exec(
                         "CREATE (:Assertion {id:$id, subject:$s, predicate:$p, object:$o, "
-                        "session_id:$sid, created_at:$t, confidence:1.0, last_seen:$t, "
-                        "valid_from:$vf, valid_to:$vt, cardinality:$card, emb:$e});",
+                        "session_id:$sid, created_at:$t, confidence:1.0, last_seen:$ls, "
+                        "valid_from:$vf, valid_to:$vt, cardinality:$card, attr:$attr, emb:$e});",
                         {"id": aid, "s": fact.subject, "p": fact.predicate, "o": fact.object,
-                         "sid": session_id, "t": now, "vf": rec["valid_from"], "vt": rec["valid_to"],
-                         "card": rec["cardinality"], "e": vec.astype(float).tolist()})
+                         "sid": session_id, "t": now, "ls": said_at, "vf": rec["valid_from"], "vt": rec["valid_to"],
+                         "card": rec["cardinality"], "attr": key, "e": vec.astype(float).tolist()})
+                    if resolve is not None:
+                        members.append((key, vec / (np.linalg.norm(vec) or 1.0)))
                     self._exec("MATCH (s:Session {id:$sid}),(a:Assertion {id:$id}) "
                                "CREATE (s)-[:ASSERTS]->(a);", {"sid": session_id, "id": aid})
                     group.append(rec)
+                    batch_ids.add(aid)
                     n["added"] += 1
                     if rec["valid_to"] is not None and rec["valid_to"] <= now:
                         n["historical"] += 1               # a backfill landed in the past
@@ -1172,6 +1225,32 @@ class GraphStore:
                     self._exec("MATCH (n:Assertion {id:$n}),(o:Assertion {id:$o}) "
                                "CREATE (n)-[:SUPERSEDES]->(o);", {"n": aid, "o": rid})
         return n
+
+    @staticmethod
+    def _resolve_attribute(fact, vec, groups: dict, members: list, resolve,
+                           threshold: float) -> Optional[str]:
+        """B9: the existing attribute key ``fact`` should join, or ``None``. Candidates = groups
+        with a member at cosine ≥ ``threshold`` to the fact (max over members — a group's
+        paraphrases can sit apart), the ``RESOLVE_K`` nearest, shown to ``resolve`` with their
+        latest value as an example. A failing chooser never blocks the merge (→ ``None``)."""
+        keys = [k for k, _ in members]
+        sims = np.vstack([v for _, v in members]) @ (vec / (np.linalg.norm(vec) or 1.0))
+        best: dict = {}
+        for k, s in zip(keys, sims):
+            if s >= threshold and s > best.get(k, -1.0):
+                best[k] = float(s)
+        if not best:
+            return None
+        cands = sorted(best, key=lambda k: -best[k])[:RESOLVE_K]
+        labels = []
+        for k in cands:
+            ex = max(groups[k], key=lambda r: (r.get("valid_from") or 0, r.get("created_at") or 0))
+            labels.append(f"{ex['subject']} | {ex['predicate']}   (e.g. {str(ex['object'])[:60]})")
+        try:
+            pick = resolve(f"{fact.subject} | {fact.predicate} | {fact.object}", labels)
+        except Exception:
+            return None
+        return cands[pick] if isinstance(pick, int) and 0 <= pick < len(cands) else None
 
     def recall(self, query: str, embedder, k: int = 5,
                half_life_days: float = DEFAULT_HALF_LIFE_DAYS, now: Optional[int] = None,
@@ -1225,14 +1304,14 @@ class GraphStore:
         q = q / (np.linalg.norm(q) or 1.0)
         by_group: dict = {}
         for r in recs:
-            key = (_normalize(r["subject"]), (r["predicate"] or "").strip().lower())
+            key = _key_of(r)                               # B9: paraphrases share one timeline
             cos = float(q @ np.asarray(r["emb"], dtype=np.float32))
             g = by_group.setdefault(key, {"subject": r["subject"], "predicate": r["predicate"],
                                           "cos": cos, "records": []})
             g["cos"] = max(g["cos"], cos)
             g["records"].append({c: r[c] for c in (
-                "id", "object", "session_id", "valid_from", "valid_to", "created_at",
-                "expired_at", "cardinality", "status")})
+                "id", "subject", "predicate", "object", "session_id", "valid_from", "valid_to",
+                "created_at", "expired_at", "cardinality", "status")})
         top = sorted(by_group.values(), key=lambda g: -g["cos"])[:max(1, int(groups))]
         for g in top:
             g["cos"] = round(g["cos"], 3)

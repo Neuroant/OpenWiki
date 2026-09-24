@@ -39,8 +39,9 @@
 | [24](#adr-24) | Ship as the `owiki` distribution + CI; publishing license-gated | Accepted | Q2, usability |
 | [25](#adr-25) | World-model analysis as a read-only, additive toolkit (`owiki analyze`) | Accepted | Q5, Q4 |
 | [26](#adr-26) | Capability-complete no-build SPA + SSE streaming (Direction J) | Accepted | usability, Q2 |
-| [27](#adr-27) | Bi-temporal assertions merged by valid time (+ veto-only coexistence check) | Accepted (Path B+ / B7) | correctness, Q5 |
+| [27](#adr-27) | Bi-temporal assertions merged by valid time (+ veto-only coexistence check) | Accepted (Path B+ / B7); refined by [ADR-29](#adr-29) | correctness, Q5 |
 | [28](#adr-28) | Graph connectivity as read-only reader overlays (Related panel, entity auto-links) | Accepted | usability, Q4 |
+| [29](#adr-29) | Fact identity: paraphrased attributes onto one key; coexistence decides rivalry per pair | Accepted (Path B+ / B9) | correctness, Q5 |
 
 ---
 
@@ -529,12 +530,39 @@
   carry them); − first-mention, whole-word matching misses some inflected forms; − one extra request per
   page view.
 
+### ADR-29
+**Fact identity: paraphrased attributes resolve onto one key; the coexistence check decides rivalry per pair.** *(v0.85, Path B+ / B9)*
+- **Context:** real history (the v0.84 dogfooding backfill) showed the valid-time merge (ADR-27) only orders
+  facts under an *exact* normalized subject+predicate key, while capture phrases one attribute many ways
+  across sessions — 43 OpenWiki-version facts on 23 keys, 23 of them "current". The synthetic eval never
+  showed it (its transcripts repeat one phrasing).
+- **Decision:** a canonical attribute key per assertion (`Assertion.attr`, `ALTER`-migrated like ADR-27); a
+  fact whose exact key is new is matched to existing groups by embedding candidates (cosine ≥ 0.75, top 6) +
+  one deterministic LLM choice ("same property of the same thing?" → number / 0), the ADR-23 pattern applied
+  to attributes; an alias map resolves each wording once. Because a grouping error must not hide facts, the
+  **coexistence check (ADR-27) now decides rivalry per pair** whenever it is available — capture cardinality
+  tags and `"many"` marks are ignored (tags remain the no-checker fallback), verdicts are not persisted, at
+  most 6 overlapping rivals are checked per fact; the check is told only that differently named subjects are
+  the same thing. Same-instant rivals from the same capture are closed in capture order, not retracted.
+- **Alternatives:** similarity threshold alone — rejected (version-family pairs median cosine 0.69 vs random
+  p99 0.67–0.77: no clean cut); LLM verify on every fact — rejected (cost; exact-key and alias hits need no
+  call); prompt the capture model with the existing attribute vocabulary — deferred (cheaper, but it biases
+  extraction and can't fix existing memory); keep ADR-27's persisted `"many"` marks — rejected after measuring
+  that one grouped description froze a whole version group; tell the checker "same property" — rejected (it
+  then replaced a wrongly grouped but true description).
+- **Consequences:** + measured on the dogfooding memory (same captured facts replayed): current facts 1,355 →
+  1,195, closed history 15 → 251, retractions 43 → 0, OpenWiki-version facts still current 23 → 11; the
+  temporal eval stays 13/13. − ~1 extra LLM call per 4 new facts + coexistence calls for grouped descriptions;
+  − the chooser errs toward "different thing" (safe, but ~4 version paraphrases stay separate); − subject
+  identity is only inferred within a resolved group. Refines [ADR-27](#adr-27); addresses debt D11.
+
 ---
 *Chapter complete. The Path-B agent-memory direction landed via ADR-14/15/16/17/18/19; the graph then
 deepened (ADR-22 typed relations + relation-aware GraphRAG, ADR-23 entity resolution), gained
 **observability** (ADR-20), a *measured* retrieval-add-on discipline (ADR-21), a **shipping** story
 (ADR-24 packaging + CI), a **world-model analysis** toolkit (ADR-25, Direction I), and a
 **capability-complete web UI** (ADR-26, Direction J — U1–U11, incl. SSE streaming), graph connectivity as
-**reader overlays** (ADR-28), and Path B+'s **bi-temporal memory** (ADR-27, B7 — refines ADR-15/18). §11
+**reader overlays** (ADR-28), and Path B+'s **bi-temporal memory** (ADR-27, B7 — refines ADR-15/18) with
+**fact identity** (ADR-29, B9 — measured on real development history). §11
 debts D1/D2/D6 are resolved. Deep designs in `docs/path-b-memory.md` and `docs/RAG-vs-GraphRAG.md`. New significant
 decisions should be appended here with the next id.*

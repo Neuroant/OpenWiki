@@ -182,29 +182,37 @@ def parse_claude_transcript(text: str, max_chars: int = 20000) -> str:
     return transcript[-max_chars:] if len(transcript) > max_chars else transcript
 
 
-def split_transcripts_by_day(texts, max_chars: int = 20000) -> list:
-    """B7 backfill: Claude Code transcripts (JSONL texts) → ``[(YYYY-MM-DD, [window, …]), …]``,
-    oldest day first — every turn grouped by the UTC day of its timestamp (turns without one
+def split_transcripts_by_window(texts, max_chars: int = 20000) -> list:
+    """B7 backfill: Claude Code transcripts (JSONL texts) → ``[(YYYY-MM-DD, [(start, window), …]),
+    …]``, oldest day first — every turn grouped by the UTC day of its timestamp (turns without one
     are dropped: they can't be dated), each day cut into windows of at most ``max_chars`` at turn
-    boundaries (an over-long single turn is truncated), so each window is one capture call."""
+    boundaries (an over-long single turn is truncated), so each window is one capture call.
+    ``start`` is the window's first turn's ISO timestamp — its facts are valid from *then*, so a
+    change later the same day orders after it instead of colliding at midnight."""
     dated = sorted((ts, turn) for text in texts for ts, turn in iter_claude_turns(text)
                    if len(ts) >= 10)
     days: dict = {}
     for ts, turn in dated:
-        days.setdefault(ts[:10], []).append(turn[:max_chars])
+        days.setdefault(ts[:10], []).append((ts, turn[:max_chars]))
     out = []
     for day in sorted(days):
-        windows, cur = [], ""
-        for turn in days[day]:
+        windows, cur, start = [], "", ""
+        for ts, turn in days[day]:
             if cur and len(cur) + 2 + len(turn) > max_chars:
-                windows.append(cur)
-                cur = turn
+                windows.append((start, cur))
+                cur, start = turn, ts
             else:
-                cur = f"{cur}\n\n{turn}" if cur else turn
+                cur, start = (f"{cur}\n\n{turn}", start) if cur else (turn, ts)
         if cur:
-            windows.append(cur)
+            windows.append((start, cur))
         out.append((day, windows))
     return out
+
+
+def split_transcripts_by_day(texts, max_chars: int = 20000) -> list:
+    """:func:`split_transcripts_by_window` without the start timestamps: ``[(day, [window, …])]``."""
+    return [(day, [text for _, text in windows])
+            for day, windows in split_transcripts_by_window(texts, max_chars)]
 
 
 def install_hooks(settings_file, inject_command: str, capture_command: str) -> Path:

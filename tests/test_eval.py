@@ -157,7 +157,7 @@ class _FakeMemGraph:
         self.forgot += 1
 
     def remember(self, session_id, facts, embedder, now=None, session_date=None, correct=False,
-                 coexist=None):
+                 coexist=None, resolve=None):
         self.stored.extend((session_id, f) for f in facts)
         self.calls.append({"session": session_id, "now": now, "session_date": session_date,
                            "correct": correct})

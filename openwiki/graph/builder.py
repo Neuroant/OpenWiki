@@ -121,17 +121,24 @@ class GraphBuilder:
             logger.warning("could not open existing graph to preserve memory: %s", exc)
             return None
         try:
-            # Assertions carry a confidence + last_seen since v0.54; read them if present,
-            # else fall back and default (pre-0.54 graphs) so the rebuild migrates them.
-            assertions = self._read_rows(
-                conn, "MATCH (a:Assertion) RETURN a.id, a.subject, a.predicate, a.object, "
-                      "a.session_id, a.created_at, a.emb, a.confidence, a.last_seen;")
+            # Assertions carry confidence + last_seen since v0.54 and the B7 bi-temporal
+            # columns since v0.81; read the newest shape present and pad older ones with NULLs
+            # (the store derives a pre-B7 record's validity from SUPERSEDES — also after restore).
+            base = ("MATCH (a:Assertion) RETURN a.id, a.subject, a.predicate, a.object, "
+                    "a.session_id, a.created_at, a.emb")
+            assertions = self._read_rows(conn, base + ", a.confidence, a.last_seen, a.valid_from, "
+                                               "a.valid_to, a.expired_at, a.cardinality;")
             if not assertions:
-                assertions = [list(r) + [1.0, 0] for r in self._read_rows(
-                    conn, "MATCH (a:Assertion) RETURN a.id, a.subject, a.predicate, a.object, "
-                          "a.session_id, a.created_at, a.emb;")]
+                assertions = [list(r) + [None] * 4 for r in self._read_rows(
+                    conn, base + ", a.confidence, a.last_seen;")]
+            if not assertions:
+                assertions = [list(r) + [1.0, 0] + [None] * 4 for r in self._read_rows(conn, base + ";")]
+            sessions = self._read_rows(conn, "MATCH (s:Session) RETURN s.id, s.created_at, s.session_date;")
+            if not sessions:
+                sessions = [list(r) + [None] for r in self._read_rows(
+                    conn, "MATCH (s:Session) RETURN s.id, s.created_at;")]
             snap = {
-                "sessions": self._read_rows(conn, "MATCH (s:Session) RETURN s.id, s.created_at;"),
+                "sessions": sessions,
                 "assertions": assertions,
                 "asserts": self._read_rows(
                     conn, "MATCH (s:Session)-[:ASSERTS]->(a:Assertion) RETURN s.id, a.id;"),
@@ -152,19 +159,22 @@ class GraphBuilder:
         reinforced edges are kept only where both endpoint pages still exist."""
         if not snap:
             return 0, 0
-        for sid, created in snap.get("sessions", []):
-            conn.execute("MERGE (s:Session {id:$id}) ON CREATE SET s.created_at=$t;",
-                         parameters={"id": sid, "t": created})
+        for sid, created, sdate in snap.get("sessions", []):
+            conn.execute("MERGE (s:Session {id:$id}) ON CREATE SET s.created_at=$t, s.session_date=$d;",
+                         parameters={"id": sid, "t": created, "d": sdate})
         kept, skipped = set(), 0
-        for aid, subj, pred, obj, sid, created, emb, conf, seen in snap.get("assertions", []):
+        for (aid, subj, pred, obj, sid, created, emb, conf, seen,
+             vfrom, vto, expired, card) in snap.get("assertions", []):
             if emb is None or len(emb) != dim:
                 skipped += 1
                 continue
             conn.execute(
                 "CREATE (:Assertion {id:$id, subject:$s, predicate:$p, object:$o, "
-                "session_id:$sid, created_at:$t, confidence:$c, last_seen:$ls, emb:$e});",
+                "session_id:$sid, created_at:$t, confidence:$c, last_seen:$ls, "
+                "valid_from:$vf, valid_to:$vt, expired_at:$x, cardinality:$card, emb:$e});",
                 parameters={"id": aid, "s": subj, "p": pred, "o": obj, "sid": sid, "t": created,
                             "c": float(conf if conf is not None else 1.0), "ls": int(seen or 0),
+                            "vf": vfrom, "vt": vto, "x": expired, "card": card,
                             "e": [float(x) for x in emb]})
             kept.add(aid)
         for sid, aid in snap.get("asserts", []):
@@ -239,15 +249,20 @@ class GraphBuilder:
         # Remembered tier (Path B, B2/B3/B6): sessions + reified assertions (empty until
         # `remember()` runs; see openwiki/graph/memory.py). Assertions carry a mirrored
         # embedding so `recall()` can brute-force cosine over them.
-        conn.execute("CREATE NODE TABLE Session(id STRING, created_at INT64, PRIMARY KEY(id));")
+        # B7 bi-temporal: valid time (valid_from/valid_to — when the fact held in the world) +
+        # transaction time (created_at/expired_at — when we recorded / stopped believing it);
+        # cardinality "many" = a multi-valued predicate (values coexist, no supersession).
+        conn.execute("CREATE NODE TABLE Session(id STRING, created_at INT64, session_date INT64, "
+                     "PRIMARY KEY(id));")
         conn.execute(
             f"CREATE NODE TABLE Assertion(id STRING, subject STRING, predicate STRING, "
             f"object STRING, session_id STRING, created_at INT64, "
-            f"confidence DOUBLE, last_seen INT64, emb FLOAT[{dim}], PRIMARY KEY(id));")
+            f"confidence DOUBLE, last_seen INT64, valid_from INT64, valid_to INT64, "
+            f"expired_at INT64, cardinality STRING, emb FLOAT[{dim}], PRIMARY KEY(id));")
         conn.execute("CREATE REL TABLE ASSERTS(FROM Session TO Assertion);")
-        # B4 contradiction/time-versioning: a newer assertion SUPERSEDES an older one
-        # (same subject+predicate, different object). 'Current' = no incoming SUPERSEDES;
-        # nothing is deleted, so the superseded history stays queryable.
+        # B4/B7 provenance: (n)-[:SUPERSEDES]->(o) = n closed or retracted o's validity
+        # (same subject+predicate, different object). 'Current' is decided by the B7
+        # validity columns; nothing is deleted, so the history stays queryable.
         conn.execute("CREATE REL TABLE SUPERSEDES(FROM Assertion TO Assertion);")
         # B5 consolidation ("sleep"): topical MemoryConcept summaries over clusters of current
         # assertions (populated by `openwiki consolidate`, empty otherwise). Like Community, a

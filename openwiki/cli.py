@@ -40,6 +40,8 @@ from .graph import (
     extract_relations, format_memory, resolve_entities, summarize_community, summarize_facts,
 )
 from .embeddings import OllamaEmbedder
+from .graph.temporal import format_date, format_interval, parse_date
+from .graph.temporal import session_date as session_date_of
 from .llm import OllamaChat
 from .mcp_server import build_server
 from .merge import combine_documents
@@ -416,6 +418,13 @@ def _build_argparser() -> argparse.ArgumentParser:
                            help="Capture a session transcript into the graph's remembered tier (Path B).")
     rem_p.add_argument("transcript", type=Path, help="A text/markdown file with the session transcript.")
     rem_p.add_argument("--session", default=None, help="Session id (default: the transcript file stem).")
+    rem_p.add_argument("--session-date", type=_date_arg, default=None, metavar="DATE",
+                       help="When the session took place (YYYY-MM-DD) — facts are valid from it unless "
+                            "the transcript states a date (B7). Default: a date in the session id, "
+                            "else now. Lets an out-of-order backfill land in history.")
+    rem_p.add_argument("--correct", action="store_true",
+                       help="The transcript CORRECTS earlier facts ('it was never X, it is Y'): the "
+                            "conflicting old fact is retracted (never true) instead of ended (B7).")
     rem_p.add_argument("-i", "--index", type=Path, default=None, help="Index dir (for the embedder; default: project's).")
     rem_p.add_argument("--graph", type=Path, default=None, help="Graph dir (default: project's graph).")
     rem_p.add_argument("--model", default=None, help="Chat model for fact extraction (default: manifest models.chat).")
@@ -427,6 +436,14 @@ def _build_argparser() -> argparse.ArgumentParser:
     rec_p.add_argument("-k", "--top-k", type=int, default=5, help="Facts to return (default: 5).")
     rec_p.add_argument("--all", dest="include_superseded", action="store_true",
                        help="Also show superseded facts (B4 history), each marked — default is current only.")
+    rec_p.add_argument("--as-of", type=_date_arg, default=None, metavar="DATE",
+                       help="B7 point-in-time: the facts that were TRUE at DATE (valid time).")
+    rec_p.add_argument("--known-at", type=_date_arg, default=None, metavar="DATE",
+                       help="B7: what OpenWiki BELIEVED at DATE (transaction time; valid time "
+                            "defaults to DATE too) — before later corrections/backfills.")
+    rec_p.add_argument("--timeline", action="store_true",
+                       help="B7: show the full history (every interval, when recorded, by which "
+                            "session) of the subject+predicate pairs that best match the query.")
     rec_p.add_argument("-i", "--index", type=Path, default=None, help="Index dir (for the embedder; default: project's).")
     rec_p.add_argument("--graph", type=Path, default=None, help="Graph dir (default: project's graph).")
     rec_p.add_argument("--host", default=None, help="Ollama host URL.")
@@ -441,6 +458,8 @@ def _build_argparser() -> argparse.ArgumentParser:
                        help="Fit the context within ~this many chars (~4/token); default: the "
                             "project's [memory] context_budget (2000). Use 0 for unbounded.")
     ctx_p.add_argument("--identity", default=None, help="Override the identity tier (default: the project's).")
+    ctx_p.add_argument("--as-of", type=_date_arg, default=None, metavar="DATE",
+                       help="B7: assemble the memory as it was true at DATE (default: now).")
     ctx_p.add_argument("-i", "--index", type=Path, default=None, help="Index dir (for the embedder; default: project's).")
     ctx_p.add_argument("--graph", type=Path, default=None, help="Graph dir (default: project's graph).")
     ctx_p.add_argument("--host", default=None, help="Ollama host URL.")
@@ -472,6 +491,14 @@ def _build_argparser() -> argparse.ArgumentParser:
                         help="inject = UserPromptSubmit (recall → inject context); "
                              "capture = SessionEnd/PreCompact (remember the session).")
     return parser
+
+
+def _date_arg(value: str) -> int:
+    """argparse type: an ISO date (YYYY-MM-DD, YYYY-MM, YYYY) → epoch seconds (UTC)."""
+    epoch = parse_date(value)
+    if epoch is None:
+        raise argparse.ArgumentTypeError(f"not a date: {value!r} (use YYYY-MM-DD)")
+    return epoch
 
 
 # ----------------------------------------------------------------- projects
@@ -1135,7 +1162,8 @@ def _cmd_build(args: argparse.Namespace) -> int:
                       file=sys.stderr)
                 for spath in session_paths:
                     sid = Path(spath).stem
-                    facts = capture_session(chat, Path(spath).read_text(encoding="utf-8"))
+                    facts = capture_session(chat, Path(spath).read_text(encoding="utf-8"),
+                                            session_date=session_date_of(sid))
                     res = graph.remember(sid, facts, index.embedder)
                     total += res["added"]
                     print(f"    · '{sid}' → {res['added']} new, {res['duplicates']} dup "
@@ -2193,6 +2221,7 @@ def _cmd_remember(args: argparse.Namespace) -> int:
     if isinstance(index.embedder, OllamaEmbedder):
         index.embedder.host = args.host.rstrip("/")
     session_id = args.session or args.transcript.stem
+    sdate = args.session_date if args.session_date is not None else session_date_of(session_id)
     graph = _open_graph(args.graph, writable=True, retries=6)
     if graph is None:
         print(f"error: no graph at {args.graph} (run `openwiki graph-build` first).", file=sys.stderr)
@@ -2200,18 +2229,21 @@ def _cmd_remember(args: argparse.Namespace) -> int:
     try:
         chat = OllamaChat(model=args.model, host=args.host, temperature=0.2)
         print(f"Capturing session '{session_id}' with {chat.name} …", file=sys.stderr)
-        facts = capture_session(chat, args.transcript.read_text(encoding="utf-8"))
+        facts = capture_session(chat, args.transcript.read_text(encoding="utf-8"), session_date=sdate)
         for f in facts:
-            print(f"  · {f.subject} {f.predicate} {f.object}", file=sys.stderr)
+            since = f"  (since {format_date(f.valid_from)})" if f.valid_from is not None else ""
+            many = "  [many]" if f.cardinality == "many" else ""
+            print(f"  · {f.subject} {f.predicate} {f.object}{since}{many}", file=sys.stderr)
         if not getattr(graph, "writable", False):
             # Locked by a running read-only serve/chat: queue to the journal instead of
             # failing — the next writable pass (serve/chat restart, `openwiki decay`, or the
             # next `remember`) folds it in. Writes are deferred, never lost.
-            n = graph.queue_remember(session_id, facts)
+            n = graph.queue_remember(session_id, facts, session_date=sdate, correct=args.correct)
             print(f"Graph busy (serve/chat running) — queued {n} fact(s) for '{session_id}' to the "
                   f"journal; they'll be folded on the next writable pass → {args.graph}")
             return 0
-        result = graph.remember(session_id, facts, index.embedder)
+        result = graph.remember(session_id, facts, index.embedder, session_date=sdate,
+                                correct=args.correct)
         try:
             graph.fold_journal(index.embedder)     # opportunistically drain older queued ops
         except Exception:
@@ -2219,8 +2251,12 @@ def _cmd_remember(args: argparse.Namespace) -> int:
     finally:
         graph.close()
     sup = f", {result['superseded']} superseded" if result.get("superseded") else ""
-    print(f"Remembered '{session_id}': {result['added']} new, {result['duplicates']} duplicate{sup} "
-          f"({result['facts']} captured) → {args.graph}")
+    if result.get("retracted"):
+        sup += f" ({result['retracted']} retracted)"
+    hist = f", {result['historical']} historical" if result.get("historical") else ""
+    when = f" [session {format_date(sdate)}]" if sdate is not None else ""
+    print(f"Remembered '{session_id}'{when}: {result['added']} new, {result['duplicates']} duplicate"
+          f"{sup}{hist} ({result['facts']} captured) → {args.graph}")
     print('  now try:  openwiki recall "<a question>"')
     return 0
 
@@ -2242,21 +2278,55 @@ def _cmd_recall(args: argparse.Namespace) -> int:
     if graph is None:
         print(f"error: no graph at {args.graph}.", file=sys.stderr)
         return 2
+    as_of, known_at = getattr(args, "as_of", None), getattr(args, "known_at", None)
+    timeline = getattr(args, "timeline", False)
     try:
-        hits = graph.recall(args.query, index.embedder, k=args.top_k,
-                            include_superseded=getattr(args, "include_superseded", False))
+        if timeline:
+            hits = graph.timeline(args.query, index.embedder, groups=min(args.top_k, 3))
+        else:
+            hits = graph.recall(args.query, index.embedder, k=args.top_k,
+                                include_superseded=getattr(args, "include_superseded", False),
+                                as_of=as_of, known_at=known_at)
     finally:
         graph.close()
     if not hits:
         print("(no relevant memory — capture sessions with `openwiki remember` first)")
         return 0
+    if timeline:
+        print(_format_timeline(hits))
+        return 0
+    view = ([f"true as of {format_date(as_of)}"] if as_of is not None else []) + \
+           ([f"as believed on {format_date(known_at)}"] if known_at is not None else [])
+    if view:
+        print(f"[{' · '.join(view)}]")
     print(format_memory(hits))
     print("\nscores:", file=sys.stderr)
     for h in hits:
-        mark = "  ⊘superseded" if h.get("superseded") else ""
+        mark = "" if h.get("in_view", True) else f"  ⊘{h.get('status', 'superseded')}"
         print(f"  {h['score']:.3f} (cos {h['cos']:.3f})  {h['subject']} {h['predicate']} "
               f"{h['object']}  [{h['session_id']}]{mark}", file=sys.stderr)
     return 0
+
+
+_TIMELINE_MARK = {"current": "●", "past": "○", "future": "◌", "retracted": "✗"}
+
+
+def _format_timeline(groups: list) -> str:
+    """B7 ``recall --timeline``: each subject+predicate's history, oldest valid time first —
+    the interval, the value, when it was recorded (and retracted), and which session."""
+    out = []
+    for g in groups:
+        out.append(f"{g['subject']} {g['predicate']} …   (match {g['cos']:.2f})")
+        for r in g["records"]:
+            when = format_interval(r["valid_from"], r["valid_to"]) or "?"
+            rec = f"recorded {format_date(r['created_at'])}"
+            if r.get("expired_at") is not None:
+                rec += f", retracted {format_date(r['expired_at'])}"
+            out.append(f"  {_TIMELINE_MARK.get(r['status'], '?')} {when:<26} {r['object']}"
+                       f"   ({rec}; {r['session_id']})")
+        out.append("")
+    out.append("● current  ○ past  ◌ planned  ✗ retracted")
+    return "\n".join(out)
 
 
 def _cmd_context(args: argparse.Namespace) -> int:
@@ -2285,7 +2355,8 @@ def _cmd_context(args: argparse.Namespace) -> int:
         max_chars = project.context_budget if project else None
     try:
         context = graph.context_for(args.query, index.embedder, identity=identity,
-                                    k=args.top_k, max_themes=args.themes, max_chars=max_chars)
+                                    k=args.top_k, max_themes=args.themes, max_chars=max_chars,
+                                    as_of=getattr(args, "as_of", None))
     finally:
         graph.close()
     if not context.strip():
@@ -2452,7 +2523,9 @@ def _print_memory_report(res: dict) -> None:
 
     rev = res["revision"]
     print(f"  Belief revision:  {rev['revision_rate']:.0%} of all facts have been superseded "
-          f"({rev['superseded']} overwritten)")
+          f"({rev['superseded']} overwritten: {rev.get('world_changes', rev['superseded'])} world "
+          f"change(s), {rev.get('corrections', 0)} correction(s))"
+          + (f" · {rev['planned']} planned" if rev.get("planned") else ""))
 
     con = res["consolidation"]
     ts = con["theme_sizes"]
@@ -2622,7 +2695,8 @@ def _hook_capture(project: Project, payload: dict) -> None:
     try:
         chat = OllamaChat(model=project.setting("models", "chat", DEFAULT_CHAT),
                           host=project.setting("models", "host", DEFAULT_HOST), temperature=0.2)
-        facts = capture_session(chat, transcript)
+        # the session ends now → today is the date relative mentions ("since yesterday") resolve against
+        facts = capture_session(chat, transcript, session_date=int(time.time()))
         sid = str(payload.get("session_id") or "session")
         if getattr(graph, "writable", False):
             graph.remember(sid, facts, embedder)

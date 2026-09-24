@@ -644,9 +644,11 @@ class WikiWebApp:
             "assertions": self.graph.list_assertions(limit=200),
         }
 
-    def memory_recall(self, query: str, k: int = 8, include_superseded: bool = False) -> dict:
-        """The remembered facts most relevant to a query (decay-weighted, B6 activation tier).
-        Needs a graph with memory + a search index (for the embedder). Read-only."""
+    def memory_recall(self, query: str, k: int = 8, include_superseded: bool = False,
+                      as_of=None, known_at=None) -> dict:
+        """The remembered facts most relevant to a query (decay-weighted, B6 activation tier),
+        optionally at a point in time (B7 ``as_of`` valid time / ``known_at`` transaction time —
+        ISO dates or epochs). Needs a graph with memory + a search index. Read-only."""
         embedder = self._memory_embedder()
         if self.graph is None or embedder is None:
             raise RuntimeError("Recall needs a graph with memory and a search index.")
@@ -654,7 +656,9 @@ class WikiWebApp:
         if not query:
             raise RuntimeError("empty query")
         k = max(1, min(int(k), 30))
-        facts = self.graph.recall(query, embedder, k=k, include_superseded=bool(include_superseded))
+        from ..graph.temporal import parse_date
+        facts = self.graph.recall(query, embedder, k=k, include_superseded=bool(include_superseded),
+                                  as_of=parse_date(as_of), known_at=parse_date(known_at))
         return {"query": query, "k": k, "facts": facts}
 
     def memory_context(self, query: str) -> dict:
@@ -942,7 +946,8 @@ def make_handler(app: WikiWebApp):
                     if not query:
                         return self._json({"error": "empty query"}, 400)
                     return self._json(app.memory_recall(
-                        query, int(data.get("k", 8)), bool(data.get("include_superseded", False))))
+                        query, int(data.get("k", 8)), bool(data.get("include_superseded", False)),
+                        as_of=data.get("as_of"), known_at=data.get("known_at")))
                 if path == "/api/context":
                     query = (data.get("query") or "").strip()
                     if not query:

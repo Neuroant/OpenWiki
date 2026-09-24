@@ -43,22 +43,36 @@ def _append(path, obj: dict) -> None:
         fh.write(line + "\n")
 
 
-def append_remember(path, session_id, facts, now: Optional[int] = None) -> int:
+def append_remember(path, session_id, facts, now: Optional[int] = None,
+                    session_date: Optional[int] = None, correct: bool = False) -> int:
     """Queue a ``remember`` op — (subject, predicate, object) triples for one session.
     ``facts`` may be ``MemoryFact``-likes (``.subject``/``.predicate``/``.object``) or
-    ``(s, p, o)`` tuples. Returns the number of triples written (0 → nothing queued)."""
+    ``(s, p, o)`` tuples. Returns the number of triples written (0 → nothing queued).
+
+    B7: ``t`` is the record (transaction) time the fold honors; a fact with a stated
+    ``valid_from`` or a ``"many"`` cardinality is written as ``[s, p, o, valid_from,
+    cardinality]`` (plain triples otherwise, so older readers still parse them), and the
+    record carries the ``session_date`` / ``correct`` flag when set."""
     triples = []
     for f in facts:
         if hasattr(f, "subject"):
             s, p, o = f.subject, f.predicate, f.object
+            vf, card = getattr(f, "valid_from", None), getattr(f, "cardinality", "one")
         else:
-            s, p, o = f
+            s, p, o = f[:3]
+            vf, card = (f[3], f[4]) if len(f) >= 5 else (None, "one")
         s, p, o = str(s).strip(), str(p).strip(), str(o).strip()
         if s and p and o:
-            triples.append([s, p, o])
+            triples.append([s, p, o] if vf is None and card == "one"
+                           else [s, p, o, None if vf is None else int(vf), card or "one"])
     if not triples:
         return 0
-    _append(path, {"op": "remember", "t": _now(now), "session": str(session_id), "facts": triples})
+    rec = {"op": "remember", "t": _now(now), "session": str(session_id), "facts": triples}
+    if session_date is not None:
+        rec["session_date"] = int(session_date)
+    if correct:
+        rec["correct"] = True
+    _append(path, rec)
     return len(triples)
 
 

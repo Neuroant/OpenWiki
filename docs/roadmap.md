@@ -772,11 +772,20 @@ architecture** rather than calling for a rewrite. The mapping is exact:
 The **genuine gaps** it surfaces — adopted in OpenWiki's measured, local, minimal way (we cite our own
 `eval` numbers, not the report's):
 
-- **B7 — Bi-temporal assertions (P0, do next).** Our supersession is single-axis (`created_at`/`last_seen`
-  + a `SUPERSEDES` edge). Add **valid-time** (`valid_from`/`valid_to`) + **transaction-time** so `recall`
-  can answer *point-in-time* ("what was true as of …?") and full provenance ("when did we learn vs. when it
-  became true?"). Invalidate-not-just-supersede (Graphiti's model). Kuzu column additions; extends B4; B0
-  preserves them across rebuild.
+- **B7 — Bi-temporal assertions. ✅ Core landed (v0.81.0).** Supersession was single-axis (`created_at`
+  + a `SUPERSEDES` edge in *processing order* — so backfilling an older transcript after a newer one made
+  the stale fact current). Now every `Assertion` carries **valid time** (`valid_from`/`valid_to`: when it
+  held in the world) + **transaction time** (`created_at`/`expired_at`: when we recorded / stopped believing
+  it) + a `cardinality` hint. The merge orders facts by **valid time** (pure `graph/temporal.py`
+  `plan_merge`): a backfill lands *in* history, a world change **closes** the rival's interval, a same-instant
+  conflict or `remember --correct` **retracts** it (we were wrong), `"many"` facts coexist, planned
+  (future-dated) facts become current on their date. Capture extracts stated dates (resolved against the
+  session date — from `--session-date` or a date in the session id). Queries: `recall --as-of` (valid time),
+  `--known-at` (transaction time), `--timeline`; `context --as-of`, MCP `wiki_memory(as_of)`, `/api/recall`
+  `as_of`/`known_at`; the assembled context shows each fact's validity. **No rebuild:** older graphs are
+  migrated in place (`ALTER` + a backfill from the B4 edges — the current set is unchanged); B0 snapshots the
+  new columns; queued journal ops keep their record time. `analyze memory` splits revision into world
+  changes vs corrections. *Next (v0.82):* the temporal eval below + a Gedächtnis-tab as-of picker.
 - **A2 — Hierarchical communities (P1).** Ours are **flat** Louvain; the report's GraphRAG builds a
   bottom-up **tree** of communities → meta-summaries (better global sensemaking now that informatik is 119
   pages). Recursive detection (or add Leiden) + a level in `MemoryConcept`/`Community` + `ask --global`

@@ -632,7 +632,7 @@ Non-REM sleep = `consolidate`; decay/Hebbian = `decay`/`REINFORCES`; non-lossy c
 hybrid vector+graph = the index-mirroring graph). It **validates** the architecture and isolates three
 concrete refinements, adopted the OpenWiki way (measured against our own `eval`, local, minimal):
 
-- **B7 — Bi-temporal assertions (do next).** Today an `Assertion` is single-axis (`created_at` + `last_seen`
+- **B7 — Bi-temporal assertions (✅ core landed v0.81.0 — as built in §12.1).** Before, an `Assertion` was single-axis (`created_at` + `last_seen`
   + a `SUPERSEDES` edge; §4/B4 already made remembered edges append-only). B7 makes time **two-axis** —
   **valid-time** (`valid_from`/`valid_to`: when a fact was true in the world) + **transaction-time** (when
   we learned/superseded it) — so a contradiction *invalidates* (closes `valid_to`) rather than only linking
@@ -655,6 +655,60 @@ already has a lightweight generate-then-verify); multi-agent swarm/stigmergy; pr
 Plan overview: `roadmap.md` → "Path B+ — Second-Brain refinements".
 
 *Source: the cognitive-memory-substrates report, read 2026-09; mapping distilled above.*
+
+### 12.1 B7 as built (v0.81.0)
+
+**The problem.** One `created_at` stood in for three times: when a fact became true (never captured),
+when the session happened (only a label), and when we recorded it (the wall clock — and a queued journal op
+even took the *fold* time). B4 superseded in **processing order**, so remembering September's session
+("port 9000") and then backfilling August's ("port 8137") made the stale 8137 current.
+
+**The model** — two independent axes per `Assertion` (plus `Session.session_date`):
+
+| Column | Axis | Meaning | `NULL` = |
+|---|---|---|---|
+| `valid_from` / `valid_to` | valid time (the world) | when the fact held | still true |
+| `created_at` / `expired_at` | transaction time (our knowledge) | when recorded / when we stopped believing it | still believed |
+| `cardinality` | — | `"many"` = several objects coexist (tools a project uses) | `"one"` |
+
+In CoALA terms this separates a fact's **semantic** content (valid time) from its **episodic** trace
+(transaction time + the session that taught it); the backfill bug was the learning action ordering knowledge
+by the order of *experience* instead of the order of *events*.
+
+**The merge rule** (pure `graph/temporal.py` `plan_merge`, applied per normalized subject+predicate, over the
+believed records): a fact is valid from its **stated** date (capture extracts it only when said, resolving
+relative dates against the session date), else the **session date** (`--session-date`, or a date in the
+session id), else the record time. Then — by valid time, not processing order:
+
+- the same object already holds at that time → **re-affirm** (B6 confidence); it holds from a *later* start
+  → **extend** its `valid_from` back (earlier evidence);
+- a functional rival holds → **close** its `valid_to` (the world changed) — or, when it started at the same
+  instant or with `remember --correct`, **retract** it (`expired_at`; with `--correct` the new fact inherits
+  the rival's whole interval: *it was never X*);
+- the new record ends where the next later record begins — a **backfill lands in history** (`historical`);
+- `"many"` facts never invalidate; a `"one"` fact never invalidates a `"many"` record (conservative against
+  inconsistent LLM tags). Future-dated facts are **planned** and become current on their date.
+
+`SUPERSEDES` edges are kept as provenance (closer → closed). Nothing is deleted.
+
+**Queries.** Default `recall` = valid now ∧ believed (identical to B4's current set after migration).
+`--as-of D` = valid at D; `--known-at K` = believed at K (valid time defaults to K; an interval counts as open
+until the closing record was recorded, derived from the provenance edges); `--timeline` = every interval of
+the best-matching subject+predicate pairs. `context --as-of`, MCP `wiki_memory(as_of)`, `/api/recall`
+(`as_of`/`known_at`). Ranking inside the view is unchanged (cos × decayed confidence); the assembled context
+renders each fact's validity (`since 2025-09-16`), so the model can answer *when* questions.
+
+**Migration — no rebuild.** Every schema generation is read through one loader (`_load_assertions`), which
+derives missing intervals from the B4 edges (`derive_legacy_intervals`: `valid_from = created_at`; a
+superseded record closes at its superseder's `created_at`, or counts as retracted if both were recorded in the
+same instant). The first writable `remember` `ALTER`s the columns in and writes that derivation back
+(`_migrate_temporal`, idempotent). B0 snapshot/restore carries the new columns; journal records carry per-fact
+`valid_from`/`cardinality` + `session_date`/`correct`, and the fold honors each record's own time.
+
+**Honest limits.** A multi-valued fact is only ended by an explicit correction (no negation capture yet);
+`--correct` treats the corrected fact as functional; `known_at` is exact for born-open intervals closed once,
+approximate if an interval is re-closed later (rows are updated in place, Graphiti-style, not versioned).
+Measured next: `eval_temporal.jsonl` (backfill / point-in-time / change-date / correction / multi-valued).
 
 ---
 

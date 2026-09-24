@@ -48,15 +48,23 @@ def analyze_memory(graph, now: "int | None" = None, half_life: "float | None" = 
     themes = graph.memory_concepts()
     assignment = graph.concept_assignment()          # {assertion_id: concept_id} (current only)
 
-    current = [f for f in facts if not f["superseded"]]
+    # B7: "current" = valid now + believed (a planned, future-dated fact is not current yet)
+    current = [f for f in facts
+               if (f["status"] == "current" if "status" in f else not f["superseded"])]
     n_current = len(current)
     total = len(facts)
 
     # -- belief revision --------------------------------------------------
+    # B7 splits it: a *closed* fact = the world changed (valid_to set); a *retracted* one = we
+    # were wrong (expired_at — a correction). Both count as superseded.
     superseded = overview.get("superseded", total - n_current)
+    retracted = int(overview.get("retracted", 0))
     revision = {
         "superseded": int(superseded),
         "revision_rate": round(superseded / total, 3) if total else 0.0,
+        "world_changes": int(superseded) - retracted,
+        "corrections": retracted,
+        "planned": int(overview.get("planned", 0)),
     }
 
     # -- consolidation ----------------------------------------------------

@@ -170,15 +170,20 @@ def build_server(wiki_dir, index=None, graph=None, agent=None, name="openwiki",
         # B6 agent memory: assemble this session's memory context (identity + recalled
         # facts + relevant themes). Needs the embedder (index) + a non-empty memory tier.
         if index is not None and _graph_has_memory(graph):
+            from .graph.temporal import parse_date   # a graph is present → the graph package loads
             specs.append(_tool(
                 "wiki_memory",
                 "Assemble what you remember relevant to a query/topic across sessions "
                 "(Path B): your identity, the most relevant remembered facts, and the "
-                "consolidated themes. Call this at the start of a session to load memory.",
-                {"query": {"type": "string"}}, ["query"]))
+                "consolidated themes. Call this at the start of a session to load memory. "
+                "Facts carry their validity dates; pass as_of (YYYY-MM-DD) to load the memory "
+                "as it was true at that date.",
+                {"query": {"type": "string"},
+                 "as_of": {"type": "string", "description": "Optional ISO date (point-in-time)."}},
+                ["query"]))
             handlers["wiki_memory"] = lambda a: (
                 graph.context_for(str(a["query"]), index.embedder, identity=identity,
-                                  max_chars=context_budget)
+                                  max_chars=context_budget, as_of=parse_date(a.get("as_of")))
                 or "(no relevant memory yet)")
 
         # Global search needs a chat model (from the agent) + community summaries.

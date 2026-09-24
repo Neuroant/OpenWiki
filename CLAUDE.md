@@ -204,16 +204,26 @@ flagged:
 .venv\Scripts\python -m openwiki recall --all "which port do we use?"   # incl. superseded history
 ```
 `remember` needs an index (for the embedder) + a **writable** graph; options
-`--session ID`, `-i/--index DIR`, `--graph DIR`, `--model NAME`, `--host URL` (it reports
-`N new, M duplicate, K superseded`). `recall` is read-only: `-k N`, `--all`,
-`-i/--index DIR`, `--graph DIR`, `--host URL`. The
+`--session ID`, `--session-date DATE`, `--correct`, `-i/--index DIR`, `--graph DIR`, `--model NAME`,
+`--host URL` (it reports `N new, M duplicate, K superseded (R retracted), H historical`). `recall` is
+read-only: `-k N`, `--all`, `--as-of DATE`, `--known-at DATE`, `--timeline`, `-i/--index DIR`,
+`--graph DIR`, `--host URL`. **B7 bi-temporal (v0.81):** each fact has **valid time**
+(`valid_from`/`valid_to` — when it held in the world: a date the transcript *states*, else the session
+date — `--session-date` or a `YYYY-MM-DD` in the session id — else the record time) and **transaction
+time** (`created_at`/`expired_at` — when recorded / retracted), plus a `cardinality` hint (`"many"` =
+values coexist). Facts merge by **valid time**, not processing order, so an out-of-order backfill lands
+*in* history (`historical`) instead of overwriting the present; a world change **closes** the old
+interval, a same-instant conflict or `--correct` **retracts** it. `recall --as-of` = true at a date,
+`--known-at` = believed at a date, `--timeline` = the full history; `context --as-of` + MCP
+`wiki_memory(as_of)` too. Old graphs migrate in place on the first writable `remember` (no rebuild). The
 `Session`/`Assertion`/`ASSERTS`/`SUPERSEDES` tables are created (empty) by every `graph-build`,
 so old graphs upgrade lazily. Both commands are gated by the project's **mode**
 (`[memory] enabled`, below) — off (Wiki mode) they refuse/return nothing.
 **Path B is complete (B0–B6):** B0 (v0.48) preserve-the-memory-tier-on-rebuild + session source
 type + mode; B1 (v0.49) read-path reinforcement; B4 (v0.50) contradiction/supersession; B5 (v0.51)
-consolidation (below); B6 (v0.52) three-tier context assembly (`context` below). Design in
-`docs/path-b-memory.md`.
+consolidation (below); B6 (v0.52) three-tier context assembly (`context` below). **Path B+** (the
+Second-Brain refinements): B7 (v0.81) bi-temporal assertions (above). Design in
+`docs/path-b-memory.md` (§12.1 = B7 as built).
 
 **Consolidate the memory (the "sleep" pass)** — the memory-tier analog of `communities`
 (Path B / B5): cluster the **current** remembered facts by embedding similarity, LLM-summarize
@@ -540,10 +550,23 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   `cos × effective_weight(confidence_weight(confidence), last_seen, now)` — a **gentle, log-scaled**
   confidence lift (`decay.confidence_weight`: a *tie-breaker* among similar-relevance facts, so a
   restated fact outranks a one-off, but relevance still dominates) **decayed by recency**; returns
-  **current only** by default (`_superseded_ids`). `has_memory()` gates both. `_ensure_memory_schema`
+  **current only** by default. `has_memory()` gates both. `_ensure_memory_schema`
   lazily creates the tables + `ALTER`s in `confidence`/`last_seen` on pre-0.54 graphs; B0's
   `_snapshot_memory`/`_restore_memory` preserve `SUPERSEDES` + confidence across a rebuild. Exposed as
   the `remember`/`recall` (+`--all`) CLI commands.
+  **B7 bi-temporal (`temporal.py`, pure):** `Assertion` also carries `valid_from`/`valid_to` (valid time),
+  `expired_at` (transaction time, with `created_at`) + `cardinality`; `Session` a `session_date`.
+  `plan_merge` decides how a fact slots into its subject+predicate's history **by valid time**
+  (reaffirm / extend back / add; close rivals' `valid_to` or retract them via `expired_at`; `"many"`
+  coexists) — `remember` just applies the plan (+ `SUPERSEDES` provenance edges). "Current" is now
+  `valid_from ≤ now < valid_to ∧ expired_at IS NULL` (`temporal.status`), not "no incoming SUPERSEDES".
+  **Every reader goes through `GraphStore._load_assertions`**, which reads any schema generation and
+  derives missing intervals from the B4 edges (`derive_legacy_intervals`), and `_view` annotates a
+  bi-temporal view (`as_of`/`known_at` → `in_view`, `status`, `superseded`). The first writable
+  `remember` `ALTER`s the columns in + writes the derivation back (`_migrate_temporal`) — no rebuild.
+  `recall(…, as_of=, known_at=)`, `timeline(query)`, `context_for(…, as_of=)`; `MemoryFact` gained
+  `valid_from`/`cardinality` (capture extracts *stated* dates only, resolved against the session date);
+  journal `remember` records carry them + the record time the fold now honors.
   **B5 consolidation ("sleep"):** the `consolidate` command clusters the *current* assertions by
   embedding similarity (`GraphStore.assertion_graph` → `community.detect_communities`), LLM-summarizes
   each cluster into a theme (`community.summarize_facts`), and writes `MemoryConcept` + `CONSOLIDATES`

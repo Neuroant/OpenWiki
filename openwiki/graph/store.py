@@ -35,7 +35,19 @@ from .journal import (
     append_reindex, append_remember, clear_journal, journal_path,
     pending_journal, read_journal,
 )
+from .temporal import (
+    ONE, believed_at, close_times, derive_legacy_intervals, plan_merge, valid_at,
+    valid_to_known_at,
+)
+from .temporal import session_date as session_date_of
+from .temporal import status as temporal_status
 from .usage import append_usage, clear_usage, read_usage, usage_log_path
+
+
+# Assertion columns by schema generation (read defensively — older graphs lack the later ones).
+_A_BASE = ("id", "subject", "predicate", "object", "session_id", "created_at")
+_A_CONF = ("confidence", "last_seen")                                     # v0.54
+_A_B7 = ("valid_from", "valid_to", "expired_at", "cardinality")           # B7 bi-temporal
 
 
 class GraphStore:
@@ -811,11 +823,13 @@ class GraphStore:
 
     # -- deferred-write journal (B1 concurrency) -----------------------
 
-    def queue_remember(self, session_id: str, facts) -> int:
+    def queue_remember(self, session_id: str, facts, session_date: Optional[int] = None,
+                       correct: bool = False) -> int:
         """Append a `remember` op to the write-ahead journal (works read-only — that's the
-        point: a locked-out writer queues instead of failing). Folded by ``fold_journal``.
-        Returns the number of triples queued."""
-        return append_remember(self._journal_path, session_id, facts)
+        point: a locked-out writer queues instead of failing). Folded by ``fold_journal``,
+        which honors the queued record time + validity (B7). Returns the number queued."""
+        return append_remember(self._journal_path, session_id, facts,
+                               session_date=session_date, correct=correct)
 
     def queue_reindex(self, slug: str, text: str) -> int:
         """Append a `reindex` op (re-sync one page) to the journal — a read-only serve/chat
@@ -829,7 +843,9 @@ class GraphStore:
     def fold_journal(self, embedder, now: Optional[int] = None) -> dict:
         """B1: drain the write-ahead journal (queued `remember` + `reindex` ops) into the
         graph and clear it. Writable-only; needs an ``embedder`` (facts + page chunks are
-        embedded at fold time). Best-effort per record — a bad op never aborts the batch."""
+        embedded at fold time). A queued `remember` keeps the time it was *queued* as its
+        record time (B7 — no drift to the fold time; ``now`` only fills in for records
+        without one). Best-effort per record — a bad op never aborts the batch."""
         if not self.writable:
             raise RuntimeError("GraphStore is read-only; open it writable to fold the journal.")
         if embedder is None:
@@ -843,11 +859,16 @@ class GraphStore:
         for rec in records:
             try:
                 if rec.get("op") == "remember":
-                    facts = [MemoryFact(t[0], t[1], t[2]) for t in rec.get("facts", [])
-                             if isinstance(t, list) and len(t) == 3]
+                    facts = [MemoryFact(t[0], t[1], t[2],
+                                        valid_from=t[3] if len(t) >= 5 else None,
+                                        cardinality=(t[4] if len(t) >= 5 else None) or ONE)
+                             for t in rec.get("facts", [])
+                             if isinstance(t, list) and len(t) in (3, 5)]
                     if facts:
-                        res = self.remember(str(rec.get("session") or "session"),
-                                            facts, embedder, now=now)
+                        res = self.remember(str(rec.get("session") or "session"), facts, embedder,
+                                            now=int(rec.get("t") or now),
+                                            session_date=rec.get("session_date"),
+                                            correct=bool(rec.get("correct")))
                         remembered += res.get("added", 0)
                 elif rec.get("op") == "reindex":
                     slug = str(rec.get("slug") or "")
@@ -862,13 +883,17 @@ class GraphStore:
     # -- remembered tier (Path B: session memory) ----------------------
 
     def _ensure_memory_schema(self, dim: int) -> None:
-        """Create Session/Assertion/ASSERTS if a pre-existing graph lacks them (once)."""
+        """Create Session/Assertion/ASSERTS if a pre-existing graph lacks them (once), and —
+        writable only — migrate older tables in place (no rebuild): v0.54 confidence columns,
+        then the B7 bi-temporal columns + their backfill (``_migrate_temporal``)."""
         if self._memory_ensured:
             return
         for ddl in (
-            "CREATE NODE TABLE IF NOT EXISTS Session(id STRING, created_at INT64, PRIMARY KEY(id));",
+            "CREATE NODE TABLE IF NOT EXISTS Session(id STRING, created_at INT64, "
+            "session_date INT64, PRIMARY KEY(id));",
             f"CREATE NODE TABLE IF NOT EXISTS Assertion(id STRING, subject STRING, predicate STRING, "
             f"object STRING, session_id STRING, created_at INT64, confidence DOUBLE, last_seen INT64, "
+            f"valid_from INT64, valid_to INT64, expired_at INT64, cardinality STRING, "
             f"emb FLOAT[{int(dim)}], PRIMARY KEY(id));",
             "CREATE REL TABLE IF NOT EXISTS ASSERTS(FROM Session TO Assertion);",
             "CREATE REL TABLE IF NOT EXISTS SUPERSEDES(FROM Assertion TO Assertion);",   # B4
@@ -877,16 +902,47 @@ class GraphStore:
                 self._exec(ddl)
             except Exception:  # pragma: no cover - already exists / older syntax
                 pass
-        # B6 confidence: migrate pre-0.54 Assertion tables that lack the columns (idempotent —
-        # ALTER errors "already has property", which we swallow). Writable connections only.
+        # Migrate older Assertion/Session tables that lack columns (idempotent — ALTER errors
+        # "already has property", which we swallow). Writable connections only.
         if self.writable:
-            for ddl in ("ALTER TABLE Assertion ADD confidence DOUBLE DEFAULT 1.0;",
-                        "ALTER TABLE Assertion ADD last_seen INT64 DEFAULT 0;"):
+            for ddl in ("ALTER TABLE Assertion ADD confidence DOUBLE DEFAULT 1.0;",   # v0.54
+                        "ALTER TABLE Assertion ADD last_seen INT64 DEFAULT 0;",
+                        "ALTER TABLE Assertion ADD valid_from INT64;",                # B7
+                        "ALTER TABLE Assertion ADD valid_to INT64;",
+                        "ALTER TABLE Assertion ADD expired_at INT64;",
+                        "ALTER TABLE Assertion ADD cardinality STRING;",
+                        "ALTER TABLE Session ADD session_date INT64;"):
                 try:
                     self._exec(ddl)
                 except Exception:  # pragma: no cover - column already present
                     pass
+            self._migrate_temporal()
         self._memory_ensured = True
+
+    def _migrate_temporal(self) -> int:
+        """B7 backfill (writable, idempotent): give each pre-B7 assertion (``valid_from IS
+        NULL``) the validity interval its B4 ``SUPERSEDES`` edges imply — so what was current
+        stays current — and date sessions whose id carries a date. Returns rows migrated."""
+        try:
+            legacy = {r[0] for r in self._rows(
+                "MATCH (a:Assertion) WHERE a.valid_from IS NULL RETURN a.id;")}
+        except Exception:
+            return 0
+        if legacy:
+            for r in self._load_assertions():            # derives the legacy intervals
+                if r["id"] in legacy:
+                    self._exec("MATCH (a:Assertion {id:$id}) "
+                               "SET a.valid_from=$vf, a.valid_to=$vt, a.expired_at=$x;",
+                               {"id": r["id"], "vf": r["valid_from"], "vt": r["valid_to"],
+                                "x": r["expired_at"]})
+        try:
+            for (sid,) in self._rows("MATCH (s:Session) WHERE s.session_date IS NULL RETURN s.id;"):
+                d = session_date_of(sid)
+                if d is not None:
+                    self._exec("MATCH (s:Session {id:$id}) SET s.session_date=$d;", {"id": sid, "d": d})
+        except Exception:      # pragma: no cover - older Session table
+            pass
+        return len(legacy)
 
     def has_memory(self) -> bool:
         try:
@@ -894,174 +950,260 @@ class GraphStore:
         except Exception:
             return False
 
-    def _superseded_ids(self) -> set:
-        """Ids of assertions with an incoming SUPERSEDES edge (i.e. no longer current)."""
+    def _supersedes_edges(self) -> list:
+        """``[(new_id, old_id)]`` — the B4/B7 provenance edges."""
         try:
-            return {r[0] for r in self._rows(
-                "MATCH (:Assertion)-[:SUPERSEDES]->(o:Assertion) RETURN o.id;")}
+            return [(r[0], r[1]) for r in self._rows(
+                "MATCH (n:Assertion)-[:SUPERSEDES]->(o:Assertion) RETURN n.id, o.id;")]
         except Exception:
-            return set()
+            return []
 
-    def remember(self, session_id: str, facts, embedder, now: Optional[int] = None) -> dict:
-        """B3 merge + **B4 contradiction handling**: embed each fact, dedup against the
-        **current** assertions (normalized triple), persist Session + Assertion + ASSERTS,
-        and — when a new fact shares a subject+predicate with a current one but gives a
-        *different* object — mark the old one superseded via a `SUPERSEDES` edge (kept, not
-        deleted, so history survives). Re-asserting a superseded fact revives it. Returns counts."""
+    def _load_assertions(self, with_emb: bool = False) -> list:
+        """Every Assertion as a dict with the full B7 field set, whatever the graph's schema
+        generation: pre-0.54 (no confidence), pre-B7 (no validity columns — or a read-only open
+        of an unmigrated graph), B7. Missing validity is derived from the ``SUPERSEDES`` edges
+        exactly as the migration would, so every reader sees one model. ``[]`` without the table."""
+        rows, cols = None, ()
+        for extra in (_A_CONF + _A_B7, _A_CONF, ()):
+            fields = _A_BASE + extra + (("emb",) if with_emb else ())
+            try:
+                rows = self._rows("MATCH (a:Assertion) RETURN "
+                                  + ", ".join(f"a.{c}" for c in fields) + ";")
+            except Exception:
+                continue
+            cols = fields
+            break
+        if rows is None:
+            return []
+        recs = []
+        for row in rows:
+            r = dict(zip(cols, row))
+            r["created_at"] = int(r.get("created_at") or 0)
+            r["confidence"] = float(r["confidence"]) if r.get("confidence") is not None else 1.0
+            r["last_seen"] = int(r.get("last_seen") or 0)
+            for c in _A_B7:
+                r.setdefault(c, None)
+            r["cardinality"] = r["cardinality"] or ONE
+            recs.append(r)
+        if any(r["valid_from"] is None for r in recs):
+            derive_legacy_intervals(recs, self._supersedes_edges())
+        return recs
+
+    def _view(self, recs: list, now: int, as_of: Optional[int] = None,
+              known_at: Optional[int] = None) -> None:
+        """Annotate records in place for one bi-temporal view: ``status`` (at ``now``),
+        ``superseded`` (past or retracted), and ``in_view`` — believed at ``known_at``
+        (transaction time; ``None`` = now) **and** valid at ``as_of`` (valid time; defaults
+        to ``known_at``, else ``now``). ``known_at`` sees an interval as open until OpenWiki
+        learned it had closed (derived from the provenance edges)."""
+        closed = close_times(recs, self._supersedes_edges()) if known_at is not None else {}
+        t_valid = as_of if as_of is not None else (known_at if known_at is not None else now)
+        for r in recs:
+            r["status"] = temporal_status(r, now)
+            r["superseded"] = r["status"] in ("past", "retracted")
+            vt = valid_to_known_at(r, known_at, closed)
+            r["in_view"] = believed_at(r, known_at) and valid_at(r, t_valid, valid_to=vt)
+
+    def remember(self, session_id: str, facts, embedder, now: Optional[int] = None,
+                 session_date: Optional[int] = None, correct: bool = False) -> dict:
+        """B3 merge + B4 contradiction handling + **B7 bi-temporal validity**: embed each fact,
+        persist Session + Assertion + ASSERTS, and slot each fact into the history of its
+        (subject, predicate) by **valid time** (``temporal.plan_merge``), not processing order —
+        so a backfilled older session lands *in* history instead of overwriting the present.
+
+        A fact is valid from its stated ``valid_from``, else the ``session_date`` (given, or a
+        date in the session id), else ``now`` (the record time, ``created_at``). Re-affirming a
+        fact that already holds raises its confidence (B6); a functional rival is **closed**
+        (``valid_to`` — the world changed) or, starting at the same instant / with ``correct``,
+        **retracted** (``expired_at`` — we were wrong); ``"many"``-cardinality facts coexist.
+        Nothing is deleted; ``SUPERSEDES`` edges keep the provenance. Returns counts
+        (``superseded`` = closed + retracted; ``historical`` = new facts that landed in the past)."""
         if not self.writable:
             raise RuntimeError("GraphStore is read-only; open it writable to remember.")
         facts = list(facts)
+        empty = {"facts": 0, "added": 0, "duplicates": 0, "superseded": 0,
+                 "retracted": 0, "historical": 0}
         if not facts:
-            return {"facts": 0, "added": 0, "duplicates": 0, "superseded": 0}
+            return empty
         if embedder is None:
             raise ValueError("remember needs an embedder.")
         now = int(now if now is not None else time.time())
+        sdate = int(session_date) if session_date is not None else session_date_of(session_id)
         emb = embedder.embed_documents([f.text() for f in facts]).astype(np.float32)
         norms = np.linalg.norm(emb, axis=1, keepdims=True)
         norms[norms == 0] = 1.0
         emb = emb / norms
         self._ensure_memory_schema(emb.shape[1])
-        added = dupes = superseded = 0
+        n = dict(empty, facts=len(facts))
         with self._lock:
-            self._exec("MERGE (s:Session {id:$id}) ON CREATE SET s.created_at=$t;",
-                       {"id": session_id, "t": now})
-            # Index the *current* assertions (a superseded one no longer dedups or conflicts):
-            # by_key {triple → (id, confidence)} for dedup/reinforce, (subj,pred) → [(id, obj)] for contradiction.
-            sup = self._superseded_ids()
-            by_key, current = {}, {}
-            for aid_e, s, p, o, conf in self._rows(
-                    "MATCH (a:Assertion) RETURN a.id, a.subject, a.predicate, a.object, a.confidence;"):
-                if aid_e in sup:
-                    continue
-                ns, pp, no = _normalize(s), (p or "").strip().lower(), _normalize(o)
-                by_key[(ns, pp, no)] = (aid_e, float(conf if conf is not None else 1.0))
-                current.setdefault((ns, pp), []).append((aid_e, no))
+            self._exec("MERGE (s:Session {id:$id}) ON CREATE SET s.created_at=$t, s.session_date=$d;",
+                       {"id": session_id, "t": now, "d": sdate})
+            # Every record (current or not) grouped by normalized (subject, predicate): the
+            # merge needs the group's whole valid-time history, not just the current fact.
+            groups: dict = {}
+            for r in self._load_assertions():
+                r["okey"] = _normalize(r["object"])
+                key = (_normalize(r["subject"]), (r["predicate"] or "").strip().lower())
+                groups.setdefault(key, []).append(r)
             for fact, vec in zip(facts, emb):
-                key = fact.key()                       # (nsubj, npred, nobj)
-                if key in by_key:                      # re-affirming a current fact → B6: raise its confidence
-                    aid_e, conf = by_key[key]
-                    self._exec("MATCH (a:Assertion {id:$id}) SET a.confidence=$c, a.last_seen=$t;",
-                               {"id": aid_e, "c": reinforced_weight(conf, DEFAULT_BOOST), "t": now})
-                    dupes += 1
-                    continue
-                aid = uuid.uuid4().hex
-                self._exec(
-                    "CREATE (:Assertion {id:$id, subject:$s, predicate:$p, object:$o, "
-                    "session_id:$sid, created_at:$t, confidence:1.0, last_seen:$t, emb:$e});",
-                    {"id": aid, "s": fact.subject, "p": fact.predicate, "o": fact.object,
-                     "sid": session_id, "t": now, "e": vec.astype(float).tolist()})
-                self._exec("MATCH (s:Session {id:$sid}),(a:Assertion {id:$id}) "
-                           "CREATE (s)-[:ASSERTS]->(a);", {"sid": session_id, "id": aid})
-                added += 1
-                # B4: this fact supersedes any current fact with the same subject+predicate
-                # but a different object.
-                nsp = (key[0], key[1])
-                for old_id, old_no in current.get(nsp, []):
-                    if old_no != key[2]:
+                ns, pp, no = fact.key()
+                group = groups.setdefault((ns, pp), [])
+                by_id = {r["id"]: r for r in group}
+                vf = fact.valid_from if fact.valid_from is not None else (
+                    sdate if sdate is not None else now)
+                plan = plan_merge(group, no, int(vf), fact.cardinality, correct)
+                for rid, vt in plan["close"]:              # the world changed at vf
+                    self._exec("MATCH (a:Assertion {id:$id}) SET a.valid_to=$vt;",
+                               {"id": rid, "vt": int(vt)})
+                    by_id[rid]["valid_to"] = int(vt)
+                for rid in plan["expire"]:                 # we were wrong: stop believing it
+                    self._exec("MATCH (a:Assertion {id:$id}) SET a.expired_at=$t;",
+                               {"id": rid, "t": now})
+                    by_id[rid]["expired_at"] = now
+                n["superseded"] += len(plan["close"]) + len(plan["expire"])
+                n["retracted"] += len(plan["expire"])
+                if plan["action"] in ("reaffirm", "extend"):   # same fact → B6: raise confidence
+                    tgt = by_id[plan["target"]]
+                    conf = reinforced_weight(tgt["confidence"], DEFAULT_BOOST)
+                    self._exec("MATCH (a:Assertion {id:$id}) "
+                               "SET a.confidence=$c, a.last_seen=$t, a.valid_from=$vf;",
+                               {"id": tgt["id"], "c": conf, "t": now, "vf": int(plan["valid_from"])})
+                    tgt.update(confidence=conf, last_seen=now, valid_from=int(plan["valid_from"]))
+                    aid = tgt["id"]
+                    n["duplicates"] += 1
+                else:
+                    aid = uuid.uuid4().hex
+                    rec = {"id": aid, "subject": fact.subject, "predicate": fact.predicate,
+                           "object": fact.object, "okey": no, "session_id": session_id,
+                           "created_at": now, "confidence": 1.0, "last_seen": now,
+                           "valid_from": int(plan["valid_from"]), "valid_to": plan["valid_to"],
+                           "expired_at": None, "cardinality": fact.cardinality or ONE}
+                    self._exec(
+                        "CREATE (:Assertion {id:$id, subject:$s, predicate:$p, object:$o, "
+                        "session_id:$sid, created_at:$t, confidence:1.0, last_seen:$t, "
+                        "valid_from:$vf, valid_to:$vt, cardinality:$card, emb:$e});",
+                        {"id": aid, "s": fact.subject, "p": fact.predicate, "o": fact.object,
+                         "sid": session_id, "t": now, "vf": rec["valid_from"], "vt": rec["valid_to"],
+                         "card": rec["cardinality"], "e": vec.astype(float).tolist()})
+                    self._exec("MATCH (s:Session {id:$sid}),(a:Assertion {id:$id}) "
+                               "CREATE (s)-[:ASSERTS]->(a);", {"sid": session_id, "id": aid})
+                    group.append(rec)
+                    n["added"] += 1
+                    if rec["valid_to"] is not None and rec["valid_to"] <= now:
+                        n["historical"] += 1               # a backfill landed in the past
+                    if plan["superseded_by"]:              # a later record already ends it
                         self._exec("MATCH (n:Assertion {id:$n}),(o:Assertion {id:$o}) "
-                                   "CREATE (n)-[:SUPERSEDES]->(o);", {"n": aid, "o": old_id})
-                        superseded += 1
-                by_key[key] = (aid, 1.0)               # so a repeat in the same batch reinforces it
-                current[nsp] = [(aid, key[2])]         # the new fact is now the current one
-        return {"facts": len(facts), "added": added, "duplicates": dupes, "superseded": superseded}
+                                   "CREATE (n)-[:SUPERSEDES]->(o);",
+                                   {"n": plan["superseded_by"], "o": aid})
+                for rid in [c[0] for c in plan["close"]] + plan["expire"]:
+                    self._exec("MATCH (n:Assertion {id:$n}),(o:Assertion {id:$o}) "
+                               "CREATE (n)-[:SUPERSEDES]->(o);", {"n": aid, "o": rid})
+        return n
 
     def recall(self, query: str, embedder, k: int = 5,
                half_life_days: float = DEFAULT_HALF_LIFE_DAYS, now: Optional[int] = None,
-               include_superseded: bool = False) -> list:
-        """B6 (activation tier) + **B4**: the remembered facts most relevant to ``query`` —
-        cosine over assertion embeddings, weighted by recency (time-decayed via `decay`).
-        **Superseded facts are excluded by default** (the agent gets the current fact);
-        pass ``include_superseded`` to also return them, each flagged ``superseded``. Read-only."""
+               include_superseded: bool = False, as_of: Optional[int] = None,
+               known_at: Optional[int] = None) -> list:
+        """B6 (activation tier) + **B7 point-in-time**: the remembered facts most relevant to
+        ``query`` — cosine over assertion embeddings × decayed confidence. By default only the
+        facts **valid now and still believed**; ``as_of`` = valid at that (valid) time,
+        ``known_at`` = as OpenWiki believed at that (transaction) time (valid time then
+        defaults to it too). ``include_superseded`` also returns everything outside the view,
+        each flagged (``superseded``, ``status``, ``in_view``). Read-only."""
         if embedder is None:
             raise ValueError("recall needs an embedder.")
-        # B6 per-fact confidence: score = cos × decayed confidence (base weight = the stored
-        # confidence, aged from last_seen). Read them if present; a pre-0.54 / read-only graph
-        # without the columns falls back to confidence 1.0 (the prior recency-only behavior).
-        try:
-            rows = self._rows("MATCH (a:Assertion) RETURN a.id, a.subject, a.predicate, a.object, "
-                              "a.session_id, a.created_at, a.emb, a.confidence, a.last_seen;")
-            has_conf = True
-        except Exception:
-            try:
-                rows = self._rows("MATCH (a:Assertion) RETURN a.id, a.subject, a.predicate, "
-                                  "a.object, a.session_id, a.created_at, a.emb;")
-                has_conf = False
-            except Exception:
-                return []   # no memory table on graphs built before this layer
-        if not rows:
+        recs = self._load_assertions(with_emb=True)   # [] on graphs built before this layer
+        if not recs:
             return []
-        sup = self._superseded_ids()
         now = int(now if now is not None else time.time())
+        self._view(recs, now, as_of=as_of, known_at=known_at)
         q = np.asarray(embedder.embed_query(query), dtype=np.float32)
         q = q / (np.linalg.norm(q) or 1.0)
         scored = []
-        for row in rows:
-            if has_conf:
-                aid, subj, pred, obj, sid, created, emb, conf, seen = row
-            else:
-                aid, subj, pred, obj, sid, created, emb = row
-                conf, seen = 1.0, 0
-            is_sup = aid in sup
-            if is_sup and not include_superseded:
+        for r in recs:
+            if not (r["in_view"] or include_superseded):
                 continue
-            conf = float(conf if conf is not None else 1.0)
-            ref = int(seen) if seen else int(created or 0)      # last affirmed, else first stated
-            cos = float(q @ np.asarray(emb, dtype=np.float32))   # stored normalized
+            ref = r["last_seen"] or r["created_at"]                # last affirmed, else first stated
+            cos = float(q @ np.asarray(r["emb"], dtype=np.float32))  # stored normalized
             # gentle, log-scaled confidence lift, decayed by recency — relevance (cos) still dominates
-            score = cos * effective_weight(confidence_weight(conf), ref, now, half_life_days)
-            scored.append({"id": aid, "subject": subj, "predicate": pred, "object": obj,
-                           "session_id": sid, "cos": round(cos, 3), "confidence": round(conf, 3),
-                           "score": round(score, 3), "superseded": is_sup})
+            score = cos * effective_weight(confidence_weight(r["confidence"]), ref, now, half_life_days)
+            scored.append({"id": r["id"], "subject": r["subject"], "predicate": r["predicate"],
+                           "object": r["object"], "session_id": r["session_id"],
+                           "cos": round(cos, 3), "confidence": round(r["confidence"], 3),
+                           "score": round(score, 3), "superseded": r["superseded"],
+                           "status": r["status"], "in_view": r["in_view"],
+                           "valid_from": r["valid_from"], "valid_to": r["valid_to"],
+                           "created_at": r["created_at"], "expired_at": r["expired_at"]})
         scored.sort(key=lambda x: -x["score"])
         return scored[:k]
 
+    def timeline(self, query: str, embedder, groups: int = 3, now: Optional[int] = None) -> list:
+        """B7: the full history of the (subject, predicate) pairs most relevant to ``query`` —
+        every record (current, past, planned, retracted) ordered by valid time, with when it
+        was recorded and by which session. ``[{"subject", "predicate", "cos", "records"}]``."""
+        if embedder is None:
+            raise ValueError("timeline needs an embedder.")
+        recs = self._load_assertions(with_emb=True)
+        if not recs:
+            return []
+        now = int(now if now is not None else time.time())
+        self._view(recs, now)
+        q = np.asarray(embedder.embed_query(query), dtype=np.float32)
+        q = q / (np.linalg.norm(q) or 1.0)
+        by_group: dict = {}
+        for r in recs:
+            key = (_normalize(r["subject"]), (r["predicate"] or "").strip().lower())
+            cos = float(q @ np.asarray(r["emb"], dtype=np.float32))
+            g = by_group.setdefault(key, {"subject": r["subject"], "predicate": r["predicate"],
+                                          "cos": cos, "records": []})
+            g["cos"] = max(g["cos"], cos)
+            g["records"].append({c: r[c] for c in (
+                "id", "object", "session_id", "valid_from", "valid_to", "created_at",
+                "expired_at", "cardinality", "status")})
+        top = sorted(by_group.values(), key=lambda g: -g["cos"])[:max(1, int(groups))]
+        for g in top:
+            g["cos"] = round(g["cos"], 3)
+            g["records"].sort(key=lambda x: (x["valid_from"] or 0, x["created_at"]))
+        return top
+
     def memory_overview(self) -> dict:
-        """Counts for the Memory tab header: sessions, **current** + superseded assertions,
-        and consolidated themes. Read-only + defensive (0 on a graph without the tables)."""
+        """Counts for the Memory tab header: sessions, **current** facts, superseded (past or
+        retracted — B7 splits out the retracted corrections), planned (valid from a future
+        date), and consolidated themes. Read-only + defensive (0 on a graph without the tables)."""
         def count(query: str) -> int:
             try:
                 return int(self._rows(query)[0][0])
             except Exception:
                 return 0
-        total = count("MATCH (a:Assertion) RETURN count(a);")
-        superseded = len(self._superseded_ids())
+        now = int(time.time())
+        states = [temporal_status(r, now) for r in self._load_assertions()]
         return {
             "sessions": count("MATCH (s:Session) RETURN count(s);"),
-            "assertions": max(0, total - superseded),   # current (not superseded)
-            "superseded": superseded,
+            "assertions": states.count("current"),
+            "superseded": states.count("past") + states.count("retracted"),
+            "retracted": states.count("retracted"),
+            "planned": states.count("future"),
             "themes": count("MATCH (c:MemoryConcept) RETURN count(c);"),
         }
 
     def list_assertions(self, limit: int = 200, include_superseded: bool = True) -> list:
         """All remembered facts with metadata (subject/predicate/object + session, confidence,
-        timestamps, superseded flag), newest first (by ``last_seen`` else ``created_at``) — the
-        Memory tab's browsable table. Read-only + defensive (pre-0.54 graphs lack confidence)."""
-        try:
-            rows = self._rows("MATCH (a:Assertion) RETURN a.id, a.subject, a.predicate, a.object, "
-                              "a.session_id, a.created_at, a.confidence, a.last_seen;")
-            has_conf = True
-        except Exception:
-            try:
-                rows = self._rows("MATCH (a:Assertion) RETURN a.id, a.subject, a.predicate, "
-                                  "a.object, a.session_id, a.created_at;")
-                has_conf = False
-            except Exception:
-                return []
-        sup = self._superseded_ids()
+        timestamps, B7 validity + status, superseded flag), newest first (by ``last_seen`` else
+        ``created_at``) — the Memory tab's browsable table. Read-only + defensive (older graphs
+        lack confidence / validity columns → defaulted / derived)."""
+        recs = self._load_assertions()
+        self._view(recs, int(time.time()))
         out = []
-        for row in rows:
-            if has_conf:
-                aid, subj, pred, obj, sid, created, conf, seen = row
-            else:
-                aid, subj, pred, obj, sid, created = row
-                conf, seen = 1.0, 0
-            is_sup = aid in sup
-            if is_sup and not include_superseded:
+        for r in recs:
+            if r["superseded"] and not include_superseded:
                 continue
-            out.append({"id": aid, "subject": subj, "predicate": pred, "object": obj,
-                        "session_id": sid, "created_at": int(created or 0),
-                        "confidence": round(float(conf if conf is not None else 1.0), 2),
-                        "last_seen": int(seen or 0), "superseded": is_sup})
+            out.append({"id": r["id"], "subject": r["subject"], "predicate": r["predicate"],
+                        "object": r["object"], "session_id": r["session_id"],
+                        "created_at": r["created_at"], "confidence": round(r["confidence"], 2),
+                        "last_seen": r["last_seen"], "superseded": r["superseded"],
+                        "status": r["status"], "valid_from": r["valid_from"],
+                        "valid_to": r["valid_to"], "expired_at": r["expired_at"],
+                        "cardinality": r["cardinality"]})
         out.sort(key=lambda a: -(a["last_seen"] or a["created_at"]))
         return out[:limit]
 
@@ -1094,15 +1236,12 @@ class GraphStore:
                 pass
 
     def current_assertions(self) -> list:
-        """Current (not superseded) assertions with their stored embeddings:
-        ``[(id, subject, predicate, object, emb), ...]``."""
-        try:
-            rows = self._rows("MATCH (a:Assertion) "
-                              "RETURN a.id, a.subject, a.predicate, a.object, a.emb;")
-        except Exception:
-            return []
-        sup = self._superseded_ids()
-        return [(r[0], r[1], r[2], r[3], r[4]) for r in rows if r[0] not in sup]
+        """Current assertions (valid now + still believed, B7) with their stored embeddings:
+        ``[(id, subject, predicate, object, emb), ...]`` — what the sleep pass consolidates."""
+        now = int(time.time())
+        return [(r["id"], r["subject"], r["predicate"], r["object"], r["emb"])
+                for r in self._load_assertions(with_emb=True)
+                if temporal_status(r, now) == "current"]
 
     def assertion_graph(self, similar_k: int = 6) -> dict:
         """Undirected similarity graph over **current** assertions (top-``k`` cosine per
@@ -1211,16 +1350,18 @@ class GraphStore:
         return sorted(agg.values(), key=lambda c: (-c["hits"], -(c["size"] or 0), c["id"]))[:limit]
 
     def context_for(self, query: str, embedder, identity: str = "",
-                    k: int = 8, max_themes: int = 4, max_chars=None) -> str:
+                    k: int = 8, max_themes: int = 4, max_chars=None,
+                    as_of: Optional[int] = None) -> str:
         """B6: assemble a session's context for ``query`` from the three memory tiers —
         identity + decay-weighted ``recall`` (activation) + the relevant consolidated themes
-        (attractors), optionally fit within a ``max_chars`` budget. Read-only + **fail-soft**
-        (missing embedder / empty memory → identity only, or ``""``)."""
+        (attractors), optionally fit within a ``max_chars`` budget. Facts carry their validity
+        (B7), and ``as_of`` assembles the memory as it was true at that date. Read-only +
+        **fail-soft** (missing embedder / empty memory → identity only, or ``""``)."""
         from .memory import assemble_context
         facts = []
         if embedder is not None:
             try:
-                facts = self.recall(query, embedder, k=k)
+                facts = self.recall(query, embedder, k=k, as_of=as_of)
             except Exception:      # never let a memory read break the caller
                 facts = []
         themes = self.relevant_concepts([f["id"] for f in facts], limit=max_themes) if facts else []

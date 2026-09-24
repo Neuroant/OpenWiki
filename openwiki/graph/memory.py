@@ -7,10 +7,9 @@ context. **Pure + chat-injected** (no Kuzu, no network), mirroring
 (persist / recall) lives in :class:`~openwiki.graph.store.GraphStore`.
 
 This is the *remembered tier* of the second-brain design — see `docs/path-b-memory.md`.
-Thin-vertical scope: **B2** capture + **B3** dedup/merge (no contradiction — that's B4)
-+ **B6** recall/format (the activation tier). The authoritative-graph reframe (B0),
-read-path reinforcement (B1), and contradiction/time-versioning (B4) are deferred, as
-is fusing the identity + attractor tiers into a full three-tier assembly.
+Scope here: **B2** capture (+ **B7** stated ``valid_from`` dates and a ``cardinality`` hint)
++ **B6** recall formatting and the three-tier ``assemble_context``. Merge, contradiction and
+the bi-temporal model live in :mod:`~openwiki.graph.temporal` (pure) and the store.
 """
 
 from __future__ import annotations
@@ -18,8 +17,10 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
+from typing import Optional
 
 from .entities import _normalize  # reuse German-aware normalization for dedup keys
+from .temporal import ONE, coerce_cardinality, format_date, format_interval, parse_date
 
 _THINK = re.compile(r"<think>.*?</think>", re.DOTALL)
 _ARRAY = re.compile(r"\[.*\]", re.DOTALL)
@@ -27,10 +28,15 @@ _ARRAY = re.compile(r"\[.*\]", re.DOTALL)
 
 @dataclass
 class MemoryFact:
-    """One remembered fact: a subject–predicate–object triple."""
+    """One remembered fact: a subject–predicate–object triple, plus (B7) when it became true
+    in the world — ``valid_from`` (epoch, only when the conversation *states* it; else the
+    session date / record time is used) — and whether the subject can hold several such
+    objects at once (``cardinality`` ``"many"``) or one replaces the other (``"one"``)."""
     subject: str
     predicate: str
     object: str
+    valid_from: Optional[int] = None
+    cardinality: str = ONE
 
     def text(self) -> str:
         return f"{self.subject} {self.predicate} {self.object}".strip()
@@ -45,12 +51,19 @@ CAPTURE_SYSTEM = (
     'of {"subject","predicate","object"} triples. Capture stable, reusable facts — decisions, '
     "preferences, definitions, states, commitments — not chit-chat, greetings, or one-off "
     "phrasing. Keep subject/object as short noun phrases and predicate as a short verb phrase. "
+    'Add "valid_from" (an ISO date: YYYY-MM-DD, or YYYY-MM / YYYY) ONLY when the conversation '
+    'explicitly says when the fact became true or takes effect ("since September 1", "from '
+    'October on") — resolve relative dates against the session date if one is given; never '
+    'guess and never use the current date. Add "cardinality": "many" when the subject can have '
+    "several such objects at the same time (e.g. the tools a project uses), otherwise \"one\" "
+    "(a single value that a new one replaces: a port, a version, a chosen default). "
     "Answer in the language of the conversation. Output ONLY the JSON array, nothing else."
 )
 
 
-def build_capture_messages(transcript: str) -> list:
-    user = f"Conversation:\n{transcript}\n\nExtract the facts worth remembering."
+def build_capture_messages(transcript: str, session_date: Optional[int] = None) -> list:
+    when = f"Session date: {format_date(session_date)}\n\n" if session_date is not None else ""
+    user = f"{when}Conversation:\n{transcript}\n\nExtract the facts worth remembering."
     return [{"role": "system", "content": CAPTURE_SYSTEM},
             {"role": "user", "content": user}]
 
@@ -74,7 +87,8 @@ def parse_facts(raw: str) -> list:
         o = str(item.get("object", "")).strip()
         if not (s and p and o):
             continue
-        fact = MemoryFact(s, p, o)
+        fact = MemoryFact(s, p, o, valid_from=parse_date(item.get("valid_from")),
+                          cardinality=coerce_cardinality(item.get("cardinality")))
         if fact.key() in seen:      # dedup within the session (B3, phase 2)
             continue
         seen.add(fact.key())
@@ -82,22 +96,34 @@ def parse_facts(raw: str) -> list:
     return facts
 
 
-def capture_session(chat, transcript: str) -> list:
-    """B2: one LLM call → the session's memory facts (``<think>`` stripped, parsed)."""
-    return parse_facts(chat.chat(build_capture_messages(transcript)))
+def capture_session(chat, transcript: str, session_date: Optional[int] = None) -> list:
+    """B2: one LLM call → the session's memory facts (``<think>`` stripped, parsed). A known
+    ``session_date`` (B7) lets the model resolve relative dates ("since yesterday")."""
+    return parse_facts(chat.chat(build_capture_messages(transcript, session_date)))
+
+
+def _provenance(f: dict) -> str:
+    """``(since 2026-09-01; s1)`` — the fact's validity (B7) + the session that taught it."""
+    when = format_interval(f.get("valid_from"), f.get("valid_to"))
+    sid = f.get("session_id", "?")
+    return f"({when}; {sid})" if when else f"({sid})"
+
+
+_STATUS_MARK = {"past": "  [superseded]", "retracted": "  [retracted]", "future": "  [planned]"}
 
 
 def format_memory(recalled: list) -> str:
-    """Format recalled facts as a compact block for injection (or ``""``).
-    A fact flagged ``superseded`` (only present with ``recall(include_superseded=True)``)
-    is marked so; the default recall returns only current facts, so injection is unaffected."""
+    """Format recalled facts as a compact block for injection (or ``""``), each with its
+    validity + session. A fact outside the requested view (only present with
+    ``recall(include_superseded=True)``) is marked by its status; one that answers an
+    ``as_of`` query is not — it *was* true then."""
     if not recalled:
         return ""
     lines = ["Relevant memory from earlier sessions:"]
     for r in recalled:
-        mark = "  [superseded]" if r.get("superseded") else ""
-        lines.append(f"- {r['subject']} {r['predicate']} {r['object']}{mark}"
-                     f"  ({r.get('session_id', '?')})")
+        mark = "" if r.get("in_view", not r.get("superseded")) else \
+            _STATUS_MARK.get(r.get("status") or "past", "  [other time]")
+        lines.append(f"- {r['subject']} {r['predicate']} {r['object']}{mark}  {_provenance(r)}")
     return "\n".join(lines)
 
 
@@ -132,7 +158,7 @@ def assemble_context(identity: str, facts: list, themes: list, max_facts: int = 
     themes; ``max_chars=None`` keeps the prior count-only behavior."""
     facts = list(facts)[:max_facts]
     themes = list(themes)[:max_themes]
-    fact_lines = [f"- {f['subject']} {f['predicate']} {f['object']}  ({f.get('session_id', '?')})"
+    fact_lines = [f"- {f['subject']} {f['predicate']} {f['object']}  {_provenance(f)}"
                   for f in facts]
     theme_lines = [f"- **{t.get('label', '')}**: {(t.get('summary') or '').strip()}" for t in themes]
 

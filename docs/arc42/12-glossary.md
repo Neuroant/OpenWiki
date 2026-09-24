@@ -78,6 +78,7 @@
 | **Begriffe browser** | The web UI's canonical-entity explorer (name · type · aliases · description · mention pages · typed relations you can walk entity→entity) — surfaces resolution + relations (ADR-26, §8.20). |
 | **Provenance (source / book)** | Each page's origin after a multi-source merge: its top-level-ancestor file (`source`) + the `sources/` subfolder (`book`); drives the sidebar filter over nav + search (ADR-26). |
 | **Verwandte Seiten (related-pages panel)** | The reader overlay under each wiki page (`/api/related/{slug}`): *Verweise* (references), *Erwähnt in* (backlinks), *Verwandte Themen* (typed relations), *Ähnliche Seiten* (`SIMILAR_TO`), *Gemeinsame Begriffe* (shared entities) — graph connectivity shown where people read (ADR-28). |
+| **Inline citation link** | A cross-reference phrase in the prose ("Abschnitt 1.6", "Seite 42") turned into a link to the page the graph resolved it to — every occurrence, from `REFERENCES.labels`; `openwiki references` adds the labels to an older graph in place (ADR-28, v0.83). |
 | **Entity auto-link** | The first whole-word mention of each canonical entity (or alias) in a rendered page, linked to its Begriffe entry client-side — the page source stays verbatim (ADR-28). |
 | **Temporal eval** | `examples/eval_temporal.jsonl` — 13 cross-session scenarios in 8 kinds (backfill, point-in-time, change-date, correction, known-at, multi-valued, planned, control) scoring B7; 7/13 (v0.80) → 13/13 (v0.82). |
 

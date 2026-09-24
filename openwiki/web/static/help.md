@@ -33,7 +33,9 @@ werden gespeichert.
   Unterkapitel sind eingerückt.
 - Jede Seite zeigt oben eine **Brotkrumen-Navigation** (Home › Kapitel › Seite)
   und den zugehörigen **PDF-Seitenbereich**.
-- Querverweise innerhalb einer Seite sind anklickbar und springen direkt zum Ziel.
+- **Verweise im Fließtext** („Abschnitt 1.6", „Seite 42", „Kapitel 2") sind anklickbar und öffnen
+  die Seite, auf die der Wissensgraph sie aufgelöst hat. Ältere Graphen erhalten diese Links mit
+  `openwiki references` — ohne Neuaufbau.
 - Unter jeder Seite erscheint ein **„Verwandte Seiten"**-Bereich, der die Vernetzung aus
   dem Wissensgraphen als anklickbare Links zeigt: **Verweise** und **Erwähnt in**
   (Rückverweise), **Verwandte Themen** (getypte Beziehungen), **Ähnliche Seiten** und

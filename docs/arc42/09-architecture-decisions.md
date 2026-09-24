@@ -519,8 +519,10 @@
 - **Alternatives:** write the links into the generated Markdown at build time — rejected: it mixes derived
   graph state into the *living* artifact the editing agent writes (a rebuild would also clobber edits),
   and baked link sets go stale as the graph changes; server-side HTML rewriting — rejected (the SPA
-  renders Markdown client-side, ADR-4); linking the inline citation phrases themselves ("Abschnitt 1.6")
-  — deferred (needs the citation label on `REFERENCES`; a small, independent increment).
+  renders Markdown client-side, ADR-4). Linking the inline citation phrases themselves ("Abschnitt 1.6")
+  was first deferred, then **landed in v0.83** in the same spirit: the phrases are stored on
+  `REFERENCES.labels`, served with the panel, and linked client-side at every occurrence; older graphs
+  get them in place via `openwiki references` (no rebuild).
 - **Consequences:** + every page becomes a hub with zero change to sources or the build; + always current
   and graceful (no graph → no panel, no entities → no auto-links, [ADR-7](#adr-7)); + read-only
   ([ADR-8](#adr-8)). − the links exist only in the web UI (MCP/CLI readers and the Markdown files don't

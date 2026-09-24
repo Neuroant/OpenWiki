@@ -751,6 +751,17 @@ second-brain tier is no longer CLI/MCP-only. Then **pipeline/build-stage observa
 wall time + LLM token spend on the Projekt tab + `openwiki status`, extending the v0.58 collector into build time
 (see Direction F). Remaining non-memory directions: retrieval quality (hybrid/re-rank, Direction A), packaging/CI (F).
 
+### Wiki linking — the graph's connectivity where people read (v0.79–v0.83)
+
+The pages were link-sparse while the graph is dense. Three read-time overlays close that gap without
+touching page sources (arc42 ADR-28): **#2** a "Verwandte Seiten" panel (v0.79 — references, backlinks,
+typed relations, similar pages, shared entities), **#3** entity auto-linking (v0.80 — first mention →
+Begriffe), and **#1 inline citation links (v0.83)** — the text's own "Abschnitt 1.6" / "Seite 42" / "Kapitel
+2" become links to the page the graph resolved them to (`REFERENCES.labels`; `openwiki references`
+refreshes an existing graph in place in seconds). On informatik: 33 citation phrases on 24 pages, all 33
+found and linked in the rendered prose. *Possible next:* the abbreviated "S. 357" form isn't a recognized
+citation yet (the page regex matches "Seite(n) N" only).
+
 ### Path B+ — Second-Brain refinements (next; from the cognitive-memory report)
 
 An external survey of cognitive-memory substrates ("From Cellular Self-Organization to the Artificial

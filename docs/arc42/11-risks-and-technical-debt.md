@@ -28,7 +28,7 @@
 | D6 | **No contradiction handling / time-versioning of facts** | Out of scope for a static wiki | ✅ **Addressed (v0.50, B4 / ADR-18; bi-temporal since v0.81, B7 / ADR-27)** — facts carry valid + transaction time and merge by valid time; `recall` returns the current fact, `--as-of`/`--known-at`/`--timeline` read the history. |
 | D7 | **Minimal observability** (stderr logs only) | Local single-user tool | ✅ **Addressed (v0.58/v0.60, ADR-20)** — an in-process metrics collector captures per-call LLM/embed latency + tokens (and per-build-stage), surfaced in the CLI, the **System** tab, and Projekt. |
 | D9 | **B7 limits** — a multi-valued fact ends only via `--correct` (no negation capture: "we no longer use X"); `known_at` is approximate when an interval is re-closed later (rows are updated in place, not versioned) | Kept the model minimal (ADR-27) | Low–Medium — capture negations as an explicit end date; row versioning if exact belief-history ever matters. |
-| D10 | **Inline citations stay plain text** — "Abschnitt 1.6 / Seite 42" in the prose is not a link (the targets appear only in the "Verwandte Seiten" panel) | The reference label isn't stored on `REFERENCES` (ADR-28) | Low — `ALTER TABLE REFERENCES ADD label` + a targeted re-extraction from the parsed corpus (no full rebuild). |
+| D10 | **Inline citations stay plain text** — "Abschnitt 1.6 / Seite 42" in the prose is not a link (the targets appear only in the "Verwandte Seiten" panel) | The reference label wasn't stored on `REFERENCES` (ADR-28) | ✅ **Addressed (v0.83)** — `REFERENCES.labels` + client-side inline linking; `openwiki references` refreshes an older graph in place (informatik: 33/33 phrases linked). |
 | D8 | **Packaging is Windows/pipx-only** | Primary platform | ✅ **Partly addressed (v0.64/v0.65, ADR-24)** — a Docker image + compose, CI, and a clean build as the `owiki` distribution; the actual PyPI publish remains (license-gated, R7). |
 
 ## 11.3 Debt that is *not* present (by design)
@@ -54,7 +54,7 @@ For a single-user, local, learning project the sensible posture is:
   - *Redistribution* → **R7** (licensing) — the gating item before any PyPI release (packaging is ready).
   - *Portability* → R6 (a Windows/macOS CI leg, now that Linux is covered).
   - *Memory fidelity* → R8 / D9 (LLM-decided dates + coexistence; negation capture, exact belief history).
-  - *Wiki linking* → D10 (inline citation links).
+  - *Wiki linking* → D10 ✅ (inline citation links, v0.83).
 
 ## 11.5 Debt → roadmap direction
 
@@ -65,7 +65,7 @@ For a single-user, local, learning project the sensible posture is:
 | D4 partial incremental upsert | Direction E — full incremental graph |
 | ✅ D7 observability (v0.58/v0.60, ADR-20) | Direction F — metrics collector + System tab + build timings |
 | D9 B7 limits | Path B+ — B7 follow-ups (negation capture; row versioning only if needed) |
-| D10 inline citation links | The wiki-linking track (GUI #1) — independent of B7, no full rebuild |
+| ✅ D10 inline citation links (v0.83) | The wiki-linking track (#1) — `REFERENCES.labels` + `openwiki references` |
 | ✅ D8 packaging *partly* (v0.64/v0.65, ADR-24) | Direction F — Docker + CI + `owiki` build; PyPI publish license-gated |
 
 ---

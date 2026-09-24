@@ -49,7 +49,7 @@ Scenarios are written as *stimulus → expected response* so they can be checked
 
 ## 10.3 Current evidence & gaps
 
-- **Met:** QS-2 (the suite — **439 tests** — runs offline, and in **CI** on every push across Python
+- **Met:** QS-2 (the suite — **446 tests** — runs offline, and in **CI** on every push across Python
   3.11–3.13 + a Docker build, ADR-24); QS-5 (four findings in `docs/RAG-vs-GraphRAG.md`, incl. hybrid
   winning on a code corpus); QS-11 by the metrics collector (ADR-20 — per-call latency/tokens in the CLI,
   System tab, and per-build-stage); QS-13 by the world-model analysis toolkit (ADR-25, §8.19 — `owiki

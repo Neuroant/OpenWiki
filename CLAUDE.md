@@ -158,6 +158,16 @@ same-concept surface variants into **canonical** entities with `aliases` + a `de
 implies `--entities`, embedding candidates + one LLM call per cluster), `--entity-model NAME`,
 `--entity-types "A,B,C"` (the domain ontology; overrides the default), `--entity-max-chars N`, `-v`.
 
+**Refresh the cross-references in place** — re-extract the `REFERENCES` edges **with their citation
+phrases** ("Abschnitt 1.6", "Seite 42" — what the web UI links inline) from the parsed corpus into an
+existing graph; entities / relations / communities / memory are untouched, so an expensive graph needs
+no rebuild (informatik: 32 edges / 33 phrases in ~1.5 s). The upgrade path for graphs built before v0.83:
+```
+.venv\Scripts\python -m openwiki references             # inside a project: its parsed corpus + graph
+```
+Options: `[source]` (a parsed `.json` or a source; default: the project's corpus), `--graph DIR`,
+`--split-level N` (must match the graph). Needs a writable graph (stop `serve` first).
+
 **Consolidate the graph into communities** — a re-runnable "sleep pass" over an
 already-built graph: detect topical communities (weighted-modularity Louvain over
 SIMILAR_TO/REFERENCES/shared-entity) and write one **LLM summary per community**
@@ -615,7 +625,11 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   the page already links those. A read-only overlay — the source `.md` stays verbatim, turning link-sparse
   pages into hubs; its payload also carries the page's canonical **entities**, which the client
   **auto-links** — the first mention of each in the prose gets a dotted link → the Begriffe view (`app.js`
-  `autolinkEntities`, TreeWalk over text nodes, first-mention/whole-word, skips links/headings/code)),
+  `autolinkEntities`, TreeWalk over text nodes, first-mention/whole-word, skips links/headings/code);
+  and the page's **citations** (`GraphStore.citations` — each outgoing `REFERENCES` edge's citation
+  phrases), which the client links **inline** (`linkCitations`, run before auto-linking): every occurrence
+  of "Abschnitt 1.6" / "Seite 42" in the prose → the page it resolved to (whitespace-tolerant, never inside
+  a longer number); the Verweise chips show them as `cited_as` tooltips),
   `/api/search`, `/api/chat` (editing agent), `/api/ask/stream` (POST) = **streaming
   RAG** for the Ask mode (Server-Sent Events: a `sources` event, then `delta` token events, then `done`;
   `WikiWebApp.ask_stream` → `RAGAgent.stream` → `OllamaChat.chat_stream`, U7 — lock held only around
@@ -1005,7 +1019,12 @@ http — count, p50/p95, total time, token in/out) + a live recent-events table,
   **merged** corpus `extract_references_multi` scopes the section map **per source
   window** so "Kapitel 2" never leaks between sources (informatik: 2 page-ref → 32 total
   edges). A page that is both a structural neighbor and a reference target shows as the
-  structural rel (dedup order in `GraphStore.neighborhood`).
+  structural rel (dedup order in `GraphStore.neighborhood`). With `labels=True` (what `build`,
+  `graph-build` and `references` use) each edge also carries its **citation phrases** — the
+  whitespace-normalized matched text ("Abschnitt 1.3", "Abschn. 3.1", "Seite 42") — stored as a JSON list
+  in `REFERENCES.labels`; the web UI links them inline (ADR-28). Gotcha: a line that *starts* with a
+  section number inside a page's top 3 lines (e.g. a wrapped "…Abschnitt⏎1.3 und …") is read as that
+  section's running header by `_section_page_map` (first appearance wins).
 
 ## Output
 

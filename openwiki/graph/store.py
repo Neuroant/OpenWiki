@@ -8,6 +8,7 @@ vector index and graph traversal working together.
 
 from __future__ import annotations
 
+import json
 import re
 import threading
 import time
@@ -319,6 +320,53 @@ class GraphStore:
     @staticmethod
     def _aliases(joined) -> list:
         return [a for a in (joined or "").split(", ") if a]
+
+    # -- inline citations (ADR-28) ------------------------------------------
+
+    def citations(self, slug: str) -> list[dict]:
+        """The page's outgoing cross-references with the **citation phrases** that produced them
+        (``[{"label": "Abschnitt 1.6", "slug", "title"}, …]``, longest phrase first) — what the
+        web UI links inline. ``[]`` on graphs built before the ``labels`` property existed
+        (refresh them with ``openwiki references``)."""
+        try:
+            rows = self._rows("MATCH (a:Page {slug:$s})-[r:REFERENCES]->(b:Page) "
+                              "RETURN r.labels, b.slug, b.title;", {"s": slug})
+        except Exception:
+            return []
+        out = []
+        for labels, dst, title in rows:
+            try:
+                phrases = json.loads(labels) if labels else []
+            except ValueError:
+                phrases = []
+            out.extend({"label": p, "slug": dst, "title": title} for p in phrases if p)
+        return sorted(out, key=lambda c: (-len(c["label"]), c["label"]))
+
+    def refresh_references(self, references) -> int:
+        """Replace every ``REFERENCES`` edge with ``references`` — ``(src, dst)`` pairs or
+        ``(src, dst, [citation phrases])`` triples — **in place**: the cheap upgrade path for a
+        graph built before citation labels (no rebuild; entities/memory untouched). Adds the
+        ``labels`` property on an older table first. Writable-only; returns edges written."""
+        if not self.writable:
+            raise RuntimeError("GraphStore is read-only; open it writable to refresh references.")
+        slugs = {r[0] for r in self._rows("MATCH (p:Page) RETURN p.slug;")}
+        count = 0
+        with self._lock:
+            try:
+                self._exec("ALTER TABLE REFERENCES ADD labels STRING;")
+            except Exception:      # already present
+                pass
+            self._exec("MATCH (:Page)-[r:REFERENCES]->(:Page) DELETE r;")
+            for ref in references:
+                src, dst = ref[0], ref[1]
+                labels = list(ref[2]) if len(ref) > 2 and ref[2] else []
+                if src in slugs and dst in slugs and src != dst:
+                    self._exec("MATCH (a:Page {slug:$a}),(b:Page {slug:$b}) "
+                               "CREATE (a)-[:REFERENCES {labels:$l}]->(b);",
+                               {"a": src, "b": dst,
+                                "l": json.dumps(labels, ensure_ascii=False) if labels else None})
+                    count += 1
+        return count
 
     def entities_for_page(self, slug: str) -> list[dict]:
         try:  # enriched (description + aliases from resolution); fall back for pre-0.66 graphs

@@ -139,6 +139,18 @@ class WikiWebApp:
             rel = n.get("rel")
             if rel and rel != "center":
                 by_rel.setdefault(rel, []).append({"slug": n["slug"], "title": n["title"]})
+        # the citation phrases behind each outgoing reference ("Abschnitt 1.6" → page) — linked
+        # inline by the client (#1) and shown on the "Verweise" chips
+        try:
+            citations = self.graph.citations(slug)
+        except Exception:
+            citations = []
+        cited_as: dict = {}
+        for c in citations:
+            cited_as.setdefault(c["slug"], []).append(c["label"])
+        for page in by_rel.get("references", []):
+            if cited_as.get(page["slug"]):
+                page["cited_as"] = sorted(cited_as[page["slug"]])
         groups = [{"key": k, "label": label, "pages": by_rel[k]}
                   for k, label in self._RELATED_GROUPS if by_rel.get(k)]
         # canonical entities mentioned on the page — for client-side auto-linking (#3)
@@ -149,7 +161,8 @@ class WikiWebApp:
                             for e in self.graph.entities_for_page(slug)]
         except Exception:
             pass
-        return {"available": True, "groups": groups, "entities": entities}
+        return {"available": True, "groups": groups, "entities": entities,
+                "citations": citations}
 
     def search(self, query: str, k: int = 8, hybrid: bool = False) -> dict:
         if self.index is None:

@@ -116,11 +116,13 @@ async function renderRelated(slug) {
   } catch (e) { return; }
   if (state.tab !== "wiki" || state.currentSlug !== slug) return;   // navigated away mid-fetch
   if (!data.available) return;
+  linkCitations(data.citations);                                    // #1: "Abschnitt 1.6" → its page
   autolinkEntities(data.entities);                                  // #3: link first mentions in the prose
   if (!(data.groups || []).length) return;
   const groups = data.groups.map((g) =>
     `<div class="rel-group"><span class="rel-label">${escapeHtml(g.label)}</span>` +
-    g.pages.map((p) => `<button class="rel-link" data-slug="${escapeHtml(p.slug)}">${escapeHtml(p.title || p.slug)}</button>`).join("") +
+    g.pages.map((p) => `<button class="rel-link" data-slug="${escapeHtml(p.slug)}"${(p.cited_as || []).length
+      ? ` title="zitiert als: ${escapeHtml(p.cited_as.join(", "))}"` : ""}>${escapeHtml(p.title || p.slug)}</button>`).join("") +
     `</div>`).join("");
   const el = document.createElement("aside");
   el.className = "related";
@@ -128,6 +130,55 @@ async function renderRelated(slug) {
   el.querySelectorAll(".rel-link").forEach((b) =>
     b.addEventListener("click", () => loadPage(b.dataset.slug)));
   $("#content").appendChild(el);
+}
+
+// #1 Inline citations: the text's own cross-references ("Abschnitt 1.6", "Seite 42", "Kapitel 2") become
+// links to the page the graph resolved them to — every occurrence (each is a real pointer), whitespace-
+// tolerant (a phrase may wrap), never inside a longer number ("1.6" ≠ "1.62" / "1.6.2"). Runs before
+// entity auto-linking, which then skips these links. Source .md untouched (ADR-28).
+function _reEsc(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+function linkCitations(citations) {
+  const root = $("#content");
+  if (!root || !(citations || []).length) return 0;
+  const items = citations.map((c) => ({ ...c, re: new RegExp(
+    "(?<![A-Za-zÀ-ÿ0-9])" + c.label.split(/\s+/).map(_reEsc).join("\\s+") + "(?![0-9]|\\.[0-9])") }));
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      let p = node.parentElement;
+      while (p && p !== root) {
+        if (_AUTOLINK_SKIP.has(p.tagName) || p.classList.contains("related")) return NodeFilter.FILTER_REJECT;
+        p = p.parentElement;
+      }
+      return NodeFilter.FILTER_ACCEPT;
+    },
+  });
+  const nodes = [];
+  let node;
+  while ((node = walker.nextNode())) nodes.push(node);            // collect first, then mutate
+  let linked = 0;
+  for (let cur of nodes) {
+    while (cur) {
+      let best = null;                                              // earliest match; ties → longest label
+      for (const it of items) {
+        const m = it.re.exec(cur.nodeValue);
+        if (m && (!best || m.index < best.m.index)) best = { m, it };
+      }
+      if (!best) break;
+      const mid = cur.splitText(best.m.index);
+      const rest = mid.splitText(best.m[0].length);
+      const slug = best.it.slug;
+      const a = document.createElement("a");
+      a.className = "cite-link";
+      a.href = "#" + slug;
+      a.title = "Verweis → " + (best.it.title || slug);
+      a.textContent = mid.nodeValue;
+      a.addEventListener("click", (e) => { e.preventDefault(); loadPage(slug); });
+      mid.replaceWith(a);
+      linked += 1;
+      cur = rest;
+    }
+  }
+  return linked;
 }
 
 // #3 Entity auto-linking: link the *first* mention of each canonical entity (or alias) in the

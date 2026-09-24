@@ -336,6 +336,15 @@ def _build_argparser() -> argparse.ArgumentParser:
     mcp_p.add_argument("--temperature", type=float, default=0.2, help="Sampling temperature (default: 0.2).")
     mcp_p.add_argument("--no-ask", action="store_true", help="Disable the `wiki_ask` tool (no chat model).")
 
+    refs_p = sub.add_parser("references", parents=[common],
+                            help="Re-extract the cross-references (+ the citation phrases the web UI "
+                                 "links inline) into an existing graph, in place — no rebuild.")
+    refs_p.add_argument("source", nargs="?", type=Path, default=None,
+                        help="A parsed .json (or a source); default: the project's parsed corpus.")
+    refs_p.add_argument("--graph", type=Path, default=None, help="Graph dir (default: project's graph).")
+    refs_p.add_argument("--split-level", type=int, default=None,
+                        help="Outline depth that became pages — must match the graph (default: manifest / 2).")
+
     graph_p = sub.add_parser("graph-build", parents=[common], help="Build the Kuzu knowledge graph over the wiki.")
     graph_p.add_argument("source", type=Path, help="A source (PDF/Markdown/text), or a .json produced by `ingest`.")
     graph_p.add_argument(
@@ -927,11 +936,12 @@ def _entity_retry_chat(model: str, host: str) -> OllamaChat:
                       options={"seed": 1, "num_predict": 4096})
 
 
-def _corpus_references(project, sources, doc, wiki, multi):
+def _corpus_references(project, sources, doc, wiki, multi, labels: bool = True):
     """Cross-reference edges for the corpus: single-source direct, else per-source
-    (each resolved within its own page span via the retained per-source IR)."""
+    (each resolved within its own page span via the retained per-source IR). With
+    ``labels`` (default) each edge carries its citation phrases — linked inline (ADR-28)."""
     if not multi:
-        return extract_references(doc, wiki)
+        return extract_references(doc, wiki, labels=labels)
     metas = []
     start = 0
     for src in sources:
@@ -944,7 +954,7 @@ def _corpus_references(project, sources, doc, wiki, multi):
         metas.append({"start": start, "count": len(parsed.pages),
                       "printed_offset": detect_page_offset(parsed)})
         start += len(parsed.pages)
-    return extract_references_multi(doc, wiki, metas)
+    return extract_references_multi(doc, wiki, metas, labels=labels)
 
 
 def _sum_llm(events) -> dict:
@@ -1323,6 +1333,9 @@ def _apply_project(args: argparse.Namespace, project: Optional[Project],
     elif cmd == "ontology":
         val("model", "models", "chat", DEFAULT_CHAT)
         val("host", "models", "host", DEFAULT_HOST)
+    elif cmd == "references":
+        path("graph", p.graph_path if p else None, Path("output") / "graph")
+        val("split_level", "build", "split_level", 2)
     elif cmd == "graph-build":
         path("out", p.graph_path if p else None, Path("output") / "graph")
         path("index", p.index_dir if p else None, Path("output") / "index")
@@ -1967,6 +1980,50 @@ def _cmd_chat(args: argparse.Namespace) -> int:
             _transient_fold(args.graph, embedder)
 
 
+def _cmd_references(args: argparse.Namespace) -> int:
+    """Refresh the graph's ``REFERENCES`` edges from the parsed corpus — with the citation
+    phrases the web UI turns into inline links (ADR-28). In place: entities, relations,
+    communities and memory are untouched, so an expensive graph needs no rebuild."""
+    project = getattr(args, "project_obj", None)
+    if args.source is not None:
+        doc = _load_parsed(args.source)
+        wiki = WikiBuilder(split_level=args.split_level).build(doc)
+        refs = extract_references(doc, wiki, labels=True)
+    elif project is not None:
+        sources = project.source_paths()
+        if not sources:
+            print("error: the project declares no document sources.", file=sys.stderr)
+            return 2
+        multi = len(sources) > 1
+        parsed_path = project.parsed_dir / ("_corpus.json" if multi else f"{source_stem(sources[0])}.json")
+        if not parsed_path.is_file():
+            print(f"error: no parsed corpus at {parsed_path} (run `openwiki build` first).", file=sys.stderr)
+            return 2
+        doc = _load_parsed(parsed_path)
+        wiki = WikiBuilder(split_level=args.split_level).build(doc)
+        refs = _corpus_references(project, sources, doc, wiki, multi, labels=True)
+        if refs is None:
+            return 2
+    else:
+        print("error: pass a parsed .json (or a source), or run inside a project.", file=sys.stderr)
+        return 2
+    graph = _open_graph(args.graph, writable=True, retries=6)
+    if graph is None:
+        print(f"error: no graph at {args.graph} (run `openwiki graph-build` first).", file=sys.stderr)
+        return 2
+    try:
+        if not getattr(graph, "writable", False):
+            print("error: the graph is locked (stop `serve`/`chat` first) — references not refreshed.",
+                  file=sys.stderr)
+            return 2
+        written = graph.refresh_references(refs)
+    finally:
+        graph.close()
+    phrases = sum(len(r[2]) for r in refs)
+    print(f"References refreshed: {written} edge(s), {phrases} citation phrase(s) → {args.graph}")
+    return 0
+
+
 def _cmd_graph_build(args: argparse.Namespace) -> int:
     logging.basicConfig(
         level=logging.INFO if args.verbose else logging.WARNING,
@@ -1975,7 +2032,7 @@ def _cmd_graph_build(args: argparse.Namespace) -> int:
     doc = _load_parsed(args.source)
     wiki = WikiBuilder(split_level=args.split_level).build(doc)
     index = SemanticIndex.load(args.index)
-    references = None if args.no_references else extract_references(doc, wiki)
+    references = None if args.no_references else extract_references(doc, wiki, labels=True)
 
     entities = None
     relations = None
@@ -2843,6 +2900,7 @@ _DISPATCH = {
     "serve": _cmd_serve,
     "mcp": _cmd_mcp,
     "graph-build": _cmd_graph_build,
+    "references": _cmd_references,
     "communities": _cmd_communities,
     "decay": _cmd_decay,
     "consolidate": _cmd_consolidate,

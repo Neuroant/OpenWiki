@@ -11,6 +11,10 @@
 
 This module reads a `ParsedDocument` (for clean per-physical-page text) and a
 `Wiki` (for the physical->slug mapping). It imports no Kuzu.
+
+With ``labels=True`` each edge also carries the **citation phrases** that produced it
+(``"Abschnitt 1.6"``, ``"Seite 47"`` — whitespace-normalized surface text), so the web UI
+can turn the phrase *in the prose* into a link to its target page (ADR-28).
 """
 
 from __future__ import annotations
@@ -55,12 +59,22 @@ def _section_page_map(pages, header_lines: int = 3) -> dict:
     return secmap
 
 
-def _section_edges(pages, phys_to_slug: dict) -> set:
+def _label(match) -> str:
+    """The citation phrase as written ("Abschnitt 1.6"), whitespace-normalized."""
+    return " ".join(match.group(0).split())
+
+
+def _add(edges: dict, src: str, dst: str, label: str) -> None:
+    edges.setdefault((src, dst), set()).add(label)
+
+
+def _section_edges(pages, phys_to_slug: dict) -> dict:
     """Section/chapter cross-reference edges within ``pages`` (one source window):
-    resolve each ``Abschnitt/Kapitel N.M`` against that window's running-header map."""
+    resolve each ``Abschnitt/Kapitel N.M`` against that window's running-header map.
+    Returns ``{(src, dst): {citation phrases}}``."""
     secmap = _section_page_map(pages)
     window = {p.number for p in pages}
-    edges = set()
+    edges: dict = {}
     for page in pages:
         src = phys_to_slug.get(page.number)
         if not src:
@@ -71,8 +85,20 @@ def _section_edges(pages, phys_to_slug: dict) -> set:
                 continue
             dst = phys_to_slug.get(dst_phys)
             if dst and dst != src:
-                edges.add((src, dst))
+                _add(edges, src, dst, _label(match))
     return edges
+
+
+def _merge(into: dict, other: dict) -> None:
+    for key, labels in other.items():
+        into.setdefault(key, set()).update(labels)
+
+
+def _result(edges: dict, labels: bool) -> list:
+    """Sorted ``(src, dst)`` pairs — or, with ``labels``, ``(src, dst, [phrases])`` triples."""
+    if labels:
+        return [(src, dst, sorted(edges[(src, dst)])) for src, dst in sorted(edges)]
+    return sorted(edges)
 
 
 def detect_page_offset(doc: ParsedDocument, max_offset: int = 40) -> int:
@@ -102,13 +128,14 @@ def _physical_to_slug(wiki: Wiki) -> dict:
     return mapping
 
 
-def extract_references(doc: ParsedDocument, wiki: Wiki, offset=None) -> list:
-    """Return sorted unique ``(src_slug, dst_slug)`` cross-reference edges."""
+def extract_references(doc: ParsedDocument, wiki: Wiki, offset=None, labels: bool = False) -> list:
+    """Return sorted unique ``(src_slug, dst_slug)`` cross-reference edges — or, with
+    ``labels``, ``(src_slug, dst_slug, [citation phrases])``."""
     if offset is None:
         offset = detect_page_offset(doc)
     phys_to_slug = _physical_to_slug(wiki)
 
-    edges = set()
+    edges: dict = {}
     for page in doc.pages:
         src = phys_to_slug.get(page.number)
         if not src:
@@ -117,16 +144,17 @@ def extract_references(doc: ParsedDocument, wiki: Wiki, offset=None) -> list:
             printed = int(match.group(1))
             dst = phys_to_slug.get(printed + offset)
             if dst and dst != src:
-                edges.add((src, dst))
+                _add(edges, src, dst, _label(match))
 
     page_refs = len(edges)
-    edges |= _section_edges(doc.pages, phys_to_slug)
+    _merge(edges, _section_edges(doc.pages, phys_to_slug))
     logger.info("References: offset=%d, %d page-ref + %d section-ref = %d edge(s)",
                 offset, page_refs, len(edges) - page_refs, len(edges))
-    return sorted(edges)
+    return _result(edges, labels)
 
 
-def extract_references_multi(doc: ParsedDocument, wiki: Wiki, sources_meta: list) -> list:
+def extract_references_multi(doc: ParsedDocument, wiki: Wiki, sources_meta: list,
+                             labels: bool = False) -> list:
     """Cross-references for a **merged** corpus, resolving each within its source.
 
     ``sources_meta`` is one dict per source, in merge order, with:
@@ -136,7 +164,7 @@ def extract_references_multi(doc: ParsedDocument, wiki: Wiki, sources_meta: list
 
     A "Seite N" on a page belonging to source *i* targets that source's printed
     page N, i.e. merged physical page ``start_i + (N + printed_offset_i)`` — so a
-    reference never leaks across sources.
+    reference never leaks across sources. ``labels`` as in :func:`extract_references`.
     """
     phys_to_slug = _physical_to_slug(wiki)
     page_meta: dict = {}
@@ -145,7 +173,7 @@ def extract_references_multi(doc: ParsedDocument, wiki: Wiki, sources_meta: list
         for local in range(1, int(meta["count"]) + 1):
             page_meta[start + local] = (start, int(meta["printed_offset"]))
 
-    edges = set()
+    edges: dict = {}
     for page in doc.pages:
         src = phys_to_slug.get(page.number)
         meta = page_meta.get(page.number)
@@ -156,7 +184,7 @@ def extract_references_multi(doc: ParsedDocument, wiki: Wiki, sources_meta: list
             printed = int(match.group(1))
             dst = phys_to_slug.get(start + printed + offset)
             if dst and dst != src:
-                edges.add((src, dst))
+                _add(edges, src, dst, _label(match))
     page_refs = len(edges)
 
     # Section/chapter refs, resolved within each source's own page window (so a
@@ -164,8 +192,8 @@ def extract_references_multi(doc: ParsedDocument, wiki: Wiki, sources_meta: list
     for meta in sources_meta:
         start, count = int(meta["start"]), int(meta["count"])
         window = [p for p in doc.pages if start < p.number <= start + count]
-        edges |= _section_edges(window, phys_to_slug)
+        _merge(edges, _section_edges(window, phys_to_slug))
 
     logger.info("References (multi): %d source(s), %d page-ref + %d section-ref = %d edge(s)",
                 len(sources_meta), page_refs, len(edges) - page_refs, len(edges))
-    return sorted(edges)
+    return _result(edges, labels)

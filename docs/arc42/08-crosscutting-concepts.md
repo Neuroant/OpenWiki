@@ -300,7 +300,9 @@ no framework, no bundler, Markdown via one vendored `marked.min.js`.
 - **Reader overlays (ADR-28):** the Wiki view appends a **"Verwandte Seiten"** panel (references,
   backlinks, typed relations, similar pages, shared entities — from `GraphStore.neighborhood`) and
   **auto-links** the first mention of each canonical entity to the Begriffe view — graph connectivity shown
-  where people read, computed at read time, the page source untouched.
+  where people read, computed at read time, the page source untouched. Since v0.83 the text's own
+  citations ("Abschnitt 1.6", "Seite 42") link **inline** to the page they resolved to
+  (`REFERENCES.labels`, `GraphStore.citations`).
 - **Time view (ADR-27):** the Gedächtnis tab reads the bi-temporal memory — *Stand am* (valid time,
   `as_of`) and *Wissensstand vom* (transaction time, `known_at`) pickers, a **Verlauf** timeline per
   subject+predicate, a validity column and überholt / zurückgezogen / geplant badges.

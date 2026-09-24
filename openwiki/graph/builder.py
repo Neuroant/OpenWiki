@@ -16,6 +16,7 @@ plus an HNSW vector index on Chunk.emb.
 
 from __future__ import annotations
 
+import json
 import logging
 import shutil
 from pathlib import Path
@@ -230,7 +231,8 @@ class GraphBuilder:
         conn.execute("CREATE REL TABLE NEXT(FROM Page TO Page);")
         conn.execute("CREATE REL TABLE PART_OF(FROM Chunk TO Page);")
         conn.execute("CREATE REL TABLE SIMILAR_TO(FROM Page TO Page, score DOUBLE);")
-        conn.execute("CREATE REL TABLE REFERENCES(FROM Page TO Page);")
+        # labels = the citation phrases ("Abschnitt 1.6", JSON list) the web UI links inline (ADR-28)
+        conn.execute("CREATE REL TABLE REFERENCES(FROM Page TO Page, labels STRING);")
         conn.execute("CREATE NODE TABLE Entity(key STRING, name STRING, type STRING, "
                      "description STRING, aliases STRING, PRIMARY KEY(key));")
         conn.execute("CREATE REL TABLE MENTIONS(FROM Page TO Entity);")
@@ -348,14 +350,19 @@ class GraphBuilder:
         return count
 
     def _insert_references(self, conn, references) -> int:
-        """Materialize REFERENCES edges (from the 'siehe Seite N' cross-refs)."""
+        """Materialize REFERENCES edges (from the 'siehe Seite N' / 'Abschnitt 1.6' cross-refs).
+        Accepts ``(src, dst)`` pairs or ``(src, dst, [citation phrases])`` triples."""
         page_slugs = self._existing_page_slugs(conn)
         count = 0
-        for src, dst in references:
+        for ref in references:
+            src, dst = ref[0], ref[1]
+            labels = list(ref[2]) if len(ref) > 2 and ref[2] else []
             if src in page_slugs and dst in page_slugs and src != dst:
                 conn.execute(
-                    "MATCH (a:Page {slug:$a}),(b:Page {slug:$b}) CREATE (a)-[:REFERENCES]->(b);",
-                    parameters={"a": src, "b": dst},
+                    "MATCH (a:Page {slug:$a}),(b:Page {slug:$b}) "
+                    "CREATE (a)-[:REFERENCES {labels:$l}]->(b);",
+                    parameters={"a": src, "b": dst,
+                                "l": json.dumps(labels, ensure_ascii=False) if labels else None},
                 )
                 count += 1
         return count

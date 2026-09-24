@@ -742,7 +742,8 @@ Small n (13) — a direction check, not a benchmark; the scenarios are hand-writ
 **Honest limits.** A multi-valued fact is only ended by an explicit correction (no negation capture yet);
 `--correct` treats the corrected fact as functional; `known_at` is exact for born-open intervals closed once,
 approximate if an interval is re-closed later (rows are updated in place, Graphiti-style, not versioned).
-Measured next: `eval_temporal.jsonl` (backfill / point-in-time / change-date / correction / multi-valued).
+Measured above (v0.82, `examples/eval_temporal.jsonl`).
+Decision record: arc42 [ADR-27](arc42/09-architecture-decisions.md#adr-27).
 
 ---
 

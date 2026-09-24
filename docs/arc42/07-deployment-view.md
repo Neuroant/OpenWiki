@@ -55,6 +55,9 @@ flowchart TB
   **Server-Sent-Events** response (`POST /api/ask/stream`) from the `ThreadingHTTPServer`, with the
   graph lock held only around retrieval so generation streams without blocking other readers (ADR-26).
 - **`mcp`** opens the graph **read-only** (coding agents only read).
+- **Upgrading** needs no rebuild for the memory tier: a graph from before B7 is read correctly as-is
+  (validity derived from its `SUPERSEDES` edges), and the first **writable** `remember` migrates it in
+  place (`ALTER TABLE … ADD` + an idempotent backfill; ADR-27).
 - **Ollama** is an independent local service shared by all of the above.
 
 ## 7.3 Platform notes

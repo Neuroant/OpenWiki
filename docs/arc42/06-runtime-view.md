@@ -159,8 +159,11 @@ the floor. Returns `{edges, decayed, pruned}` (plus the folded-in count).
 ## 6.7 Scenario: Remember & recall a session (Path B)
 
 The remembered tier's write→read loop. `remember` captures a transcript into facts and merges them
-(dedup + **contradiction supersession**); `recall` returns the *current* facts most relevant to a
-query in a later session. Both require Second Brain mode (`[memory] enabled`, ADR-14).
+**by valid time** (ADR-27): each fact slots into its subject+predicate history — re-affirm, extend back,
+or add; a rival's interval is closed (a change) or the rival retracted (a correction), after a veto-only
+"can both be true at once?" check. `recall` returns the facts most relevant to a query that are valid
+**now** — or at an `as_of` date, or as believed at a `known_at` date. Both require Second Brain mode
+(`[memory] enabled`, ADR-14).
 
 ```mermaid
 sequenceDiagram
@@ -171,21 +174,24 @@ sequenceDiagram
   participant E as OllamaEmbedder
 
   Note over U,GS: remember (writable graph)
-  U->>M: capture_session(chat, transcript)
-  M->>C: chat(CAPTURE_SYSTEM, transcript)
-  C-->>M: JSON facts as MemoryFacts
-  U->>GS: remember(session_id, facts, embedder)
+  U->>M: capture_session(chat, transcript, session_date)
+  M->>C: chat(CAPTURE_SYSTEM, session date + transcript)
+  C-->>M: JSON facts as MemoryFacts (stated valid_from, cardinality)
+  U->>GS: remember(session_id, facts, embedder, session_date, coexist)
   GS->>E: embed_documents(fact texts)
-  Note over GS: dedup vs current, then a new fact with the same subject and predicate but a different object supersedes the old one (SUPERSEDES, B4)
+  Note over GS: plan_merge by valid time, reaffirm or extend or add, a backfill lands in history (B7)
+  GS->>C: facts_coexist(older, newer) only for a real conflict
+  C-->>GS: yes keeps both as many, no lets the merge close or retract the rival
 
   Note over U,GS: recall (read-only graph, a later session)
-  U->>GS: recall(query, embedder, k)
+  U->>GS: recall(query, embedder, k, as_of, known_at)
   GS->>E: embed_query(query)
-  GS-->>U: current facts by decay-weighted cosine (superseded hidden by default)
+  GS-->>U: facts valid now (or at as_of, as believed at known_at) by decay-weighted cosine
 ```
 
-A doc rebuild preserves these assertions + their `SUPERSEDES` edges (B0/ADR-16), so memory survives
-re-ingesting sources. The cross-session eval (`eval --cross-session`) measures whether this assembled
+A doc rebuild preserves these assertions — validity columns + `SUPERSEDES` provenance edges included
+(B0/ADR-16) — so memory survives re-ingesting sources; a pre-B7 graph is migrated in place by the first
+writable `remember` (no rebuild). The cross-session eval (`eval --cross-session`) measures whether this assembled
 memory beats a cold start and a raw-log paste (`docs/path-b-memory.md` §7).
 
 ## 6.8 Cross-cutting runtime aspects

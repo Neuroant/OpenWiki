@@ -5,16 +5,19 @@ This is the architecture documentation for **OpenWiki**, structured after the
 into 12 sections, from goals and constraints down to building blocks, runtime, decisions,
 quality, and risks.
 
-> **Status: COMPLETE** (maintained through v0.78). All 12 chapters are complete; diagrams use Mermaid
+> **Status: COMPLETE** (maintained through v0.82). All 12 chapters are complete; diagrams use Mermaid
 > (rendered by GitHub) and have been validated. The **Path B agent-memory** direction is complete
-> (B0–B6; ADR-14–19). Since then the architecture has grown six more decision clusters (§9), all
+> (B0–B6; ADR-14–19). Since then the architecture has grown eight more decision clusters (§9), all
 > reflected here: the graph **deepened** — typed `Entity→Entity` relations + relation-aware GraphRAG
 > (ADR-22) and corpus-wide **entity resolution** (ADR-23) — plus **observability** (ADR-20), a *measured*
 > retrieval-add-on discipline (hybrid BM25+dense, LLM re-rank — ADR-21), a **shipping** story
 > (`owiki` packaging + Docker + CI, ADR-24), a **world-model analysis** toolkit (`owiki analyze` —
-> coupling / gaps / compare / memory dynamics; ADR-25, §8.19, Direction I complete), and a
+> coupling / gaps / compare / memory dynamics; ADR-25, §8.19, Direction I complete), a
 > **capability-complete web UI** (Ask mode + retrieval controls, streaming, the Analyse + Begriffe tabs,
-> provenance; ADR-26, §8.20, Direction J complete). Deep detail: `docs/path-b-memory.md`,
+> provenance; ADR-26, §8.20, Direction J complete), graph connectivity as **reader overlays** (the
+> "Verwandte Seiten" panel + entity auto-links; ADR-28), and — Path B+ — **bi-temporal memory** (valid +
+> transaction time, merged by valid time, `--as-of`/`--known-at`, a veto-only coexistence check; measured
+> 7/13 → 13/13 on a temporal eval; ADR-27, §8.15, QS-15). Deep detail: `docs/path-b-memory.md`,
 > `docs/RAG-vs-GraphRAG.md`.
 
 ## Audience & relationship to the other docs
@@ -26,7 +29,7 @@ quality, and risks.
 | `docs/roadmap.md` | Anyone | What was built (history) + prioritized future directions |
 | `docs/RAG-vs-GraphRAG.md` | Evaluators | The measured findings behind the graph design |
 | `docs/projects.md` | Architects, users | Deep design of the **project** concept (§8.14): manifest, discovery, registry, layout, multi-source merge |
-| `docs/path-b-memory.md` | Architects | **Path B (agent memory)** design + staged plan — realized by ADR-15/16/17/18/19, resolving §11 D1/D2/D6 (B0–B6 + concurrency landed) |
+| `docs/path-b-memory.md` | Architects | **Path B (agent memory)** design + staged plan — realized by ADR-15/16/17/18/19, resolving §11 D1/D2/D6 (B0–B6 + concurrency landed); §12 = Path B+ (B7 as built + measured → ADR-27) |
 | `docs/coding-agents.md` | Users | MCP / OpenCode / Claude Code setup |
 
 The arc42 docs and `CLAUDE.md` overlap by design (both describe the architecture); this doc

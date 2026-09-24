@@ -17,11 +17,12 @@ flowchart LR
   P --> P1["No cloud calls"] & P2["Data stays on disk"]
   M --> M1["Modularity (IR + boundaries)"] & M2["Testability (offline)"] & M3["Minimal dependencies"]
   F --> F1["Grounded, cited answers"] & F2["Global sensemaking"] & F3["Cross-session memory (Path B)"]
-  F --> F4["World-model analysis (owiki analyze)"]
+  F --> F4["World-model analysis (owiki analyze)"] & F5["Temporal memory (as-of / known-at, B7)"]
   E --> E1["Small-corpus latency"] & E2["Incremental builds"] & E3["Observability (per-call metrics)"]
   M --> M4["CI (offline suite, Linux)"]
   I --> I1["CLI / HTTP / MCP"]
   U --> U1["One-command build"] & U2["Browser exploration"] & U3["Capability-complete UI (Ask/stream/Analyse/Begriffe)"]
+  U --> U4["Wiki as hub (related pages, entity links)"]
 ```
 
 ## 10.2 Quality Scenarios
@@ -43,16 +44,19 @@ Scenarios are written as *stimulus → expected response* so they can be checked
 | QS-11 | Observability | should | A run fails (e.g. Ollama down) → a clear, actionable message; **and** every LLM/embedding call's latency + token counts are captured (`metrics.py`, ADR-20) and surfaced in the CLI `⏱` footer, the **System** tab (`/api/metrics`), per-turn chat stats, and per-build-stage on Projekt. |
 | QS-12 | Cross-session memory | should | In Second Brain mode, establish a fact in one session and change it in a later one → `recall` returns the **current** fact, not the stale one (contradiction handling, ADR-18); the memory survives a `graph-build` (ADR-16); `eval --cross-session` measures assembled memory beating cold-start + raw-log. |
 | QS-13 | Measurability (structure) | should | Ask "how well-organized is this KB / how much does the graph add?" → `owiki analyze` (coupling / gaps / compare / memory, ADR-25) returns reproducible structural metrics (e.g. the *graph-reach* headline) — offline, read-only; two KBs compare via `--compare`. |
-| QS-14 | Usability (UI) | should | Open `serve` in a browser → every major capability is reachable without the CLI: **Ask** with GraphRAG/hybrid/re-rank/global controls (streaming), the **Analyse** tab (coupling/gaps/memory + map), the **Begriffe** entity browser, and source/book provenance filtering — no build step, no JS dependencies (ADR-26). |
+| QS-14 | Usability (UI) | should | Open `serve` in a browser → every major capability is reachable without the CLI: **Ask** with GraphRAG/hybrid/re-rank/global controls (streaming), the **Analyse** tab (coupling/gaps/memory + map), the **Begriffe** entity browser, and source/book provenance filtering — no build step, no JS dependencies (ADR-26); a page's graph connectivity (references, backlinks, similar pages, shared entities) is one click away under it, and entity mentions link to their Begriffe entry (ADR-28). |
+| QS-15 | Correctness (temporal memory) | should | Remember a newer session, then backfill an older one → `recall` still returns the **present** value; `recall --as-of D` returns the value valid at D; `--known-at K` returns what was believed at K (before a later correction); a correction retracts rather than ends the old fact; two coexisting values ("uses Kuzu" + "uses Ollama") both stay current (ADR-27). `examples/eval_temporal.jsonl` measures it. |
 
 ## 10.3 Current evidence & gaps
 
-- **Met:** QS-2 (the suite — **399 tests** — runs offline, and in **CI** on every push across Python
+- **Met:** QS-2 (the suite — **439 tests** — runs offline, and in **CI** on every push across Python
   3.11–3.13 + a Docker build, ADR-24); QS-5 (four findings in `docs/RAG-vs-GraphRAG.md`, incl. hybrid
   winning on a code corpus); QS-11 by the metrics collector (ADR-20 — per-call latency/tokens in the CLI,
   System tab, and per-build-stage); QS-13 by the world-model analysis toolkit (ADR-25, §8.19 — `owiki
   analyze` coupling/gaps/compare/memory, offline + read-only); QS-14 by the capability-complete web UI
-  (ADR-26, §8.20 — Direction J, U1–U11 incl. SSE streaming); QS-1 / QS-3 / QS-4 / QS-6 / QS-8 / QS-9 are
+  (ADR-26, §8.20 — Direction J, U1–U11 incl. SSE streaming) + the reader overlays (ADR-28); QS-15 by B7
+  (ADR-27) — the temporal eval took assembled-memory task success from **7/13 (v0.80.0, two runs) to 13/13**
+  (13 hand-written scenarios — a direction check, not a benchmark); QS-1 / QS-3 / QS-4 / QS-6 / QS-8 / QS-9 are
   architectural (enforced by boundaries + tests); QS-7 by the fingerprint chain (ADR-11); QS-12 by the
   memory tests + the cross-session eval (Path B, §8.15).
 - **Not formally measured (performance):** there is no latency/throughput *budget* yet — though the

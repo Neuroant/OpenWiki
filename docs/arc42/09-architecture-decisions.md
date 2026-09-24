@@ -6,7 +6,8 @@
 > **landed** (ADR-14–19). Later decisions deepen the graph (ADR-22 typed relations + relation-aware
 > GraphRAG, ADR-23 entity resolution) and add **observability** (ADR-20), a *measured* retrieval-add-on
 > discipline (ADR-21), a **shipping** story (ADR-24 packaging + CI), a **world-model analysis** toolkit
-> (ADR-25, Direction I), and a **capability-complete web UI** (ADR-26, Direction J).
+> (ADR-25, Direction I), a **capability-complete web UI** (ADR-26, Direction J), graph connectivity as
+> **reader overlays** (ADR-28), and — Path B+ — **bi-temporal** memory (ADR-27, B7).
 
 ## ADR index
 
@@ -29,7 +30,7 @@
 | [15](#adr-15) | Remembered facts as reified `Assertion` nodes (not typed edges) | Accepted (Path B / B2–B4) | Q4 |
 | [16](#adr-16) | Graph preserves the remembered tier across a document rebuild | Accepted (Path B / B0) | Q4 |
 | [17](#adr-17) | Read-path reinforcement via an append-only usage log | Accepted (Path B / B1) | correctness |
-| [18](#adr-18) | Contradiction as append-only supersession (`SUPERSEDES`-edge-only) | Accepted (Path B / B4) | Q4, correctness |
+| [18](#adr-18) | Contradiction as append-only supersession (`SUPERSEDES`-edge-only) | Accepted (Path B / B4); refined by [ADR-27](#adr-27) | Q4, correctness |
 | [19](#adr-19) | Concurrency as read-only readers + a lock-free write-ahead journal | Accepted (Path B / B1) | correctness, Q2 |
 | [20](#adr-20) | Observability via an in-process, bounded metrics ring buffer | Accepted | Q5, performance |
 | [21](#adr-21) | Retrieval add-ons (hybrid, re-rank) measured, not adopted on faith | Accepted | Q5 |
@@ -38,6 +39,8 @@
 | [24](#adr-24) | Ship as the `owiki` distribution + CI; publishing license-gated | Accepted | Q2, usability |
 | [25](#adr-25) | World-model analysis as a read-only, additive toolkit (`owiki analyze`) | Accepted | Q5, Q4 |
 | [26](#adr-26) | Capability-complete no-build SPA + SSE streaming (Direction J) | Accepted | usability, Q2 |
+| [27](#adr-27) | Bi-temporal assertions merged by valid time (+ veto-only coexistence check) | Accepted (Path B+ / B7) | correctness, Q5 |
+| [28](#adr-28) | Graph connectivity as read-only reader overlays (Related panel, entity auto-links) | Accepted | usability, Q4 |
 
 ---
 
@@ -277,7 +280,10 @@
 - **Consequences:** + Time-travel + **revival** (re-asserting a superseded fact revives it) come for
   free; no column migration (one always-created edge table, [ADR-7](#adr-7)); preserved across a
   rebuild ([ADR-16](#adr-16)). − Conservative detection misses synonym-predicate contradictions; per-fact
-  `confidence` is deferred. Addresses debt D6.
+  `confidence` is deferred. Addresses debt D6. *Refined by [ADR-27](#adr-27) (v0.81): the edge decided
+  supersession in processing order, so an out-of-order backfill made a stale fact current — B7 adds the
+  validity columns this ADR deferred (the `ALTER` migration proved cheap) and keeps `SUPERSEDES` as
+  provenance.*
 
 ### ADR-19
 **Concurrency as read-only readers + a lock-free write-ahead journal.** *(Path B / B1 — generalizes [ADR-8](#adr-8)/[ADR-17](#adr-17))*
@@ -449,11 +455,84 @@
   dependencies. − more client state in one `app.js`; − the SSE path bypasses the JSON `_json` handler (a
   second response shape to maintain); − the Agent mode stays blocking (asymmetry with Ask).
 
+### ADR-27
+**Bi-temporal assertions: valid time + transaction time, merged by valid time (+ a veto-only LLM coexistence check).** *(v0.81–v0.82, Path B+ / B7)*
+- **Context:** ADR-18 gave each `Assertion` one `created_at` and decided supersession in **processing
+  order**. That single timestamp stood in for three different times — when a fact became true (never
+  captured), when the session happened (only a label), and when it was recorded (the wall clock; a
+  queued journal op even took the *fold* time). Consequences: backfilling an older transcript after a
+  newer one made the **stale fact current**; "what was true in August?", "when did we switch?" and "what
+  did we believe before the correction?" had no answer; a correction ("it was never X") looked the same
+  as a world change. The cognitive-memory survey that shaped Path B+ names exactly this gap (Graphiti's
+  temporal edge model).
+- **Decision:** two independent time axes per fact — **valid time** `valid_from`/`valid_to` (when it held
+  in the world; `NULL` = still true) and **transaction time** `created_at`/`expired_at` (when OpenWiki
+  recorded it / stopped believing it) — plus a `cardinality` hint and `Session.session_date`. A fact is
+  valid from a date the transcript *states* (capture extracts it only when said), else the session date
+  (`--session-date` or a date in the session id), else the record time. A pure `graph/temporal.py`
+  `plan_merge` slots each fact into its subject+predicate history **by valid time**: re-affirm / extend
+  back / add; a functional rival's interval is **closed** (the world changed) or, at the same instant or
+  with `remember --correct`, the rival is **retracted** (`expired_at` — we were wrong); a backfill lands
+  *in* history; `"many"` values coexist; future-dated facts are *planned* until their date. "Current" =
+  valid now ∧ still believed. `recall --as-of` (valid time) / `--known-at` (transaction time) /
+  `--timeline`, `context --as-of`, MCP `wiki_memory(as_of)`, the web time view. **Migration in place, no
+  rebuild:** one schema-tolerant loader derives missing intervals from the ADR-18 edges; the first
+  writable `remember` `ALTER`s the columns in and writes the derivation back (idempotent; the current set
+  is unchanged). `SUPERSEDES` stays as provenance. **v0.82:** because the capture model's per-fact
+  cardinality tag proved noisy, a tag-based invalidation is first put to one deterministic LLM question —
+  *"can both statements be true at the same moment?"* — which can only **veto** it (keep both, mark the
+  pair `"many"`); never with `--correct`.
+- **Alternatives:** keep ADR-18's edge-only derivation — rejected (the edge encodes processing order, so
+  it cannot express a backfill, a correction or a planned change); **row versioning** (immutable rows, a
+  new version per change — exact `known_at`) — rejected as heavier (duplicate embeddings/ids, lineage
+  tracking); updated in place instead, Graphiti-style, with close times derived from the provenance
+  edges; a rebuild-time migration — rejected (`ALTER` verified in place on Kuzu 0.11, incl. a real 50 MB
+  graph); trust the cardinality tag alone — rejected after measuring it (qwen3 tagged "OpenWiki *also*
+  uses Ollama" as single-valued 2/3 times); an LLM that *decides* every conflict — rejected, as in ADR-18,
+  because it could wrongly hide a valid fact: the check is **veto-only**, so it can keep a fact but never
+  hide one — the direction ADR-18 already deemed safe; framing it as "does the newer *replace* the
+  older?" — rejected (biased the model to *replace* even for Kuzu→Ollama).
+- **Consequences:** + measured: `examples/eval_temporal.jsonl` assembled-memory task success **7/13
+  (v0.80.0, twice) → 13/13** (backfill, point-in-time, change-date, known-at, multi-valued); + backfills
+  are safe, corrections are distinguishable, planned changes activate on their date, and every past
+  belief is reconstructable; + no rebuild on upgrade. − five more columns and a more complex merge (kept
+  pure + unit-tested); − `known_at` is approximate when an interval is re-closed later (in-place rows);
+  − a multi-valued fact ends only via `--correct` (no negation capture yet); − one extra LLM call per
+  actual conflict, and the veto depends on the chat model's judgment; − the eval is small and
+  hand-written (a direction check, not a benchmark). Refines [ADR-15](#adr-15) (fields) and
+  [ADR-18](#adr-18) (supersession semantics); [ADR-16](#adr-16) snapshots the columns;
+  [ADR-19](#adr-19) journal records keep their own record time.
+
+### ADR-28
+**Graph connectivity surfaced as read-only reader overlays, not written into page source.** *(v0.79–v0.80)*
+- **Context:** the wiki pages are sparsely hyperlinked — only what the source prose and the outline
+  provide — while the graph holds rich connectivity: resolved cross-references (`REFERENCES`), their
+  backlinks, `SIMILAR_TO`, shared entities, typed relations. A wiki's value comes from its
+  interconnections, but that connectivity was visible only in the Graph tab.
+- **Decision:** overlay it where people read, computed at read time: a **"Verwandte Seiten"** panel under
+  each page (`/api/related/{slug}` → `WikiWebApp.related` → `GraphStore.neighborhood`, grouped into
+  *Verweise* / *Erwähnt in* / *Verwandte Themen* / *Ähnliche Seiten* / *Gemeinsame Begriffe*; structural
+  parent/child/prev/next omitted since the page already links them), and client-side **entity
+  auto-linking** — the first whole-word mention of each canonical entity (or alias) in the rendered prose
+  links to its Begriffe entry (a TreeWalker over text nodes, skipping links, headings and code). The
+  page's `.md` stays verbatim.
+- **Alternatives:** write the links into the generated Markdown at build time — rejected: it mixes derived
+  graph state into the *living* artifact the editing agent writes (a rebuild would also clobber edits),
+  and baked link sets go stale as the graph changes; server-side HTML rewriting — rejected (the SPA
+  renders Markdown client-side, ADR-4); linking the inline citation phrases themselves ("Abschnitt 1.6")
+  — deferred (needs the citation label on `REFERENCES`; a small, independent increment).
+- **Consequences:** + every page becomes a hub with zero change to sources or the build; + always current
+  and graceful (no graph → no panel, no entities → no auto-links, [ADR-7](#adr-7)); + read-only
+  ([ADR-8](#adr-8)). − the links exist only in the web UI (MCP/CLI readers and the Markdown files don't
+  carry them); − first-mention, whole-word matching misses some inflected forms; − one extra request per
+  page view.
+
 ---
 *Chapter complete. The Path-B agent-memory direction landed via ADR-14/15/16/17/18/19; the graph then
 deepened (ADR-22 typed relations + relation-aware GraphRAG, ADR-23 entity resolution), gained
 **observability** (ADR-20), a *measured* retrieval-add-on discipline (ADR-21), a **shipping** story
 (ADR-24 packaging + CI), a **world-model analysis** toolkit (ADR-25, Direction I), and a
-**capability-complete web UI** (ADR-26, Direction J — U1–U11, incl. SSE streaming). §11 debts D1/D2/D6
-are resolved. Deep designs in `docs/path-b-memory.md` and `docs/RAG-vs-GraphRAG.md`. New significant
+**capability-complete web UI** (ADR-26, Direction J — U1–U11, incl. SSE streaming), graph connectivity as
+**reader overlays** (ADR-28), and Path B+'s **bi-temporal memory** (ADR-27, B7 — refines ADR-15/18). §11
+debts D1/D2/D6 are resolved. Deep designs in `docs/path-b-memory.md` and `docs/RAG-vs-GraphRAG.md`. New significant
 decisions should be appended here with the next id.*

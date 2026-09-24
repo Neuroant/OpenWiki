@@ -13,6 +13,7 @@
 | R4 | **Entity extraction is slow + non-deterministic** | Medium | Medium | ~1 LLM call/page; mitigated by greedy+seed determinism, output bounding, retry-on-empty — still opt-in and slow. |
 | R5 | **Findings rest on small N / one corpus / one embedder** | Medium (generalization) | — | Two aligned signals (objective + judge); flagged as a caveat in `RAG-vs-GraphRAG.md`. |
 | R6 | **Windows-primary; CI Linux-only** | Low–Medium | Low | ✅ **Partly addressed (v0.64, ADR-24)** — GitHub Actions runs the offline suite (Py 3.11–3.13) + the Docker build on `ubuntu-latest` every push, so Linux is now *verified* (not just claimed). Remaining: no Windows/macOS CI leg. |
+| R8 | **LLM-dependent memory semantics** — the capture model decides a fact's stated date + cardinality, and a coexistence verdict can keep a stale value current | Medium (wrong current fact) | Low–Medium | Dates are taken only when *stated* (never guessed) and validated; the coexistence check is **veto-only** (it can keep a fact, never hide one), deterministic (temperature 0), and skipped for explicit `--correct`; measured on `eval_temporal.jsonl` (ADR-27). |
 | R7 | **Licensing before redistribution** | High if redistributed | Low (not yet redistributed) | PyMuPDF is **AGPL-3.0** and there is **no project LICENSE** yet (§2 LC1/LC3). Packaging is publish-*ready* (ADR-24) but deliberately **gated**: a `Private :: Do Not Upload` classifier + a manual-only publish workflow block release until a (AGPL-compatible) license is chosen — or a non-AGPL PDF backend is swapped in behind the parser boundary. |
 
 ## 11.2 Technical Debt
@@ -24,8 +25,10 @@
 | D3 | **Retrieval ignores Kuzu's HNSW; brute-force cosine** | Simplicity at small scale | Medium — back `SemanticIndex.search` with an ANN index when corpora grow. |
 | D4 | **Incremental upsert recomputes only `SIMILAR_TO`** | Cheap live sync for edits | Medium — CHILD_OF/NEXT/REFERENCES/entities still need a full `graph-build`. |
 | D5 | **Community precision is moderate / labels heuristic-then-LLM** | Broad thematic questions span themes | Low — acceptable; measured (precision 56.7% on the thematic set). |
-| D6 | **No contradiction handling / time-versioning of facts** | Out of scope for a static wiki | ✅ **Addressed (v0.50, B4 / ADR-18)** — a newer fact SUPERSEDES the older; `recall` returns the current fact, history stays queryable. |
+| D6 | **No contradiction handling / time-versioning of facts** | Out of scope for a static wiki | ✅ **Addressed (v0.50, B4 / ADR-18; bi-temporal since v0.81, B7 / ADR-27)** — facts carry valid + transaction time and merge by valid time; `recall` returns the current fact, `--as-of`/`--known-at`/`--timeline` read the history. |
 | D7 | **Minimal observability** (stderr logs only) | Local single-user tool | ✅ **Addressed (v0.58/v0.60, ADR-20)** — an in-process metrics collector captures per-call LLM/embed latency + tokens (and per-build-stage), surfaced in the CLI, the **System** tab, and Projekt. |
+| D9 | **B7 limits** — a multi-valued fact ends only via `--correct` (no negation capture: "we no longer use X"); `known_at` is approximate when an interval is re-closed later (rows are updated in place, not versioned) | Kept the model minimal (ADR-27) | Low–Medium — capture negations as an explicit end date; row versioning if exact belief-history ever matters. |
+| D10 | **Inline citations stay plain text** — "Abschnitt 1.6 / Seite 42" in the prose is not a link (the targets appear only in the "Verwandte Seiten" panel) | The reference label isn't stored on `REFERENCES` (ADR-28) | Low — `ALTER TABLE REFERENCES ADD label` + a targeted re-extraction from the parsed corpus (no full rebuild). |
 | D8 | **Packaging is Windows/pipx-only** | Primary platform | ✅ **Partly addressed (v0.64/v0.65, ADR-24)** — a Docker image + compose, CI, and a clean build as the `owiki` distribution; the actual PyPI publish remains (license-gated, R7). |
 
 ## 11.3 Debt that is *not* present (by design)
@@ -42,13 +45,16 @@ For a single-user, local, learning project the sensible posture is:
   localhost-only, §7.4), R2 (local-model quality), D5 (community precision). These are consequences
   of decisions in §9, not defects.
 - **Addressed (Path B landed):** D1 / D2 / D6 — B0 / B1 / B4 (ADR-16 / 17 / 18); the memory tier is
-  authoritative, reads reinforce, and facts are time-versioned. See `docs/path-b-memory.md`.
+  authoritative, reads reinforce, and facts are time-versioned — **bi-temporally** since B7 (ADR-27). See
+  `docs/path-b-memory.md`.
 - **Addressed (post-Path-B):** D7 observability (ADR-20), D8 packaging + R6 CI *partly* (ADR-24 — Docker +
   Linux CI landed; PyPI publish + Windows/macOS CI remain).
 - **Tracked (address if the project's goals expand):**
   - *Scale* → R3 / D3 (brute-force retrieval) — back `SemanticIndex.search` with an ANN index.
   - *Redistribution* → **R7** (licensing) — the gating item before any PyPI release (packaging is ready).
   - *Portability* → R6 (a Windows/macOS CI leg, now that Linux is covered).
+  - *Memory fidelity* → R8 / D9 (LLM-decided dates + coexistence; negation capture, exact belief history).
+  - *Wiki linking* → D10 (inline citation links).
 
 ## 11.5 Debt → roadmap direction
 
@@ -58,6 +64,8 @@ For a single-user, local, learning project the sensible posture is:
 | D3 brute-force retrieval | Direction A — hybrid landed (ADR-21); ANN still open |
 | D4 partial incremental upsert | Direction E — full incremental graph |
 | ✅ D7 observability (v0.58/v0.60, ADR-20) | Direction F — metrics collector + System tab + build timings |
+| D9 B7 limits | Path B+ — B7 follow-ups (negation capture; row versioning only if needed) |
+| D10 inline citation links | The wiki-linking track (GUI #1) — independent of B7, no full rebuild |
 | ✅ D8 packaging *partly* (v0.64/v0.65, ADR-24) | Direction F — Docker + CI + `owiki` build; PyPI publish license-gated |
 
 ---

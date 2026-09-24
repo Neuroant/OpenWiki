@@ -43,13 +43,17 @@
 | **Reinforcement / decay** | Hebbian "strengthen on use" (`reinforce`) and time-based "forget" (`decay`, exponential half-life). |
 | **Remembered tier** | The authoritative Path B memory subgraph (`Session`/`Assertion` + `SUPERSEDES`, plus the `REINFORCES` overlay); additive, preserved across doc rebuilds (ADR-16); active only in Second Brain mode. |
 | **Session / Assertion** | A captured "day" of experience (`Session`) and a reified subject·predicate·object fact under it (`Assertion`, with a mirrored embedding) — the memory data model (ADR-15). |
-| **SUPERSEDES / supersession** | A newer `Assertion` supersedes an older one (same normalized subject+predicate, different object); "current" = no incoming `SUPERSEDES`; nothing deleted, so history stays queryable (ADR-18). |
+| **SUPERSEDES / supersession** | A newer `Assertion` supersedes an older one (same normalized subject+predicate, different object); nothing deleted, so history stays queryable (ADR-18). Since B7 the edge is *provenance* (closer → closed); "current" is decided by the validity columns (ADR-27). |
+| **Valid time / transaction time (bi-temporal)** | A fact's two time axes (ADR-27): **valid time** `valid_from`/`valid_to` = when it held in the world (its *semantic* content); **transaction time** `created_at`/`expired_at` = when OpenWiki recorded it / stopped believing it (its *episodic* trace). "Current" = valid now ∧ believed. |
+| **As-of / known-at** | Point-in-time memory queries: `recall --as-of D` = what was *true* at D (valid time); `--known-at K` = what OpenWiki *believed* at K (transaction time) — e.g. before a later correction. The web's *Stand am* / *Wissensstand vom* pickers. |
+| **Backfill / closed / retracted / planned** | A **backfill** = an older session remembered after newer ones; it lands *in* history instead of overwriting the present. A **closed** fact's interval ended (the world changed — *überholt*); a **retracted** one was never true (a correction, `remember --correct` — *zurückgezogen*); a **planned** one is valid only from a future date (*geplant*). |
+| **Cardinality / coexistence check** | Whether a predicate holds one value at a time (`one`: a port, a default) or several (`many`: the tools a project uses). The capture model tags it, but noisily, so before an invalidation a **veto-only** LLM check asks *"can both be true at the same moment?"* (`memory.facts_coexist`, ADR-27). |
 | **MemoryConcept / consolidation** | A theme over a cluster of related current facts, with an LLM summary (`CONSOLIDATES` edges to its members) — the "sleep" pass (`openwiki consolidate`, B5). A *derived* view (recomputed, not snapshotted), like `Community`; supports global search over memory. |
 | **Context assembly / `context_for`** | The B6 payoff: assemble a session's context from the three memory tiers — **identity** + **activation** (`recall`) + **attractors** (relevant `MemoryConcept`s) — into one block (`openwiki context` / MCP `wiki_memory`). "Load the concentrate, not the log." |
 | **Usage log** | The append-only `graph.usage.jsonl` sidecar a read-only `ask`/MCP writes to; the next writer folds it into `REINFORCES` edges — read-path reinforcement without the write lock (B1/ADR-17). |
 | **Write-ahead journal** | The lock-free `graph.journal.jsonl` sidecar holding queued `remember`/`reindex` ops when the graph is read-only; a later writer folds it in (`fold_journal`) — the concurrency mechanism (ADR-19). |
 | **Mode (Wiki / Second Brain)** | A per-project policy (`[memory] enabled`): Wiki = document tier only (default); Second Brain = document + remembered tiers (ADR-14). |
-| **Path A / Path B** | A = the consolidation layer (communities / global search, done); B = agent-memory — **complete (B0–B6)**: authoritative graph (B0), read-path reinforcement (B1), contradiction versioning (B4), sleep consolidation (B5), and three-tier context assembly (B6). Remaining items are refinements, not stages. |
+| **Path A / Path B** | A = the consolidation layer (communities / global search, done); B = agent-memory — **complete (B0–B6)**: authoritative graph (B0), read-path reinforcement (B1), contradiction versioning (B4), sleep consolidation (B5), and three-tier context assembly (B6). **Path B+** = the Second-Brain refinements: B7 bi-temporal assertions (landed, ADR-27); A2 hierarchical communities and B8 priming (next). |
 
 ## 12.4 Platform & tooling
 
@@ -73,6 +77,9 @@
 | **SSE streaming** | Server-Sent Events (`text/event-stream`) from the stdlib server: Ask answers stream token-by-token (`/api/ask/stream` → `ask_stream` → `RAGAgent.stream` → `chat_stream`), the graph lock held only around retrieval (ADR-26). |
 | **Begriffe browser** | The web UI's canonical-entity explorer (name · type · aliases · description · mention pages · typed relations you can walk entity→entity) — surfaces resolution + relations (ADR-26, §8.20). |
 | **Provenance (source / book)** | Each page's origin after a multi-source merge: its top-level-ancestor file (`source`) + the `sources/` subfolder (`book`); drives the sidebar filter over nav + search (ADR-26). |
+| **Verwandte Seiten (related-pages panel)** | The reader overlay under each wiki page (`/api/related/{slug}`): *Verweise* (references), *Erwähnt in* (backlinks), *Verwandte Themen* (typed relations), *Ähnliche Seiten* (`SIMILAR_TO`), *Gemeinsame Begriffe* (shared entities) — graph connectivity shown where people read (ADR-28). |
+| **Entity auto-link** | The first whole-word mention of each canonical entity (or alias) in a rendered page, linked to its Begriffe entry client-side — the page source stays verbatim (ADR-28). |
+| **Temporal eval** | `examples/eval_temporal.jsonl` — 13 cross-session scenarios in 8 kinds (backfill, point-in-time, change-date, correction, known-at, multi-valued, planned, control) scoring B7; 7/13 (v0.80) → 13/13 (v0.82). |
 
 ## 12.5 Acronyms
 
@@ -105,5 +112,7 @@
 *Chapter complete. Path B terms landed (ADR-14–18); later terms cover the deepened graph (typed
 relations, entity resolution — ADR-22/23), retrieval variants (hybrid, BM25, RRF, re-ranking — ADR-21),
 observability (ADR-20), shipping (owiki, CI, OIDC — ADR-24), world-model analysis (coupling, graph
-reach, fingerprint, semantic map, PCA/UMAP/ARI — ADR-25), and the web UI (Ask mode, SSE streaming,
-Begriffe browser, provenance — ADR-26).*
+reach, fingerprint, semantic map, PCA/UMAP/ARI — ADR-25), the web UI (Ask mode, SSE streaming,
+Begriffe browser, provenance — ADR-26; related-pages panel, entity auto-links — ADR-28), and bi-temporal
+memory (valid / transaction time, as-of / known-at, backfill, retracted, coexistence check, temporal eval
+— ADR-27).*

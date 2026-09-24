@@ -165,14 +165,22 @@ Alongside the document tier, a project in **Second Brain mode** (`[memory] enabl
 "memory tier off." Four concepts span it:
 
 - **Reified facts (ADR-15).** A remembered fact is an `Assertion` node (subject · predicate · object +
-  `session_id`, `created_at`, a mirrored embedding) under a `Session`, captured from a transcript by a
-  pure, chat-injected pass (`memory.capture_session`). Reification is what makes a fact versionable + provenanced.
+  `session_id`, `created_at`, a mirrored embedding, and — B7 — `valid_from`/`valid_to`/`expired_at`/
+  `cardinality`) under a `Session`, captured from a transcript by a pure, chat-injected pass
+  (`memory.capture_session`). Reification is what makes a fact versionable + provenanced.
 - **Merge, not append (B3).** `remember` embeds each fact and **dedups** against the *current*
   assertions by normalized `(subject, predicate, object)` (`_normalize`, ADR-12), so re-affirming a
   fact is a no-op.
-- **Contradiction as supersession (ADR-18).** A newer fact with the same normalized subject+predicate
-  but a different object adds `(new)-[:SUPERSEDES]->(old)` — nothing deleted, "current" = no incoming
-  `SUPERSEDES`, validity intervals derivable. `recall` returns current facts only; history stays queryable (`--all`).
+- **Time: bi-temporal validity (ADR-27, refining ADR-18).** Each fact has **valid time** (when it held
+  in the world — a stated date, else the session date, else the record time) and **transaction time**
+  (when recorded / retracted). The pure `temporal.plan_merge` orders a subject+predicate's history **by
+  valid time**, not processing order: a changed value **closes** the old interval, a same-instant clash
+  or `--correct` **retracts** it, a backfill lands in history, `"many"` values coexist (confirmed by a
+  veto-only LLM *can both be true at once?* check), future-dated facts wait for their date. Nothing is
+  deleted (`SUPERSEDES` stays as provenance); "current" = valid now ∧ believed; `recall --as-of` /
+  `--known-at` / `--timeline` read the history. In CoALA terms: valid time is a fact's *semantic*
+  content, transaction time + session its *episodic* trace — the backfill bug was the learning step
+  ordering knowledge by experience instead of by event.
 - **Activation + forgetting.** `recall` ranks assertions by **decay-weighted** cosine (`effective_weight`,
   the same half-life math as the `REINFORCES` usage overlay), and read-path `record_usage` / `fold_usage`
   (B1) + `decay` keep the graph at a useful density — strengthen what's used, fade what isn't.
@@ -289,12 +297,19 @@ no framework, no bundler, Markdown via one vendored `marked.min.js`.
   `WikiWebApp.ask_stream` → a `text/event-stream` response from the `ThreadingHTTPServer`, consumed by a
   `fetch`+`ReadableStream` client. Crucially the graph lock is held **only around retrieval**, so the long
   generation streams **lock-free** — consistent with the reader-XOR-writer model (§8.6, ADR-19).
+- **Reader overlays (ADR-28):** the Wiki view appends a **"Verwandte Seiten"** panel (references,
+  backlinks, typed relations, similar pages, shared entities — from `GraphStore.neighborhood`) and
+  **auto-links** the first mention of each canonical entity to the Begriffe view — graph connectivity shown
+  where people read, computed at read time, the page source untouched.
+- **Time view (ADR-27):** the Gedächtnis tab reads the bi-temporal memory — *Stand am* (valid time,
+  `as_of`) and *Wissensstand vom* (transaction time, `known_at`) pickers, a **Verlauf** timeline per
+  subject+predicate, a validity column and überholt / zurückgezogen / geplant badges.
 - Everything is **read-only + graceful**: a tab whose artifact is absent (no graph, no memory, no entities)
   shows a hint, not an error (ADR-7).
 
 ---
-*Chapter complete. Cross-refs: runtime error paths → §6.8; the memory tier → §8.15 + ADR-14/15/16/18;
+*Chapter complete. Cross-refs: runtime error paths → §6.8; the memory tier → §8.15 + ADR-14/15/16/18/27;
 observability → §8.16 + ADR-20; retrieval → §8.17 + ADR-9/21 + `docs/RAG-vs-GraphRAG.md`; the semantic
-graph → §8.18 + ADR-12/22/23; world-model analysis → §8.19 + ADR-25; the web UI → §8.20 + ADR-26; the
+graph → §8.18 + ADR-12/22/23; world-model analysis → §8.19 + ADR-25; the web UI → §8.20 + ADR-26/28; the
 no-auth risk → §11 R1; the project concept → §5, ADR-10/11, §7; the boundaries these concepts rest on →
 §5.1 + ADR-1/2/7/13.*

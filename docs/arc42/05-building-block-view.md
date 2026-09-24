@@ -160,6 +160,7 @@ flowchart TB
   comm2["community.py\n(Louvain + summaries, pure)"] --> store2
   decay2["decay.py\n(decay math, pure)"] --> store2
   mem2["memory.py\n(session capture, pure)"] --> store2
+  temp2["temporal.py\n(bi-temporal merge, pure)"] --> store2
   use2["usage.py\n(usage log, pure)"] --> store2
   store2 --> consumers["agent · tools · web · mcp · eval"]
 ```
@@ -172,7 +173,8 @@ flowchart TB
 | `entities.py` | pure (injected chat/embedder) | `extract_entities(…) -> [Entity]`; `extract_relations(wiki, entities, chat) -> [Relation]` (typed `RELATED_TO`, ADR-22); `resolve_entities(entities, embedder, chat) -> canonical + aliases + descriptions` (ADR-23); `coerce_types`; `DEFAULT_ENTITY_TYPES` | LLM per page + deterministic normalization; relations + resolution opt-in. |
 | `community.py` | pure (injected chat) | `detect_communities(edges, nodes)`; `summarize_community(chat, members)`; `summarize_facts(chat, facts)` (B5 memory themes); `answer_global(chat, q, communities)`; `parse_summary` | Consolidation layer / global search (docs **and**, via B5, memory). |
 | `decay.py` | pure | `effective_weight(w, last_seen, now, half_life)`; `reinforced_weight(w, boost, cap)` | Usage-memory math. |
-| `memory.py` | pure (injected chat) | `capture_session(chat, transcript) -> [MemoryFact]`; `parse_facts`; `format_memory(recalled)` | Path B: session → subject–predicate–object facts + context formatting. |
+| `memory.py` | pure (injected chat) | `capture_session(chat, transcript, session_date) -> [MemoryFact]` (+ stated `valid_from`, `cardinality`); `parse_facts`; `format_memory(recalled)`; `assemble_context`; `facts_coexist(chat, older, newer)` (the veto-only coexistence check, ADR-27) | Path B: session → subject–predicate–object facts + context formatting. |
+| `temporal.py` | pure | `plan_merge(records, okey, valid_from, cardinality, correct, coexists)` (the valid-time merge rule); `status`/`valid_at`/`believed_at`; `derive_legacy_intervals`; `parse_date`/`session_date`/`format_interval` | Path B+ (B7, ADR-27): the bi-temporal model — decides how a fact slots into its history. |
 | `usage.py` | pure | `usage_log_path(db)`; `append_usage(path, pairs)`; `read_usage`; `clear_usage` | Path B (B1): the append-only read-path usage-log sidecar. |
 | `journal.py` | pure | `journal_path(db)`; `append_remember`/`append_reindex`; `read_journal`/`clear_journal` | Path B (B1, ADR-19): the lock-free write-ahead journal (queued `remember`/`reindex` ops). |
 
@@ -184,9 +186,9 @@ serves static files; `web/static/` is a no-build vanilla-JS SPA.
 
 | Block | kind | Key interface |
 |---|---|---|
-| `WikiWebApp` | I/O (Kuzu/Ollama/files) | `manifest` (+ per-page `source`/`book` provenance), `get_page`, `search` (+ `hybrid`), `chat` (+ per-turn stats), `ask`/`ask_stream` (RAG for the Ask mode — non-streaming + SSE, ADR-26), `entities`/`entity` (Begriffe browser), `graph_explore`/`graph_expand`/`graph_neighborhood`, `project_info`, `communities`, `ask_global`, `run_eval`, `compare`, `health_stats`, `start_answer_eval`/`answer_eval_status`, `metrics` (ADR-20), `memory_info`/`memory_recall`/`memory_context` (Path B), `analyze`/`analyze_gaps`/`analyze_memory` (ADR-25). Serves a **10-tab, no-build SPA** (Projekt · Wiki · Graph · **Begriffe** · **Analyse** · Gedächtnis · Evaluation · System · Tutorial · Hilfe) with an **Ask** chat mode, dark theme, collapsible panels, and token-streaming answers (ADR-26). |
+| `WikiWebApp` | I/O (Kuzu/Ollama/files) | `manifest` (+ per-page `source`/`book` provenance), `get_page`, `related` (the "Verwandte Seiten" overlay + the page's entities for auto-linking, ADR-28), `search` (+ `hybrid`), `chat` (+ per-turn stats), `ask`/`ask_stream` (RAG for the Ask mode — non-streaming + SSE, ADR-26), `entities`/`entity` (Begriffe browser), `graph_explore`/`graph_expand`/`graph_neighborhood`, `project_info`, `communities`, `ask_global`, `run_eval`, `compare`, `health_stats`, `start_answer_eval`/`answer_eval_status`, `metrics` (ADR-20), `memory_info`/`memory_recall`/`memory_context` (Path B; `as_of`/`known_at`, ADR-27)/`memory_timeline` (B7), `analyze`/`analyze_gaps`/`analyze_memory` (ADR-25). Serves a **10-tab, no-build SPA** (Projekt · Wiki · Graph · **Begriffe** · **Analyse** · Gedächtnis · Evaluation · System · Tutorial · Hilfe) with an **Ask** chat mode, dark theme, collapsible panels, and token-streaming answers (ADR-26). |
 | `make_handler(app)` / `serve(app, host, port)` | I/O (http) | JSON API + static file serving on `ThreadingHTTPServer`. |
-| `web/static/{index.html, app.js, style.css, marked.min.js}` | — | SPA: 6 tabs (Projekt / Wiki / Graph / Evaluation / Tutorial / Hilfe); client-side Markdown; hand-rolled force-directed graph explorer. |
+| `web/static/{index.html, app.js, style.css, marked.min.js}` | — | SPA: 10 tabs (see `WikiWebApp`); client-side Markdown with the related-pages panel + entity auto-links (ADR-28); the Gedächtnis time view (as-of / known-at pickers, timeline); hand-rolled force-directed graph explorer. |
 
 Concurrency: the threaded server shares **one** `GraphStore` connection, guarded by the
 store's `RLock` (§8.6).
@@ -204,9 +206,9 @@ for edits + memory. Responsibilities group as:
 | **Entities** | `entities_for_page(slug)`, `pages_for_entity(query)` |
 | **Communities** | `communities()`, `community_members()`, `page_graph()`, `page_snippet()`, `upsert_communities(assignment, summaries, labels)` |
 | **Usage-memory** | `reinforce(from, to, now, boost)`, `decay(now, half_life, floor)`, `record_usage(pairs)` (writable → reinforce / read-only → log), `fold_usage(now)`, `pending_usage()` |
-| **Remembered tier (Path B)** | `remember(session_id, facts, embedder)` (dedup + **supersede** contradictions), `recall(query, embedder, k, include_superseded)` (current-only by default), `has_memory()`, `forget_all()` |
+| **Remembered tier (Path B)** | `remember(session_id, facts, embedder, now, session_date, correct, coexist)` (merge by **valid time** via `temporal.plan_merge` — reaffirm / extend / add, close or retract rivals, ADR-27), `recall(query, embedder, k, include_superseded, as_of, known_at)` (valid now ∧ believed by default), `timeline(query)`, `list_assertions()`/`memory_overview()`, `has_memory()`, `forget_all()`; one schema-tolerant `_load_assertions` + `_view` serve every reader, and `_migrate_temporal` upgrades older graphs in place |
 | **Memory consolidation (Path B / B5)** | `assertion_graph(similar_k)` (similarity over current facts), `upsert_memory_concepts(assignment, summaries, labels)` (the "sleep" pass → `MemoryConcept` themes), `memory_concepts()`, `has_memory_concepts()` |
-| **Context assembly (Path B / B6)** | `relevant_concepts(assertion_ids, limit)` (attractor themes for the activated facts), `context_for(query, embedder, identity, k, max_themes)` (the three-tier assembly → one context string, read-only + fail-soft) |
+| **Context assembly (Path B / B6)** | `relevant_concepts(assertion_ids, limit)` (attractor themes for the activated facts), `context_for(query, embedder, identity, k, max_themes, max_chars, as_of)` (the three-tier assembly → one context string with each fact's validity, read-only + fail-soft) |
 | **Incremental update** | `upsert_page(slug, text, …, embedder)` (MERGE page, replace chunks, recompute `SIMILAR_TO`) |
 | **Hybrid retrieval** | `hybrid_search(vector, k)` (vector k-NN → owning page) |
 
@@ -241,4 +243,5 @@ flowchart LR
 *Chapter complete. Cross-refs: interfaces → §8 (concepts), decisions → §9, runtime flows →
 §6. Path B **landed** its blocks: `graph/memory.py` + `graph/usage.py` (§5.2), the remembered-tier
 + usage-log methods on `GraphStore` (§5.4), and read-path `record_usage` in `RAGAgent` (§5.5) —
-authoritative graph (B0/ADR-16), read-path reinforcement (B1/ADR-17), contradiction versioning (B4/ADR-18).*
+authoritative graph (B0/ADR-16), read-path reinforcement (B1/ADR-17), contradiction versioning (B4/ADR-18),
+refined into bi-temporal validity by `graph/temporal.py` (B7/ADR-27).*

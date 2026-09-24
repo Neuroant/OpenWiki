@@ -24,8 +24,9 @@ The system is a straight, staged pipeline built around an intermediate represent
 8. **Consolidation layer** — LLM community summaries over the graph → **global search**.
 9. **Usage-memory** — decaying `REINFORCES` edges that learn which connections are used.
 10. **Agent memory (Path B)** — an authoritative *remembered tier* (`Session`/`Assertion`) captured
-    from session transcripts and recalled across sessions, with newer facts **superseding** older
-    ones, periodic **consolidation** into themes (the "sleep" pass), and **three-tier context
+    from session transcripts and recalled across sessions, **bi-temporally versioned** (when a fact
+    was true vs. when it was learned — so an out-of-order backfill lands in history and a correction is
+    distinguishable from a change), periodic **consolidation** into themes (the "sleep" pass), and **three-tier context
     assembly** (identity + activation + attractors) for a new session; gated by a per-project
     **Wiki vs Second Brain mode** (`[memory] enabled`).
 

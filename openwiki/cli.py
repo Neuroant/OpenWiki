@@ -103,6 +103,10 @@ def _build_argparser() -> argparse.ArgumentParser:
     cc_p = sub.add_parser("claude-code", parents=[common],
                           help="Scaffold a Claude Code config (.mcp.json + .claude/) wiring the project's MCP server.")
     cc_p.add_argument("--force", action="store_true", help="Overwrite existing Claude Code files.")
+    cc_p.add_argument("--into", type=Path, default=None, metavar="DIR",
+                      help="With --hooks: install ONLY the memory hooks — bound to this project — into "
+                           "DIR/.claude/settings.local.json (machine-local), e.g. the repo you work in "
+                           "with Claude Code; no MCP/command files are written there.")
     cc_p.add_argument("--hooks", action="store_true",
                       help="Also wire Path B memory hooks into .claude/settings.json — auto-inject "
                            "recalled memory on each prompt + capture the session on end/compaction "
@@ -499,6 +503,32 @@ def _build_argparser() -> argparse.ArgumentParser:
     hook_p.add_argument("event", choices=["inject", "capture"],
                         help="inject = UserPromptSubmit (recall → inject context); "
                              "capture = SessionEnd/PreCompact (remember the session).")
+    hook_p.add_argument("--project", default=None, metavar="DIR",
+                        help="Bind the hook to this OpenWiki project (else: discovered from the "
+                             "session's working directory — never the registry's active project).")
+    hook_p.add_argument("--payload", type=Path, default=None, metavar="FILE",
+                        help=argparse.SUPPRESS)   # internal: the detached capture worker's event file
+    bf_redo_help = "Re-capture days whose session is already in memory (default: skip them — resume)."
+
+    bf_p = sub.add_parser("backfill", parents=[common],
+                          help="Backfill the memory tier from Claude Code transcripts (JSONL): one "
+                               "dated session per day, so B7 orders the facts by when they happened.")
+    bf_p.add_argument("transcripts", nargs="+", type=Path,
+                      help="Claude Code transcript .jsonl file(s), or folder(s) of them "
+                           "(e.g. ~/.claude/projects/<repo>).")
+    bf_p.add_argument("--since", type=_date_arg, default=None, metavar="DATE", help="First day to include.")
+    bf_p.add_argument("--until", type=_date_arg, default=None, metavar="DATE", help="Last day to include.")
+    bf_p.add_argument("--max-chars", type=int, default=20000,
+                      help="Window size per capture call (default 20000 chars).")
+    bf_p.add_argument("--prefix", default="claude-",
+                      help="Session-id prefix; the day is appended (default: claude-YYYY-MM-DD).")
+    bf_p.add_argument("--dry-run", action="store_true",
+                      help="Only list the per-day windows — no LLM calls, no writes.")
+    bf_p.add_argument("--redo", action="store_true", help=bf_redo_help)
+    bf_p.add_argument("-i", "--index", type=Path, default=None, help="Index dir (for the embedder; default: project's).")
+    bf_p.add_argument("--graph", type=Path, default=None, help="Graph dir (default: project's graph).")
+    bf_p.add_argument("--model", default=None, help="Chat model for capture (default: manifest models.chat).")
+    bf_p.add_argument("--host", default=None, help="Ollama host URL.")
     return parser
 
 
@@ -658,13 +688,17 @@ def _mcp_command() -> list:
     return [Path(sys.executable).as_posix(), "-m", "openwiki", "mcp"]
 
 
-def _hook_command(event: str) -> str:
+def _hook_command(event: str, project_root=None, portable: bool = True) -> str:
     """The shell command string a Claude Code hook runs for OpenWiki memory
-    (``inject``/``capture``). Prefer the portable `owiki`; else the current interpreter
-    (quoted — its path may contain spaces on Windows)."""
-    if shutil.which("owiki"):
-        return f"owiki hook {event}"
-    return f'"{Path(sys.executable).as_posix()}" -m openwiki hook {event}'
+    (``inject``/``capture``), optionally **bound** to a project (``--project``) — for hooks
+    installed outside the project folder. ``portable`` prefers `owiki` on PATH; otherwise (and
+    always with ``portable=False``) the current interpreter — pinning the hook to the exact
+    OpenWiki that installed it (a stale `owiki` would fail on unknown args, and an argparse exit
+    code 2 would *block* the user's prompt). Quoted — paths may contain spaces on Windows."""
+    bind = f' --project "{Path(project_root).as_posix()}"' if project_root else ""
+    if portable and shutil.which("owiki"):
+        return f"owiki hook {event}{bind}"
+    return f'"{Path(sys.executable).as_posix()}" -m openwiki hook {event}{bind}'
 
 
 def _scaffold_opencode_for(project: Project, force: bool,
@@ -717,6 +751,22 @@ def _cmd_claude_code(args: argparse.Namespace) -> int:
              or userconfig.setting("models", "embed", None) or DEFAULT_EMBED)
     command = _mcp_command()
     hooks = getattr(args, "hooks", False)
+    into = getattr(args, "into", None)
+    if into is not None:
+        if not hooks:
+            print("error: --into installs the memory hooks — pass it together with --hooks.",
+                  file=sys.stderr)
+            return 2
+        from .claude_code_template import install_hooks
+        target = install_hooks(Path(into) / ".claude" / "settings.local.json",
+                               _hook_command("inject", project.root, portable=False),
+                               _hook_command("capture", project.root, portable=False))
+        mode = "on" if project.memory_enabled else "OFF — enable [memory] to use them"
+        print(f"Installed OpenWiki memory hooks → {target}\n"
+              f"  bound to project '{project.name}' ({project.root}); Second Brain mode is {mode}\n"
+              f"  UserPromptSubmit→inject, SessionEnd/PreCompact→capture — restart Claude Code in "
+              f"{Path(into).resolve()} (or review them with /hooks) to activate.")
+        return 0
     inject_cmd = _hook_command("inject") if hooks else ""
     capture_cmd = _hook_command("capture") if hooks else ""
     print(f"Scaffolding Claude Code config into project '{project.name}' ({project.root})")
@@ -1331,6 +1381,11 @@ def _apply_project(args: argparse.Namespace, project: Optional[Project],
         val("model", "models", "chat", DEFAULT_CHAT)
         val("host", "models", "host", DEFAULT_HOST)
     elif cmd == "ontology":
+        val("model", "models", "chat", DEFAULT_CHAT)
+        val("host", "models", "host", DEFAULT_HOST)
+    elif cmd == "backfill":
+        path("index", p.index_dir if p else None, Path("output") / "index")
+        path("graph", p.graph_path if p else None, Path("output") / "graph")
         val("model", "models", "chat", DEFAULT_CHAT)
         val("host", "models", "host", DEFAULT_HOST)
     elif cmd == "references":
@@ -2336,6 +2391,90 @@ def _cmd_remember(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_backfill(args: argparse.Namespace) -> int:
+    """Path B / B7: backfill the memory tier from Claude Code transcripts — each UTC day becomes
+    one dated session (``<prefix>YYYY-MM-DD``), cut into bounded capture windows, so the
+    valid-time merge orders facts by when they happened (a later day's change closes an earlier
+    value). Host-injected blocks + compaction summaries are skipped. Needs a writable graph."""
+    from .claude_code_template import split_transcripts_by_day
+
+    project = getattr(args, "project_obj", None)
+    if project is not None and not project.memory_enabled:
+        print(f"error: memory is disabled for project '{project.name}' (Wiki mode).", file=sys.stderr)
+        return 2
+    files: list = []
+    for spec in args.transcripts:
+        spec = Path(spec).expanduser()
+        files.extend(sorted(spec.glob("*.jsonl")) if spec.is_dir() else [spec])
+    files = [f for f in files if f.is_file()]
+    if not files:
+        print("error: no Claude Code transcript (.jsonl) found.", file=sys.stderr)
+        return 2
+    days = split_transcripts_by_day([f.read_text(encoding="utf-8", errors="ignore") for f in files],
+                                    max_chars=max(2000, int(args.max_chars)))
+    lo = format_date(args.since) if args.since is not None else ""
+    hi = format_date(args.until) if args.until is not None else "9999"
+    days = [(d, w) for d, w in days if lo <= d <= hi]
+    n_windows = sum(len(w) for _, w in days)
+    print(f"Backfill: {len(files)} transcript(s) → {len(days)} day(s), {n_windows} capture window(s)",
+          file=sys.stderr)
+    if args.dry_run or not days:
+        for day, windows in days:
+            print(f"  {args.prefix}{day}: {len(windows)} window(s), "
+                  f"{sum(len(w) for w in windows) // 1000}k chars")
+        return 0
+    if not (args.index / "index.json").is_file():
+        print(f"error: no index at {args.index} (run `openwiki build` — needed for the embedder).",
+              file=sys.stderr)
+        return 2
+    index = SemanticIndex.load(args.index)
+    if isinstance(index.embedder, OllamaEmbedder):
+        index.embedder.host = args.host.rstrip("/")
+    graph = _open_graph(args.graph, writable=True, retries=6)
+    if graph is None or not getattr(graph, "writable", False):
+        print("error: could not open the graph writable (stop `serve`/`chat` first).", file=sys.stderr)
+        if graph is not None:
+            graph.close()
+        return 2
+    chat = _capture_chat(args.model, args.host)
+    coexist = _coexist_check(args.model, args.host)
+    totals = {"facts": 0, "added": 0, "duplicates": 0, "superseded": 0, "retracted": 0, "historical": 0}
+    failed: list = []
+    skipped = 0
+    started = time.time()
+    try:
+        done = set() if args.redo else {r[0] for r in graph._rows(
+            "MATCH (s:Session)-[:ASSERTS]->(:Assertion) RETURN DISTINCT s.id;")}
+        for i, (day, windows) in enumerate(days, 1):
+            sid, sdate = f"{args.prefix}{day}", parse_date(day)
+            if sid in done:                     # resume: this day is already in memory
+                skipped += 1
+                continue
+            for j, window in enumerate(windows, 1):
+                try:                            # one bad window (timeout, garbage) never aborts the run
+                    facts = capture_session(chat, window, session_date=sdate)
+                    res = graph.remember(sid, facts, index.embedder, session_date=sdate, coexist=coexist)
+                except Exception as exc:
+                    failed.append(f"{sid}#{j}")
+                    print(f"  ! {sid} window {j}/{len(windows)} failed: {exc}", file=sys.stderr, flush=True)
+                    continue
+                for key in totals:
+                    totals[key] += res.get(key, 0)
+            print(f"  [{i}/{len(days)}] {sid}: {len(windows)} window(s) · {totals['added']} new / "
+                  f"{totals['duplicates']} dup / {totals['superseded']} superseded so far "
+                  f"({(time.time() - started) / 60:.1f} min)", file=sys.stderr, flush=True)
+    finally:
+        graph.close()
+    note = f", {skipped} day(s) already in memory skipped" if skipped else ""
+    print(f"Backfilled {len(days) - skipped} day(s): {totals['added']} new fact(s), {totals['duplicates']} "
+          f"re-affirmed, {totals['superseded']} superseded ({totals['retracted']} retracted), "
+          f"{totals['facts']} captured{note} → {args.graph}")
+    if failed:
+        print(f"  {len(failed)} window(s) failed ({', '.join(failed[:8])}{' …' if len(failed) > 8 else ''}) "
+              f"— re-run with --since <day> --redo to retry.", file=sys.stderr)
+    return 0
+
+
 def _cmd_recall(args: argparse.Namespace) -> int:
     """Path B (B6): show the remembered facts most relevant to a query."""
     project = getattr(args, "project_obj", None)
@@ -2703,17 +2842,25 @@ def _cmd_hook(args: argparse.Namespace) -> int:
     (SessionEnd/PreCompact → remember). **Always exits 0** — a hook must never block the
     session (exit 2 on UserPromptSubmit would reject the prompt). Fail-soft throughout."""
     try:
-        raw = sys.stdin.read()
-        payload = json.loads(raw) if raw.strip() else {}
+        job = getattr(args, "payload", None)
+        if job is not None:                        # the detached capture worker (see _spawn_capture)
+            payload = json.loads(Path(job).read_text(encoding="utf-8"))
+            Path(job).unlink(missing_ok=True)
+            payload["_worker"] = True
+        else:
+            raw = sys.stdin.read()
+            payload = json.loads(raw) if raw.strip() else {}
         if isinstance(payload, dict):
-            _run_hook(args.event, payload)
+            _run_hook(args.event, payload, getattr(args, "project", None))
     except Exception as exc:      # fail-soft: stderr goes to the host's debug log only
         print(f"openwiki hook '{getattr(args, 'event', '?')}': {exc}", file=sys.stderr)
     return 0
 
 
-def _run_hook(event: str, payload: dict) -> None:
-    project = Project.find(payload.get("cwd") or None)
+def _run_hook(event: str, payload: dict, project_dir=None) -> None:
+    # an explicit binding wins; else discover from the session's cwd — deliberately *not* the
+    # registry's active project (that would feed every Claude Code session into one memory)
+    project = Project.load(project_dir) if project_dir else Project.find(payload.get("cwd") or None)
     if project is None or not project.memory_enabled:
         return   # no project / Wiki mode → nothing to inject or capture
     if event == "inject":
@@ -2751,12 +2898,51 @@ def _hook_inject(project: Project, payload: dict) -> None:
             "this is not the user's current message:\n\n" + context + "\n")
 
 
+def _capture_chat(model, host) -> OllamaChat:
+    """The chat model for session capture (hook worker + backfill): a generous timeout — a
+    20k-char window takes ~1 min on a local 30B — and an output cap, so a sampling repetition
+    loop ends in bounded time instead of running into the timeout."""
+    return OllamaChat(model=model, host=host, temperature=0.2, timeout=900.0,
+                      options={"num_predict": 4096})
+
+
+def _spawn_capture(project: Project, payload: dict) -> bool:
+    """Hand the capture to a **detached** worker process and return at once: a capture is one
+    ~1-min LLM call, longer than a host hook may run (SessionEnd/PreCompact are killed after their
+    timeout). The event is parked under the project's ``.openwiki/``; the worker logs to
+    ``.openwiki/hook.log``. Returns ``False`` if the spawn failed (→ capture inline instead)."""
+    import subprocess
+    try:
+        state = project.state_dir
+        state.mkdir(parents=True, exist_ok=True)
+        job = state / f"capture-{os.getpid()}-{int(time.time() * 1000)}.json"
+        job.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        cmd = [sys.executable, "-m", "openwiki", "hook", "capture",
+               "--project", str(project.root), "--payload", str(job)]
+        log = (state / "hook.log").open("a", encoding="utf-8")
+        kw = {"stdin": subprocess.DEVNULL, "stdout": log, "stderr": log, "close_fds": True}
+        if os.name == "nt":
+            kw["creationflags"] = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+        else:
+            kw["start_new_session"] = True
+        subprocess.Popen(cmd, **kw)
+        return True
+    except Exception as exc:       # never let the hook fail — fall back to inline capture
+        print(f"openwiki hook: could not spawn capture worker ({exc}); capturing inline",
+              file=sys.stderr)
+        return False
+
+
 def _hook_capture(project: Project, payload: dict) -> None:
     """SessionEnd/PreCompact → capture the transcript into the remembered tier (best-effort).
-    If the graph is locked by a running read-only serve/chat, **queue** the facts to the
-    write-ahead journal instead of dropping them — the next writable pass folds them in."""
+    The hook itself only **spawns a detached worker** and returns (the LLM call outlives a hook's
+    timeout); the worker captures *first* and only then opens the graph writable (so the exclusive
+    Kuzu lock is held for the short write, not the ~1-min LLM call). If the graph is locked by a
+    running serve/chat, the facts are **queued** to the write-ahead journal instead of dropped."""
     from .claude_code_template import parse_claude_transcript
 
+    if not payload.get("_worker") and _spawn_capture(project, payload):
+        return
     tpath = payload.get("transcript_path")
     embedder = _hook_embedder(project)
     if not tpath or not Path(tpath).is_file() or embedder is None or not project.graph_path.exists():
@@ -2764,18 +2950,19 @@ def _hook_capture(project: Project, payload: dict) -> None:
     transcript = parse_claude_transcript(Path(tpath).read_text(encoding="utf-8", errors="ignore"))
     if not transcript.strip():
         return
-    graph = _open_graph(project.graph_path, writable=True, retries=4)
+    model = project.setting("models", "chat", DEFAULT_CHAT)
+    host = project.setting("models", "host", DEFAULT_HOST)
+    # the session ends now → today is the date relative mentions ("since yesterday") resolve against
+    facts = capture_session(_capture_chat(model, host), transcript, session_date=int(time.time()))
+    if not facts:
+        return
+    sid = str(payload.get("session_id") or "session")
+    graph = _open_graph(project.graph_path, writable=True, retries=6)
     if graph is None:
         return
     try:
-        chat = OllamaChat(model=project.setting("models", "chat", DEFAULT_CHAT),
-                          host=project.setting("models", "host", DEFAULT_HOST), temperature=0.2)
-        # the session ends now → today is the date relative mentions ("since yesterday") resolve against
-        facts = capture_session(chat, transcript, session_date=int(time.time()))
-        sid = str(payload.get("session_id") or "session")
         if getattr(graph, "writable", False):
-            coexist = _coexist_check(project.setting("models", "chat", DEFAULT_CHAT),
-                                     project.setting("models", "host", DEFAULT_HOST))
+            coexist = _coexist_check(model, host)
             graph.remember(sid, facts, embedder, coexist=coexist)
             try:
                 graph.fold_journal(embedder, coexist=coexist)
@@ -2901,6 +3088,7 @@ _DISPATCH = {
     "mcp": _cmd_mcp,
     "graph-build": _cmd_graph_build,
     "references": _cmd_references,
+    "backfill": _cmd_backfill,
     "communities": _cmd_communities,
     "decay": _cmd_decay,
     "consolidate": _cmd_consolidate,

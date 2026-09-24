@@ -14,6 +14,7 @@ and the model names (only used in the help cheat-sheet text). Parallels
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 CLAUDE_CODE_FILES = (
@@ -134,12 +135,23 @@ def _text_of(content) -> str:
     return ""
 
 
-def parse_claude_transcript(text: str, max_chars: int = 20000) -> str:
-    """Convert a Claude Code transcript (JSONL — one message per line) into a plain
-    ``User: … / Assistant: …`` transcript for memory capture (B6 host hook). Lenient:
-    skips lines it can't parse and non-text content (tool calls/results); returns the
-    **last** ``max_chars`` (the most recent conversation, bounded)."""
-    turns: list = []
+# Host-injected blocks inside user messages — system reminders (they carry e.g. CLAUDE.md), slash
+# command echoes, local command output. Not the user's words: stripped before capture, else they'd
+# be remembered as "facts".
+_HOST_BLOCK = re.compile(
+    r"<(system-reminder|command-name|command-message|command-args|local-command-stdout|"
+    r"local-command-stderr|local-command-caveat)>.*?</\1>", re.DOTALL)
+
+
+def _clean(body: str) -> str:
+    return _HOST_BLOCK.sub("", body or "").strip()
+
+
+def iter_claude_turns(text: str):
+    """Yield ``(timestamp, "User: …" / "Assistant: …")`` per text-bearing message of a Claude
+    Code transcript (JSONL). Lenient: skips unparseable lines, non-text content (tool
+    calls/results), host-injected blocks (system reminders, command echoes) and compaction
+    summaries (they restate earlier turns). ``timestamp`` is the line's ISO string or ``""``."""
     for line in text.splitlines():
         line = line.strip()
         if not line:
@@ -148,17 +160,67 @@ def parse_claude_transcript(text: str, max_chars: int = 20000) -> str:
             obj = json.loads(line)
         except ValueError:
             continue
-        if not isinstance(obj, dict):
+        # isCompactSummary restates earlier turns; isMeta marks host-expanded skill / slash-command
+        # bodies ("Please analyze this codebase…") — instructions *to* the model, not the user's words
+        if not isinstance(obj, dict) or obj.get("isCompactSummary") or obj.get("isMeta"):
             continue
         msg = obj.get("message") if isinstance(obj.get("message"), dict) else obj
         role = str(msg.get("role") or obj.get("type") or "").lower()
         if role not in ("user", "assistant"):
             continue
-        body = _text_of(msg.get("content"))
+        body = _clean(_text_of(msg.get("content")))
         if body:
-            turns.append(f"{role.capitalize()}: {body}")
-    transcript = "\n\n".join(turns).strip()
+            yield str(obj.get("timestamp") or ""), f"{role.capitalize()}: {body}"
+
+
+def parse_claude_transcript(text: str, max_chars: int = 20000) -> str:
+    """Convert a Claude Code transcript (JSONL — one message per line) into a plain
+    ``User: … / Assistant: …`` transcript for memory capture (B6 host hook) — see
+    :func:`iter_claude_turns` for what is skipped; returns the **last** ``max_chars`` (the
+    most recent conversation, bounded)."""
+    transcript = "\n\n".join(turn for _, turn in iter_claude_turns(text)).strip()
     return transcript[-max_chars:] if len(transcript) > max_chars else transcript
+
+
+def split_transcripts_by_day(texts, max_chars: int = 20000) -> list:
+    """B7 backfill: Claude Code transcripts (JSONL texts) → ``[(YYYY-MM-DD, [window, …]), …]``,
+    oldest day first — every turn grouped by the UTC day of its timestamp (turns without one
+    are dropped: they can't be dated), each day cut into windows of at most ``max_chars`` at turn
+    boundaries (an over-long single turn is truncated), so each window is one capture call."""
+    dated = sorted((ts, turn) for text in texts for ts, turn in iter_claude_turns(text)
+                   if len(ts) >= 10)
+    days: dict = {}
+    for ts, turn in dated:
+        days.setdefault(ts[:10], []).append(turn[:max_chars])
+    out = []
+    for day in sorted(days):
+        windows, cur = [], ""
+        for turn in days[day]:
+            if cur and len(cur) + 2 + len(turn) > max_chars:
+                windows.append(cur)
+                cur = turn
+            else:
+                cur = f"{cur}\n\n{turn}" if cur else turn
+        if cur:
+            windows.append(cur)
+        out.append((day, windows))
+    return out
+
+
+def install_hooks(settings_file, inject_command: str, capture_command: str) -> Path:
+    """Merge the memory hooks into a Claude Code settings file (created if absent; other
+    settings preserved). Returns the path written."""
+    settings_file = Path(settings_file)
+    existing: dict = {}
+    if settings_file.is_file():
+        try:
+            existing = json.loads(settings_file.read_text(encoding="utf-8"))
+        except ValueError:
+            existing = {}
+    merged = merge_hooks(existing, inject_command, capture_command)
+    settings_file.parent.mkdir(parents=True, exist_ok=True)
+    settings_file.write_text(json.dumps(merged, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    return settings_file
 
 
 def hooks_config(inject_command: str, capture_command: str) -> dict:
@@ -216,15 +278,5 @@ def scaffold_claude_code(root, *, chat_model: str, embed_model: str, mcp_command
         target.write_text(content, encoding="utf-8")
         written.append(target)
     if inject_command and capture_command:
-        settings = root / ".claude" / "settings.json"
-        existing: dict = {}
-        if settings.is_file():
-            try:
-                existing = json.loads(settings.read_text(encoding="utf-8"))
-            except ValueError:
-                existing = {}
-        merged = merge_hooks(existing, inject_command, capture_command)
-        settings.parent.mkdir(parents=True, exist_ok=True)
-        settings.write_text(json.dumps(merged, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-        written.append(settings)
+        written.append(install_hooks(root / ".claude" / "settings.json", inject_command, capture_command))
     return written, skipped

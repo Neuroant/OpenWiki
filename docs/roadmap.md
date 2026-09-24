@@ -810,6 +810,21 @@ The **genuine gaps** it surfaces — adopted in OpenWiki's measured, local, mini
   (backfill, point-in-time, change-date, correction, known-at, multi-valued, planned, control) through the
   cross-session harness; before/after against v0.80.0 in a worktree: **7/13 → 13/13** (numbers + caveats in
   `path-b-memory.md` §12.1). Small and hand-written — a direction check, not a benchmark.
+- **Dogfooding on real data. ✅ (v0.84).** A Second Brain project over OpenWiki itself
+  (`G:\OpenWiki\Projects\openwiki-dev`: the repo + docs as a code-corpus wiki, memory on), wired into this
+  repo's Claude Code sessions (`claude-code --hooks --into`, bound + pinned, capture in a detached worker)
+  and **backfilled** from the full development history (`openwiki backfill`: 28 dated days → 73 windows →
+  **1,420 facts** in 110 min, 0 failed windows). Findings (details: `path-b-memory.md` §12.2): the pipeline
+  holds on real history and durable facts come back ("embedding uses bge-m3", "Python must be 3.13"), but
+  **fact identity** is the dominant failure — 43 version facts landed on **23 different subject+predicate
+  keys**, so B7 never saw them as the same fact (23 stay "current"); ~2% obvious session trivia; 43
+  "retractions" are a day-granularity artifact (same-day changes share one `valid_from`).
+- **B9 — Fact identity (P0, next; from the dogfooding).** Resolve paraphrased subjects/predicates ("project
+  version is" / "has version" / "is versioned as") onto one attribute key before the valid-time merge —
+  embedding candidates over `subject predicate` + one LLM verify per unmatched fact (the ADR-23 entity-
+  resolution pattern, applied to attributes). Plus the cheap follow-ups: per-window timestamps for backfill
+  (intra-day order), decay by *stated* time for backfilled facts, and a capture prompt that drops session
+  trivia. Measure on the backfilled memory: version-key fragmentation 23 → ~1.
 - **B8 — Spreading-activation priming (P2, measure-first).** Session-scoped activation boost over graph
   neighbors of a retrieved node (+ decay), to resolve ambiguous follow-ups. Close to REINFORCES+decay but
   intra-session; A/B against plain recall before trusting it (the GraphRAG finding is the cautionary tale).

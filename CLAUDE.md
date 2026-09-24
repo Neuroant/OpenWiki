@@ -255,6 +255,29 @@ warm-start `seed`) + `summarize_facts`; `MemoryConcept`/`CONSOLIDATES` are a *de
 (recomputed each pass, not snapshotted across rebuilds — like `Community`). Reports
 `N theme(s) (M summarized, K reused)`.
 
+**Backfill memory from Claude Code history** — turn existing Claude Code transcripts (JSONL) into the
+memory tier, **one dated session per UTC day** (`claude-YYYY-MM-DD`), each day cut into bounded capture
+windows, so B7's valid-time merge orders the facts by when they happened (a later day's change closes an
+earlier value). System reminders, slash-command echoes, tool output, compaction summaries and
+`isMeta` messages (host-expanded skill/command bodies — instructions *to* the model, not the user's words)
+are stripped (`claude_code_template.iter_claude_turns` / `split_transcripts_by_day`). **Resumable +
+robust:** days whose session is already in memory are skipped (`--redo` to re-capture), and a failed
+window (timeout, garbage) is logged and skipped rather than aborting the run; capture uses
+`cli._capture_chat` (900 s timeout + a `num_predict` cap, so a sampling repetition loop ends bounded):
+```
+.venv\Scripts\python -m openwiki backfill ~/.claude/projects/<repo-slug> --dry-run   # list days/windows
+.venv\Scripts\python -m openwiki backfill ~/.claude/projects/<repo-slug>             # capture (slow: 1 LLM call/window)
+```
+Options: `--since/--until DATE`, `--max-chars N` (window, default 20000), `--prefix`, `--dry-run`, `--redo`,
+`-i/--index`, `--graph`, `--model`, `--host`. Needs a writable graph + Second Brain mode.
+
+**Second Brain for the repo you work in** — `claude-code --hooks --into DIR` installs *only* the memory
+hooks, **bound** to the current project (`owiki hook … --project <root>`) and **pinned** to the installing
+interpreter, into `DIR/.claude/settings.local.json` (machine-local, gitignored) — so Claude Code sessions
+in a code repo feed a separate memory project without putting a manifest in the repo. Dogfooded on
+OpenWiki itself: project `G:\OpenWiki\Projects\openwiki-dev` (this repo + docs as a code-corpus wiki,
+memory on), hooks in this repo's `.claude/settings.local.json`, backfilled from the development history.
+
 **Assemble a session's memory context (B6)** — the Path B payoff: build the context for a query
 from the **three memory tiers** — **identity** (the project's, or `[memory] identity`), **activation**
 (decay-weighted `recall`), and **attractors** (the B5 themes the recalled facts belong to). *Load the
@@ -395,9 +418,11 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   parser: a **directory** → a root **overview page** (repo name + file tree) + one
   page per source file (its content in a fenced code block, language from the
   extension; `.md`/`.rst`/`.txt` kept as prose), file title = repo-relative path,
-  reusing `sections_to_document`. `os.walk` prunes noisy dirs (`.git`/`node_modules`/
-  `__pycache__`/build dirs + dotfolders), an extension allowlist + name matches
-  select files, and binary (NUL-byte sniff) / oversized files are skipped.
+  reusing `sections_to_document`. In a **git repo** the file set is `git ls-files --cached --others
+  --exclude-standard` (so `.gitignore`d build outputs / data dumps never enter the wiki — e.g. this
+  repo's `output/`); otherwise `os.walk` prunes noisy dirs (`.git`/`node_modules`/`__pycache__`/build
+  dirs + dotfolders). Either way an extension allowlist + name matches select files, and binary
+  (NUL-byte sniff) / oversized files are skipped.
 - **`openwiki/sources.py`** — `parse_source(source, …)` dispatches by type (URL or
   `.html` → WebParser; a **directory** → CodeParser; `.md`/`.txt` → MarkdownParser;
   `.pdf` → PDFParser, imported **lazily** so a non-PDF setup needs no PyMuPDF) +
@@ -876,8 +901,20 @@ http — count, p50/p95, total time, token in/out) + a live recent-events table,
   `render_files`/`scaffold_claude_code` shape; shares `cli._mcp_command()`. With
   **`--hooks`** it also merges the **B6 host-lifecycle memory hooks** into `.claude/settings.json`
   (`merge_hooks`/`hooks_config`: `UserPromptSubmit`→`owiki hook inject`, `SessionEnd`/`PreCompact`→
-  `owiki hook capture`), preserving other settings. `parse_claude_transcript` (pure) turns the
-  Claude Code transcript JSONL into a text transcript for capture. The hooks run `cli._cmd_hook`
+  `owiki hook capture`), preserving other settings (`install_hooks`). **`--into DIR`** writes *only*
+  the hooks into `DIR/.claude/settings.local.json`, bound with `--project` and pinned to the current
+  interpreter (`_hook_command(portable=False)` — a stale `owiki` on PATH would fail on new args, and an
+  argparse exit 2 would *block* the prompt). The hook resolves its project from `--project`, else the
+  session `cwd` — **never** the registry's active project. `parse_claude_transcript` (pure, via
+  `iter_claude_turns`) turns the Claude Code transcript JSONL into a text transcript for capture,
+  stripping host-injected blocks (`<system-reminder>` — which carries CLAUDE.md —, command echoes,
+  local-command output), compaction summaries and `isMeta` skill/command expansions. **Capture runs
+  detached:** the `capture` hook only parks the event under the project's `.openwiki/` and spawns a
+  detached worker (`owiki hook capture --payload FILE`, logging to `.openwiki/hook.log`) — a capture is a
+  ~1-min LLM call on a local 30B, longer than a SessionEnd/PreCompact hook may run — and the worker
+  captures *before* opening the graph writable, so Kuzu's exclusive lock is held only for the short
+  write (not the LLM call, which would otherwise block every reader, incl. the next prompt's inject).
+  The hooks run `cli._cmd_hook`
   (reads the event JSON on stdin, **always exits 0** — fail-soft — else exit 2 would reject the
   prompt): `inject` = `GraphStore.context_for(prompt)` → stdout (Claude Code injects it), `capture`
   = parse transcript → `capture_session` → `remember` (skipped if the graph is write-locked). Gated
@@ -885,7 +922,8 @@ http — count, p50/p95, total time, token in/out) + a live recent-events table,
 - **`openwiki/cli.py`** — argparse CLI with `init`, `build`, `status`, `project`
   (`list`/`use`/`add`/`remove`/`add-source`), `opencode`, `claude-code`, `ontology`, `ingest`,
   `build-wiki`, `index`, `search`, `eval`, `ask` (`--global` = global search),
-  `chat`, `graph-build`, `communities`, `decay`, `remember`, `recall`, `consolidate`, `context`,
+  `chat`, `graph-build`, `references`, `communities`, `decay`, `remember`, `backfill`, `recall`,
+  `consolidate`, `context`,
   `analyze` (world-model analysis — `coupling` | `gaps` | `memory`, offline), `hook` (host-lifecycle
   memory hook — reads the event JSON on stdin), `serve`, and `mcp` subcommands. A shared
   `--project` (parent parser) + `_apply_project(args, project)` fill unset

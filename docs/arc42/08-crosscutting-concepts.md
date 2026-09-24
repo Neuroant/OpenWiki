@@ -193,7 +193,9 @@ Alongside the document tier, a project in **Second Brain mode** (`[memory] enabl
   session context: **identity** (the project / `[memory] identity`) + **activation** (`recall`) +
   **attractors** (the themes the recalled facts belong to). Read-only + **fail-soft** (any tier may be
   empty). Exposed as the `context` CLI, the MCP `wiki_memory` tool, and — via `claude-code --hooks` —
-  **Claude Code host hooks** (`UserPromptSubmit`→inject, `SessionEnd`/`PreCompact`→capture, through the
+  **Claude Code host hooks** (installable into any repo via `claude-code --hooks --into DIR`, bound to a
+  memory project and pinned to the installing interpreter; capture runs in a detached worker that takes
+  the graph lock only for the write — v0.84; `UserPromptSubmit`→inject, `SessionEnd`/`PreCompact`→capture, through the
   fail-soft `owiki hook` command), so memory flows automatically. The cross-session eval scores it
   ("assembled" beats raw-log). *Load the concentrate, not the log.*
 

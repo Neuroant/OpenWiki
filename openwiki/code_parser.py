@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
+import subprocess
 from pathlib import Path
 from typing import Optional, Union
 
@@ -71,12 +73,37 @@ def _is_text(path: Path, max_bytes: int) -> bool:
         return False
 
 
+def _git_files(root: Path) -> Optional[list]:
+    """Tracked + untracked-but-not-ignored files of a git work tree (``git ls-files``) —
+    so a repo wiki honors ``.gitignore`` (build outputs, data dumps, local artifacts) without
+    reimplementing gitignore matching. ``None`` when ``root`` isn't a git work tree's top or
+    git is unavailable → the caller walks the directory instead."""
+    if not (root / ".git").exists() or not shutil.which("git"):
+        return None
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(root), "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+            capture_output=True, timeout=60, check=True).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return [root / rel for rel in out.decode("utf-8", errors="replace").split("\0") if rel]
+
+
 def collect_files(root, max_bytes: int = 500_000) -> list[Path]:
     """The source files under ``root`` a repo wiki would include: extension/name
     allowlist, noisy dirs (`.git`/`node_modules`/…/dotfolders) and binary/oversized
-    files pruned. Sorted by POSIX relative path (a valid pre-order over the tree).
-    Shared by :class:`CodeParser` and the build fingerprint."""
+    files pruned — and, in a git repo, anything ``.gitignore``d (via ``git ls-files``).
+    Sorted by POSIX relative path (a valid pre-order over the tree). Shared by
+    :class:`CodeParser` and the build fingerprint."""
     root = Path(root)
+    tracked = _git_files(root)
+    if tracked is not None:
+        found = [p for p in tracked
+                 if not any(part in _EXCLUDE_DIRS or part.startswith(".")
+                            for part in p.relative_to(root).parts[:-1])
+                 and p.is_file() and _included(p) and _is_text(p, max_bytes)]
+        found.sort(key=lambda p: p.relative_to(root).as_posix())
+        return found
     found: list[Path] = []
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = sorted(d for d in dirnames

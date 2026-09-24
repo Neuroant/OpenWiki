@@ -745,6 +745,39 @@ approximate if an interval is re-closed later (rows are updated in place, Graphi
 Measured above (v0.82, `examples/eval_temporal.jsonl`).
 Decision record: arc42 [ADR-27](arc42/09-architecture-decisions.md#adr-27).
 
+### 12.2 Real data (v0.84): OpenWiki's own development history
+
+**Setup.** Project `openwiki-dev` = the OpenWiki repo as a code-corpus wiki (131 pages / 1,207 chunks; the
+code parser now honors `.gitignore`, so `output/` stays out) with memory on. `claude-code --hooks --into
+<repo>` installs the memory hooks into the repo's `.claude/settings.local.json` — bound to the project
+(`--project`) and pinned to the installing interpreter (a stale `owiki` 0.45 on PATH would have failed; an
+argparse exit 2 on `UserPromptSubmit` *blocks the prompt*). Capture runs in a **detached worker** (a capture
+is a ~1-min LLM call, longer than a SessionEnd/PreCompact hook may run) that captures *before* taking the
+graph's exclusive lock. `openwiki backfill` turned the development transcript (1.4 M chars since 2026-07-31)
+into 28 dated sessions → 73 windows, skipping host-injected text: system reminders, command echoes,
+compaction summaries and `isMeta` skill expansions — the first run captured the `/init` skill prompt as
+"facts" ("CLAUDE.md does not include obvious instructions") until that was fixed.
+
+**Result.** 1,420 facts in 110 min (1 timeout in the first run → per-window error tolerance + an output
+cap; 0 failures after). 58 superseded (15 world changes, 43 retractions), 317 subjects / 768 predicates.
+Durable facts recall well ("embedding uses bge-m3 (since 2026-07-31)", "Python version must be 3.13").
+
+**Findings.**
+1. **Fact identity is the dominant failure.** 43 version facts sit on **23 distinct subject+predicate keys**
+   ("OpenWiki project | version", "project | has version", "graph layer | is versioned as" …) — the merge
+   only recognizes exact normalized matches, so 23 remain "current". The synthetic eval never showed this
+   (its transcripts repeat one phrasing). → **B9**: resolve paraphrased attribute keys (embedding candidates
+   + LLM verify, the ADR-23 pattern) before the valid-time merge.
+2. **Day granularity.** Backfilled windows of one day share `valid_from` = that midnight, so an intra-day
+   change reads as a same-instant conflict → retraction (43, clustered on the longest days). → use each
+   window's first-turn timestamp.
+3. **Recency.** Backfilled facts are all "hot": decay counts from the record time (today), not from when the
+   fact was stated. → decay from the stated (valid) time for backfilled facts.
+4. **Noise is modest** (~2% obvious session trivia: task paths, test counts, pushes) but visible in
+   injected context; retrieval over short triples also ranks lexical near-misses ("chat opens read-only")
+   above the answer ("default chat model is …"). → tighten the capture prompt; consider consolidation
+   (`consolidate` → themes) for the attractor tier.
+
 ---
 
 *Cross-refs: overview → [`docs/roadmap.md`](roadmap.md#path-b--the-second-brain-memory-model);

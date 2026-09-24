@@ -8,7 +8,7 @@ build-backend = "setuptools.build_meta"
 # LICENSE file) before any public PyPI upload; the release workflow is manual for that reason.
 [project]
 name = "owiki"
-version = "0.83.0"
+version = "0.84.0"
 description = "OpenWiki — build agentic wikis: turn documents into a searchable, graph-linked, agent-editable knowledge base (local Ollama)."
 readme = "README.md"
 requires-python = ">=3.10,<3.14"

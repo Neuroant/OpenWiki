@@ -733,14 +733,48 @@ function memReasonHtml(data) {
     Aktiviere den Second-Brain-Modus mit <code>[memory] enabled = true</code> in <code>openwiki.toml</code>.</p>`;
 }
 
+// B7 bi-temporal: epoch seconds → YYYY-MM-DD (UTC), a fact's validity interval, its status badge
+function memDate(s) { return s == null ? "" : new Date(s * 1000).toISOString().slice(0, 10); }
+function memInterval(f) {
+  if (f.valid_from == null) return "";
+  return f.valid_to == null ? `seit ${memDate(f.valid_from)}` : `${memDate(f.valid_from)} → ${memDate(f.valid_to)}`;
+}
+const MEM_STATUS = {
+  past: ["sup", "überholt", "Gültigkeit beendet — die Welt hat sich geändert"],
+  retracted: ["ret", "zurückgezogen", "korrigiert — war nie wahr"],
+  future: ["plan", "geplant", "gilt erst ab dem Startdatum"],
+};
+function memStatusBadge(status) {
+  const b = MEM_STATUS[status];
+  return b ? `<span class="mem-badge ${b[0]}" title="${b[2]}">${b[1]}</span>` : "";
+}
+
 function memFactRow(f) {
+  const out = f.in_view === false || (f.in_view == null && f.superseded);   // outside the requested view
   const badges = [];
-  if (f.superseded) badges.push(`<span class="mem-badge sup">überholt</span>`);
+  if (out) badges.push(memStatusBadge(f.status || "past"));
   if (f.confidence > 1) badges.push(`<span class="mem-badge conf" title="mehrfach bestätigt">×${f.confidence}</span>`);
   const sc = (f.score != null) ? `<span class="mem-score" title="Relevanz (cos ${f.cos})">${f.score}</span>` : "";
-  return `<div class="mem-fact${f.superseded ? " is-sup" : ""}">${sc}
+  const when = memInterval(f);
+  return `<div class="mem-fact${out ? " is-sup" : ""}">${sc}
     <span class="mem-triple"><b>${escapeHtml(f.subject)}</b> ${escapeHtml(f.predicate)} <b>${escapeHtml(f.object)}</b></span>
+    ${when ? `<span class="mem-when">${when}</span>` : ""}
     <span class="mem-src">[${escapeHtml(f.session_id || "?")}]</span> ${badges.join(" ")}</div>`;
+}
+
+function memTimelineHtml(groups) {
+  if (!groups.length) return `<p class="muted">Keine passenden Erinnerungen.</p>`;
+  const mark = { current: "●", past: "○", future: "◌", retracted: "✗" };
+  return groups.map((g) => `
+    <div class="mem-tl"><div class="mem-tl-h"><b>${escapeHtml(g.subject)}</b> ${escapeHtml(g.predicate)} …
+      <span class="muted">· Treffer ${g.cos}</span></div>
+      ${g.records.map((r) => `<div class="mem-tl-row st-${r.status}">
+        <span class="mem-tl-mark" title="${r.status}">${mark[r.status] || "?"}</span>
+        <span class="mem-tl-when">${memInterval(r) || "?"}</span>
+        <b class="mem-tl-obj">${escapeHtml(r.object)}</b>
+        <span class="mem-src">erfasst ${memDate(r.created_at)}${r.expired_at != null ? ", zurückgezogen " + memDate(r.expired_at) : ""} · ${escapeHtml(r.session_id || "?")}</span>
+        ${memStatusBadge(r.status)}</div>`).join("")}</div>`).join("") +
+    `<div class="muted mem-tl-legend">● aktuell · ○ überholt · ◌ geplant · ✗ zurückgezogen</div>`;
 }
 
 function renderMemoryView(data) {
@@ -751,6 +785,8 @@ function renderMemoryView(data) {
     <span class="mem-chip"><b>${s.sessions || 0}</b> Sitzungen</span>
     <span class="mem-chip"><b>${s.assertions || 0}</b> Fakten</span>
     <span class="mem-chip"><b>${s.superseded || 0}</b> überholt</span>
+    ${s.retracted ? `<span class="mem-chip"><b>${s.retracted}</b> zurückgezogen</span>` : ""}
+    ${s.planned ? `<span class="mem-chip"><b>${s.planned}</b> geplant</span>` : ""}
     <span class="mem-chip"><b>${s.themes || 0}</b> Themen</span></div>`;
 
   const recallBox = data.has_embedder ? `
@@ -758,6 +794,14 @@ function renderMemoryView(data) {
       <input id="mem-q" type="text" placeholder="Woran soll ich mich erinnern? (z. B. welche Modelle nutzen wir?)" />
       <button id="mem-recall-btn">Abrufen</button>
       <button id="mem-context-btn" class="secondary">Kontext bauen</button>
+      <button id="mem-timeline-btn" class="secondary" title="Alle Gültigkeitsintervalle der passendsten Fakten">Verlauf</button>
+    </div>
+    <div class="mem-when-ctl">
+      <label title="Welche Fakten galten an diesem Tag? (Gültigkeitszeit)">Stand am
+        <input type="date" id="mem-asof" /></label>
+      <label title="Was hatte OpenWiki an diesem Tag gespeichert — vor späteren Korrekturen? (Transaktionszeit)">Wissensstand vom
+        <input type="date" id="mem-knownat" /></label>
+      <button id="mem-when-clear" class="linkish" type="button">heute</button>
     </div>
     <div id="mem-out" class="mem-out" hidden></div>`
     : `<p class="muted">Kein Suchindex geladen — Abruf und Kontext sind nicht verfügbar (starte den Server mit <code>-i</code>).</p>`;
@@ -772,9 +816,10 @@ function renderMemoryView(data) {
   const rows = (data.assertions || []).map((f) => `
     <tr class="${f.superseded ? "sup" : ""}">
       <td><b>${escapeHtml(f.subject)}</b></td><td>${escapeHtml(f.predicate)}</td>
-      <td><b>${escapeHtml(f.object)}</b></td><td class="m-name">${escapeHtml(f.session_id || "")}</td>
+      <td><b>${escapeHtml(f.object)}</b></td><td class="m-when">${memInterval(f)}</td>
+      <td class="m-name">${escapeHtml(f.session_id || "")}</td>
       <td class="num">${f.confidence}</td>
-      <td>${f.superseded ? '<span class="mem-badge sup">überholt</span>' : ""}</td></tr>`).join("");
+      <td>${memStatusBadge(f.status || (f.superseded ? "past" : ""))}</td></tr>`).join("");
 
   return `<div class="mem-head"><strong>Gedächtnis</strong>
       <span class="muted">Path B · Second Brain — was frühere Sitzungen hinterlassen haben</span></div>
@@ -785,8 +830,8 @@ function renderMemoryView(data) {
     <h3 class="mem-h3">Erinnerte Fakten
       <label class="mem-toggle"><input type="checkbox" id="mem-show-sup" /> überholte zeigen</label></h3>
     <table class="mem-table" id="mem-table"><thead><tr>
-      <th>Subjekt</th><th>Prädikat</th><th>Objekt</th><th>Sitzung</th><th>Konfidenz</th><th></th></tr></thead>
-      <tbody>${rows || `<tr><td colspan="6" class="muted">—</td></tr>`}</tbody></table>`;
+      <th>Subjekt</th><th>Prädikat</th><th>Objekt</th><th>Gültig</th><th>Sitzung</th><th>Konfidenz</th><th></th></tr></thead>
+      <tbody>${rows || `<tr><td colspan="7" class="muted">—</td></tr>`}</tbody></table>`;
 }
 
 async function renderMemory() {
@@ -815,22 +860,30 @@ function wireMemory() {
   const q = $("#mem-q");
   const out = $("#mem-out");
   if (!q) return;
+  const asOf = $("#mem-asof"), knownAt = $("#mem-knownat");
   const run = async (mode) => {
     const query = q.value.trim();
     if (!query) return;
     out.hidden = false;
     out.innerHTML = `<p class="muted">…</p>`;
+    const as_of = asOf.value || null, known_at = knownAt.value || null;
+    const view = [as_of ? `gültig am ${as_of}` : "", known_at ? `Wissensstand vom ${known_at}` : ""]
+      .filter(Boolean).join(" · ");
+    const viewNote = view ? `<div class="mem-ctx-h muted">Zeitpunkt: ${view}</div>` : "";
     try {
       if (mode === "context") {
-        const d = await postJSON("/api/context", { query });
-        out.innerHTML = `<div class="mem-ctx-h muted">Zusammengesetzter Kontext${d.budget ? " · Budget " + d.budget + " Zeichen" : ""}</div>
+        const d = await postJSON("/api/context", { query, as_of });
+        out.innerHTML = `<div class="mem-ctx-h muted">Zusammengesetzter Kontext${d.budget ? " · Budget " + d.budget + " Zeichen" : ""}${as_of ? " · gültig am " + as_of : ""}</div>
           <pre class="mem-context">${escapeHtml(d.context || "(leer)")}</pre>`;
+      } else if (mode === "timeline") {
+        const d = await postJSON("/api/timeline", { query });
+        out.innerHTML = memTimelineHtml(d.groups || []);
       } else {
-        const d = await postJSON("/api/recall", { query, k: 8 });
+        const d = await postJSON("/api/recall", { query, k: 8, as_of, known_at });
         const facts = d.facts || [];
-        out.innerHTML = facts.length
+        out.innerHTML = viewNote + (facts.length
           ? `<div class="mem-facts">${facts.map(memFactRow).join("")}</div>`
-          : `<p class="muted">Keine passenden Erinnerungen.</p>`;
+          : `<p class="muted">Keine passenden Erinnerungen${view ? " zu diesem Zeitpunkt" : ""}.</p>`);
       }
     } catch (e) {
       out.innerHTML = `<p class="muted">Fehler: ${escapeHtml(e.message)}</p>`;
@@ -838,6 +891,8 @@ function wireMemory() {
   };
   $("#mem-recall-btn").addEventListener("click", () => run("recall"));
   $("#mem-context-btn").addEventListener("click", () => run("context"));
+  $("#mem-timeline-btn").addEventListener("click", () => run("timeline"));
+  $("#mem-when-clear").addEventListener("click", () => { asOf.value = ""; knownAt.value = ""; run("recall"); });
   q.addEventListener("keydown", (e) => { if (e.key === "Enter") run("recall"); });
 }
 async function loadDoc(name) {

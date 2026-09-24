@@ -705,6 +705,40 @@ same instant). The first writable `remember` `ALTER`s the columns in and writes 
 (`_migrate_temporal`, idempotent). B0 snapshot/restore carries the new columns; journal records carry per-fact
 `valid_from`/`cardinality` + `session_date`/`correct`, and the fold honors each record's own time.
 
+**Measured (v0.82).** `examples/eval_temporal.jsonl` — 13 scenarios in 8 kinds, run through the
+cross-session harness (`owiki eval --cross-session --eval-set examples/eval_temporal.jsonl`), qwen3:30b +
+bge-m3, task success of the **assembled** memory context. *Before* = v0.80.0's own harness + memory tier
+(from a worktree; same transcripts, the dates only inside the text), run twice; all runs re-scored with the
+same scorer:
+
+| kind | n | v0.80 (run 1 / 2) | v0.82 w/o coexistence check | v0.82 |
+|---|---|---|---|---|
+| backfill | 2 | 0 / 0 | 2 | **2** |
+| point-in-time | 2 | 1 / 1 | 2 | **2** |
+| change-date | 2 | 1 / 1 | 2 | **2** |
+| correction | 2 | 2 / 2 | 2 | **2** |
+| known-at | 1 | 0 / 0 | 1 | **1** |
+| multi-valued | 1 | 0 / 0 | 0 | **1** |
+| planned | 2 | 2 / 2 | 2 | **2** |
+| control (no dates) | 1 | 1 / 1 | 1 | **1** |
+| **all** | 13 | **7 / 7** | **12** | **13** |
+
+Cold stays 0/13 and raw-log 13/13 throughout (tiny transcripts — raw-log's weakness is length and noise,
+which this set doesn't stress; the cross-session set §7 does). The v0.80 failures are the predicted ones —
+backfill answers the stale value ("port 8137", "llama3.1"), change-date answers a session *label*
+("Since-port-s2") or "I don't know", known-at can't see the pre-correction belief. Its passes on
+correction / planned / some point-in-time are **incidental**: the capture model baked dates or distinct
+wording into the fact strings, so no supersession fired — B7 gets them right structurally, the eval can't
+tell the two apart. **The multi-valued miss drove a design change:** qwen3 tags "OpenWiki *also* uses
+Ollama" as `cardinality: "one"` in 2 of 3 samples even with the predicate named as a "many" example, so a
+per-fact tag alone is too noisy. v0.82 adds a **coexistence check** (`memory.facts_coexist`): before a
+tag-based rival is invalidated, one deterministic yes/no call asks *"can both statements be true at the
+same moment?"* — 13/13 plausible verdicts on a probe of functional vs multi-valued pairs (incl. ones the
+prompt doesn't name: "works on", "meets on", "version is", "depends on"). The framing matters: asking
+whether the newer fact *replaces* the older biased qwen3 to "replace" even for Kuzu→Ollama. Consulted
+lazily (only the rivals that matter), cached, never with `--correct`; a compatible pair is marked `"many"`.
+Small n (13) — a direction check, not a benchmark; the scenarios are hand-written for the mechanisms.
+
 **Honest limits.** A multi-valued fact is only ended by an explicit correction (no negation capture yet);
 `--correct` treats the corrected fact as functional; `known_at` is exact for born-open intervals closed once,
 approximate if an interval is re-closed later (rows are updated in place, Graphiti-style, not versioned).

@@ -785,13 +785,20 @@ The **genuine gaps** it surfaces — adopted in OpenWiki's measured, local, mini
   `as_of`/`known_at`; the assembled context shows each fact's validity. **No rebuild:** older graphs are
   migrated in place (`ALTER` + a backfill from the B4 edges — the current set is unchanged); B0 snapshots the
   new columns; queued journal ops keep their record time. `analyze memory` splits revision into world
-  changes vs corrections. *Next (v0.82):* the temporal eval below + a Gedächtnis-tab as-of picker.
+  changes vs corrections. **v0.82 — measured + surfaced:** the temporal eval below took assembled-memory
+  task success from **7/13 (v0.80, twice) to 13/13** (backfill 0→2, point-in-time 1→2, change-date 1→2,
+  known-at 0→1, multi-valued 0→1); the one v0.82 miss (a noisy `cardinality` tag let "also uses Ollama"
+  close "uses Kuzu") added an LLM **coexistence check** ("can both be true at once?") before any
+  invalidation. The Gedächtnis tab gained *Stand am* / *Wissensstand vom* date pickers, a **Verlauf**
+  timeline (`/api/timeline`), a validity column and überholt / zurückgezogen / geplant badges.
 - **A2 — Hierarchical communities (P1).** Ours are **flat** Louvain; the report's GraphRAG builds a
   bottom-up **tree** of communities → meta-summaries (better global sensemaking now that informatik is 119
   pages). Recursive detection (or add Leiden) + a level in `MemoryConcept`/`Community` + `ask --global`
   traversal.
-- **Temporal-reasoning eval (P1).** An `eval_temporal.jsonl` (LongMemEval-style point-in-time +
-  "when did X change" scenarios) to *measure* B7 — the same eval-first discipline as RAG-vs-GraphRAG.
+- **Temporal-reasoning eval. ✅ (v0.82).** `examples/eval_temporal.jsonl` — 13 scenarios / 8 kinds
+  (backfill, point-in-time, change-date, correction, known-at, multi-valued, planned, control) through the
+  cross-session harness; before/after against v0.80.0 in a worktree: **7/13 → 13/13** (numbers + caveats in
+  `path-b-memory.md` §12.1). Small and hand-written — a direction check, not a benchmark.
 - **B8 — Spreading-activation priming (P2, measure-first).** Session-scoped activation boost over graph
   neighbors of a retrieved node (+ decay), to resolve ambiguous follow-ups. Close to REINFORCES+decay but
   intra-session; A/B against plain recall before trusting it (the GraphRAG finding is the cautionary tale).

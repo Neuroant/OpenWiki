@@ -54,9 +54,12 @@ CAPTURE_SYSTEM = (
     'Add "valid_from" (an ISO date: YYYY-MM-DD, or YYYY-MM / YYYY) ONLY when the conversation '
     'explicitly says when the fact became true or takes effect ("since September 1", "from '
     'October on") — resolve relative dates against the session date if one is given; never '
-    'guess and never use the current date. Add "cardinality": "many" when the subject can have '
-    "several such objects at the same time (e.g. the tools a project uses), otherwise \"one\" "
-    "(a single value that a new one replaces: a port, a version, a chosen default). "
+    'guess and never use the current date. Add "cardinality" to every fact — a property of the '
+    "PREDICATE in general, not of how many objects this conversation happens to mention: "
+    '"many" when the subject can relate to several such objects at the same time, so a new one '
+    "ADDS to the others (uses, supports, depends on, contains, works with, has member); "
+    '"one" when the subject has a single current value, so a new one REPLACES the old (runs on '
+    "port, default model is, version is, is stored in, is located at, is set to). "
     "Answer in the language of the conversation. Output ONLY the JSON array, nothing else."
 )
 
@@ -94,6 +97,27 @@ def parse_facts(raw: str) -> list:
         seen.add(fact.key())
         facts.append(fact)
     return facts
+
+
+COEXIST_SYSTEM = (
+    "Can the two statements below both be true at the same moment? Think about the real world: "
+    "a project can use several tools at once and support several formats at once, but a server "
+    "has one port at a time, a setting has one value at a time, and a thing is stored in one "
+    "place at a time. Answer only yes or no."
+)
+
+
+def facts_coexist(chat, older: str, newer: str) -> bool:
+    """B7: can two facts about the same subject + relation hold **at the same time**? One
+    deterministic yes/no call — asked only when a new fact would otherwise invalidate an old
+    one, because the capture model's per-fact ``cardinality`` tag is noisy (measured: qwen3
+    tags "OpenWiki also uses Ollama" as ``"one"`` in 2 of 3 samples) while the concrete pair
+    question is reliable. Neutral framing on purpose ("newer replaces older?" biased it to
+    *replace*). Anything but a clear yes → ``False`` (replace — the pre-B7 behavior)."""
+    raw = chat.chat([{"role": "system", "content": COEXIST_SYSTEM},
+                     {"role": "user", "content": f"1. {older}\n2. {newer}"}])
+    answer = _THINK.sub("", raw or "").strip().lower()
+    return answer.startswith(("yes", "ja"))
 
 
 def capture_session(chat, transcript: str, session_date: Optional[int] = None) -> list:

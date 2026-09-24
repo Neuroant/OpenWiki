@@ -486,3 +486,108 @@ def test_mcp_wiki_memory_accepts_as_of(tmp_path):
         assert "port 8137" in then and "port 9000" not in then
     finally:
         store.close()
+
+
+def test_web_memory_as_of_context_and_timeline(tmp_path):
+    pytest.importorskip("kuzu")
+    from openwiki.graph import GraphBuilder, GraphStore
+    from openwiki.search import SemanticIndex
+    from openwiki.web.server import WikiWebApp
+    from openwiki.wiki import Wiki, WikiPage, write_wiki
+
+    pages = [WikiPage(slug="000-a", title="A", level=1, order=0, pdf_page_start=1,
+                      pdf_page_end=1, text="server port project database")]
+    wiki = Wiki(title="T", pages=pages, source="x.pdf", split_level=1)
+    write_wiki(wiki, tmp_path / "wiki")
+    emb = _TEmbedder()
+    index = SemanticIndex.build(wiki, emb, size_words=50, overlap_words=10)
+    GraphBuilder(tmp_path / "graph").build(wiki, index)
+    store = GraphStore(tmp_path / "graph", writable=True)
+    try:
+        store.remember("2025-08-01", [_port("port 8137")], emb, now=T("2025-08-01"))
+        store.remember("2025-09-01", [_port("port 9000")], emb, now=T("2025-09-01"))
+        app = WikiWebApp(tmp_path / "wiki", index=index, graph=store)
+        now_facts = app.memory_recall("server port", k=1)["facts"]
+        then = app.memory_recall("server port", k=1, as_of="2025-08-15")["facts"]
+        assert now_facts[0]["object"] == "port 9000" and then[0]["object"] == "port 8137"
+        assert then[0]["in_view"] and then[0]["status"] == "past"
+        ctx = app.memory_context("server port", as_of="2025-08-15")["context"]
+        assert "port 8137" in ctx and "port 9000" not in ctx
+        (g,) = app.memory_timeline("server port")["groups"]
+        assert [r["object"] for r in g["records"]] == ["port 8137", "port 9000"]
+        rows = app.memory_info()["assertions"]
+        assert {r["object"]: r["status"] for r in rows} == {"port 8137": "past", "port 9000": "current"}
+    finally:
+        store.close()
+
+
+# -- coexistence check (the capture's cardinality tag is noisy; ask about the actual pair) --
+
+def test_plan_merge_coexists_vetoes_a_tag_rival_lazily():
+    asked = []
+
+    def coexists(r):
+        asked.append(r["id"])
+        return r["okey"] == "kuzu"                        # uses Kuzu + uses Ollama can co-hold
+
+    recs = [_r("k", "kuzu", 100), _r("p", "8137", 50, vt=100)]   # p is not valid at 150
+    p = plan_merge(recs, "ollama", 150, coexists=coexists)
+    assert p["action"] == "add" and not p["close"] and p["coexist"] == ["k"]
+    assert asked == ["k"]                                 # only the rival that matters was asked
+    q = plan_merge([_r("a", "9000", 100)], "9100", 150, coexists=lambda r: False)
+    assert q["close"] == [("a", 150)] and q["coexist"] == []
+    c = plan_merge([_r("a", "9000", 100)], "9001", 150, correct=True, coexists=lambda r: True)
+    assert c["expire"] == ["a"]                           # an explicit correction is never vetoed
+
+
+def test_plan_merge_coexists_keeps_a_multi_valued_backfill_open():
+    recs = [_r("k", "kuzu", 300)]                         # Sep: uses Kuzu
+    p = plan_merge(recs, "ollama", 100, coexists=lambda r: True)   # Aug backfill: uses Ollama
+    assert p["valid_to"] is None and p["superseded_by"] is None   # not bounded by Kuzu
+
+
+def test_facts_coexist_parses_a_yes_no_verdict():
+    from openwiki.graph.memory import facts_coexist
+
+    class _C:
+        def __init__(self, out):
+            self.out, self.seen = out, None
+
+        def chat(self, messages):
+            self.seen = messages
+            return self.out
+
+    yes = _C("<think>tools</think> Yes.")
+    assert facts_coexist(yes, "OpenWiki uses Kuzu", "OpenWiki uses Ollama") is True
+    assert "1. OpenWiki uses Kuzu\n2. OpenWiki uses Ollama" in yes.seen[1]["content"]
+    assert facts_coexist(_C("Ja"), "a", "b") is True
+    for out in ("No", "no.", "", "maybe"):
+        assert facts_coexist(_C(out), "a", "b") is False  # unclear → replace (pre-B7 behavior)
+
+
+def test_remember_with_coexist_keeps_both_and_marks_many(tmp_path):
+    store, emb = _store(tmp_path), _TEmbedder()
+    calls = []
+
+    def coexist(older, newer):
+        calls.append((older, newer))
+        return "project uses" in older                    # tools co-hold; ports would not
+
+    try:
+        store.remember("s1", [MemoryFact("the project", "uses", "Kuzu")], emb, now=T("2025-09-01"))
+        r = store.remember("s2", [MemoryFact("the project", "uses", "Ollama")], emb,
+                           now=T("2025-09-02"), coexist=coexist)
+        assert r["superseded"] == 0 and calls == [("the project uses Kuzu", "the project uses Ollama")]
+        got = sorted(_objs(store.recall("project uses", emb, k=5, now=T("2025-09-03"))))
+        assert got == ["Kuzu", "Ollama"]
+        assert {x["cardinality"] for x in store.list_assertions()} == {"many"}
+        # now multi-valued: a third tool needs no further check
+        store.remember("s3", [MemoryFact("the project", "uses", "NumPy")], emb,
+                       now=T("2025-09-04"), coexist=coexist)
+        assert len(calls) == 1
+        # a genuinely functional pair is still replaced
+        store.remember("p1", [_port("port 8137")], emb, now=T("2025-09-01"), coexist=coexist)
+        r = store.remember("p2", [_port("port 9000")], emb, now=T("2025-09-05"), coexist=coexist)
+        assert r["superseded"] == 1
+    finally:
+        store.close()

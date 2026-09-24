@@ -35,7 +35,7 @@ from .chat_agent import WikiAgent, summarize_wiki
 from .claude_code_template import scaffold_claude_code
 from .opencode_template import scaffold_opencode
 from .graph import (
-    GraphStore, answer_global, build_graph, capture_session, detect_communities,
+    GraphStore, answer_global, build_graph, capture_session, detect_communities, facts_coexist,
     detect_page_offset, extract_entities, extract_references, extract_references_multi,
     extract_relations, format_memory, resolve_entities, summarize_community, summarize_facts,
 )
@@ -491,6 +491,14 @@ def _build_argparser() -> argparse.ArgumentParser:
                         help="inject = UserPromptSubmit (recall → inject context); "
                              "capture = SessionEnd/PreCompact (remember the session).")
     return parser
+
+
+def _coexist_check(model, host):
+    """B7: the ``coexist(older, newer)`` callable for ``GraphStore.remember`` — one deterministic
+    chat call per actual conflict ("can both be true at once?"), overriding the noisy capture
+    cardinality tag."""
+    judge = OllamaChat(model=model, host=host, temperature=0.0)
+    return lambda older, newer: facts_coexist(judge, older, newer)
 
 
 def _date_arg(value: str) -> int:
@@ -1156,6 +1164,7 @@ def _cmd_build(args: argparse.Namespace) -> int:
                     graph.close()
                 return 2
             chat = OllamaChat(model=models.get("chat", DEFAULT_CHAT), host=host, temperature=0.2)
+            coexist = _coexist_check(models.get("chat", DEFAULT_CHAT), host)
             total = 0
             try:
                 print(f"  memory: capturing {len(session_paths)} session(s) with {chat.name} …",
@@ -1164,7 +1173,7 @@ def _cmd_build(args: argparse.Namespace) -> int:
                     sid = Path(spath).stem
                     facts = capture_session(chat, Path(spath).read_text(encoding="utf-8"),
                                             session_date=session_date_of(sid))
-                    res = graph.remember(sid, facts, index.embedder)
+                    res = graph.remember(sid, facts, index.embedder, coexist=coexist)
                     total += res["added"]
                     print(f"    · '{sid}' → {res['added']} new, {res['duplicates']} dup "
                           f"({res['facts']} captured)", file=sys.stderr)
@@ -1706,6 +1715,14 @@ def _cross_session_eval(args: argparse.Namespace, project) -> int:
     print("-" * 23)
     for cond in ("cold", "raw-log", "assembled"):
         print(f"{cond:<14}{s[cond]:>8.1%}")
+    if result.get("by_kind"):           # B7 temporal sets tag each scenario with a kind
+        print(f"\n{'kind':<16}{'n':>3}{'cold':>8}{'raw-log':>9}{'assembled':>11}")
+        print("-" * 47)
+        for kind, v in result["by_kind"].items():
+            print(f"{kind:<16}{v['n']:>3}{v['cold']:>8.0%}{v['raw-log']:>9.0%}{v['assembled']:>11.0%}")
+        misses = [d for d in result["details"] if not d["success"]["assembled"]]
+        for d in misses:
+            print(f"  ✗ assembled  {d['name']}: {d['answers']['assembled'][:110]}")
     if result["judged"]:
         t = result["tally"]
         print(f"\nLLM judge (assembled vs raw-log, position-balanced):  "
@@ -2242,10 +2259,11 @@ def _cmd_remember(args: argparse.Namespace) -> int:
             print(f"Graph busy (serve/chat running) — queued {n} fact(s) for '{session_id}' to the "
                   f"journal; they'll be folded on the next writable pass → {args.graph}")
             return 0
+        coexist = _coexist_check(args.model, args.host)
         result = graph.remember(session_id, facts, index.embedder, session_date=sdate,
-                                correct=args.correct)
+                                correct=args.correct, coexist=coexist)
         try:
-            graph.fold_journal(index.embedder)     # opportunistically drain older queued ops
+            graph.fold_journal(index.embedder, coexist=coexist)   # drain older queued ops
         except Exception:
             pass
     finally:
@@ -2699,9 +2717,11 @@ def _hook_capture(project: Project, payload: dict) -> None:
         facts = capture_session(chat, transcript, session_date=int(time.time()))
         sid = str(payload.get("session_id") or "session")
         if getattr(graph, "writable", False):
-            graph.remember(sid, facts, embedder)
+            coexist = _coexist_check(project.setting("models", "chat", DEFAULT_CHAT),
+                                     project.setting("models", "host", DEFAULT_HOST))
+            graph.remember(sid, facts, embedder, coexist=coexist)
             try:
-                graph.fold_journal(embedder)
+                graph.fold_journal(embedder, coexist=coexist)
             except Exception:
                 pass
         else:

@@ -566,7 +566,15 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   `remember` `ALTER`s the columns in + writes the derivation back (`_migrate_temporal`) — no rebuild.
   `recall(…, as_of=, known_at=)`, `timeline(query)`, `context_for(…, as_of=)`; `MemoryFact` gained
   `valid_from`/`cardinality` (capture extracts *stated* dates only, resolved against the session date);
-  journal `remember` records carry them + the record time the fold now honors.
+  journal `remember` records carry them + the record time the fold now honors. **Coexistence check
+  (v0.82):** the capture's per-fact `cardinality` tag is noisy (qwen3 tags "OpenWiki *also* uses
+  Ollama" as `one` 2/3 times), so `remember(…, coexist=)` asks `memory.facts_coexist(chat, older,
+  newer)` — one deterministic yes/no call, *"can both be true at the same moment?"* — before a
+  tag-based rival is invalidated (lazily, only for the rivals that matter; cached per call; never with
+  `--correct`); a compatible pair is kept and both marked `"many"`. Wired in `remember`, the `build`
+  memory stage, the hook capture and the eval harness (`cli._coexist_check`); the journal fold uses it
+  when the caller passes one. Neutral framing matters: "does the newer *replace* the older?" biased
+  qwen3 to *replace* even for Kuzu→Ollama.
   **B5 consolidation ("sleep"):** the `consolidate` command clusters the *current* assertions by
   embedding similarity (`GraphStore.assertion_graph` → `community.detect_communities`), LLM-summarizes
   each cluster into a theme (`community.summarize_facts`), and writes `MemoryConcept` + `CONSOLIDATES`
@@ -624,8 +632,9 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   community summaries, `/api/metrics?limit=` = the runtime observability snapshot
   (`WikiWebApp.metrics()` → `metrics.COLLECTOR.snapshot()`), `/api/memory` = the Path B
   memory-tier overview (`memory_info()`: identity + counts + themes + browsable assertions),
-  `/api/recall` (POST) = decay-weighted `recall`, `/api/context` (POST) = the assembled
-  three-tier `context_for`, `/api/analyze?k=&method=` = the world-model coupling analysis +
+  `/api/recall` (POST) = decay-weighted `recall` (B7 `as_of`/`known_at`), `/api/context` (POST) = the
+  assembled three-tier `context_for` (`as_of`), `/api/timeline` (POST) = B7 fact history
+  (`memory_timeline` → `GraphStore.timeline`), `/api/analyze?k=&method=` = the world-model coupling analysis +
   2-D semantic map (`WikiWebApp.analyze()` → `analysis.analyze_coupling` + `project_2d`), `/api/analyze/gaps`
   = P3 gap-mining (`analyze_gaps`), `/api/analyze/memory` = P4 memory-tier dynamics (`analyze_memory`),
   `/api/entities?q=&type=` = the canonical-entity browser (`entities()` → `GraphStore.list_entities`),
@@ -665,10 +674,12 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   memory-tier dynamics (revision / consolidation / temperature bars / breadth / growth). Read-only +
   offline; graceful empty states (no index / no graph / no memory). The **Gedächtnis (Memory)
 tab** (`renderMemory` → `/api/memory`) surfaces **Path B** in the browser: the identity
-(DNA) + stat chips (Sitzungen / Fakten / überholt / Themen), a **recall/context box**
-(`/api/recall` decay-weighted facts, `/api/context` the assembled three-tier context),
-`MemoryConcept` **theme cards**, and a browsable **assertion table** (current vs superseded
-via a toggle, with confidence). Read-only + graceful empty states (no graph / Wiki mode /
+(DNA) + stat chips (Sitzungen / Fakten / überholt / zurückgezogen / geplant / Themen), a
+**recall/context box** (`/api/recall` decay-weighted facts, `/api/context` the assembled three-tier
+context, **Verlauf** = `/api/timeline` the B7 history) with two **B7 date pickers** — *Stand am*
+(valid time → `as_of`) and *Wissensstand vom* (transaction time → `known_at`) — `MemoryConcept`
+**theme cards**, and a browsable **assertion table** (a **Gültig** validity column + status badges
+überholt / zurückgezogen / geplant; superseded rows via a toggle, with confidence). Read-only + graceful empty states (no graph / Wiki mode /
 no sessions / no index). Backed by `GraphStore.memory_overview()` + `list_assertions()`
 (browse) reusing `recall`/`context_for`/`memory_concepts`. The **System tab** (`renderSystem`
 → `/api/metrics`) is the **observability** surface: per-kind summary cards (chat / embed /
@@ -790,6 +801,14 @@ http — count, p50/p95, total time, token in/out) + a live recent-events table,
   (v0.47): assembled **100%** vs raw-log **85.7%** vs cold **0%**, judge **3–1** assembled — memory
   helps the next session and concentrating it beats replaying it. `--recall-k N` sets the recalled-
   fact budget. Pure/fake-testable core (`build_probe_messages`/`task_success`/the fake-graph driver).
+  **B7 temporal scenarios** (`examples/eval_temporal.jsonl`, run with `--eval-set`): a setup entry may
+  be `{"transcript","session","date","recorded","correct"}` (dated / transaction-timed / correcting
+  sessions, remembered in the listed order — backfills list the newer first), a scenario may carry
+  `as_of`/`known_at` (passed to `recall`, as a calling agent would to `wiki_memory(as_of)`) and a `kind`
+  (→ a per-kind table + assembled misses); `task_success` accepts `"a|b"` alternatives. Dates stay raw
+  strings in `CrossSessionItem` and are parsed at run time, so `eval.py` stays Kuzu-free. **Measured
+  (v0.82):** assembled task success **7/13 (v0.80.0, two runs) → 13/13** — backfill, point-in-time,
+  change-date, known-at and multi-valued are where pre-B7 memory fails (`docs/path-b-memory.md` §12.1).
 - **`openwiki/analysis/`** — the **world-model analysis** toolkit (`owiki analyze`). `coupling.py`
   is P1: **graph↔semantic coupling**, pure NumPy over `SemanticIndex.embeddings` (collapsed to a
   per-page mean vector, `page_vectors`) + `GraphStore.coupling_edges()` (undirected page-pair lists per

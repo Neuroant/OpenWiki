@@ -172,7 +172,7 @@ def valid_to_known_at(rec: dict, known_at: Optional[int], closed: dict):
 # -- the merge rule --------------------------------------------------------------
 
 def plan_merge(records: Iterable[dict], okey: str, valid_from: int,
-               cardinality: str = ONE, correct: bool = False) -> dict:
+               cardinality: str = ONE, correct: bool = False, coexists=None) -> dict:
     """How a new fact ``(…, object→okey)`` valid from ``valid_from`` slots into the history
     of its ``(subject, predicate)`` — ``records`` are that group's existing records. Ordered
     by **valid time**, not processing order (the B7 fix for out-of-order backfills).
@@ -193,25 +193,44 @@ def plan_merge(records: Iterable[dict], okey: str, valid_from: int,
     we were wrong; with ``correct`` the new record inherits the rival's whole interval). The
     new record ends where the next later record begins (a backfill lands *in* history, not
     on top of it; ``superseded_by`` names that later record). A ``"many"`` fact coexists with
-    other objects and only ever re-affirms / extends / adds."""
+    other objects and only ever re-affirms / extends / adds.
+
+    ``coexists(record) -> bool`` (optional — an LLM "can both be true at once?" check) vetoes
+    a tag-based rival: the capture model's per-fact cardinality tag is noisy, so the store
+    asks about the *actual* pair before invalidating. It is consulted lazily, only for the
+    rivals that matter (those holding at ``valid_from`` + the next later one), never with
+    ``correct`` (an explicit correction wins); vetoed ids are returned as ``coexist`` so the
+    caller can mark the pair multi-valued."""
     V = int(valid_from)
     believed = [r for r in records if r.get("expired_at") is None]
     covering = [r for r in believed if valid_at(r, V)]
     for r in covering:
         if r.get("okey") == okey:
             return {"action": "reaffirm", "target": r["id"], "valid_from": r.get("valid_from"),
-                    "valid_to": r.get("valid_to"), "close": [], "expire": [], "superseded_by": None}
+                    "valid_to": r.get("valid_to"), "close": [], "expire": [], "superseded_by": None,
+                    "coexist": []}
 
     functional = coerce_cardinality(cardinality) != MANY
+    coexist: list = []
 
-    def rival(r):
+    def tag_rival(r):
         return functional and r.get("okey") != okey and r.get("cardinality") != MANY
 
+    def rival(r):                                  # a tag rival the coexistence check doesn't veto
+        if not tag_rival(r):
+            return False
+        if coexists is not None and not correct and coexists(r):
+            coexist.append(r["id"])
+            return False
+        return True
+
     rivals = [r for r in covering if rival(r)]
-    relevant = [r for r in believed if r.get("okey") == okey or rival(r)]
-    later = sorted((r for r in relevant if (r.get("valid_from") or 0) > V),
-                   key=lambda r: r["valid_from"])
-    nxt = later[0] if later else None
+    nxt = None                                     # the next later record that bounds the new one
+    for r in sorted((r for r in believed if (r.get("valid_from") or 0) > V),
+                    key=lambda r: r["valid_from"]):
+        if r.get("okey") == okey or rival(r):
+            nxt = r
+            break
 
     new_vf = V
     if correct and rivals:
@@ -232,8 +251,8 @@ def plan_merge(records: Iterable[dict], okey: str, valid_from: int,
         # the same value already holds right after → extend it back instead of a new record
         return {"action": "extend", "target": nxt["id"], "valid_from": new_vf,
                 "valid_to": nxt.get("valid_to"), "close": close, "expire": expire,
-                "superseded_by": None}
+                "superseded_by": None, "coexist": coexist}
     superseded_by = (nxt["id"] if nxt is not None and nxt.get("okey") != okey
                      and new_vt == nxt["valid_from"] else None)
     return {"action": "add", "target": None, "valid_from": new_vf, "valid_to": new_vt,
-            "close": close, "expire": expire, "superseded_by": superseded_by}
+            "close": close, "expire": expire, "superseded_by": superseded_by, "coexist": coexist}

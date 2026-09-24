@@ -36,7 +36,7 @@ from .journal import (
     pending_journal, read_journal,
 )
 from .temporal import (
-    ONE, believed_at, close_times, derive_legacy_intervals, plan_merge, valid_at,
+    MANY, ONE, believed_at, close_times, derive_legacy_intervals, plan_merge, valid_at,
     valid_to_known_at,
 )
 from .temporal import session_date as session_date_of
@@ -840,7 +840,7 @@ class GraphStore:
         """How many deferred-write ops (remember/reindex) are queued (0 if none)."""
         return pending_journal(self._journal_path)
 
-    def fold_journal(self, embedder, now: Optional[int] = None) -> dict:
+    def fold_journal(self, embedder, now: Optional[int] = None, coexist=None) -> dict:
         """B1: drain the write-ahead journal (queued `remember` + `reindex` ops) into the
         graph and clear it. Writable-only; needs an ``embedder`` (facts + page chunks are
         embedded at fold time). A queued `remember` keeps the time it was *queued* as its
@@ -868,7 +868,7 @@ class GraphStore:
                         res = self.remember(str(rec.get("session") or "session"), facts, embedder,
                                             now=int(rec.get("t") or now),
                                             session_date=rec.get("session_date"),
-                                            correct=bool(rec.get("correct")))
+                                            correct=bool(rec.get("correct")), coexist=coexist)
                         remembered += res.get("added", 0)
                 elif rec.get("op") == "reindex":
                     slug = str(rec.get("slug") or "")
@@ -1005,7 +1005,8 @@ class GraphStore:
             r["in_view"] = believed_at(r, known_at) and valid_at(r, t_valid, valid_to=vt)
 
     def remember(self, session_id: str, facts, embedder, now: Optional[int] = None,
-                 session_date: Optional[int] = None, correct: bool = False) -> dict:
+                 session_date: Optional[int] = None, correct: bool = False,
+                 coexist=None) -> dict:
         """B3 merge + B4 contradiction handling + **B7 bi-temporal validity**: embed each fact,
         persist Session + Assertion + ASSERTS, and slot each fact into the history of its
         (subject, predicate) by **valid time** (``temporal.plan_merge``), not processing order —
@@ -1017,7 +1018,12 @@ class GraphStore:
         (``valid_to`` — the world changed) or, starting at the same instant / with ``correct``,
         **retracted** (``expired_at`` — we were wrong); ``"many"``-cardinality facts coexist.
         Nothing is deleted; ``SUPERSEDES`` edges keep the provenance. Returns counts
-        (``superseded`` = closed + retracted; ``historical`` = new facts that landed in the past)."""
+        (``superseded`` = closed + retracted; ``historical`` = new facts that landed in the past).
+
+        ``coexist(older_text, newer_text) -> bool`` (optional, e.g. ``memory.facts_coexist``
+        bound to a chat model) is asked before a tag-based rival is invalidated — a pair that
+        can hold at once is kept and both records are marked ``"many"`` (verdicts cached per
+        call; see ``temporal.plan_merge``). Without it the capture tags alone decide."""
         if not self.writable:
             raise RuntimeError("GraphStore is read-only; open it writable to remember.")
         facts = list(facts)
@@ -1045,13 +1051,32 @@ class GraphStore:
                 r["okey"] = _normalize(r["object"])
                 key = (_normalize(r["subject"]), (r["predicate"] or "").strip().lower())
                 groups.setdefault(key, []).append(r)
+            verdicts: dict = {}                            # (old okey, new okey) → coexist?
             for fact, vec in zip(facts, emb):
                 ns, pp, no = fact.key()
                 group = groups.setdefault((ns, pp), [])
                 by_id = {r["id"]: r for r in group}
                 vf = fact.valid_from if fact.valid_from is not None else (
                     sdate if sdate is not None else now)
-                plan = plan_merge(group, no, int(vf), fact.cardinality, correct)
+
+                def coexists(r, fact=fact, no=no):
+                    key = (r["okey"], no)
+                    if key not in verdicts:
+                        try:
+                            verdicts[key] = bool(coexist(
+                                f"{r['subject']} {r['predicate']} {r['object']}", fact.text()))
+                        except Exception:              # a failed check never blocks the merge
+                            verdicts[key] = False
+                    return verdicts[key]
+                plan = plan_merge(group, no, int(vf), fact.cardinality, correct,
+                                  coexists=coexists if coexist is not None else None)
+                card = fact.cardinality or ONE
+                if plan.get("coexist"):                    # the pair holds at once → multi-valued
+                    card = MANY
+                    for rid in plan["coexist"]:
+                        self._exec("MATCH (a:Assertion {id:$id}) SET a.cardinality=$c;",
+                                   {"id": rid, "c": MANY})
+                        by_id[rid]["cardinality"] = MANY
                 for rid, vt in plan["close"]:              # the world changed at vf
                     self._exec("MATCH (a:Assertion {id:$id}) SET a.valid_to=$vt;",
                                {"id": rid, "vt": int(vt)})
@@ -1077,7 +1102,7 @@ class GraphStore:
                            "object": fact.object, "okey": no, "session_id": session_id,
                            "created_at": now, "confidence": 1.0, "last_seen": now,
                            "valid_from": int(plan["valid_from"]), "valid_to": plan["valid_to"],
-                           "expired_at": None, "cardinality": fact.cardinality or ONE}
+                           "expired_at": None, "cardinality": card}
                     self._exec(
                         "CREATE (:Assertion {id:$id, subject:$s, predicate:$p, object:$o, "
                         "session_id:$sid, created_at:$t, confidence:1.0, last_seen:$t, "

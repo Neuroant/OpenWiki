@@ -661,9 +661,22 @@ class WikiWebApp:
                                   as_of=parse_date(as_of), known_at=parse_date(known_at))
         return {"query": query, "k": k, "facts": facts}
 
-    def memory_context(self, query: str) -> dict:
+    def memory_timeline(self, query: str, groups: int = 3) -> dict:
+        """B7: the full history (every validity interval, when recorded, by which session) of
+        the subject+predicate pairs best matching ``query``. Read-only."""
+        embedder = self._memory_embedder()
+        if self.graph is None or embedder is None:
+            raise RuntimeError("Timeline needs a graph with memory and a search index.")
+        query = (query or "").strip()
+        if not query:
+            raise RuntimeError("empty query")
+        return {"query": query,
+                "groups": self.graph.timeline(query, embedder, groups=max(1, min(int(groups), 10)))}
+
+    def memory_context(self, query: str, as_of=None) -> dict:
         """The assembled three-tier session context for a query (identity + activation +
-        attractors, B6), budgeted by the project's ``context_budget``. Read-only."""
+        attractors, B6), budgeted by the project's ``context_budget``; ``as_of`` (B7, ISO date)
+        assembles the memory as it was true then. Read-only."""
         embedder = self._memory_embedder()
         if self.graph is None or embedder is None:
             raise RuntimeError("Context needs a graph with memory and a search index.")
@@ -672,7 +685,9 @@ class WikiWebApp:
             raise RuntimeError("empty query")
         identity = self.project.identity if self.project is not None else ""
         budget = self.project.context_budget if self.project is not None else None
-        context = self.graph.context_for(query, embedder, identity=identity, max_chars=budget)
+        from ..graph.temporal import parse_date
+        context = self.graph.context_for(query, embedder, identity=identity, max_chars=budget,
+                                         as_of=parse_date(as_of))
         return {"query": query, "context": context, "identity": identity, "budget": budget}
 
     def chat(self, message: str) -> dict:
@@ -952,7 +967,12 @@ def make_handler(app: WikiWebApp):
                     query = (data.get("query") or "").strip()
                     if not query:
                         return self._json({"error": "empty query"}, 400)
-                    return self._json(app.memory_context(query))
+                    return self._json(app.memory_context(query, as_of=data.get("as_of")))
+                if path == "/api/timeline":
+                    query = (data.get("query") or "").strip()
+                    if not query:
+                        return self._json({"error": "empty query"}, 400)
+                    return self._json(app.memory_timeline(query, int(data.get("groups", 3))))
                 if path == "/api/answer-eval":
                     return self._json(app.start_answer_eval(
                         int(data.get("top_k", 5)), int(data.get("expand_k", 3)),

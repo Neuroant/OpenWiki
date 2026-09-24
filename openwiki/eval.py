@@ -365,15 +365,28 @@ def run_answer_eval(items, index, graph, chat, top_k: int = 5, expand_k: int = 3
 @dataclass
 class CrossSessionItem:
     name: str
-    setup: list[str]        # earlier-session transcripts, chronological
+    setup: list[str]        # earlier-session transcripts, in the order they are remembered
     question: str           # asked in a later session
     expected: list[str]     # a correct answer contains all of these (case-insensitive)
+    # B7 temporal scenarios (all optional; raw values — parsed at run time so this module
+    # stays Kuzu-free): per-setup session metadata {"session", "date", "recorded", "correct"}
+    # parallel to ``setup``, and the probe's point in time (valid ``as_of`` / transaction
+    # ``known_at``) — what a calling agent passes, e.g. to MCP ``wiki_memory(as_of)``.
+    sessions: list[dict] = field(default_factory=list)
+    as_of: object = None
+    known_at: object = None
+    kind: str = ""          # scenario category, for a per-kind breakdown
 
 
 def load_cross_session_set(path) -> list[CrossSessionItem]:
     """Read a cross-session scenario set from JSONL — one scenario per line:
     ``{"name", "setup": [transcript, …] | transcript, "question", "expected": [str,…] | str}``
-    (``answer`` is accepted as an alias for ``expected``; ``#`` lines and blanks skipped)."""
+    (``answer`` is accepted as an alias for ``expected``; ``#`` lines and blanks skipped).
+
+    B7: a setup entry may instead be an object ``{"transcript", "session", "date",
+    "recorded", "correct"}`` — the session id, its date (else a date in the id), when it
+    was recorded (transaction time; default now) and whether it corrects earlier facts —
+    and a scenario may carry ``as_of`` / ``known_at`` (ISO dates) and a ``kind``."""
     items: list[CrossSessionItem] = []
     for n, line in enumerate(Path(path).read_text(encoding="utf-8").splitlines(), 1):
         line = line.strip()
@@ -381,26 +394,40 @@ def load_cross_session_set(path) -> list[CrossSessionItem]:
             continue
         obj = json.loads(line)
         setup = obj.get("setup", [])
-        if isinstance(setup, str):
+        if isinstance(setup, (str, dict)):
             setup = [setup]
+        transcripts, sessions = [], []
+        for s in setup:
+            if isinstance(s, dict):
+                transcripts.append(str(s.get("transcript") or s.get("text") or ""))
+                sessions.append({k: s[k] for k in ("session", "date", "recorded", "correct") if k in s})
+            else:
+                transcripts.append(str(s))
+                sessions.append({})
         expected = obj.get("expected", obj.get("answer", []))
         if isinstance(expected, str):
             expected = [expected]
         items.append(CrossSessionItem(
             name=str(obj.get("name") or f"scenario-{n}"),
-            setup=[str(s) for s in setup],
+            setup=transcripts,
             question=obj["question"],
             expected=[str(e) for e in expected],
+            sessions=sessions if any(sessions) else [],
+            as_of=obj.get("as_of"),
+            known_at=obj.get("known_at"),
+            kind=str(obj.get("kind") or ""),
         ))
     return items
 
 
 def task_success(answer: str, expected: Iterable[str]) -> bool:
     """Objective cross-session task success: does the answer contain every expected
-    substring (case-insensitive)? ``expected`` is usually a single key fact token."""
+    substring (case-insensitive)? ``expected`` is usually a single key fact token; an entry
+    ``"a|b|c"`` accepts any alternative (a date can be phrased many ways)."""
     low = (answer or "").lower()
     exp = [str(e).lower() for e in expected]
-    return bool(exp) and all(e in low for e in exp)
+    return bool(exp) and all(any(alt.strip() and alt.strip() in low for alt in e.split("|"))
+                             for e in exp)
 
 
 _PROBE_SYSTEM = (
@@ -432,19 +459,27 @@ def run_cross_session_eval(items, graph, embedder, chat, judge=None, recall_k: i
     honest test of whether concentrated memory beats replaying the log. ``graph`` must be a
     **writable** throwaway (scenarios are isolated via ``forget_all``). Backend-agnostic —
     ``graph``/``embedder``/``chat`` injected; capture/format reused from the memory tier."""
-    from .graph.memory import assemble_context, capture_session
+    from .graph.memory import assemble_context, capture_session, facts_coexist
+    from .graph.temporal import parse_date, session_date
 
     items = list(items)
     conditions = ("cold", "raw-log", "assembled")
     success = {c: 0.0 for c in conditions}
     tally = {"assembled": 0, "raw-log": 0, "tie": 0}
+    by_kind: dict = {}
     details = []
     for i, item in enumerate(items):
         graph.forget_all()                                  # isolate this scenario
         for j, transcript in enumerate(item.setup):
-            facts = capture_session(chat, transcript)
-            graph.remember(f"{item.name}-s{j + 1}", facts, embedder)
-        recalled = graph.recall(item.question, embedder, k=recall_k)
+            meta = item.sessions[j] if j < len(item.sessions) else {}
+            sid = str(meta.get("session") or f"{item.name}-s{j + 1}")
+            sdate = parse_date(meta.get("date")) if meta.get("date") is not None else session_date(sid)
+            facts = capture_session(chat, transcript, session_date=sdate)
+            graph.remember(sid, facts, embedder, now=parse_date(meta.get("recorded")),
+                           session_date=sdate, correct=bool(meta.get("correct")),
+                           coexist=lambda a, b: facts_coexist(chat, a, b))
+        recalled = graph.recall(item.question, embedder, k=recall_k,
+                                as_of=parse_date(item.as_of), known_at=parse_date(item.known_at))
         # B6: the "assembled" condition is now the three-tier context_for assembler —
         # activation (recall) + attractors (themes the recalled facts belong to). Identity
         # is left empty here (scenarios are generic); themes appear once the graph is consolidated.
@@ -457,7 +492,13 @@ def run_cross_session_eval(items, graph, embedder, chat, judge=None, recall_k: i
         answers = {c: _THINK.sub("", chat.chat(build_probe_messages(item.question, ctx))).strip()
                    for c, ctx in contexts.items()}
         for c in conditions:
-            success[c] += 1.0 if task_success(answers[c], item.expected) else 0.0
+            ok = task_success(answers[c], item.expected)
+            success[c] += 1.0 if ok else 0.0
+            if item.kind:
+                k = by_kind.setdefault(item.kind, {"n": 0, **{cc: 0 for cc in conditions}})
+                k[c] += 1 if ok else 0
+        if item.kind:
+            by_kind[item.kind]["n"] += 1
         if judge is not None:
             if i % 2 == 0:      # alternate A/B to cancel position bias
                 verdict = judge_pairwise(judge, item.question, answers["assembled"], answers["raw-log"])
@@ -467,8 +508,8 @@ def run_cross_session_eval(items, graph, embedder, chat, judge=None, recall_k: i
                 winner = {"a": "raw-log", "b": "assembled", "tie": "tie"}[verdict]
             tally[winner] += 1
         details.append({
-            "name": item.name, "question": item.question, "expected": item.expected,
-            "recalled": len(recalled), "answers": answers,
+            "name": item.name, "kind": item.kind, "question": item.question,
+            "expected": item.expected, "recalled": len(recalled), "answers": answers,
             "success": {c: task_success(answers[c], item.expected) for c in conditions},
         })
         if on_progress:
@@ -478,6 +519,8 @@ def run_cross_session_eval(items, graph, embedder, chat, judge=None, recall_k: i
         "scenarios": len(items),
         "judged": judge is not None,
         "success": {c: success[c] / div for c in conditions},
+        "by_kind": {k: {"n": v["n"], **{c: v[c] / (v["n"] or 1) for c in conditions}}
+                    for k, v in by_kind.items()},
         "tally": tally,
         "details": details,
     }

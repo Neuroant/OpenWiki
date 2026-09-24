@@ -149,16 +149,23 @@ class _FakeMemGraph:
     def __init__(self):
         self.stored = []            # (session_id, MemoryFact)
         self.forgot = 0
+        self.calls = []             # remember() kwargs (B7 temporal scenarios)
+        self.recall_kw = {}
 
     def forget_all(self):
         self.stored = []
         self.forgot += 1
 
-    def remember(self, session_id, facts, embedder, now=None):
+    def remember(self, session_id, facts, embedder, now=None, session_date=None, correct=False,
+                 coexist=None):
         self.stored.extend((session_id, f) for f in facts)
+        self.calls.append({"session": session_id, "now": now, "session_date": session_date,
+                           "correct": correct})
+        self.coexist = coexist
         return {"facts": len(facts), "added": len(facts), "duplicates": 0}
 
     def recall(self, query, embedder, k=5, **kw):
+        self.recall_kw = kw
         return [{"id": f"{sid}-{i}", "subject": f.subject, "predicate": f.predicate,
                  "object": f.object, "session_id": sid, "cos": 1.0, "score": 1.0}
                 for i, (sid, f) in enumerate(self.stored)][:k]
@@ -206,6 +213,57 @@ def test_load_cross_session_set(tmp_path):
     assert [i.name for i in items] == ["n1", "scenario-4"]            # 2nd JSON is file line 4
     assert items[0].setup == ["s only"] and items[0].expected == ["tok"]
     assert items[1].setup == ["a", "b"] and items[1].expected == ["x", "y"]
+    assert items[0].sessions == [] and items[0].as_of is None and items[0].kind == ""
+
+
+def test_load_cross_session_set_temporal_fields(tmp_path):
+    """B7: dated / recorded / correcting setup sessions + a point-in-time probe."""
+    from openwiki import eval as ev
+    path = tmp_path / "t.jsonl"
+    path.write_text(
+        '{"name":"t","kind":"backfill","as_of":"2025-08-15","known_at":"2025-09-17",'
+        '"setup":[{"session":"2025-09-16","transcript":"port 9000"},'
+        '"plain",'
+        '{"session":"fix","date":"2025-09-18","recorded":"2025-09-18","correct":true,"text":"9001"}],'
+        '"question":"q","expected":"9000"}\n', encoding="utf-8")
+    (it,) = ev.load_cross_session_set(path)
+    assert it.setup == ["port 9000", "plain", "9001"] and it.kind == "backfill"
+    assert it.sessions == [{"session": "2025-09-16"}, {},
+                           {"session": "fix", "date": "2025-09-18", "recorded": "2025-09-18",
+                            "correct": True}]
+    assert (it.as_of, it.known_at) == ("2025-08-15", "2025-09-17")
+
+
+def test_task_success_alternatives():
+    from openwiki import eval as ev
+    exp = ["2025-09-16|16. September|16.09.2025"]
+    assert ev.task_success("Seit dem 16. September 2025.", exp)
+    assert ev.task_success("since 2025-09-16", exp)
+    assert not ev.task_success("since September", exp)
+    assert ev.task_success("Kuzu and Ollama", ["kuzu", "ollama|llama"])
+    assert not ev.task_success("x", ["|"])                   # empty alternatives never match
+
+
+def test_run_cross_session_eval_passes_temporal_context():
+    import pytest
+    pytest.importorskip("kuzu")          # parses dates via openwiki.graph.temporal
+    from openwiki import eval as ev
+    from openwiki.graph.temporal import parse_date as T
+    items = [ev.CrossSessionItem(
+        "pit", ["port 8137 notes", "fix notes"], "Which port in August?", ["8137"],
+        sessions=[{"session": "2025-08-01"},
+                  {"session": "fix", "date": "2025-09-18", "recorded": "2025-09-18", "correct": True}],
+        as_of="2025-08-15", kind="point-in-time")]
+    graph = _FakeMemGraph()
+    r = ev.run_cross_session_eval(items, graph, None, _XChat())
+    assert graph.calls[0] == {"session": "2025-08-01", "now": None,
+                              "session_date": T("2025-08-01"), "correct": False}
+    assert graph.calls[1] == {"session": "fix", "now": T("2025-09-18"),
+                              "session_date": T("2025-09-18"), "correct": True}
+    assert graph.recall_kw == {"as_of": T("2025-08-15"), "known_at": None}
+    assert callable(graph.coexist)                           # the LLM coexistence check is wired
+    assert r["by_kind"]["point-in-time"]["n"] == 1
+    assert r["details"][0]["kind"] == "point-in-time"
 
 
 def test_run_cross_session_eval_conditions():

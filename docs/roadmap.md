@@ -840,6 +840,57 @@ verify we can extend if needed); **multi-agent swarm / stigmergy** (single-user 
 Vaults"** (task-agent territory, not a knowledge substrate). The "edge of chaos / K≈2" framing is a *lens*
 for the world-model **coupling** analysis (Direction I), not a build item. Design detail: `path-b-memory.md` §12.
 
+### Path B++ — memory hygiene & implicit recall (next; from the cognitive-agent report)
+
+A second external report ("Architecture and Implementation of a Cognitive AI Agent: Simulating Human
+Intelligence through LLMs, CoALA, and Sleep Phase Consolidation" — a *virtual-secretary* blueprint) is mostly
+an **agent-runtime** design (continuous inner monologue, asyncio heartbeat loops, System-1/System-2, tool
+synthesis). OpenWiki is the **memory + knowledge substrate under** an agent (Claude Code, via hooks + MCP), so
+only its memory half applies — and that half largely **validates** what exists:
+
+| Report concept | OpenWiki today |
+|---|---|
+| CoALA working / episodic / semantic memory | budgeted `context_for` / dated sessions (backfill + hooks) / `Assertion`s + themes + wiki |
+| Letta core / recall / archival | identity tier / activation `recall` / wiki + graph |
+| Memori semantic triples as a compression layer | S-P-O capture (~500-token budget vs Memori's ~721) |
+| Zep/Graphiti temporal validity | **B7** bi-temporal assertions |
+| "Conflict-aware temporal tagger" (SleepGate) | **B7 + B9** valid-time merge + fact identity |
+| NREM consolidation | `consolidate` (themes) + `decay` |
+
+The **genuine gaps**, measure-first as always:
+
+- **Provenance + memory scrubbing (P0 — memory is now injected into every prompt).** Captured facts carry no
+  source: a user's decision and a claim from a *pasted document* (this very report — "SleepGate reduces
+  interference to O(log n)") land on equal footing and get injected later. Tag each fact's origin at capture
+  (user decision / assistant proposal / discussed material) and **scrub instruction-like facts** ("ignore X",
+  "always do Y") before they are stored — the agentic-memory-poisoning path the report describes, cheap to
+  close at the source. Keep the inject framing ("this is not the user's message").
+- **Cue-trigger recall (P1 — LoCoMo-Plus "Level-2 memory").** Similarity recall can't connect "hates noisy
+  open-plan offices" (session 3) to "book a venue for the client meeting" (session 45) — no shared words. First a
+  scenario set in the cross-session harness (expect the baseline to fail), then the cheapest fix that measures:
+  LLM-generated "which remembered preferences / constraints matter here?" probe queries at inject time, B8
+  priming, or themes. (Dogfooding already showed the symptom: "which chat model is the default?" → "chat opens
+  read-only".)
+- **`openwiki sleep` + intentional forgetting (P1).** One schedulable nightly pass (Task Scheduler / cron):
+  consolidate → resolve (B9) → scrub → **forget** → decay. Forgetting = prune low-value, never-recalled facts
+  (today decay only re-ranks; the dogfooding memory grows ~50 facts/day) — the "biological rhythm" at no cost.
+- **LoCoMo benchmark (P2).** The public long-conversation QA set (snap-research) converted to the cross-session
+  format → the first externally comparable number instead of hand-written scenarios only.
+- **Agent-initiated writes (P2, optional).** CoALA's learning action by the agent itself (Letta's
+  `memory_replace`): an opt-in MCP `wiki_remember` tool (via the journal) so a decision is stored when made, not
+  only at session end.
+
+**Out of scope** (agent runtime or model internals, against the local-substrate role): continuous thinking /
+inner-monologue managers / heartbeat loops / dual-speed System-1–2 (Claude Code is the agent; always-on
+thinking competes for the one local GPU); SleepGate KV-cache gating, fast weights, HOPE self-distillation,
+RL "dreaming" (need model internals / training — a local Ollama model is a black box); Theory-of-Mind / persona
+RL (agent-side; the identity tier covers persona at the memory level); Voyager-style tool synthesis + Git-backed
+skill libraries (procedural memory is the host's — at most export captured how-tos as skills later); probe-based
+circuit breakers (internals; OpenWiki's own calls are already bounded — output caps, timeouts, per-window error
+tolerance). **Caveat on the source:** several load-bearing claims are unverified 2026 preprints or vendor numbers
+(SleepGate's "O(n) → O(log n) interference", Memori's 87% LoCoMo at 721 tokens) — treated as hypotheses, not
+facts. Design detail: `path-b-memory.md` §13.
+
 ### Honest guardrails
 
 - **Contradiction (Phase 3 / B4) is belief revision** — a decades-old AI problem, not a graph

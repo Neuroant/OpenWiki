@@ -41,6 +41,7 @@
 10. [Recommended first slice](#10-recommended-first-slice)
 11. [Prior art & learnings — "Cognitive Substrate"](#11-prior-art--learnings--cognitive-substrate)
 12. [Second-Brain refinements (B7 / A2 / B8) — next](#12-second-brain-refinements-b7--a2--b8--next)
+13. [Memory hygiene & implicit recall (B10+) — next](#13-memory-hygiene--implicit-recall-b10--next-from-the-cognitive-agent-report)
 
 ---
 
@@ -819,6 +820,60 @@ version, a Python-version constraint, "enabled in version 0.53.0" / "version bum
 errs toward "different thing" (safe: fragmentation over a wrong merge); descriptions grouped with values cost
 extra coexistence calls; subject identity is only inferred inside a resolved group (no general
 subject resolution).
+
+## 13. Memory hygiene & implicit recall (B10+) — next, from the cognitive-agent report
+
+A second external report (*"Architecture and Implementation of a Cognitive AI Agent: Simulating Human
+Intelligence through LLMs, CoALA, and Sleep Phase Consolidation"* — a virtual-secretary blueprint: CoALA,
+Letta/MemGPT, Memori, Zep/Graphiti, LoCoMo/LoCoMo-Plus, sleep-phase consolidation, ToM, memory poisoning) was
+read after B9. It is an **agent-runtime** design; OpenWiki is the **memory substrate beneath** an agent, so the
+mapping is one layer down.
+
+**Where it confirms the design.** CoALA's working / episodic / semantic modules = `context_for` (budgeted) /
+dated sessions (backfill + host hooks) / `Assertion`s + `MemoryConcept` themes + wiki; Letta's core / recall /
+archival = identity / activation `recall` / wiki + graph; Memori's "semantic triples as a compression layer" = our
+S-P-O capture (a ~500-token budget vs Memori's reported ~721); Zep/Graphiti temporal validity = B7; the
+"conflict-aware temporal tagger" = B7's valid-time merge + B9 fact identity; NREM consolidation = `consolidate` +
+`decay`.
+
+**Gaps, in order** (each measured before adopted):
+
+1. **Provenance + scrubbing (P0).** Since v0.84 the hooks inject memory into *every* prompt, so memory is a
+   persistence path for injected instructions (the report's "agentic memory poisoning"). Today a fact has no
+   origin: a user decision and a claim from pasted material (this report's own "O(log n)" numbers) are equal.
+   → capture tags each fact's **source** (user decision / assistant proposal / discussed material);
+   instruction-like facts ("ignore …", "always …", "never …") are **scrubbed** before storage (rule filter + an
+   LLM check, both cheap); recall can down-weight discussed material. Measure: a poisoning scenario set (a
+   transcript quoting a malicious document) must not surface the instruction in `context_for`.
+2. **Cue-trigger recall (P1).** LoCoMo-Plus's "Level-2 cognitive memory": the stored cue ("hates noisy
+   open-plan offices") and the later trigger ("book a venue for the client meeting") share no words or close
+   embeddings, so cosine recall misses it. → a cue-trigger scenario set in the cross-session harness (causal /
+   state / goal / value constraints), baseline first; then compare (a) LLM-generated constraint probes at inject
+   time ("which remembered preferences/constraints could matter for this request?"), (b) B8 graph priming,
+   (c) theme-level recall. Adopt only what wins.
+3. **`openwiki sleep` + intentional forgetting (P1).** One nightly, schedulable pass: `consolidate` → B9
+   re-resolution of recent facts → scrub → **forget** (prune facts that are low-importance, never recalled and
+   old; decay today only re-ranks, and the dogfooding memory grows ~50 facts/day) → `decay`. The report's
+   "biological rhythm" at the cost of a Task-Scheduler / cron entry.
+4. **LoCoMo (P2).** Convert the public long-conversation QA benchmark (snap-research) into the cross-session
+   format — the first number comparable to other memory systems (single-hop / multi-hop / temporal /
+   open-domain / adversarial categories).
+5. **Agent-initiated writes (P2, optional).** CoALA's learning action by the agent (Letta's `memory_replace`):
+   an opt-in MCP `wiki_remember(fact)` that queues to the journal — decisions stored when made, not only at
+   session end.
+
+**Out of scope.** Continuous thinking, inner-monologue managers, heartbeat event loops, System-1/2 dual rate
+(agent runtime — Claude Code is the agent; always-on reasoning competes for the single local GPU). SleepGate
+KV-cache gating, fast weights, HOPE self-distillation, RL "dreaming" (model internals / training — impossible on a
+black-box local model). ToM hypotheses and persona-consistency RL (agent-side; the identity tier is the memory-level
+contribution). Voyager-style tool synthesis and Git-backed skill memory (the host owns procedural memory; at most,
+later, export captured how-tos as `.claude/skills`). Probe-based cognitive circuit breakers (need internals; our
+calls are already bounded).
+
+**Source caveat.** The report mixes established work (CoALA, MemGPT/Letta, Zep/Graphiti, LoCoMo, Voyager) with
+unverified 2026 preprints and vendor claims (SleepGate's O(n) → O(log n) interference, "Language Models Need
+Sleep", "Theory of Agent", Memori's 87% LoCoMo at 721 tokens); those are hypotheses here, not premises. The
+"human-mind emulator" framing oversells prompt-level techniques.
 
 ---
 

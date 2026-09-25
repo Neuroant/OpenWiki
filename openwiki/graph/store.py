@@ -50,6 +50,8 @@ _A_BASE = ("id", "subject", "predicate", "object", "session_id", "created_at")
 _A_CONF = ("confidence", "last_seen")                                     # v0.54
 _A_B7 = ("valid_from", "valid_to", "expired_at", "cardinality")           # B7 bi-temporal
 _A_B9 = ("attr",)                                                         # B9 attribute key
+_A_P0 = ("source",)                                                       # P0 provenance
+MATERIAL_WEIGHT = 0.75                # P0: a claim from discussed material ranks below decisions
 ATTR_SEP = "\x1f"                     # canonical attribute key = normalized subject ␟ predicate
 RESOLVE_THRESHOLD = 0.75              # min fact-embedding cosine for an attribute candidate (B9)
 RESOLVE_K = 6                         # candidates shown to the attribute chooser
@@ -924,9 +926,10 @@ class GraphStore:
                 if rec.get("op") == "remember":
                     facts = [MemoryFact(t[0], t[1], t[2],
                                         valid_from=t[3] if len(t) >= 5 else None,
-                                        cardinality=(t[4] if len(t) >= 5 else None) or ONE)
+                                        cardinality=(t[4] if len(t) >= 5 else None) or ONE,
+                                        source=t[5] if len(t) >= 6 else None)
                              for t in rec.get("facts", [])
-                             if isinstance(t, list) and len(t) in (3, 5)]
+                             if isinstance(t, list) and len(t) in (3, 5, 6)]
                     if facts:
                         res = self.remember(str(rec.get("session") or "session"), facts, embedder,
                                             now=int(rec.get("t") or now),
@@ -958,7 +961,7 @@ class GraphStore:
             f"CREATE NODE TABLE IF NOT EXISTS Assertion(id STRING, subject STRING, predicate STRING, "
             f"object STRING, session_id STRING, created_at INT64, confidence DOUBLE, last_seen INT64, "
             f"valid_from INT64, valid_to INT64, expired_at INT64, cardinality STRING, attr STRING, "
-            f"emb FLOAT[{int(dim)}], PRIMARY KEY(id));",
+            f"source STRING, emb FLOAT[{int(dim)}], PRIMARY KEY(id));",
             "CREATE REL TABLE IF NOT EXISTS ASSERTS(FROM Session TO Assertion);",
             "CREATE REL TABLE IF NOT EXISTS SUPERSEDES(FROM Assertion TO Assertion);",   # B4
         ):
@@ -976,6 +979,7 @@ class GraphStore:
                         "ALTER TABLE Assertion ADD expired_at INT64;",
                         "ALTER TABLE Assertion ADD cardinality STRING;",
                         "ALTER TABLE Assertion ADD attr STRING;",                     # B9
+                        "ALTER TABLE Assertion ADD source STRING;",                   # P0
                         "ALTER TABLE Session ADD session_date INT64;"):
                 try:
                     self._exec(ddl)
@@ -1029,7 +1033,8 @@ class GraphStore:
         of an unmigrated graph), B7. Missing validity is derived from the ``SUPERSEDES`` edges
         exactly as the migration would, so every reader sees one model. ``[]`` without the table."""
         rows, cols = None, ()
-        for extra in (_A_CONF + _A_B7 + _A_B9, _A_CONF + _A_B7, _A_CONF, ()):
+        for extra in (_A_CONF + _A_B7 + _A_B9 + _A_P0, _A_CONF + _A_B7 + _A_B9,
+                      _A_CONF + _A_B7, _A_CONF, ()):
             fields = _A_BASE + extra + (("emb",) if with_emb else ())
             try:
                 rows = self._rows("MATCH (a:Assertion) RETURN "
@@ -1046,7 +1051,7 @@ class GraphStore:
             r["created_at"] = int(r.get("created_at") or 0)
             r["confidence"] = float(r["confidence"]) if r.get("confidence") is not None else 1.0
             r["last_seen"] = int(r.get("last_seen") or 0)
-            for c in _A_B7 + _A_B9:
+            for c in _A_B7 + _A_B9 + _A_P0:
                 r.setdefault(c, None)
             r["cardinality"] = r["cardinality"] or ONE
             recs.append(r)
@@ -1101,11 +1106,18 @@ class GraphStore:
             raise RuntimeError("GraphStore is read-only; open it writable to remember.")
         facts = list(facts)
         empty = {"facts": 0, "added": 0, "duplicates": 0, "superseded": 0,
-                 "retracted": 0, "historical": 0, "resolved": 0}
+                 "retracted": 0, "historical": 0, "resolved": 0, "scrubbed": 0}
         if not facts:
             return empty
         if embedder is None:
             raise ValueError("remember needs an embedder.")
+        # P0: the rule scrubber is the last line of defense for facts arriving by any path (journal,
+        # a caller that skipped capture's audit) — an injected instruction never becomes memory
+        from .memory import is_unsafe_instruction
+        scrubbed = sum(1 for f in facts if is_unsafe_instruction(f))
+        facts = [f for f in facts if not is_unsafe_instruction(f)]
+        if not facts:
+            return dict(empty, scrubbed=scrubbed)
         now = int(now if now is not None else time.time())
         sdate = int(session_date) if session_date is not None else session_date_of(session_id)
         # recency counts from when the fact was *said* (a backfilled session), not from when it was
@@ -1116,7 +1128,7 @@ class GraphStore:
         norms[norms == 0] = 1.0
         emb = emb / norms
         self._ensure_memory_schema(emb.shape[1])
-        n = dict(empty, facts=len(facts))
+        n = dict(empty, facts=len(facts), scrubbed=scrubbed)
         with self._lock:
             self._exec("MERGE (s:Session {id:$id}) ON CREATE SET s.created_at=$t, s.session_date=$d;",
                        {"id": session_id, "t": now, "d": sdate})
@@ -1200,14 +1212,17 @@ class GraphStore:
                            "object": fact.object, "okey": no, "session_id": session_id,
                            "created_at": now, "confidence": 1.0, "last_seen": said_at,
                            "valid_from": int(plan["valid_from"]), "valid_to": plan["valid_to"],
-                           "expired_at": None, "cardinality": card, "attr": key}
+                           "expired_at": None, "cardinality": card, "attr": key,
+                           "source": getattr(fact, "source", None)}
                     self._exec(
                         "CREATE (:Assertion {id:$id, subject:$s, predicate:$p, object:$o, "
                         "session_id:$sid, created_at:$t, confidence:1.0, last_seen:$ls, "
-                        "valid_from:$vf, valid_to:$vt, cardinality:$card, attr:$attr, emb:$e});",
+                        "valid_from:$vf, valid_to:$vt, cardinality:$card, attr:$attr, "
+                        "source:$src, emb:$e});",
                         {"id": aid, "s": fact.subject, "p": fact.predicate, "o": fact.object,
                          "sid": session_id, "t": now, "ls": said_at, "vf": rec["valid_from"], "vt": rec["valid_to"],
-                         "card": rec["cardinality"], "attr": key, "e": vec.astype(float).tolist()})
+                         "card": rec["cardinality"], "attr": key, "src": rec["source"],
+                         "e": vec.astype(float).tolist()})
                     if resolve is not None:
                         members.append((key, vec / (np.linalg.norm(vec) or 1.0)))
                     self._exec("MATCH (s:Session {id:$sid}),(a:Assertion {id:$id}) "
@@ -1279,13 +1294,16 @@ class GraphStore:
             cos = float(q @ np.asarray(r["emb"], dtype=np.float32))  # stored normalized
             # gentle, log-scaled confidence lift, decayed by recency — relevance (cos) still dominates
             score = cos * effective_weight(confidence_weight(r["confidence"]), ref, now, half_life_days)
+            if r.get("source") == "material":                      # P0: a claim, not a decision
+                score *= MATERIAL_WEIGHT
             scored.append({"id": r["id"], "subject": r["subject"], "predicate": r["predicate"],
                            "object": r["object"], "session_id": r["session_id"],
                            "cos": round(cos, 3), "confidence": round(r["confidence"], 3),
                            "score": round(score, 3), "superseded": r["superseded"],
                            "status": r["status"], "in_view": r["in_view"],
                            "valid_from": r["valid_from"], "valid_to": r["valid_to"],
-                           "created_at": r["created_at"], "expired_at": r["expired_at"]})
+                           "created_at": r["created_at"], "expired_at": r["expired_at"],
+                           "source": r.get("source")})
         scored.sort(key=lambda x: -x["score"])
         return scored[:k]
 
@@ -1355,7 +1373,7 @@ class GraphStore:
                         "last_seen": r["last_seen"], "superseded": r["superseded"],
                         "status": r["status"], "valid_from": r["valid_from"],
                         "valid_to": r["valid_to"], "expired_at": r["expired_at"],
-                        "cardinality": r["cardinality"]})
+                        "cardinality": r["cardinality"], "source": r.get("source")})
         out.sort(key=lambda a: -(a["last_seen"] or a["created_at"]))
         return out[:limit]
 

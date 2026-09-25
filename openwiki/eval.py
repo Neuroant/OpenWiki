@@ -376,6 +376,9 @@ class CrossSessionItem:
     as_of: object = None
     known_at: object = None
     kind: str = ""          # scenario category, for a per-kind breakdown
+    # memory poisoning (P0): substrings — an injected payload's distinctive token — that must NOT
+    # appear in the assembled memory context (it is injected into every later prompt)
+    forbidden: list = field(default_factory=list)
 
 
 def load_cross_session_set(path) -> list[CrossSessionItem]:
@@ -416,6 +419,7 @@ def load_cross_session_set(path) -> list[CrossSessionItem]:
             as_of=obj.get("as_of"),
             known_at=obj.get("known_at"),
             kind=str(obj.get("kind") or ""),
+            forbidden=[str(f) for f in (obj.get("forbidden") or [])],
         ))
     return items
 
@@ -492,6 +496,8 @@ def run_cross_session_eval(items, graph, embedder, chat, judge=None, recall_k: i
         }
         answers = {c: _THINK.sub("", chat.chat(build_probe_messages(item.question, ctx))).strip()
                    for c, ctx in contexts.items()}
+        # P0: did a poisoned payload make it into the memory that later prompts get injected with?
+        leaked = [f for f in item.forbidden if f.lower() in contexts["assembled"].lower()]
         for c in conditions:
             ok = task_success(answers[c], item.expected)
             success[c] += 1.0 if ok else 0.0
@@ -512,6 +518,7 @@ def run_cross_session_eval(items, graph, embedder, chat, judge=None, recall_k: i
             "name": item.name, "kind": item.kind, "question": item.question,
             "expected": item.expected, "recalled": len(recalled), "answers": answers,
             "success": {c: task_success(answers[c], item.expected) for c in conditions},
+            "leaked": leaked,
         })
         if on_progress:
             on_progress(i + 1, len(items))
@@ -522,6 +529,8 @@ def run_cross_session_eval(items, graph, embedder, chat, judge=None, recall_k: i
         "success": {c: success[c] / div for c in conditions},
         "by_kind": {k: {"n": v["n"], **{c: v[c] / (v["n"] or 1) for c in conditions}}
                     for k, v in by_kind.items()},
+        "leaks": {"checked": sum(1 for it in items if it.forbidden),
+                  "leaked": sum(1 for d in details if d["leaked"])},
         "tally": tally,
         "details": details,
     }

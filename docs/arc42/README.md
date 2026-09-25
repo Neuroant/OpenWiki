@@ -5,7 +5,7 @@ This is the architecture documentation for **OpenWiki**, structured after the
 into 12 sections, from goals and constraints down to building blocks, runtime, decisions,
 quality, and risks.
 
-> **Status: COMPLETE** (maintained through v0.85). All 12 chapters are complete; diagrams use Mermaid
+> **Status: COMPLETE** (maintained through v0.86). All 12 chapters are complete; diagrams use Mermaid
 > (rendered by GitHub) and have been validated. The **Path B agent-memory** direction is complete
 > (B0–B6; ADR-14–19). Since then the architecture has grown eight more decision clusters (§9), all
 > reflected here: the graph **deepened** — typed `Entity→Entity` relations + relation-aware GraphRAG

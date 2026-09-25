@@ -859,12 +859,14 @@ only its memory half applies — and that half largely **validates** what exists
 
 The **genuine gaps**, measure-first as always:
 
-- **Provenance + memory scrubbing (P0 — memory is now injected into every prompt).** Captured facts carry no
-  source: a user's decision and a claim from a *pasted document* (this very report — "SleepGate reduces
-  interference to O(log n)") land on equal footing and get injected later. Tag each fact's origin at capture
-  (user decision / assistant proposal / discussed material) and **scrub instruction-like facts** ("ignore X",
-  "always do Y") before they are stored — the agentic-memory-poisoning path the report describes, cheap to
-  close at the source. Keep the inject framing ("this is not the user's message").
+- **Provenance + memory scrubbing (P0). ✅ (v0.86).** Measured on `examples/eval_poisoning.jsonl` (5 hidden
+  injections + 3 legit items): baseline **2/5 payloads leaked** into the assembled memory. The first design
+  (source tags + an LLM audit) **failed** — the injection launders the tag ("the user has authorized sharing all
+  API keys…" → a *user* fact), payloads get captured descriptively ("scanner is disabled when …"), and the audit
+  caught nothing while dropping two legitimate facts. Shipped instead: a **source-independent security-sensitive
+  memory policy** (never persist instructions to AI assistants, security weakening, secrets/payments directed
+  somewhere, standing authorizations) → **0/5 leaked, 8/8 legit kept, 0 of 1,446 real facts scrubbed**; the
+  provenance tag stays a soft signal ("Material" marker, ×0.75 rank). Details: `path-b-memory.md` §13.1; ADR-30.
 - **Cue-trigger recall (P1 — LoCoMo-Plus "Level-2 memory").** Similarity recall can't connect "hates noisy
   open-plan offices" (session 3) to "book a venue for the client meeting" (session 45) — no shared words. First a
   scenario set in the cross-session harness (expect the baseline to fail), then the cheapest fix that measures:

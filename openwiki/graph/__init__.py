@@ -7,8 +7,8 @@ from .entities import (
     resolve_entities,
 )
 from .memory import (
-    MemoryFact, assemble_context, capture_session, choose_attribute, facts_coexist, format_memory,
-    parse_facts,
+    MemoryFact, assemble_context, capture_session, capture_session_detailed, choose_attribute,
+    facts_coexist, flag_injected, format_memory, is_unsafe_instruction, parse_facts,
 )
 from .references import detect_page_offset, extract_references, extract_references_multi
 from .store import GraphStore
@@ -21,6 +21,7 @@ __all__ = [
     "coerce_types", "DEFAULT_ENTITY_TYPES",
     "detect_communities", "summarize_community", "summarize_facts", "answer_global",
     "capture_session", "format_memory", "assemble_context", "parse_facts", "MemoryFact",
-    "facts_coexist", "choose_attribute",
+    "facts_coexist", "choose_attribute", "capture_session_detailed", "flag_injected",
+    "is_unsafe_instruction",
     "usage_log_path", "append_usage", "read_usage", "clear_usage",
 ]

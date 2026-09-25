@@ -795,6 +795,8 @@ const MEM_STATUS = {
   retracted: ["ret", "zurückgezogen", "korrigiert — war nie wahr"],
   future: ["plan", "geplant", "gilt erst ab dem Startdatum"],
 };
+// P0 provenance: a claim from a pasted document / email / web page under discussion — not a decision
+const MEM_MATERIAL_BADGE = `<span class="mem-badge mat" title="aus besprochenem Material (Dokument, E-Mail, Webseite) — keine Entscheidung">Material</span>`;
 function memStatusBadge(status) {
   const b = MEM_STATUS[status];
   return b ? `<span class="mem-badge ${b[0]}" title="${b[2]}">${b[1]}</span>` : "";
@@ -805,6 +807,7 @@ function memFactRow(f) {
   const badges = [];
   if (out) badges.push(memStatusBadge(f.status || "past"));
   if (f.confidence > 1) badges.push(`<span class="mem-badge conf" title="mehrfach bestätigt">×${f.confidence}</span>`);
+  if (f.source === "material") badges.push(MEM_MATERIAL_BADGE);
   const sc = (f.score != null) ? `<span class="mem-score" title="Relevanz (cos ${f.cos})">${f.score}</span>` : "";
   const when = memInterval(f);
   return `<div class="mem-fact${out ? " is-sup" : ""}">${sc}
@@ -870,7 +873,7 @@ function renderMemoryView(data) {
       <td><b>${escapeHtml(f.object)}</b></td><td class="m-when">${memInterval(f)}</td>
       <td class="m-name">${escapeHtml(f.session_id || "")}</td>
       <td class="num">${f.confidence}</td>
-      <td>${memStatusBadge(f.status || (f.superseded ? "past" : ""))}</td></tr>`).join("");
+      <td>${memStatusBadge(f.status || (f.superseded ? "past" : ""))}${f.source === "material" ? " " + MEM_MATERIAL_BADGE : ""}</td></tr>`).join("");
 
   return `<div class="mem-head"><strong>Gedächtnis</strong>
       <span class="muted">Path B · Second Brain — was frühere Sitzungen hinterlassen haben</span></div>

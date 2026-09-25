@@ -58,13 +58,19 @@ def append_remember(path, session_id, facts, now: Optional[int] = None,
         if hasattr(f, "subject"):
             s, p, o = f.subject, f.predicate, f.object
             vf, card = getattr(f, "valid_from", None), getattr(f, "cardinality", "one")
+            src = getattr(f, "source", None)
         else:
             s, p, o = f[:3]
             vf, card = (f[3], f[4]) if len(f) >= 5 else (None, "one")
+            src = f[5] if len(f) >= 6 else None
         s, p, o = str(s).strip(), str(p).strip(), str(o).strip()
         if s and p and o:
-            triples.append([s, p, o] if vf is None and card == "one"
-                           else [s, p, o, None if vf is None else int(vf), card or "one"])
+            if src is not None:                   # P0 provenance travels with the fact
+                triples.append([s, p, o, None if vf is None else int(vf), card or "one", src])
+            elif vf is None and card == "one":
+                triples.append([s, p, o])
+            else:
+                triples.append([s, p, o, None if vf is None else int(vf), card or "one"])
     if not triples:
         return 0
     rec = {"op": "remember", "t": _now(now), "session": str(session_id), "facts": triples}

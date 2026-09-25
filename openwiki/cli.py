@@ -35,8 +35,8 @@ from .chat_agent import WikiAgent, summarize_wiki
 from .claude_code_template import scaffold_claude_code
 from .opencode_template import scaffold_opencode
 from .graph import (
-    GraphStore, answer_global, build_graph, capture_session, choose_attribute, detect_communities,
-    facts_coexist,
+    GraphStore, answer_global, build_graph, capture_session, capture_session_detailed,
+    choose_attribute, detect_communities, facts_coexist,
     detect_page_offset, extract_entities, extract_references, extract_references_multi,
     extract_relations, format_memory, resolve_entities, summarize_community, summarize_facts,
 )
@@ -1241,8 +1241,11 @@ def _cmd_build(args: argparse.Namespace) -> int:
                       file=sys.stderr)
                 for spath in session_paths:
                     sid = Path(spath).stem
-                    facts = capture_session(chat, Path(spath).read_text(encoding="utf-8"),
-                                            session_date=session_date_of(sid))
+                    facts, dropped = capture_session_detailed(
+                        chat, Path(spath).read_text(encoding="utf-8"), session_date=session_date_of(sid))
+                    if dropped:
+                        print(f"    · '{sid}': {len(dropped)} instruction-like fact(s) scrubbed",
+                              file=sys.stderr)
                     res = graph.remember(sid, facts, index.embedder, coexist=coexist, resolve=resolve)
                     total += res["added"]
                     print(f"    · '{sid}' → {res['added']} new, {res['duplicates']} dup "
@@ -1801,6 +1804,13 @@ def _cross_session_eval(args: argparse.Namespace, project) -> int:
         misses = [d for d in result["details"] if not d["success"]["assembled"]]
         for d in misses:
             print(f"  ✗ assembled  {d['name']}: {d['answers']['assembled'][:110]}")
+    leaks = result.get("leaks") or {}
+    if leaks.get("checked"):              # P0 poisoning scenarios: payload in the assembled memory?
+        print(f"\nPoisoning: {leaks['leaked']}/{leaks['checked']} scenario(s) leaked an injected "
+              f"payload into the assembled memory context")
+        for d in result["details"]:
+            if d.get("leaked"):
+                print(f"  ✗ leaked  {d['name']}: {', '.join(d['leaked'])}")
     if result["judged"]:
         t = result["tally"]
         print(f"\nLLM judge (assembled vs raw-log, position-balanced):  "
@@ -2368,11 +2378,16 @@ def _cmd_remember(args: argparse.Namespace) -> int:
     try:
         chat = OllamaChat(model=args.model, host=args.host, temperature=0.2)
         print(f"Capturing session '{session_id}' with {chat.name} …", file=sys.stderr)
-        facts = capture_session(chat, args.transcript.read_text(encoding="utf-8"), session_date=sdate)
+        facts, dropped = capture_session_detailed(chat, args.transcript.read_text(encoding="utf-8"),
+                                                  session_date=sdate)
         for f in facts:
             since = f"  (since {format_date(f.valid_from)})" if f.valid_from is not None else ""
             many = "  [many]" if f.cardinality == "many" else ""
-            print(f"  · {f.subject} {f.predicate} {f.object}{since}{many}", file=sys.stderr)
+            src = f"  <{f.source}>" if f.source else ""
+            print(f"  · {f.subject} {f.predicate} {f.object}{since}{many}{src}", file=sys.stderr)
+        for f in dropped:              # P0: injected instructions never become memory
+            print(f"  ✗ scrubbed (instruction-like): {f.subject} {f.predicate} {f.object}",
+                  file=sys.stderr)
         if not getattr(graph, "writable", False):
             # Locked by a running read-only serve/chat: queue to the journal instead of
             # failing — the next writable pass (serve/chat restart, `openwiki decay`, or the
@@ -2397,6 +2412,9 @@ def _cmd_remember(args: argparse.Namespace) -> int:
     hist = f", {result['historical']} historical" if result.get("historical") else ""
     if result.get("resolved"):
         hist += f", {result['resolved']} matched to an existing attribute"
+    n_scrubbed = len(dropped) + result.get("scrubbed", 0)
+    if n_scrubbed:
+        hist += f", {n_scrubbed} scrubbed"
     when = f" [session {format_date(sdate)}]" if sdate is not None else ""
     print(f"Remembered '{session_id}'{when}: {result['added']} new, {result['duplicates']} duplicate"
           f"{sup}{hist} ({result['facts']} captured) → {args.graph}")
@@ -2453,7 +2471,7 @@ def _cmd_backfill(args: argparse.Namespace) -> int:
     coexist = _coexist_check(args.model, args.host)
     resolve = _attribute_resolver(args.model, args.host)
     totals = {"facts": 0, "added": 0, "duplicates": 0, "superseded": 0, "retracted": 0,
-              "historical": 0, "resolved": 0}
+              "historical": 0, "resolved": 0, "scrubbed": 0}
     failed: list = []
     skipped = 0
     started = time.time()
@@ -2469,7 +2487,8 @@ def _cmd_backfill(args: argparse.Namespace) -> int:
                 # valid from the window's first turn (intra-day order), else the day
                 wdate = parse_date(start[:19]) or sdate
                 try:                            # one bad window (timeout, garbage) never aborts the run
-                    facts = capture_session(chat, window, session_date=wdate)
+                    facts, dropped = capture_session_detailed(chat, window, session_date=wdate)
+                    totals["scrubbed"] += len(dropped)
                     res = graph.remember(sid, facts, index.embedder, session_date=wdate,
                                          coexist=coexist, resolve=resolve)
                 except Exception as exc:
@@ -2487,6 +2506,7 @@ def _cmd_backfill(args: argparse.Namespace) -> int:
     note = f", {skipped} day(s) already in memory skipped" if skipped else ""
     print(f"Backfilled {len(days) - skipped} day(s): {totals['added']} new fact(s), {totals['duplicates']} "
           f"re-affirmed, {totals['resolved']} matched to an existing attribute, "
+          f"{totals['scrubbed']} instruction-like scrubbed, "
           f"{totals['superseded']} superseded ({totals['retracted']} retracted), "
           f"{totals['facts']} captured{note} → {args.graph}")
     if failed:
@@ -2973,7 +2993,11 @@ def _hook_capture(project: Project, payload: dict) -> None:
     model = project.setting("models", "chat", DEFAULT_CHAT)
     host = project.setting("models", "host", DEFAULT_HOST)
     # the session ends now → today is the date relative mentions ("since yesterday") resolve against
-    facts = capture_session(_capture_chat(model, host), transcript, session_date=int(time.time()))
+    facts, dropped = capture_session_detailed(_capture_chat(model, host), transcript,
+                                              session_date=int(time.time()))
+    for f in dropped:                  # logged to .openwiki/hook.log by the detached worker
+        print(f"openwiki hook: scrubbed instruction-like fact: {f.subject} | {f.predicate} | "
+              f"{f.object}", file=sys.stderr)
     if not facts:
         return
     sid = str(payload.get("session_id") or "session")

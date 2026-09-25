@@ -331,6 +331,7 @@ header {
 .mem-badge.conf { background: #e6f4ea; color: #1e7e34; }
 .mem-badge.ret { background: #f1e6fb; color: #7b3fb0; }
 .mem-badge.plan { background: #e7f0fd; color: #2c5fb3; }
+.mem-badge.mat { background: #fdf3e1; color: #9a6400; }
 .mem-when { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .mem-when-ctl { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; margin-top: 8px; font-size: 12.5px; color: var(--muted); }
 .mem-when-ctl label { display: inline-flex; align-items: center; gap: 6px; }
@@ -488,6 +489,7 @@ header {
 :root[data-theme="dark"] .mem-badge.conf { background: #173323; color: #7fd49a; }
 :root[data-theme="dark"] .mem-badge.ret { background: #2c1f3a; color: #c79bf0; }
 :root[data-theme="dark"] .mem-badge.plan { background: #1a2a44; color: #8fb3f5; }
+:root[data-theme="dark"] .mem-badge.mat { background: #3a2c14; color: #e8b86a; }
 
 /* -- Analyse map controls (projection + community focus, U11) ------------- */
 .an-mapctl { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-bottom: 8px; font-size: 12.5px; }

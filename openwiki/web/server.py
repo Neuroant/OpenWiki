@@ -699,8 +699,13 @@ class WikiWebApp:
         identity = self.project.identity if self.project is not None else ""
         budget = self.project.context_budget if self.project is not None else None
         from ..graph.temporal import parse_date
+        probes = None
+        chat = getattr(self.agent, "chat", None)
+        if chat is not None and self.project is not None and self.project.memory_probes:
+            from ..graph.memory import constraint_probes
+            probes = constraint_probes(chat, query)          # P1 cue-trigger; fail-soft → []
         context = self.graph.context_for(query, embedder, identity=identity, max_chars=budget,
-                                         as_of=parse_date(as_of))
+                                         as_of=parse_date(as_of), probes=probes)
         return {"query": query, "context": context, "identity": identity, "budget": budget}
 
     def chat(self, message: str) -> dict:

@@ -732,3 +732,78 @@ def test_a_stated_session_day_yields_to_the_precise_session_time(tmp_path):
         assert {x["object"]: x["valid_from"] for x in store.list_assertions()}["port 9100"] == T("2025-10-01")
     finally:
         store.close()
+
+
+def test_old_relevant_fact_outranks_a_recent_weak_one(tmp_path):
+    """Recency is a bounded tie-breaker: a year-old, highly relevant fact must still beat a
+    recent, weakly related one (unbounded decay once scored it ~0 — cue-trigger eval)."""
+    store, emb = _store(tmp_path), _TEmbedder()
+    try:
+        store.remember("2024-09-01", [MemoryFact("the server", "listens on", "port 8137")], emb,
+                       now=T("2025-09-20"))
+        store.remember("2025-09-19", [MemoryFact("the project", "uses", "a server rack")], emb,
+                       now=T("2025-09-20"))
+        hits = store.recall("which port does the server listen on", emb, k=2, now=T("2025-09-20"))
+        assert hits[0]["object"] == "port 8137" and hits[0]["score"] > 0
+    finally:
+        store.close()
+
+
+# -- P1 cue-trigger recall -------------------------------------------------------
+
+class _Said:
+    def __init__(self, reply):
+        self.reply = reply
+
+    def chat(self, messages):
+        return self.reply
+
+
+def test_constraint_probes_are_fact_statements():
+    from openwiki.graph.memory import constraint_probes
+    chat = _Said('- user is allergic to nuts\n2. user cannot stand noise\n"user has a dog"\nuser owns a car')
+    assert constraint_probes(chat, "Order a cake") == [
+        "user is allergic to nuts", "user cannot stand noise", "user has a dog"]
+    assert constraint_probes(_Said(""), "Order a cake") == []
+
+
+def test_keep_in_mind_section_comes_first():
+    facts = [{"subject": "project", "predicate": "uses", "object": "Kuzu", "session_id": "s1"},
+             {"subject": "user", "predicate": "is allergic to", "object": "hazelnuts",
+              "session_id": "s2", "probe": "user is allergic to nuts"}]
+    ctx = assemble_context("", facts, [])
+    assert ctx.index("## Keep in mind") < ctx.index("hazelnuts") < ctx.index("## What I remember")
+    assert "apply them" in ctx and ctx.index("Kuzu") > ctx.index("## What I remember")
+
+
+def test_probe_slot_prefers_a_fact_about_the_user(tmp_path):
+    """A probe asks about the user: its reserved slot takes the best fact *about the user* among
+    its top hits, not a closer topic fact (which would crowd out the constraint it was meant to reach)."""
+    store, emb = _store(tmp_path), _TEmbedder()
+    try:
+        store.remember("s1", [MemoryFact("the server", "uses", "port 8137"),
+                              MemoryFact("user", "uses", "python"),
+                              MemoryFact("the project", "uses", "a database")], emb)
+        hits = store.recall_probed("project database", emb, ["server port python uses"], k=2)
+        assert [h["object"] for h in hits] == ["python", "a database"]
+        assert hits[0]["probe"] == "server port python uses" and "probe" not in hits[1]
+        assert store.recall_probed("project database", emb, [], k=2) == store.recall(
+            "project database", emb, k=2)
+    finally:
+        store.close()
+
+
+def test_probes_leave_a_memory_without_personal_facts_alone(tmp_path):
+    """No fact about the user → the probe slots stay empty: the context is plain recall, and the
+    project's own facts are never relabelled as "the user's circumstances"."""
+    store, emb = _store(tmp_path), _TEmbedder()
+    try:
+        store.remember("s1", [MemoryFact("the server", "uses", "port 8137"),
+                              MemoryFact("the project", "uses", "a database")], emb)
+        plain = store.recall("project database", emb, k=2)
+        probed = store.recall_probed("project database", emb, ["server port uses"], k=2)
+        assert probed == plain and not any("probe" in h for h in probed)
+        assert "Keep in mind" not in store.context_for("project database", emb,
+                                                       probes=["server port uses"])
+    finally:
+        store.close()

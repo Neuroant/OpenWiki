@@ -358,7 +358,9 @@ older one **supersedes** it (history stays queryable); `recall` ranks by decay-w
 cosine so useful facts persist and stale ones fade. It's read-safe under concurrency (Kuzu
 is reader-XOR-writer, so writes queue to a lock-free journal a writer folds in), and it can
 wire into a coding agent's lifecycle via **host hooks** (`claude-code --hooks`: inject memory
-on each prompt, capture on session end). Design: **[docs/path-b-memory.md](docs/path-b-memory.md)**.
+on each prompt, capture on session end). With `[memory] probes = true` (or `context --probes`) a
+context read also reaches **implicit constraints** — "book a venue" recalls "can't stand noisy
+offices" although they share no words (cue-trigger recall). Design: **[docs/path-b-memory.md](docs/path-b-memory.md)**.
 
 ### Web UI
 
@@ -472,6 +474,7 @@ entities = false            # LLM-extract typed entities (Entity + MENTIONS)
 
 [memory]                    # Second Brain mode (Path B) — off = Wiki mode (documents only)
 enabled = false             # remember/recall/consolidate/context + the Gedächtnis tab + memory hooks
+# probes = false            # cue-trigger recall: +1 chat call per context read surfaces the user's implicit constraints
 ```
 
 - **`openwiki build`** runs the whole pipeline into the project's `output/`,

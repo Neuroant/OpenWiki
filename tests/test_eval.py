@@ -289,6 +289,43 @@ def test_run_cross_session_eval_judge_balances_position():
     assert r["tally"] == {"assembled": 1, "raw-log": 1, "tie": 0}
 
 
+class _ConstraintChat(_XChat):
+    """_XChat + the P1 constraint judge: "yes" iff the judged answer mentions the port."""
+
+    def chat(self, messages):
+        if "respects something it knew" in messages[0]["content"]:
+            answer = messages[-1]["content"].split("The assistant's answer:")[1]
+            return "Yes." if "8137" in answer else "no"
+        return super().chat(messages)
+
+
+def test_constraint_respected_parses_the_verdict():
+    from openwiki import eval as ev
+
+    class Said:
+        def __init__(self, reply):
+            self.reply = reply
+
+        def chat(self, messages):
+            return self.reply
+    assert ev.constraint_respected(Said("Yes."), "q", "a", "c") is True
+    assert ev.constraint_respected(Said("**yes**"), "q", "a", "c") is True
+    assert ev.constraint_respected(Said("<think>yes?</think>No"), "q", "a", "c") is False
+
+
+def test_run_cross_session_eval_scores_constraints():
+    """P1: a scenario with a ``constraint`` gets an LLM-judge verdict per condition + a tally;
+    one without is left unjudged."""
+    from openwiki import eval as ev
+    items = [ev.CrossSessionItem("c", ["We always run on port 8137."], "Set up the server.", ["8137"],
+                                 constraint="The user runs everything on port 8137."),
+             ev.CrossSessionItem("plain", ["x runs on 8137"], "q", ["8137"])]
+    r = ev.run_cross_session_eval(items, _FakeMemGraph(), None, _ConstraintChat())
+    assert r["details"][0]["applied"] == {"cold": False, "raw-log": True, "assembled": True}
+    assert r["details"][1]["applied"] is None
+    assert r["applied"] == {"checked": 1, "cold": 0, "raw-log": 1, "assembled": 1}
+
+
 def test_load_eval_set(tmp_path):
     path = tmp_path / "eval.jsonl"
     path.write_text(

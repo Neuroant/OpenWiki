@@ -249,6 +249,39 @@ def flag_injected(chat, facts: list) -> set:
     return {int(m) - 1 for m in re.findall(r"\d+", first) if 1 <= int(m) <= len(facts)}
 
 
+CONSTRAINT_SYSTEM = (
+    "An assistant with a long-term memory of its user is about to handle the request below. Guess up to "
+    "three facts that, IF the memory held them about this user, would change how the request should be "
+    "handled — each about a different kind of circumstance: health, allergies or physical limits; "
+    "dislikes, values or preferences; schedule habits or commitments; budget or savings goals; family or "
+    "pets; past bad experiences. Write each as a short statement the way a memory stores it (\"user is "
+    "allergic to nuts\", \"user cannot stand noise\", \"user has a dog\") — about the user, never repeating "
+    "the request's own details (places, names, dates). One per line, nothing else."
+)
+
+
+def constraint_probes(chat, request: str, n: int = 3) -> list:
+    """P1 cue-trigger recall: probes for the user's *implicit constraints* on a request — a stored
+    preference ("can't stand noisy open-plan offices") shares no words with the later request that it
+    should shape ("book a venue for the client meeting"), so plain similarity recall misses it. The
+    probes are *hypothetical facts* in the stored form ("user cannot stand noise"), not questions: asked
+    for search queries, the model wrote questions to the user anchored on the request's topic ("do you
+    prefer a quiet setting for client meetings?"), which ranked the topic's facts (meeting rooms) above
+    the personal one (measured, §13.2). One short deterministic call; **fail-soft** — a failed call
+    (model down, timeout) or malformed / empty output → ``[]``, and recall proceeds unprobed."""
+    try:
+        raw = _THINK.sub("", chat.chat([{"role": "system", "content": CONSTRAINT_SYSTEM},
+                                        {"role": "user", "content": f"Request: {request}"}]) or "")
+    except Exception:          # a memory read must never fail because the probe call did
+        return []
+    probes = []
+    for line in raw.splitlines():
+        line = re.sub(r"^[\s\-*\d.)]+", "", line).strip().strip('"')
+        if 3 <= len(line) <= 160 and line.lower() != request.strip().lower():
+            probes.append(line)
+    return probes[:n]
+
+
 def capture_session_detailed(chat, transcript: str, session_date: Optional[int] = None,
                              audit: bool = False) -> tuple:
     """B2 capture + **P0 scrubbing** → ``(kept, dropped)``: the security-sensitive rule policy
@@ -333,6 +366,11 @@ def assemble_context(identity: str, facts: list, themes: list, max_facts: int = 
     themes; ``max_chars=None`` keeps the prior count-only behavior."""
     facts = list(facts)[:max_facts]
     themes = list(themes)[:max_themes]
+    # P1 cue-trigger: facts a constraint probe surfaced get their own section, *before* the rest — a
+    # remembered constraint buried among topic facts is easily overlooked by the answering model
+    keep = [f for f in facts if f.get("probe")]
+    facts = [f for f in facts if not f.get("probe")]
+    keep_lines = [f"- {f['subject']} {f['predicate']} {f['object']}  {_provenance(f)}" for f in keep]
     fact_lines = [f"- {f['subject']} {f['predicate']} {f['object']}  {_provenance(f)}"
                   for f in facts]
     theme_lines = [f"- **{t.get('label', '')}**: {(t.get('summary') or '').strip()}" for t in themes]
@@ -351,6 +389,14 @@ def assemble_context(identity: str, facts: list, themes: list, max_facts: int = 
                 remaining = max(0, remaining - len(block) - 2)   # -2 ≈ the blank-line separator
 
     fact_budget = None if remaining is None else int(remaining * _FACT_BUDGET_SHARE)
+    keep_block, keep_used = _fit_section(
+        "## Keep in mind — the user's own circumstances; apply them where they bear on the request",
+        keep_lines, fact_budget)
+    if keep_block:
+        blocks.append(keep_block)
+        if remaining is not None:
+            remaining = max(0, remaining - keep_used - 2)
+            fact_budget = max(0, fact_budget - keep_used - 2)
     fact_block, fact_used = _fit_section("## What I remember (most relevant)", fact_lines, fact_budget)
     if fact_block:
         blocks.append(fact_block)

@@ -52,6 +52,7 @@ _A_B7 = ("valid_from", "valid_to", "expired_at", "cardinality")           # B7 b
 _A_B9 = ("attr",)                                                         # B9 attribute key
 _A_P0 = ("source",)                                                       # P0 provenance
 MATERIAL_WEIGHT = 0.75                # P0: a claim from discussed material ranks below decisions
+RECENCY_FLOOR = 0.6                   # recall: time decay never takes a fact below 60% of its score
 ATTR_SEP = "\x1f"                     # canonical attribute key = normalized subject ␟ predicate
 RESOLVE_THRESHOLD = 0.75              # min fact-embedding cosine for an attribute candidate (B9)
 RESOLVE_K = 6                         # candidates shown to the attribute chooser
@@ -65,6 +66,15 @@ def attr_key(subject: str, predicate: str) -> str:
 def _key_of(rec: dict) -> str:
     """A record's attribute key: its resolved ``attr`` (B9), else its own exact key."""
     return rec.get("attr") or attr_key(rec["subject"], rec["predicate"])
+
+
+_PERSONAL = re.compile(r"^(the )?user\b|^(i|me|my)\b", re.IGNORECASE)
+
+
+def _is_personal(rec: dict) -> bool:
+    """A fact about the user themself ("user | is allergic to | hazelnuts", "user's knee | …",
+    "Bruno | is the dog of | user") — capture names the user "user"."""
+    return any(_PERSONAL.match((rec.get(part) or "").strip()) for part in ("subject", "object"))
 
 
 class GraphStore:
@@ -1292,20 +1302,53 @@ class GraphStore:
                 continue
             ref = r["last_seen"] or r["created_at"]                # last affirmed, else first stated
             cos = float(q @ np.asarray(r["emb"], dtype=np.float32))  # stored normalized
-            # gentle, log-scaled confidence lift, decayed by recency — relevance (cos) still dominates
-            score = cos * effective_weight(confidence_weight(r["confidence"]), ref, now, half_life_days)
+            # gentle, log-scaled confidence lift; recency as a *bounded* tie-breaker — relevance (cos)
+            # dominates: unbounded decay let any recent, weakly related fact beat an old, highly
+            # relevant one (a year-old "allergic to hazelnuts" scored ~0.0001 × cos — cue-trigger eval)
+            decay = effective_weight(1.0, ref, now, half_life_days)
+            score = (cos * confidence_weight(r["confidence"])
+                     * (RECENCY_FLOOR + (1.0 - RECENCY_FLOOR) * decay))
             if r.get("source") == "material":                      # P0: a claim, not a decision
                 score *= MATERIAL_WEIGHT
             scored.append({"id": r["id"], "subject": r["subject"], "predicate": r["predicate"],
                            "object": r["object"], "session_id": r["session_id"],
                            "cos": round(cos, 3), "confidence": round(r["confidence"], 3),
-                           "score": round(score, 3), "superseded": r["superseded"],
+                           "score": round(score, 3), "_rank": score, "superseded": r["superseded"],
                            "status": r["status"], "in_view": r["in_view"],
                            "valid_from": r["valid_from"], "valid_to": r["valid_to"],
                            "created_at": r["created_at"], "expired_at": r["expired_at"],
                            "source": r.get("source")})
-        scored.sort(key=lambda x: -x["score"])
+        scored.sort(key=lambda x: -x["_rank"])     # the unrounded score — rounding made ties
+        for x in scored:
+            x.pop("_rank")
         return scored[:k]
+
+    def recall_probed(self, query: str, embedder, probes, k: int = 5, **kw) -> list:
+        """P1 cue-trigger recall: ``recall`` for ``query`` plus one reserved slot per constraint
+        ``probe`` (``memory.constraint_probes``) — each probe's best hit not already present comes
+        first, the query's hits fill the rest; the total stays ``k``. The probes reach the user's
+        implicit constraints ("can't stand noisy offices") that share no words with the request.
+        A probe asks about the user, so its slot only takes a fact *about the user* among its top
+        hits — else it stays empty: a topic fact ("client meetings are held in Room 4B") would take
+        the slot it was meant to free, and a memory with no personal facts would be relabelled
+        wholesale as "the user's circumstances" (measured: "we won't adopt SleepGate" became the
+        user's circumstance and the answer flipped to "yes, we are adopting it")."""
+        probes = [p for p in (probes or []) if p]
+        base = self.recall(query, embedder, k=k, **kw)
+        if not probes:
+            return base
+        picked, seen = [], set()
+        for p in probes[:max(1, k // 2)]:
+            hit = next((h for h in self.recall(p, embedder, k=3, **kw)
+                        if h["id"] not in seen and _is_personal(h)), None)
+            if hit is not None:
+                picked.append(dict(hit, probe=p))
+                seen.add(hit["id"])
+        for hit in base:
+            if hit["id"] not in seen:
+                picked.append(hit)
+                seen.add(hit["id"])
+        return picked[:k]
 
     def timeline(self, query: str, embedder, groups: int = 3, now: Optional[int] = None) -> list:
         """B7: the full history of the (subject, predicate) pairs most relevant to ``query`` —
@@ -1521,17 +1564,20 @@ class GraphStore:
 
     def context_for(self, query: str, embedder, identity: str = "",
                     k: int = 8, max_themes: int = 4, max_chars=None,
-                    as_of: Optional[int] = None) -> str:
+                    as_of: Optional[int] = None, probes=None) -> str:
         """B6: assemble a session's context for ``query`` from the three memory tiers —
         identity + decay-weighted ``recall`` (activation) + the relevant consolidated themes
         (attractors), optionally fit within a ``max_chars`` budget. Facts carry their validity
-        (B7), and ``as_of`` assembles the memory as it was true at that date. Read-only +
-        **fail-soft** (missing embedder / empty memory → identity only, or ``""``)."""
+        (B7), and ``as_of`` assembles the memory as it was true at that date. ``probes`` (P1
+        cue-trigger, ``memory.constraint_probes``) reserve slots for the user's implicit
+        constraints, shown first under "Keep in mind". Read-only + **fail-soft** (missing
+        embedder / empty memory → identity only, or ``""``)."""
         from .memory import assemble_context
         facts = []
         if embedder is not None:
             try:
-                facts = self.recall(query, embedder, k=k, as_of=as_of)
+                facts = (self.recall_probed(query, embedder, probes, k=k, as_of=as_of) if probes
+                         else self.recall(query, embedder, k=k, as_of=as_of))
             except Exception:      # never let a memory read break the caller
                 facts = []
         themes = self.relevant_concepts([f["id"] for f in facts], limit=max_themes) if facts else []

@@ -578,6 +578,29 @@
   on the capture prompt alone; − a small hand-written set (5 injections). Tightens [ADR-15](#adr-15)'s capture path;
   mitigates risk R8.
 
+### ADR-31
+**Cue-trigger recall: fact-shaped constraint probes with personal-only reserved slots, opt-in.** *(v0.87, Path B++ / P1)*
+- **Context:** a constraint mentioned in passing ("I can't stand noisy open-plan offices") shares no words with the
+  later request it should shape ("book a venue for the client meeting"), so similarity recall misses it — measured on
+  a cue-trigger set with topic-adjacent distractors: the cue reached the assembled context in 2/8 scenarios, and an
+  answer honored the constraint in 1/8.
+- **Decision:** one short chat call per context read guesses up to three **hypothetical user facts in the stored form**
+  that would change how the request is handled (`memory.constraint_probes`); each gets one reserved recall slot, filled
+  only by a fact **about the user** (`GraphStore.recall_probed`), and the probe hits are rendered first under "Keep in
+  mind — … apply them where they bear on the request". Bounded + fail-soft (12 s, capped output; any failure → plain
+  recall). **Off by default** (`[memory] probes`); the cross-session harness answers task requests task-aware and
+  scores application with an LLM judge (`eval.constraint_respected`).
+- **Alternatives:** probes as search *questions* — rejected after measuring (they matched the request's topic facts;
+  cue 4/8); letting any probe hit take the slot — rejected after measuring (a memory with no personal facts was relabelled
+  "the user's circumstances" and a poisoning-set answer flipped to the opposite decision); B8 graph priming / theme-level
+  recall — not needed once probes reached the cue (still open for non-personal cues); on by default — rejected: +1 local
+  LLM call per prompt, and the coding-session memory has 1 personal fact in 1,218.
+- **Consequences:** + cue in context 2/8 → **7/8**, constraint respected 1/8 → **6/8** (raw log 4/8); temporal 13/13 and
+  poisoning 8/8 / 0 leaks unchanged; + the harness now separates retrieval, application and substring success. − an
+  extra chat call per read when enabled, and none at all when the local model is cold; − personal-fact detection depends
+  on capture naming the user "user"; − 8 hand-written scenarios, one run each. Extends the B6 context assembly of
+  the Second-Brain tier ([ADR-14](#adr-14)); the bounded-recency ranking fix found on the way refines [ADR-27](#adr-27).
+
 ---
 *Chapter complete. The Path-B agent-memory direction landed via ADR-14/15/16/17/18/19; the graph then
 deepened (ADR-22 typed relations + relation-aware GraphRAG, ADR-23 entity resolution), gained
@@ -585,7 +608,7 @@ deepened (ADR-22 typed relations + relation-aware GraphRAG, ADR-23 entity resolu
 (ADR-24 packaging + CI), a **world-model analysis** toolkit (ADR-25, Direction I), and a
 **capability-complete web UI** (ADR-26, Direction J — U1–U11, incl. SSE streaming), graph connectivity as
 **reader overlays** (ADR-28), and Path B+'s **bi-temporal memory** (ADR-27, B7 — refines ADR-15/18) with
-**fact identity** (ADR-29, B9 — measured on real development history) and **memory hygiene** against
-poisoning (ADR-30, P0). §11
+**fact identity** (ADR-29, B9 — measured on real development history), **memory hygiene** against
+poisoning (ADR-30, P0) and **cue-trigger recall** for implicit constraints (ADR-31, P1). §11
 debts D1/D2/D6 are resolved. Deep designs in `docs/path-b-memory.md` and `docs/RAG-vs-GraphRAG.md`. New significant
 decisions should be appended here with the next id.*

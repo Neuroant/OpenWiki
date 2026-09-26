@@ -133,6 +133,14 @@ class Project:
             return 2000
 
     @property
+    def memory_probes(self) -> bool:
+        """P1 cue-trigger recall for assembled contexts (hook inject, ``context``, ``wiki_memory``,
+        the web context box): one extra chat call per read guesses the user's implicit constraints
+        on the request, which get reserved recall slots. ``[memory] probes``, **off by default** —
+        it costs a local LLM call on every prompt the inject hook sees."""
+        return bool(self.setting("memory", "probes", False))
+
+    @property
     def memory_enabled(self) -> bool:
         """Second Brain mode — whether the remembered tier (Path B) is active for this
         project. **Off by default** (Wiki mode, §3.1 / ADR-14); turn it on with
@@ -260,6 +268,7 @@ entities = {str(entities).lower()}
 # across doc rebuilds, and recall them later. Off = Wiki mode (docs only).
 enabled = {str(memory).lower()}
 # context_budget = 2000   # chars (~4/token) for an assembled memory context (B6 / hooks)
+# probes = false          # cue-trigger recall: +1 chat call per context read to surface the user's implicit constraints
 
 [serve]
 port = {port}

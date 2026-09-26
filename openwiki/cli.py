@@ -241,6 +241,9 @@ def _build_argparser() -> argparse.ArgumentParser:
                              "Default set: <project>/eval_cross_session.jsonl.")
     eval_p.add_argument("--recall-k", type=int, default=10,
                         help="Facts recalled for the 'assembled' condition (--cross-session; default 10).")
+    eval_p.add_argument("--probes", action="store_true",
+                        help="--cross-session: cue-trigger recall — constraint probes reserve recall "
+                             "slots for the user's implicit constraints (P1; +1 chat call/scenario).")
     eval_p.add_argument("--limit", type=int, default=None, help="Only evaluate the first N questions.")
     eval_p.add_argument("--model", default=None, help="Chat model for --answers (default: project's models.chat).")
     eval_p.add_argument("--host", default=None, help="Ollama host URL.")
@@ -474,6 +477,11 @@ def _build_argparser() -> argparse.ArgumentParser:
     ctx_p.add_argument("--identity", default=None, help="Override the identity tier (default: the project's).")
     ctx_p.add_argument("--as-of", type=_date_arg, default=None, metavar="DATE",
                        help="B7: assemble the memory as it was true at DATE (default: now).")
+    ctx_p.add_argument("--probes", action=argparse.BooleanOptionalAction, default=None,
+                       help="Cue-trigger recall: one chat call guesses the user's implicit constraints "
+                            "on the query and reserves recall slots for them (default: the project's "
+                            "[memory] probes, off).")
+    ctx_p.add_argument("--model", default=None, help="Chat model for --probes (default: project's).")
     ctx_p.add_argument("-i", "--index", type=Path, default=None, help="Index dir (for the embedder; default: project's).")
     ctx_p.add_argument("--graph", type=Path, default=None, help="Graph dir (default: project's graph).")
     ctx_p.add_argument("--host", default=None, help="Ollama host URL.")
@@ -1433,6 +1441,7 @@ def _apply_project(args: argparse.Namespace, project: Optional[Project],
     elif cmd == "context":
         path("index", p.index_dir if p else None, Path("output") / "index")
         path("graph", p.graph_path if p else None, Path("output") / "graph")
+        val("model", "models", "chat", DEFAULT_CHAT)
         val("host", "models", "host", DEFAULT_HOST)
     elif cmd == "analyze":
         path("index", p.index_dir if p else None, Path("output") / "index")
@@ -1770,9 +1779,14 @@ def _cross_session_eval(args: argparse.Namespace, project) -> int:
     subset = items[: args.limit] if args.limit else items
     chat = OllamaChat(model=args.model, host=args.host, temperature=0.2)
     judge = OllamaChat(model=args.model, host=args.host, temperature=0.0) if args.judge else None
+    probe = None
+    if getattr(args, "probes", False):
+        from .graph.memory import constraint_probes
+        probe_chat = OllamaChat(model=args.model, host=args.host, temperature=0.0)
+        probe = lambda q: constraint_probes(probe_chat, q)          # noqa: E731
     print(f"Cross-session eval: {path.name}  ({len(subset)} scenarios) — "
-          f"cold vs raw-log vs assembled with {chat.name}{' + judge' if judge else ''} …",
-          file=sys.stderr)
+          f"cold vs raw-log vs assembled with {chat.name}{' + judge' if judge else ''}"
+          f"{' + probes' if probe else ''} …", file=sys.stderr)
 
     tmp_dir = Path(tempfile.mkdtemp(prefix="owiki-xsess-"))
     try:
@@ -1784,7 +1798,8 @@ def _cross_session_eval(args: argparse.Namespace, project) -> int:
         try:
             result = run_cross_session_eval(
                 subset, graph, index.embedder, chat, judge=judge, recall_k=args.recall_k,
-                on_progress=lambda done, total: print(f"  {done}/{total} done", file=sys.stderr))
+                on_progress=lambda done, total: print(f"  {done}/{total} done", file=sys.stderr),
+                probe=probe)
         finally:
             graph.close()
     finally:
@@ -1804,6 +1819,15 @@ def _cross_session_eval(args: argparse.Namespace, project) -> int:
         misses = [d for d in result["details"] if not d["success"]["assembled"]]
         for d in misses:
             print(f"  ✗ assembled  {d['name']}: {d['answers']['assembled'][:110]}")
+    cues = result.get("cues") or {}
+    if cues.get("checked"):               # P1 cue-trigger: retrieval, separately from application
+        print(f"\nCue recall: {cues['recalled']}/{cues['checked']} scenario(s) had the cue fact in the "
+              f"assembled memory context")
+    applied = result.get("applied") or {}
+    if applied.get("checked"):            # P1: did the answer *respect* the constraint (LLM judge)?
+        n = applied["checked"]
+        print("Constraint respected (judge): " + " · ".join(
+            f"{c} {applied.get(c, 0)}/{n}" for c in ("cold", "raw-log", "assembled")))
     leaks = result.get("leaks") or {}
     if leaks.get("checked"):              # P0 poisoning scenarios: payload in the assembled memory?
         print(f"\nPoisoning: {leaks['leaked']}/{leaks['checked']} scenario(s) leaked an injected "
@@ -2607,10 +2631,12 @@ def _cmd_context(args: argparse.Namespace) -> int:
         max_chars = None if args.max_chars <= 0 else args.max_chars
     else:
         max_chars = project.context_budget if project else None
+    use_probes = args.probes if args.probes is not None else bool(project and project.memory_probes)
+    probes = _memory_probes(args.query, args.model, args.host) if use_probes else None
     try:
         context = graph.context_for(args.query, index.embedder, identity=identity,
                                     k=args.top_k, max_themes=args.themes, max_chars=max_chars,
-                                    as_of=getattr(args, "as_of", None))
+                                    as_of=getattr(args, "as_of", None), probes=probes)
     finally:
         graph.close()
     if not context.strip():
@@ -2926,16 +2952,33 @@ def _hook_inject(project: Project, payload: dict) -> None:
     embedder = _hook_embedder(project) if prompt else None
     if not embedder or not project.graph_path.exists():
         return
+    probes = None
+    if project.memory_probes:           # P1 cue-trigger: bounded so the 30 s hook still injects
+        probes = _memory_probes(prompt, project.setting("models", "chat", DEFAULT_CHAT),
+                                project.setting("models", "host", DEFAULT_HOST))
     graph = GraphStore(project.graph_path)   # read-only
     try:
         context = graph.context_for(prompt, embedder, identity=project.identity,
-                                    max_chars=project.context_budget)
+                                    max_chars=project.context_budget, probes=probes)
     finally:
         graph.close()
     if context.strip():
         sys.stdout.write(
             "Relevant memory from earlier sessions (OpenWiki Second Brain) — use if helpful; "
             "this is not the user's current message:\n\n" + context + "\n")
+
+
+PROBE_TIMEOUT = 12.0     # s — the inject hook runs under a 30 s limit (embed + recall + this call)
+
+
+def _memory_probes(query: str, model, host) -> list:
+    """P1 cue-trigger: the constraint probes for a memory read — one short deterministic call,
+    **bounded** (``PROBE_TIMEOUT``, capped output) and **fail-soft** (a cold / unreachable model →
+    ``[]``, and the read proceeds unprobed rather than injecting nothing)."""
+    from .graph.memory import constraint_probes
+    chat = OllamaChat(model=model, host=str(host).rstrip("/"), temperature=0.0,
+                      timeout=PROBE_TIMEOUT, options={"num_predict": 160})
+    return constraint_probes(chat, query)
 
 
 def _capture_chat(model, host) -> OllamaChat:
@@ -3110,7 +3153,9 @@ def _cmd_mcp(args: argparse.Namespace) -> int:
     identity = project.identity if (project is not None and project.memory_enabled) else ""
     budget = project.context_budget if (project is not None and project.memory_enabled) else None
     server = build_server(args.wiki, index=index, graph=graph, agent=agent,
-                          version=__version__, identity=identity, context_budget=budget)
+                          version=__version__, identity=identity, context_budget=budget,
+                          memory_probes=bool(project is not None and project.memory_enabled
+                                             and project.memory_probes))
     server.serve()   # blocks on stdio (JSON-RPC)
     return 0
 

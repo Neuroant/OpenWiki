@@ -287,8 +287,9 @@ concentrate, not the log.* Read-only + fail-soft (empty tiers degrade gracefully
 ```
 Options: `-k N` (activation facts; default 8), `--themes N` (default 4), `--max-chars N` (fit within
 ~a char budget, ~4/token; default the project's `[memory] context_budget`, 2000; `0` = unbounded),
-`--identity TEXT` (override), `-i/--index DIR` (embedder), `--graph DIR`, `--host URL`. Gated by
-`[memory] enabled`. Backed by `GraphStore.context_for` (→ `recall` + `relevant_concepts` + pure
+`--identity TEXT` (override), `--probes/--no-probes` (P1 cue-trigger recall — default the project's
+`[memory] probes`, off) + `--model NAME` (the probe chat model), `-i/--index DIR` (embedder), `--graph DIR`,
+`--host URL`. Gated by `[memory] enabled`. Backed by `GraphStore.context_for` (→ `recall` + `relevant_concepts` + pure
 `memory.assemble_context`, which **budgets** the tiers: identity → facts (majority) → themes
 (remainder), graceful truncation); also exposed to coding agents as the MCP **`wiki_memory`** tool
 (bounded by the same budget). Scored by `eval --cross-session` (the "assembled" condition is this
@@ -582,10 +583,11 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   `Assertion` carries `confidence` (starts 1.0) + `last_seen`; **re-affirming** a current fact (a
   dedup hit) *reinforces* its confidence (`reinforced_weight`) + stamps `last_seen` instead of a plain
   skip. `recall(query, embedder, k, include_superseded=False)` (read-only) scores by
-  `cos × effective_weight(confidence_weight(confidence), last_seen, now)` — a **gentle, log-scaled**
-  confidence lift (`decay.confidence_weight`: a *tie-breaker* among similar-relevance facts, so a
-  restated fact outranks a one-off, but relevance still dominates) **decayed by recency**; returns
-  **current only** by default. `has_memory()` gates both. `_ensure_memory_schema`
+  `cos × confidence_weight(confidence) × (RECENCY_FLOOR + (1 − RECENCY_FLOOR) × decay(last_seen, now))` — a
+  **gentle, log-scaled** confidence lift (`decay.confidence_weight`: a *tie-breaker* among similar-relevance
+  facts, so a restated fact outranks a one-off, but relevance still dominates) and a **bounded** recency
+  factor (`RECENCY_FLOOR` 0.6: a year-old relevant fact keeps ≥ 60 % of its score — unbounded decay once
+  scored 2025-dated facts ≈0; it sorts on the unrounded score); returns **current only** by default. `has_memory()` gates both. `_ensure_memory_schema`
   lazily creates the tables + `ALTER`s in `confidence`/`last_seen` on pre-0.54 graphs; B0's
   `_snapshot_memory`/`_restore_memory` preserve `SUPERSEDES` + confidence across a rebuild. Exposed as
   the `remember`/`recall` (+`--all`) CLI commands.
@@ -662,6 +664,23 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   `examples/eval_poisoning.jsonl` (5 injection scenarios with a payload that must not reach the assembled
   context + 3 legit user conventions/decisions that must survive): leaks 2/5 → **0/5**, legit 8/8 kept; 0 of
   1,446 real dogfooding facts would be scrubbed (`docs/path-b-memory.md` §13.1, arc42 ADR-30).
+  **P1 cue-trigger recall (v0.87):** a constraint mentioned in passing ("can't stand noisy open-plan offices")
+  shares no words with the later request it should shape ("book a venue"), so similarity recall misses it.
+  `memory.constraint_probes(chat, request)` — one short deterministic call, fail-soft (any error → `[]`) —
+  guesses up to three **hypothetical user facts in the stored form** ("user cannot stand noise"; asked for
+  *questions*, qwen3 anchored them on the request's topic and matched the distractors). `GraphStore.recall_probed(
+  query, embedder, probes, k)` reserves one slot per probe for its best hit **about the user** (`store._is_personal`:
+  subject or object "user"/"I"/"my"; else the slot stays empty — with any hit allowed, a memory without personal
+  facts was relabelled "the user's circumstances" and a poisoning-set answer flipped), the query fills the rest;
+  `context_for(probes=)` → `assemble_context` renders probe hits (`"probe"` key) first under "## Keep in mind —
+  the user's own circumstances; apply them where they bear on the request". Opt-in **`[memory] probes`**
+  (`Project.memory_probes`, default off): the inject hook (`cli._memory_probes` — 12 s `PROBE_TIMEOUT`, 160-token
+  cap, so the 30 s hook still injects; a cold model → unprobed), `context --probes`, MCP `wiki_memory`
+  (`build_server(memory_probes=)`, via the agent's chat) and the web context box. Off by default because it costs a
+  chat call per prompt and the coding-session memory holds 1 personal fact in 1,218. **Measured**
+  (`examples/eval_cue_trigger.jsonl`, 8 scenarios + topic-adjacent distractors, hand-audited): cue in context
+  2/8 → **7/8**, constraint respected 1/8 → **6/8** (raw log 4/8); temporal 13/13 and poisoning 8/8 / 0 leaks
+  unchanged (`docs/path-b-memory.md` §13.2, arc42 ADR-31).
   **B5 consolidation ("sleep"):** the `consolidate` command clusters the *current* assertions by
   embedding similarity (`GraphStore.assertion_graph` → `community.detect_communities`), LLM-summarizes
   each cluster into a theme (`community.summarize_facts`), and writes `MemoryConcept` + `CONSOLIDATES`
@@ -899,7 +918,15 @@ http — count, p50/p95, total time, token in/out) + a live recent-events table,
   (→ a per-kind table + assembled misses); `task_success` accepts `"a|b"` alternatives. Dates stay raw
   strings in `CrossSessionItem` and are parsed at run time, so `eval.py` stays Kuzu-free. A scenario may also list
   `forbidden` substrings (P0: an injected payload's token) that must not appear in the assembled context —
-  the report prints `Poisoning: N/M leaked` (`examples/eval_poisoning.jsonl`). **Measured
+  the report prints `Poisoning: N/M leaked` (`examples/eval_poisoning.jsonl`). **P1 cue-trigger**
+  (`examples/eval_cue_trigger.jsonl`): a scenario may list `cue` substrings (did the cue fact reach the assembled
+  context? → `Cue recall: N/M`, retrieval) and a one-sentence `constraint`, which an **LLM judge**
+  (`eval.constraint_respected`; `judge` chat if given, else the answer chat) checks each answer *respects* →
+  `Constraint respected (judge)` per condition (application — substring success over-counts: an answer can name the
+  constraint and break it; the judge agreed with a hand audit on 30/32). `eval --cross-session --probes` runs the
+  assembled condition with constraint probes (`run_cross_session_eval(probe=)`). The harness answer prompt
+  (`_PROBE_SYSTEM`) is **task-aware**: a fact question still gets "say you don't know", a request to do/plan
+  something must take what's remembered about the user into account, in 1–3 sentences. **Measured
   (v0.82):** assembled task success **7/13 (v0.80.0, two runs) → 13/13** — backfill, point-in-time,
   change-date, known-at and multi-valued are where pre-B7 memory fails (`docs/path-b-memory.md` §12.1).
 - **`openwiki/analysis/`** — the **world-model analysis** toolkit (`owiki analyze`). `coupling.py`

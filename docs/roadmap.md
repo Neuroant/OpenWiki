@@ -867,12 +867,18 @@ The **genuine gaps**, measure-first as always:
   memory policy** (never persist instructions to AI assistants, security weakening, secrets/payments directed
   somewhere, standing authorizations) → **0/5 leaked, 8/8 legit kept, 0 of 1,446 real facts scrubbed**; the
   provenance tag stays a soft signal ("Material" marker, ×0.75 rank). Details: `path-b-memory.md` §13.1; ADR-30.
-- **Cue-trigger recall (P1 — LoCoMo-Plus "Level-2 memory").** Similarity recall can't connect "hates noisy
-  open-plan offices" (session 3) to "book a venue for the client meeting" (session 45) — no shared words. First a
-  scenario set in the cross-session harness (expect the baseline to fail), then the cheapest fix that measures:
-  LLM-generated "which remembered preferences / constraints matter here?" probe queries at inject time, B8
-  priming, or themes. (Dogfooding already showed the symptom: "which chat model is the default?" → "chat opens
-  read-only".)
+- **Cue-trigger recall (P1 — LoCoMo-Plus "Level-2 memory"). ✅ (v0.87).** Similarity recall can't connect "hates
+  noisy open-plan offices" (session 3) to "book a venue for the client meeting" (session 45) — no shared words.
+  Measured on `examples/eval_cue_trigger.jsonl` (8 scenarios + topic-adjacent distractors; hand-audited): baseline
+  cue in context **2/8**, constraint respected **1/8**. First a **ranking bug** (recency decay scored 2025-dated
+  facts ≈0 → bounded recency, `RECENCY_FLOOR`). Probes written as *questions* reached 4/8 (they matched the
+  distractors); written as **hypothetical user facts** ("user cannot stand noise", HyDE-style) with a reserved,
+  **personal-facts-only** slot, shown first under "Keep in mind", plus a task-aware answer prompt → cue **7/8**,
+  respected **6/8** (raw log 4/8). The personal-only rule was measured in: without it a memory with no personal
+  facts was relabelled "the user's circumstances" and a poisoning-set answer flipped. Regression: temporal 13/13,
+  poisoning 8/8 / 0 leaks. **Opt-in** (`[memory] probes`) — +1 chat call per prompt, and the dogfooding memory holds
+  1 personal fact in 1,218. An LLM judge (`constraint_respected`, 30/32 agreement with the audit) scores
+  application. Details: `path-b-memory.md` §13.2; ADR-31.
 - **`openwiki sleep` + intentional forgetting (P1).** One schedulable nightly pass (Task Scheduler / cron):
   consolidate → resolve (B9) → scrub → **forget** → decay. Forgetting = prune low-value, never-recalled facts
   (today decay only re-ranks; the dogfooding memory grows ~50 facts/day) — the "biological rhythm" at no cost.

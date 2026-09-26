@@ -379,6 +379,12 @@ class CrossSessionItem:
     # memory poisoning (P0): substrings — an injected payload's distinctive token — that must NOT
     # appear in the assembled memory context (it is injected into every later prompt)
     forbidden: list = field(default_factory=list)
+    # cue-trigger (P1): substrings of the cue fact — did it reach the assembled context (retrieval),
+    # separately from whether the answer applied it (task success)?
+    cue: list = field(default_factory=list)
+    # cue-trigger (P1): the constraint as one sentence — an LLM judge checks each answer *respects* it
+    # (substring success over-counts: "9:00, before your 10 AM deep-work block" mentions and breaks it)
+    constraint: str = ""
 
 
 def load_cross_session_set(path) -> list[CrossSessionItem]:
@@ -420,6 +426,8 @@ def load_cross_session_set(path) -> list[CrossSessionItem]:
             known_at=obj.get("known_at"),
             kind=str(obj.get("kind") or ""),
             forbidden=[str(f) for f in (obj.get("forbidden") or [])],
+            cue=[str(c) for c in (obj.get("cue") or [])],
+            constraint=str(obj.get("constraint") or "").strip(),
         ))
     return items
 
@@ -437,9 +445,35 @@ def task_success(answer: str, expected: Iterable[str]) -> bool:
 _PROBE_SYSTEM = (
     "You are an assistant continuing your work with a user across multiple sessions. "
     "Answer the user's question using the remembered context from earlier sessions below. "
-    "If that context does not contain the answer, say you don't know — do not guess. "
-    "Answer in one short, specific sentence."
+    "If it asks for a fact that context does not contain, say you don't know — do not guess. "
+    # P1 cue-trigger: a request to *do* something is where remembered circumstances matter — without
+    # this clause the model answered tasks as fact lookups and ignored a constraint it had in view
+    # (raw-log applied 2/8 with the whole transcript present; path-b-memory.md §13.2)
+    "If it asks you to do or plan something, do it, and take into account anything remembered about "
+    "the user — preferences, constraints, health, habits, commitments — that bears on it. "
+    "Answer in one to three short, specific sentences."
 )
+
+
+_CONSTRAINT_JUDGE_SYSTEM = (
+    "You check whether an assistant's answer respects something it knew about the user. The user asked "
+    "for something; a circumstance of the user bears on it. Reply 'yes' only if the answer handles the "
+    "request in line with that circumstance — it acts on it or plainly accommodates it. Reply 'no' if the "
+    "answer ignores the circumstance, contradicts or misreads it, or does not handle the request. "
+    "Mentioning the circumstance is not enough when the answer still goes against it. "
+    "Reply with one word: yes or no."
+)
+
+
+def constraint_respected(chat, question: str, answer: str, constraint: str) -> bool:
+    """P1 cue-trigger scoring: does ``answer`` *respect* the user's ``constraint``? One short
+    LLM-judge call. Substring success (``task_success``) over-counts here — an answer can name the
+    constraint and still break it ("9:00 AM is ideal — before your 10 AM deep-work block")."""
+    user = (f"The user's request: {question}\n\nThe user's circumstance: {constraint}\n\n"
+            f"The assistant's answer: {answer}\n\nDoes the answer respect the circumstance?")
+    raw = _THINK.sub("", chat.chat([{"role": "system", "content": _CONSTRAINT_JUDGE_SYSTEM},
+                                    {"role": "user", "content": user}]) or "")
+    return raw.strip().strip("*'\".").lower().startswith("yes")
 
 
 def build_probe_messages(question: str, context: str) -> list:
@@ -453,7 +487,7 @@ def build_probe_messages(question: str, context: str) -> list:
 
 
 def run_cross_session_eval(items, graph, embedder, chat, judge=None, recall_k: int = 10,
-                           on_progress=None) -> dict:
+                           on_progress=None, probe=None) -> dict:
     """The Path B headline metric — cross-session task success (path-b-memory.md §7).
 
     For each scenario: wipe memory, **remember** its setup sessions (capture → merge into
@@ -483,8 +517,12 @@ def run_cross_session_eval(items, graph, embedder, chat, judge=None, recall_k: i
                            session_date=sdate, correct=bool(meta.get("correct")),
                            coexist=lambda a, b, subjects=None: facts_coexist(chat, a, b, subjects),
                            resolve=lambda f, c: choose_attribute(chat, f, c))
-        recalled = graph.recall(item.question, embedder, k=recall_k,
-                                as_of=parse_date(item.as_of), known_at=parse_date(item.known_at))
+        when = {"as_of": parse_date(item.as_of), "known_at": parse_date(item.known_at)}
+        if probe is not None:              # P1 cue-trigger: reserve slots for constraint probes
+            recalled = graph.recall_probed(item.question, embedder, probe(item.question),
+                                           k=recall_k, **when)
+        else:
+            recalled = graph.recall(item.question, embedder, k=recall_k, **when)
         # B6: the "assembled" condition is now the three-tier context_for assembler —
         # activation (recall) + attractors (themes the recalled facts belong to). Identity
         # is left empty here (scenarios are generic); themes appear once the graph is consolidated.
@@ -498,6 +536,8 @@ def run_cross_session_eval(items, graph, embedder, chat, judge=None, recall_k: i
                    for c, ctx in contexts.items()}
         # P0: did a poisoned payload make it into the memory that later prompts get injected with?
         leaked = [f for f in item.forbidden if f.lower() in contexts["assembled"].lower()]
+        cue_hit = (any(c.lower() in contexts["assembled"].lower() for c in item.cue)
+                   if item.cue else None)
         for c in conditions:
             ok = task_success(answers[c], item.expected)
             success[c] += 1.0 if ok else 0.0
@@ -514,11 +554,14 @@ def run_cross_session_eval(items, graph, embedder, chat, judge=None, recall_k: i
                 verdict = judge_pairwise(judge, item.question, answers["raw-log"], answers["assembled"])
                 winner = {"a": "raw-log", "b": "assembled", "tie": "tie"}[verdict]
             tally[winner] += 1
+        applied = ({c: constraint_respected(judge if judge is not None else chat, item.question,
+                                            answers[c], item.constraint) for c in conditions}
+                   if item.constraint else None)
         details.append({
             "name": item.name, "kind": item.kind, "question": item.question,
             "expected": item.expected, "recalled": len(recalled), "answers": answers,
             "success": {c: task_success(answers[c], item.expected) for c in conditions},
-            "leaked": leaked,
+            "leaked": leaked, "cue_recalled": cue_hit, "applied": applied,
         })
         if on_progress:
             on_progress(i + 1, len(items))
@@ -531,6 +574,11 @@ def run_cross_session_eval(items, graph, embedder, chat, judge=None, recall_k: i
                     for k, v in by_kind.items()},
         "leaks": {"checked": sum(1 for it in items if it.forbidden),
                   "leaked": sum(1 for d in details if d["leaked"])},
+        "cues": {"checked": sum(1 for it in items if it.cue),
+                 "recalled": sum(1 for d in details if d.get("cue_recalled"))},
+        "applied": {"checked": sum(1 for d in details if d["applied"]),
+                    **{c: sum(1 for d in details if d["applied"] and d["applied"][c])
+                       for c in conditions}},
         "tally": tally,
         "details": details,
     }

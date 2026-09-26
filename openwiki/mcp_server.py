@@ -110,12 +110,15 @@ def _tool(name, description, properties, required):
 
 
 def build_server(wiki_dir, index=None, graph=None, agent=None, name="openwiki",
-                 version="0", identity="", context_budget=None) -> MCPStdioServer:
+                 version="0", identity="", context_budget=None,
+                 memory_probes: bool = False) -> MCPStdioServer:
     """Assemble the MCP server from already-loaded OpenWiki components.
 
     `index` (SemanticIndex) enables search/ask; `graph` (GraphStore) enables the
     graph tools; `agent` (RAGAgent) powers `wiki_ask`. Read-only `WikiTools` back
-    the rest. `identity` + `context_budget` seed/bound the B6 `wiki_memory` context.
+    the rest. `identity` + `context_budget` seed/bound the B6 `wiki_memory` context;
+    `memory_probes` (P1 cue-trigger, needs the agent's chat model) probes it for the
+    user's implicit constraints.
     """
     from .tools import WikiTools
 
@@ -181,10 +184,19 @@ def build_server(wiki_dir, index=None, graph=None, agent=None, name="openwiki",
                 {"query": {"type": "string"},
                  "as_of": {"type": "string", "description": "Optional ISO date (point-in-time)."}},
                 ["query"]))
-            handlers["wiki_memory"] = lambda a: (
-                graph.context_for(str(a["query"]), index.embedder, identity=identity,
-                                  max_chars=context_budget, as_of=parse_date(a.get("as_of")))
-                or "(no relevant memory yet)")
+            probe_chat = getattr(agent, "chat", None) if memory_probes else None
+
+            def _wiki_memory(a):
+                query = str(a["query"])
+                probes = None
+                if probe_chat is not None:
+                    from .graph.memory import constraint_probes
+                    probes = constraint_probes(probe_chat, query)     # fail-soft → []
+                return (graph.context_for(query, index.embedder, identity=identity,
+                                          max_chars=context_budget, as_of=parse_date(a.get("as_of")),
+                                          probes=probes)
+                        or "(no relevant memory yet)")
+            handlers["wiki_memory"] = _wiki_memory
 
         # Global search needs a chat model (from the agent) + community summaries.
         if agent is not None and _graph_has_communities(graph):

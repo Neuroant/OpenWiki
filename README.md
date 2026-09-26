@@ -422,8 +422,10 @@ live UI.
 agents — **Claude Code**, **OpenCode**, Cursor, … — can query it as tools:
 `wiki_ask` (grounded, cited answers), `wiki_global` (thematic answers from community
 summaries), `wiki_search`, `wiki_list_pages`, `wiki_read_page`, `wiki_graph_neighbors`,
-`wiki_find_path`, `wiki_find_entity` (with its typed relations), and `wiki_memory` (the
-three-tier memory context, in Second Brain mode). Tools are advertised by availability.
+`wiki_find_path`, `wiki_find_entity` (with its typed relations), `wiki_memory` (the
+three-tier memory context, in Second Brain mode) and — opt-in via `[memory] agent_writes` —
+`wiki_remember` (the agent records facts / a new state and closes what it `replaces`).
+Tools are advertised by availability.
 
 ```bash
 openwiki mcp --wiki output/wiki --index output/index --graph output/graph

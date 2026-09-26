@@ -858,7 +858,7 @@ S-P-O capture (a ~500-token budget vs Memori's reported ~721); Zep/Graphiti temp
 4. **LoCoMo (P2).** Convert the public long-conversation QA benchmark (snap-research) into the cross-session
    format — the first number comparable to other memory systems (single-hop / multi-hop / temporal /
    open-domain / adversarial categories).
-5. **Agent-initiated writes (P2, optional).** CoALA's learning action by the agent (Letta's `memory_replace`):
+5. **Agent-initiated writes (P2) — built in v0.90 as `wiki_remember`, §13.6.** CoALA's learning action by the agent (Letta's `memory_replace`):
    an opt-in MCP `wiki_remember(fact)` that queues to the journal — decisions stored when made, not only at
    session end. After §13.4–13.5 also the most promising fix for **stale state**: the agent that makes a change
    records the new state, which the local model could not infer afterwards.
@@ -1093,6 +1093,42 @@ Staleness stays visible rather than fixed: every injected fact carries its date 
 agent reads the context. The promising route is the **writer that knows what it just changed** — the host agent
 (a strong model) recording the new state explicitly when it makes the change (the planned opt-in MCP
 `wiki_remember`, P2), which B7 then orders by valid time like any other fact.
+
+### 13.6 `wiki_remember` — the agent records the new state (v0.90), as built and measured
+
+**Design.** An opt-in MCP tool (`[memory] agent_writes = true`) for the host agent: `facts` (subject / predicate /
+object triples, optional `valid_from`, default *now*), `replaces` (remembered facts the change makes outdated, copied
+as `wiki_memory` prints them), `source` (`assistant` default, or `user`). Structured triples — the host agent is the
+strong model, so no local extraction step. The MCP graph is read-only, so the call **queues one journal op**; the next
+writable pass (the capture worker at session end — now also when the session itself yields no facts —, `sleep`,
+`serve`) folds it: remember the facts, then **close** the replaced ones (`GraphStore.retire` → `valid_to` = the op's
+time, B7 *past*: history kept, never deleted). At call time: the P0 policy screens every fact; a one-off event
+(`is_ephemeral`) is refused with "record the resulting state instead"; `replaces` lines are resolved against the
+believed facts **now** (`GraphStore.match_facts` — bullet, provenance, status marks, `|` separators and case ignored;
+exact matches only, since a near miss must not close the wrong fact) and an unmatched line comes back with the three
+closest current facts to retry with. An agent op skips the local model's B9 attribute resolution at fold time — it
+names its replacements itself (measured below); exact-wording B7 merges still apply.
+
+**Measured on real data** (a copy of the dogfooding memory; the host agent's part played by writing the true current
+state for each of the 14 labeled stale facts of §13.4, `replaces` copied from the printed lines; folded by
+`openwiki sleep` with the coexistence check + resolver, as in production):
+- `replaces` matched **14/14** on the first try;
+- stale facts: **14/14 closed**; in 10 topic queries ("how many tabs does the web UI have?", "what is left for U7?",
+  "does openwiki-dev have a memory tier?", …) the stale facts in the recalled context went **12 → 0**, and **9 of
+  10** contexts now carry the recorded new state ("openwiki web UI | has | ten tabs: …", "U7 streaming chat | is |
+  shipped in v0.78.0");
+- collateral: a first run let the fold's B9 resolver group "openwiki web UI | has | ten tabs" with "openwiki | has
+  project-aware UI" (both had landed in one attribute group), and the coexistence check closed that **true** fact —
+  hence no B9 for agent ops; after that the only other closed fact was "test suite | has | 399 passing tests", a
+  correct exact-wording supersession by the new "514 passing tests".
+
+**Found on the way:** 36 facts with a stated date of 1969 (Kauffman's paper, from a discussed article) made
+`format_date` raise on Windows (`datetime.fromtimestamp` rejects negative epochs) — every context that recalled one
+would have failed, and the fail-soft hook would have injected nothing. Dates are now computed from the epoch.
+
+**Limits.** The measurement shows the mechanism works when the agent records the change; whether an agent does so
+unprompted, at the right moments, is a behavior of the host (the tool description asks for it; `CLAUDE.md` / skills
+can reinforce it) and is not measured here. Writes land at the next writable pass, not instantly.
 
 ---
 

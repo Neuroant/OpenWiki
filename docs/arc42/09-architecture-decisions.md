@@ -621,6 +621,27 @@
   − rules catch 19 of 30 labeled junk facts (stale states remain); − English + German patterns only; − one annotator.
   Complements [ADR-30](#adr-30) (keep poison out at capture) with a pass that cleans what capture let through.
 
+### ADR-33
+**Stale state is fixed by the writer that makes the change — an opt-in, journaled `wiki_remember` with explicit `replaces`.** *(v0.90, Path B++ / P2)*
+- **Context:** stale facts ("the web UI has six tabs", "U7 is the remaining large item") stay current because the
+  session that changed the state never restated it; afterwards, three approaches with the local 30B failed —
+  re-resolution in memory (0/14), a wiki-grounded check (1/14) and update-aware capture (82 % of candidates flagged).
+- **Decision:** an MCP tool the host agent (a strong model) calls when it makes a change: structured `facts` (the
+  new state) + `replaces` (remembered facts it makes outdated, matched **exactly** against the believed facts at
+  call time; unmatched lines return the closest facts). Queued to the write-ahead journal (the MCP graph stays
+  read-only); the fold remembers the facts and **closes** the replaced ones (B7 *past*). P0 policy + the
+  ephemeral-event rule screen every fact. Agent ops skip the local B9 attribute resolver. Off unless `[memory]
+  agent_writes = true`.
+- **Alternatives:** infer staleness with the local model (the three attempts above — rejected after measuring);
+  free-text writes extracted by the local model (reintroduces its weakness); fuzzy `replaces` matching (a near miss
+  would close the wrong fact); synchronous writes from the MCP server (would take Kuzu's exclusive lock from every
+  reader, incl. the inject hook).
+- **Consequences:** + on the dogfooding memory, 14/14 labeled stale facts closed, stale facts in 10 topic contexts
+  12 → 0, the new state injected in 9/10, the only side effect a correct supersession; + no local-model judgment in
+  the path. − depends on the agent calling it at the right moments (unmeasured host behavior); − writes land at the
+  next writable pass; − an agent with write access is a poisoning vector (hence opt-in + the P0 screen, [ADR-30](#adr-30)).
+  Uses [ADR-19](#adr-19)'s journal and [ADR-27](#adr-27)'s valid-time model.
+
 ---
 *Chapter complete. The Path-B agent-memory direction landed via ADR-14/15/16/17/18/19; the graph then
 deepened (ADR-22 typed relations + relation-aware GraphRAG, ADR-23 entity resolution), gained
@@ -630,6 +651,6 @@ deepened (ADR-22 typed relations + relation-aware GraphRAG, ADR-23 entity resolu
 **reader overlays** (ADR-28), and Path B+'s **bi-temporal memory** (ADR-27, B7 — refines ADR-15/18) with
 **fact identity** (ADR-29, B9 — measured on real development history), **memory hygiene** against
 poisoning (ADR-30, P0), **cue-trigger recall** for implicit constraints (ADR-31, P1) and policy-based
-**forgetting** in a nightly sleep pass (ADR-32). §11
+**forgetting** in a nightly sleep pass (ADR-32), and **agent-recorded state** against stale facts (ADR-33). §11
 debts D1/D2/D6 are resolved. Deep designs in `docs/path-b-memory.md` and `docs/RAG-vs-GraphRAG.md`. New significant
 decisions should be appended here with the next id.*

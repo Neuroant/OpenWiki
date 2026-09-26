@@ -133,6 +133,14 @@ class Project:
             return 2000
 
     @property
+    def agent_writes(self) -> bool:
+        """Whether a coding agent may **write** memory through MCP ``wiki_remember`` (record a
+        decision or a new state when it makes the change, closing what it replaces). ``[memory]
+        agent_writes``, **off by default** — memory is injected into every later prompt, so write
+        access is granted deliberately (the P0 policy still screens every fact)."""
+        return bool(self.setting("memory", "agent_writes", False))
+
+    @property
     def memory_probes(self) -> bool:
         """P1 cue-trigger recall for assembled contexts (hook inject, ``context``, ``wiki_memory``,
         the web context box): one extra chat call per read guesses the user's implicit constraints
@@ -269,6 +277,7 @@ entities = {str(entities).lower()}
 enabled = {str(memory).lower()}
 # context_budget = 2000   # chars (~4/token) for an assembled memory context (B6 / hooks)
 # probes = false          # cue-trigger recall: +1 chat call per context read to surface the user's implicit constraints
+# agent_writes = false    # let a coding agent record facts / new states via MCP wiki_remember
 
 [serve]
 port = {port}

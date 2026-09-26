@@ -24,7 +24,7 @@ lives in :class:`~openwiki.graph.store.GraphStore`. Record dicts carry ``id``, `
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Iterable, Optional
 
 _DATE = re.compile(r"^\s*(\d{4})(?:-(\d{1,2})(?:-(\d{1,2}))?)?"
@@ -69,11 +69,16 @@ def session_date(session_id) -> Optional[int]:
     return _epoch(int(m.group(1)), int(m.group(2)), int(m.group(3))) if m else None
 
 
+_EPOCH0 = datetime(1970, 1, 1, tzinfo=timezone.utc)
+
+
 def format_date(epoch) -> str:
-    """Epoch seconds → ``YYYY-MM-DD`` (UTC); ``""`` for ``None``."""
+    """Epoch seconds → ``YYYY-MM-DD`` (UTC); ``""`` for ``None``. Computed from the epoch, not
+    ``datetime.fromtimestamp``, which raises on Windows for dates before 1970 — a stated
+    "since 1969" (a paper's year) once crashed every context that recalled such a fact."""
     if epoch is None:
         return ""
-    return datetime.fromtimestamp(int(epoch), tz=timezone.utc).strftime("%Y-%m-%d")
+    return (_EPOCH0 + timedelta(seconds=int(epoch))).strftime("%Y-%m-%d")
 
 
 def format_interval(valid_from, valid_to) -> str:

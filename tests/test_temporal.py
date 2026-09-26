@@ -807,3 +807,13 @@ def test_probes_leave_a_memory_without_personal_facts_alone(tmp_path):
                                                        probes=["server port uses"])
     finally:
         store.close()
+
+
+def test_format_date_handles_dates_before_1970():
+    """A stated "since 1969" (a paper's year) is a valid date; datetime.fromtimestamp raises on
+    Windows for negative epochs, which once crashed every context that recalled such a fact."""
+    from openwiki.graph.temporal import format_date, format_interval
+    assert format_date(T("1969-01-01")) == "1969-01-01"
+    assert format_date(T("1900-06-15")) == "1900-06-15"
+    assert format_interval(T("1969-01-01"), T("2026-09-01")) == "1969-01-01 → 2026-09-01"
+    assert format_date(T("2026-09-26")) == "2026-09-26"

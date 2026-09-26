@@ -382,7 +382,8 @@ exclusive-writable mode (live graph sync, but blocks other graph access).
 Read-only tools (`wiki_ask`/`wiki_global`/`wiki_search`/`wiki_read_page`/`wiki_list_pages`/
 `wiki_graph_neighbors`/`wiki_find_path`/`wiki_find_entity`/`wiki_memory`), advertised by
 availability (`wiki_global` needs a chat model + community summaries; `wiki_memory` — the B6
-three-tier context — needs an index + a non-empty memory tier). Options:
+three-tier context — needs an index + a non-empty memory tier), plus the opt-in **write** tool
+`wiki_remember` (`[memory] agent_writes = true`, below). Options:
 `--model`, `--host`, `--no-ask`. Coding-agent setup is in
 `docs/coding-agents.md` (+ `examples/coding-agents/`).
 
@@ -711,6 +712,18 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   excludes it with no per-reader code; `believed_at` holds it only for `known_at` before `forgotten_at`; `remember()`
   skips forgotten records (a re-said fact is added afresh). The `sleep` CLI (`cli._cmd_sleep`) shares the B5 core with
   `consolidate` (`cli._consolidate_graph`); the Gedächtnis tab shows a "vergessen" chip + badge.
+  **Stale facts (§13.4–13.5, measured, not adopted):** re-resolution in memory, a wiki-grounded check and
+  update-aware capture all failed with the local 30B (0/14, 1/14, 82 % of candidates flagged) — for 12 of 14 stale
+  facts no successor exists in memory. **`wiki_remember` (v0.90, P2)** fixes it at the source: the opt-in MCP tool
+  (`build_server(memory_writes=)`, `Project.agent_writes`, `mcp_server._remember`) takes structured `facts` + `replaces`
+  (lines as `wiki_memory` prints them → `GraphStore.match_facts`, exact via `store._line_key`; unmatched → the 3
+  closest facts), screens with `is_unsafe_instruction` + `is_ephemeral`, and queues one journal op
+  (`queue_remember(…, retire=ids, agent=True)`; session `agent-YYYY-MM-DD`, valid from *now*). `fold_journal`
+  remembers the facts (**no B9 `resolve` for agent ops** — it once grouped "web UI | has | ten tabs" with "has
+  project-aware UI" and closed that true fact) and `GraphStore.retire(ids, at)` closes the replaced ones (`valid_to`;
+  B7 *past*). The capture worker now also folds when the session yields no facts. Measured on the dogfooding memory
+  (14 labeled stale facts): replaces matched 14/14, all closed, stale facts in 10 topic contexts 12 → 0.
+  `temporal.format_date` computes from the epoch (Windows' `fromtimestamp` raised on a stated "since 1969").
   **B5 consolidation ("sleep"):** the `consolidate` command clusters the *current* assertions by
   embedding similarity (`GraphStore.assertion_graph` → `community.detect_communities`), LLM-summarizes
   each cluster into a theme (`community.summarize_facts`), and writes `MemoryConcept` + `CONSOLIDATES`

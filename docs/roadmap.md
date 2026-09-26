@@ -899,10 +899,15 @@ The **genuine gaps**, measure-first as always:
   that knows what it changed — `wiki_remember` below. Details: `path-b-memory.md` §13.4–13.5.
 - **LoCoMo benchmark (P2).** The public long-conversation QA set (snap-research) converted to the cross-session
   format → the first externally comparable number instead of hand-written scenarios only.
-- **Agent-initiated writes (P2, optional).** CoALA's learning action by the agent itself (Letta's
-  `memory_replace`): an opt-in MCP `wiki_remember` tool (via the journal) so a decision is stored when made, not
-  only at session end — and, after §13.4–13.5, the most promising fix for **stale state**: the host agent records
-  the new state ("U7 is shipped", "the web UI has ten tabs") when it makes the change, and B7 orders it by valid time.
+- **Agent-initiated writes — `wiki_remember` (P2). ✅ (v0.90).** CoALA's learning action by the agent itself
+  (Letta's `memory_replace`), and the fix for **stale state** that the local model couldn't infer afterwards: an
+  opt-in MCP tool (`[memory] agent_writes`) — the host agent records facts / the **new state** when it makes a change
+  and names what it `replaces` (copied from `wiki_memory`; exact matches, near misses come back with suggestions);
+  queued to the journal, folded at session end / `sleep`: new facts remembered, replaced ones **closed** (history
+  kept). P0 screening; one-off events refused ("record the resulting state"). Measured on the dogfooding memory with
+  the 14 labeled stale facts: `replaces` matched 14/14, all closed, stale facts in 10 topic contexts **12 → 0**, the
+  new state in 9/10; agent ops skip the local B9 resolver (it closed a true fact once). Also fixed: pre-1970 dates
+  crashed `format_date` on Windows. Details: `path-b-memory.md` §13.6; ADR-33.
 
 **Out of scope** (agent runtime or model internals, against the local-substrate role): continuous thinking /
 inner-monologue managers / heartbeat loops / dual-speed System-1–2 (Claude Code is the agent; always-on

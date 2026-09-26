@@ -41,6 +41,7 @@ from .graph import (
     extract_relations, format_memory, resolve_entities, summarize_community, summarize_facts,
 )
 from .embeddings import OllamaEmbedder
+from .graph.journal import journal_path, pending_journal
 from .graph.temporal import format_date, format_interval, parse_date
 from .graph.temporal import session_date as session_date_of
 from .llm import OllamaChat
@@ -3161,8 +3162,8 @@ def _hook_capture(project: Project, payload: dict) -> None:
     for f in dropped:                  # logged to .openwiki/hook.log by the detached worker
         print(f"openwiki hook: scrubbed instruction-like fact: {f.subject} | {f.predicate} | "
               f"{f.object}", file=sys.stderr)
-    if not facts:
-        return
+    if not facts and not pending_journal(journal_path(project.graph_path)):
+        return                         # nothing captured and nothing queued (wiki_remember) to fold
     sid = str(payload.get("session_id") or "session")
     graph = _open_graph(project.graph_path, writable=True, retries=6)
     if graph is None:
@@ -3171,12 +3172,13 @@ def _hook_capture(project: Project, payload: dict) -> None:
         if getattr(graph, "writable", False):
             coexist = _coexist_check(model, host)
             resolve = _attribute_resolver(model, host)
-            graph.remember(sid, facts, embedder, coexist=coexist, resolve=resolve)
+            if facts:
+                graph.remember(sid, facts, embedder, coexist=coexist, resolve=resolve)
             try:
                 graph.fold_journal(embedder, coexist=coexist, resolve=resolve)
             except Exception:
                 pass
-        else:
+        elif facts:
             graph.queue_remember(sid, facts)   # locked → queue; a later writer folds it in
     finally:
         graph.close()
@@ -3275,7 +3277,9 @@ def _cmd_mcp(args: argparse.Namespace) -> int:
     server = build_server(args.wiki, index=index, graph=graph, agent=agent,
                           version=__version__, identity=identity, context_budget=budget,
                           memory_probes=bool(project is not None and project.memory_enabled
-                                             and project.memory_probes))
+                                             and project.memory_probes),
+                          memory_writes=bool(project is not None and project.memory_enabled
+                                             and project.agent_writes))
     server.serve()   # blocks on stdio (JSON-RPC)
     return 0
 

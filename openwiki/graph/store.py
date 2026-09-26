@@ -72,6 +72,18 @@ def _key_of(rec: dict) -> str:
 _PERSONAL = re.compile(r"^(the )?user\b|^(i|me|my)\b", re.IGNORECASE)
 
 
+def _line_key(line: str) -> str:
+    """A fact line as printed ("- s p o  (since …; session)  [superseded]", or "s | p | o") →
+    a comparison key: bullet, provenance, status marks and separators dropped; case and
+    whitespace folded."""
+    t = str(line).strip()
+    t = re.sub(r"^[-*•]\s+", "", t)
+    t = re.sub(r"\s+\[[a-z ]+\]\s*$", "", t)                  # [superseded] / [forgotten] …
+    t = re.sub(r"\s+\((since [^()]*|[^()]*;[^()]*)\)\s*$", "", t)  # "  (since 2026-09-01; s1)", not "(default)"
+    t = t.replace(" | ", " ")
+    return " ".join(t.lower().split())
+
+
 def _summarized(summary) -> bool:
     """A theme with a summary; an empty one is **pending** (a ``--budget`` consolidation ran out)."""
     return bool((summary or "").strip())
@@ -904,12 +916,55 @@ class GraphStore:
     # -- deferred-write journal (B1 concurrency) -----------------------
 
     def queue_remember(self, session_id: str, facts, session_date: Optional[int] = None,
-                       correct: bool = False) -> int:
+                       correct: bool = False, retire=None, agent: bool = False) -> int:
         """Append a `remember` op to the write-ahead journal (works read-only — that's the
         point: a locked-out writer queues instead of failing). Folded by ``fold_journal``,
-        which honors the queued record time + validity (B7). Returns the number queued."""
+        which honors the queued record time + validity (B7). ``retire`` = ids of facts the op
+        makes outdated (``wiki_remember``'s ``replaces``); ``agent`` marks a host-agent write (no
+        B9 resolution at fold time — see ``fold_journal``). Returns the number of facts queued."""
         return append_remember(self._journal_path, session_id, facts,
-                               session_date=session_date, correct=correct)
+                               session_date=session_date, correct=correct, retire=retire,
+                               agent=agent)
+
+    def match_facts(self, lines) -> tuple:
+        """``wiki_remember``'s ``replaces``: find the **believed** facts (current, not forgotten)
+        each line names — as ``wiki_memory`` / ``recall`` print them ("- s p o  (since …; session)")
+        or as ``"s | p | o"``; provenance, status marks and case/whitespace are ignored. Exact
+        matches only (a near miss must not close the wrong fact). Read-only.
+        → ``({line: [ids]}, [unmatched lines])``."""
+        recs = self._load_assertions()
+        self._view(recs, int(time.time()))
+        index: dict = {}
+        for r in recs:
+            if r["in_view"] and r["status"] == "current":
+                index.setdefault(_line_key(f"{r['subject']} {r['predicate']} {r['object']}"),
+                                 []).append(r["id"])
+        matched, unmatched = {}, []
+        for line in lines or []:
+            ids = index.get(_line_key(str(line)))
+            if ids:
+                matched[str(line)] = ids
+            elif str(line).strip():
+                unmatched.append(str(line))
+        return matched, unmatched
+
+    def retire(self, ids, at: Optional[int] = None) -> int:
+        """Close facts the world moved past (``wiki_remember``'s ``replaces``, folded from the
+        journal): their valid time ends at ``at`` — B7 status *past*, kept for as-of/timeline
+        views, never deleted. Skips facts already closed, retracted, forgotten, or not yet valid
+        at ``at``. Writable; returns how many were closed."""
+        if not self.writable:
+            raise RuntimeError("GraphStore is read-only; open it writable to retire facts.")
+        at = int(at if at is not None else time.time())
+        n = 0
+        with self._lock:
+            for aid in ids or []:
+                rows = self._rows(
+                    "MATCH (a:Assertion {id:$id}) WHERE a.valid_to IS NULL AND a.expired_at IS NULL "
+                    "AND a.forgotten_at IS NULL AND (a.valid_from IS NULL OR a.valid_from < $t) "
+                    "SET a.valid_to=$t RETURN a.id;", {"id": str(aid), "t": at})
+                n += len(rows)
+        return n
 
     def queue_reindex(self, slug: str, text: str) -> int:
         """Append a `reindex` op (re-sync one page) to the journal — a read-only serve/chat
@@ -936,7 +991,7 @@ class GraphStore:
             return {"records": 0, "remembered": 0, "reindexed": 0}
         from .memory import MemoryFact
         now = int(now if now is not None else time.time())
-        remembered = reindexed = 0
+        remembered = reindexed = retired = 0
         for rec in records:
             try:
                 if rec.get("op") == "remember":
@@ -951,8 +1006,13 @@ class GraphStore:
                                             now=int(rec.get("t") or now),
                                             session_date=rec.get("session_date"),
                                             correct=bool(rec.get("correct")), coexist=coexist,
-                                            resolve=resolve)
+                                            # an agent write names what it replaces; the local
+                                            # model's attribute matching grouped "web UI has ten
+                                            # tabs" with "has project-aware UI" and closed it
+                                            resolve=None if rec.get("agent") else resolve)
                         remembered += res.get("added", 0)
+                    if rec.get("retire"):             # wiki_remember's replaces → close them
+                        retired += self.retire(rec["retire"], at=int(rec.get("t") or now))
                 elif rec.get("op") == "reindex":
                     slug = str(rec.get("slug") or "")
                     if slug:
@@ -961,7 +1021,8 @@ class GraphStore:
             except Exception:      # pragma: no cover - one bad op never aborts the fold
                 continue
         clear_journal(self._journal_path)
-        return {"records": len(records), "remembered": remembered, "reindexed": reindexed}
+        return {"records": len(records), "remembered": remembered, "reindexed": reindexed,
+                "retired": retired}
 
     # -- remembered tier (Path B: session memory) ----------------------
 

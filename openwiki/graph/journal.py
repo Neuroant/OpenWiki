@@ -44,7 +44,8 @@ def _append(path, obj: dict) -> None:
 
 
 def append_remember(path, session_id, facts, now: Optional[int] = None,
-                    session_date: Optional[int] = None, correct: bool = False) -> int:
+                    session_date: Optional[int] = None, correct: bool = False,
+                    retire=None, agent: bool = False) -> int:
     """Queue a ``remember`` op — (subject, predicate, object) triples for one session.
     ``facts`` may be ``MemoryFact``-likes (``.subject``/``.predicate``/``.object``) or
     ``(s, p, o)`` tuples. Returns the number of triples written (0 → nothing queued).
@@ -52,7 +53,13 @@ def append_remember(path, session_id, facts, now: Optional[int] = None,
     B7: ``t`` is the record (transaction) time the fold honors; a fact with a stated
     ``valid_from`` or a ``"many"`` cardinality is written as ``[s, p, o, valid_from,
     cardinality]`` (plain triples otherwise, so older readers still parse them), and the
-    record carries the ``session_date`` / ``correct`` flag when set."""
+    record carries the ``session_date`` / ``correct`` flag when set.
+
+    ``retire`` (``wiki_remember``'s ``replaces``): ids of remembered facts this op makes outdated —
+    the fold closes them at the op's time (valid time ends: the world changed). A record may carry
+    only ``retire`` (the new state already remembered, or none needed). ``agent`` marks an op
+    written by the host agent (``wiki_remember``): it names its replacements itself, so the fold
+    skips the model-based attribute resolution (B9) for its facts."""
     triples = []
     for f in facts:
         if hasattr(f, "subject"):
@@ -71,9 +78,14 @@ def append_remember(path, session_id, facts, now: Optional[int] = None,
                 triples.append([s, p, o])
             else:
                 triples.append([s, p, o, None if vf is None else int(vf), card or "one"])
-    if not triples:
+    retire = [str(i) for i in (retire or []) if str(i).strip()]
+    if not triples and not retire:
         return 0
     rec = {"op": "remember", "t": _now(now), "session": str(session_id), "facts": triples}
+    if retire:
+        rec["retire"] = retire
+    if agent:
+        rec["agent"] = True
     if session_date is not None:
         rec["session_date"] = int(session_date)
     if correct:

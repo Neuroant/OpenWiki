@@ -104,6 +104,59 @@ class MCPStdioServer:
 # Build the OpenWiki toolset over the existing library.
 # ---------------------------------------------------------------------------
 
+def _remember(graph, index, a: dict) -> str:
+    """``wiki_remember``: screen the agent's facts (P0 security policy; one-off events are
+    refused with a hint to record the resulting state), resolve ``replaces`` against the
+    believed facts *now* (exact lines only — near misses come back with suggestions), and
+    queue one journal op; the next writable pass folds it (remember + close the replaced)."""
+    import time as _time
+    from .graph.memory import MemoryFact, is_ephemeral, is_unsafe_instruction
+    from .graph.temporal import parse_date
+
+    now = int(_time.time())
+    source = "user" if str(a.get("source") or "").lower() == "user" else "assistant"
+    facts, notes = [], []
+    for f in a.get("facts") or []:
+        f = f if isinstance(f, dict) else {}
+        s, p, o = (str(f.get(k) or "").strip() for k in ("subject", "predicate", "object"))
+        if not (s and p and o):
+            notes.append("skipped a fact without subject, predicate and object")
+            continue
+        vf = parse_date(f.get("valid_from")) if f.get("valid_from") else None
+        fact = MemoryFact(s, p, o, valid_from=vf if vf is not None else now, source=source)
+        if is_unsafe_instruction(fact):
+            notes.append(f"not stored — security-sensitive (restate it in the session instead): {s} {p} {o}")
+        elif is_ephemeral(fact):
+            notes.append(f"not stored — a one-off event; record the resulting state instead: {s} {p} {o}")
+        else:
+            facts.append(fact)
+    matched, unmatched = graph.match_facts(a.get("replaces") or [])
+    retire = [i for ids in matched.values() for i in ids]
+    out = []
+    if facts or retire:
+        session = "agent-" + _time.strftime("%Y-%m-%d", _time.gmtime(now))
+        graph.queue_remember(session, facts, session_date=now, retire=retire, agent=True)
+        out.append(f"Queued {len(facts)} fact(s)"
+                   + (f", closing {len(retire)} replaced fact(s)" if retire else "")
+                   + " — they land in memory at the next write pass (session end or `openwiki sleep`).")
+        out += [f"  + {f.subject} {f.predicate} {f.object}" for f in facts]
+        out += [f"  − {line}" for line in matched]
+    else:
+        out.append("Nothing stored.")
+    for line in unmatched:
+        hint = ""
+        if index is not None:
+            try:
+                near = graph.recall(line, index.embedder, k=3)
+                if near:
+                    hint = "; closest current facts: " + " | ".join(
+                        f"{h['subject']} {h['predicate']} {h['object']}" for h in near)
+            except Exception:
+                hint = ""
+        out.append(f"No current fact matches “{line}” — nothing closed{hint}")
+    return "\n".join(out + notes)
+
+
 def _tool(name, description, properties, required):
     return {"name": name, "description": description,
             "inputSchema": {"type": "object", "properties": properties, "required": required}}
@@ -111,14 +164,15 @@ def _tool(name, description, properties, required):
 
 def build_server(wiki_dir, index=None, graph=None, agent=None, name="openwiki",
                  version="0", identity="", context_budget=None,
-                 memory_probes: bool = False) -> MCPStdioServer:
+                 memory_probes: bool = False, memory_writes: bool = False) -> MCPStdioServer:
     """Assemble the MCP server from already-loaded OpenWiki components.
 
     `index` (SemanticIndex) enables search/ask; `graph` (GraphStore) enables the
     graph tools; `agent` (RAGAgent) powers `wiki_ask`. Read-only `WikiTools` back
     the rest. `identity` + `context_budget` seed/bound the B6 `wiki_memory` context;
     `memory_probes` (P1 cue-trigger, needs the agent's chat model) probes it for the
-    user's implicit constraints.
+    user's implicit constraints. `memory_writes` (``[memory] agent_writes``) adds
+    `wiki_remember` — the agent records facts / new states, queued to the journal.
     """
     from .tools import WikiTools
 
@@ -197,6 +251,35 @@ def build_server(wiki_dir, index=None, graph=None, agent=None, name="openwiki",
                                           probes=probes)
                         or "(no relevant memory yet)")
             handlers["wiki_memory"] = _wiki_memory
+
+        # Agent-initiated writes (opt-in): record a decision or a NEW STATE when the agent makes a
+        # change, closing the facts it replaces — the local model can't infer staleness afterwards
+        # (path-b-memory.md §13.4–13.6). Read-only graph → queued to the journal, folded later.
+        if memory_writes:
+            specs.append(_tool(
+                "wiki_remember",
+                "Record facts in your long-term memory NOW — decisions, conventions, and above all "
+                "a NEW STATE whenever you change something (\"the web UI has ten tabs\", \"U7 "
+                "streaming chat is shipped\"), so later sessions don't act on the old one. Each fact "
+                "is a subject / predicate / object triple. Put the remembered facts your change makes "
+                "outdated in `replaces`, copied as wiki_memory shows them — they are closed (kept as "
+                "history), not deleted. Record the resulting state, not the event (\"v1.2 was "
+                "pushed\" is not kept). Facts land in memory at the next write pass (session end, "
+                "`openwiki sleep`).",
+                {"facts": {"type": "array", "description": "Facts to remember.", "items": {
+                    "type": "object", "properties": {
+                        "subject": {"type": "string"}, "predicate": {"type": "string"},
+                        "object": {"type": "string"},
+                        "valid_from": {"type": "string",
+                                       "description": "Optional ISO date it became true (default: now)."}},
+                    "required": ["subject", "predicate", "object"]}},
+                 "replaces": {"type": "array", "items": {"type": "string"},
+                              "description": "Remembered facts this makes outdated, as wiki_memory "
+                                             "prints them."},
+                 "source": {"type": "string", "enum": ["assistant", "user"],
+                            "description": "Who established it: you (default) or the user's decision."}},
+                []))
+            handlers["wiki_remember"] = lambda a: _remember(graph, index, a)
 
         # Global search needs a chat model (from the agent) + community summaries.
         if agent is not None and _graph_has_communities(graph):

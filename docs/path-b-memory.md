@@ -1024,7 +1024,10 @@ disbelieved); `remember()` skips forgotten records, so a later session that says
 snapshots carry the columns; old graphs gain them by `ALTER` on the first sleep. **`openwiki sleep`** runs, in one
 writable pass: fold the queued usage + journal (with the coexistence check and B9 resolver) → forget → re-consolidate
 the themes (`_consolidate_graph`, shared with `consolidate`; an unreachable model only skips this step) → decay the
-usage edges. `--dry-run` lists what would be forgotten. Schedulable — Windows Task Scheduler:
+usage edges. `--dry-run` lists what would be forgotten; `--budget N` (also on `consolidate`) caps the new theme
+summaries per run — the rest are stored *pending* (members, no summary; no reader shows them) and the next run,
+warm-started from that partition, finishes them (the dogfooding memory's first consolidation: 120 themes in
+~6 min — `--budget` spreads such a run over several nights). Schedulable — Windows Task Scheduler:
 `schtasks /Create /SC DAILY /ST 03:30 /TN "OpenWiki sleep" /TR "<venv>\Scripts\python.exe -m openwiki sleep --project <project dir>"`;
 cron: `30 3 * * * cd <project dir> && owiki sleep >> .openwiki/sleep.log 2>&1`.
 

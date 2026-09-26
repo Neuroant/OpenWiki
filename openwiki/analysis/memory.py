@@ -69,7 +69,8 @@ def analyze_memory(graph, now: "int | None" = None, half_life: "float | None" = 
     }
 
     # -- consolidation ----------------------------------------------------
-    consolidated_ids = set(assignment)
+    summarized = {t["id"] for t in themes}         # a pending theme (--budget ran out) doesn't count
+    consolidated_ids = {aid for aid, cid in assignment.items() if cid in summarized}
     consolidated = sum(1 for f in current if f["id"] in consolidated_ids)
     sizes = [t.get("size", 0) for t in themes]
     consolidation = {

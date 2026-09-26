@@ -72,6 +72,11 @@ def _key_of(rec: dict) -> str:
 _PERSONAL = re.compile(r"^(the )?user\b|^(i|me|my)\b", re.IGNORECASE)
 
 
+def _summarized(summary) -> bool:
+    """A theme with a summary; an empty one is **pending** (a ``--budget`` consolidation ran out)."""
+    return bool((summary or "").strip())
+
+
 def _is_personal(rec: dict) -> bool:
     """A fact about the user themself ("user | is allergic to | hazelnuts", "user's knee | …",
     "Bruno | is the dog of | user") — capture names the user "user"."""
@@ -1403,7 +1408,8 @@ class GraphStore:
             "retracted": states.count("retracted"),
             "planned": states.count("future"),
             "forgotten": states.count("forgotten"),
-            "themes": count("MATCH (c:MemoryConcept) RETURN count(c);"),
+            "themes": len(self.memory_concepts()),
+            "pending_themes": len(self.memory_concepts(include_pending=True)) - len(self.memory_concepts()),
         }
 
     def list_assertions(self, limit: int = 200, include_superseded: bool = True) -> list:
@@ -1558,14 +1564,18 @@ class GraphStore:
                            "CREATE (c)-[:CONSOLIDATES]->(a);", {"id": int(cid), "aid": aid})
         return {"concepts": len(sizes), "assertions": len(assignment)}
 
-    def memory_concepts(self) -> list:
-        """All consolidated memory themes with their summaries (largest first)."""
+    def memory_concepts(self, include_pending: bool = False) -> list:
+        """The consolidated memory themes with their summaries (largest first). A **pending**
+        theme — clustered, but not yet summarized because a ``--budget`` run ran out — keeps its
+        members (so the next run's warm start sees the same partition) and is left out unless
+        ``include_pending``."""
         try:
             rows = self._rows("MATCH (c:MemoryConcept) "
                               "RETURN c.id, c.label, c.summary, c.size ORDER BY c.size DESC, c.id;")
         except Exception:
             return []
-        return [{"id": r[0], "label": r[1], "summary": r[2], "size": r[3]} for r in rows]
+        return [{"id": r[0], "label": r[1], "summary": r[2], "size": r[3]} for r in rows
+                if include_pending or _summarized(r[2])]
 
     def has_memory_concepts(self) -> bool:
         try:
@@ -1608,7 +1618,7 @@ class GraphStore:
             return []
         agg: dict = {}
         for cid, label, summary, size, aid in rows:
-            if aid in ids:
+            if aid in ids and _summarized(summary):          # a pending theme has nothing to say yet
                 e = agg.setdefault(cid, {"id": cid, "label": label, "summary": summary,
                                          "size": size, "hits": 0})
                 e["hits"] += 1

@@ -423,6 +423,9 @@ def _build_argparser() -> argparse.ArgumentParser:
     sleep_p.add_argument("--max-facts", type=int, default=12, help="Facts shown to the summarizer per theme (default: 12).")
     sleep_p.add_argument("--similar-k", type=int, default=6, help="Top-k similarity edges per fact (default: 6).")
     sleep_p.add_argument("--resummarize", action="store_true", help="Re-summarize every theme from scratch.")
+    sleep_p.add_argument("--budget", type=int, default=None, metavar="N",
+                         help="At most N new theme summaries (LLM calls) this run, largest first; the "
+                              "rest stay pending for the next run (default: no limit).")
     sleep_p.add_argument("--half-life", type=float, default=30.0, help="Usage-edge half-life in days (default: 30).")
     sleep_p.add_argument("--floor", type=float, default=0.1, help="Prune usage edges below this weight (default: 0.1).")
     sleep_p.add_argument("--model", default=None, help="Chat model (default: manifest models.chat).")
@@ -447,6 +450,9 @@ def _build_argparser() -> argparse.ArgumentParser:
     cons_p.add_argument("--resummarize", action="store_true",
                         help="Re-summarize every theme from scratch (ignore the incremental cache "
                              "+ warm-start; a full rebuild of the consolidation layer).")
+    cons_p.add_argument("--budget", type=int, default=None, metavar="N",
+                        help="At most N new theme summaries (LLM calls) this run, largest first; the rest "
+                             "are stored pending and summarized by the next run (default: no limit).")
     cons_p.add_argument("--model", default=None,
                         help="Chat model for the theme summaries (default: manifest models.chat).")
     cons_p.add_argument("--host", default=None, help="Ollama host URL.")
@@ -2262,10 +2268,15 @@ def _consolidate_graph(graph, args) -> tuple:
     """B5 core, shared by ``consolidate`` and ``sleep``: cluster the current facts
     (warm-started from the prior partition), LLM-summarize each new/changed theme — an
     unchanged member set reuses its summary — and write the themes. Uses ``args.similar_k /
-    min_size / max_facts / resummarize / model / host``. → ``(result, summarized, reused)``."""
+    min_size / max_facts / resummarize / model / host / budget``. ``budget`` caps the new
+    summaries (LLM calls) of this run, largest themes first; the rest are written **pending**
+    (members, no summary) so the partition persists and the next run — warm-started from it —
+    summarizes them: a large first consolidation proceeds over several bounded runs instead of
+    losing all its work to a timeout. → ``(result, summarized, reused, pending)``."""
     from collections import defaultdict
 
-    reused = summarized = 0
+    reused = summarized = pending = 0
+    budget = getattr(args, "budget", None)
     # B5 stability + incrementality: warm-start clustering from the prior partition, and
     # reuse an existing theme's summary when its member set is unchanged (skip the LLM call).
     prior_assign = {} if args.resummarize else graph.concept_assignment()
@@ -2290,8 +2301,9 @@ def _consolidate_graph(graph, args) -> tuple:
 
     chat = OllamaChat(model=args.model, host=args.host, temperature=0.2)
     if kept:
+        cap = f", at most {budget} new summaries" if budget is not None else ""
         print(f"Consolidating {len(facts)} fact(s) into {len(kept)} theme(s) with {chat.name} "
-              f"(unchanged themes reuse their summary) …", file=sys.stderr)
+              f"(unchanged themes reuse their summary{cap}) …", file=sys.stderr)
     else:
         print(f"No themes yet — need a cluster of ≥{args.min_size} related facts "
               f"({len(facts)} fact(s) so far).", file=sys.stderr)
@@ -2303,6 +2315,10 @@ def _consolidate_graph(graph, args) -> tuple:
             labels[new_id], summaries[new_id] = cached
             reused += 1
             tag = "reuse"
+        elif budget is not None and summarized >= budget:    # out of budget → next run
+            labels[new_id], summaries[new_id] = f"Thema {new_id}", ""
+            pending += 1
+            tag = "pending"
         else:
             ranked = sorted(members[cid], key=lambda a: (-degree.get(a, 0.0), a))
             fact_texts = [facts[a] for a in ranked[: args.max_facts]]
@@ -2313,7 +2329,7 @@ def _consolidate_graph(graph, args) -> tuple:
         for aid in members[cid]:
             assignment[aid] = new_id
         print(f"  [{new_id}] {len(members[cid]):>3} facts — {labels[new_id]}  ({tag})", file=sys.stderr)
-    return graph.upsert_memory_concepts(assignment, summaries, labels), summarized, reused
+    return graph.upsert_memory_concepts(assignment, summaries, labels), summarized, reused, pending
 
 
 def _cmd_sleep(args: argparse.Namespace) -> int:
@@ -2376,9 +2392,10 @@ def _cmd_sleep(args: argparse.Namespace) -> int:
     print(f"  forgot {sum(forgotten.values())} fact(s): {forgotten.get('ephemeral', 0)} one-off event(s), "
           f"{forgotten.get('unsafe', 0)} unsafe (archived, not deleted)")
     if consolidated is not None:
-        result, summarized, reused = consolidated
+        result, summarized, reused, pending = consolidated
         print(f"  consolidated {result['assertions']} fact(s) into {result['concepts']} theme(s) "
-              f"({summarized} summarized, {reused} reused)")
+              f"({summarized} summarized, {reused} reused"
+              f"{f', {pending} pending — the next run summarizes them' if pending else ''})")
     elif note:
         print(note)
     print(f"  decayed {decayed['edges']} usage edge(s) ({decayed['pruned']} pruned)")
@@ -2405,7 +2422,7 @@ def _cmd_consolidate(args: argparse.Namespace) -> int:
         if not graph.has_memory():
             print("(no remembered facts yet — capture sessions with `openwiki remember` first)")
             return 0
-        result, summarized, reused = _consolidate_graph(graph, args)
+        result, summarized, reused, pending = _consolidate_graph(graph, args)
         folded = decayed = None
         if not args.no_decay:
             folded = graph.fold_usage()
@@ -2415,6 +2432,8 @@ def _cmd_consolidate(args: argparse.Namespace) -> int:
 
     print(f"Consolidated {result['assertions']} fact(s) into {result['concepts']} theme(s) "
           f"({summarized} summarized, {reused} reused) → {args.graph}")
+    if pending:
+        print(f"  {pending} theme(s) pending (--budget reached) — re-run to summarize them.")
     if decayed is not None:
         fold_note = f"folded {folded['records']} usage record(s); " if folded and folded["records"] else ""
         print(f"  {fold_note}decayed {decayed['edges']} usage edge(s) ({decayed['pruned']} pruned).")

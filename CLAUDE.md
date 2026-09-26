@@ -249,11 +249,15 @@ support global search over memory (`answer_global`):
 Options: `--graph DIR`, `--min-size N` (smallest cluster that becomes a theme; default 2),
 `--max-facts N` (facts shown to the summarizer per theme; default 12), `--similar-k N`
 (clustering edges per fact; default 6), `--half-life DAYS` / `--floor F` / `--no-decay` (the
-decay step), `--resummarize` (ignore the cache — rebuild every summary), `--model NAME`,
+decay step), `--resummarize` (ignore the cache — rebuild every summary), `--budget N` (at most N
+new summaries this run, largest themes first; the rest are written **pending** — members kept, empty summary,
+skipped by every reader (`memory_concepts`, `relevant_concepts`, the overview's `themes` vs `pending_themes`) — and
+the next run, warm-started from that partition, summarizes them: a large first consolidation (dogfooding: 120
+themes, ~6 min) spreads over several bounded runs instead of losing all work to a timeout), `--model NAME`,
 `--host URL`. Gated by `[memory] enabled`. Reuses `community.detect_communities` (now with a
 warm-start `seed`) + `summarize_facts`; `MemoryConcept`/`CONSOLIDATES` are a *derived* view
 (recomputed each pass, not snapshotted across rebuilds — like `Community`). Reports
-`N theme(s) (M summarized, K reused)`.
+`N theme(s) (M summarized, K reused)` (+ pending with `--budget`).
 
 **Sleep — nightly memory maintenance + forgetting** (Path B++): one schedulable writable pass — fold what
 read-only processes queued (usage + journal) → **forget** what the memory policy says not to keep → re-consolidate
@@ -266,7 +270,7 @@ leaves recall, context, consolidation and counts but stays in the graph (`forgot
 .venv\Scripts\python -m openwiki sleep                  # schedule it nightly (Task Scheduler / cron)
 ```
 Options: `--dry-run`, `--no-consolidate` (skip the only step that calls the chat model), `--min-size` / `--max-facts` /
-`--similar-k` / `--resummarize` (as `consolidate`), `--half-life` / `--floor` (as `decay`), `-i/--index` (embedder for
+`--similar-k` / `--resummarize` / `--budget N` (as `consolidate`), `--half-life` / `--floor` (as `decay`), `-i/--index` (embedder for
 queued ops), `--graph`, `--model`, `--host`. Gated by `[memory] enabled`. **Measured** on the dogfooding memory: 31 %
 of the facts injected for 40 real prompts were such junk (vs ~3 % of all facts — it clusters on frequent actions) →
 **5 %** after forgetting 27 facts, 0 of 232 hand-labeled keep-facts dropped; an LLM review dropped 11–81 keep-facts

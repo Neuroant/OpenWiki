@@ -189,3 +189,83 @@ def test_sleep_command_dry_run_then_forgets_and_consolidates(tmp_path, capsys, m
         assert members and not (members & forgotten)                  # themes only over kept facts
     finally:
         store.close()
+
+
+class _Emb3:
+    """Three orthogonal topics → three clean clusters."""
+    VOCAB = ["server", "port", "graph", "kuzu", "model", "ollama"]
+    name = "fake:topics"
+
+    def _vec(self, text):
+        low = text.lower()
+        v = np.array([float(low.count(w)) for w in self.VOCAB], dtype=np.float32)
+        return v if v.any() else v + 1e-3
+
+    def embed_documents(self, texts):
+        return np.vstack([self._vec(t) for t in texts])
+
+    def embed_query(self, text):
+        return self._vec(text)
+
+
+class _CountingChat:
+    calls = 0
+
+    def __init__(self, *a, **kw):
+        self.name = "fake:count"
+
+    def chat(self, messages):
+        type(self).calls += 1
+        return f"Thema: T{type(self).calls}\nSummary number {type(self).calls}."
+
+
+def test_consolidate_budget_leaves_the_rest_pending_for_the_next_run(tmp_path, capsys, monkeypatch):
+    """--budget N: only N new summaries per run (largest themes first); the rest are stored
+    *pending* (members kept → the next run's warm start sees the same partition) and never
+    reach a reader; the next run reuses what's done and summarizes what's pending."""
+    from openwiki import cli
+    from openwiki.graph import GraphBuilder
+    from openwiki.search import SemanticIndex
+    from openwiki.wiki import Wiki, WikiPage
+
+    pytest.importorskip("kuzu")
+    proj = _project(tmp_path)
+    graph = proj / "output" / "graph"
+    pages = [WikiPage(slug="000-a", title="A", level=1, order=0, pdf_page_start=1,
+                      pdf_page_end=1, text="server port graph kuzu model ollama")]
+    wiki = Wiki(title="T", pages=pages, source="x.pdf", split_level=1)
+    GraphBuilder(graph).build(wiki, SemanticIndex.build(wiki, _Emb3(), size_words=50, overlap_words=10))
+    store, emb = _open(graph), _Emb3()
+    try:
+        store.remember("s1", [MemoryFact("the server", "listens on", "port 8137"),
+                              MemoryFact("the server port", "is set in", "the manifest"),
+                              MemoryFact("the graph", "is stored in", "kuzu"),
+                              MemoryFact("kuzu", "holds", "the graph"),
+                              MemoryFact("the model", "is served by", "ollama"),
+                              MemoryFact("ollama", "runs", "the chat model")], emb, now=1000)
+    finally:
+        store.close()
+    monkeypatch.setattr(cli, "OllamaChat", _CountingChat)
+
+    def run(*extra):
+        _CountingChat.calls = 0
+        assert cli.main(["consolidate", "--project", str(proj), "--similar-k", "1", "--no-decay",
+                         *extra]) == 0
+        store = _open(graph)
+        try:
+            ov = store.memory_overview()
+            ids = [a["id"] for a in store.list_assertions()]
+            shown = store.relevant_concepts(ids, limit=10)
+            return _CountingChat.calls, ov["themes"], ov["pending_themes"], shown
+        finally:
+            store.close()
+
+    calls, themes, pending, shown = run("--budget", "1")
+    assert (calls, themes) == (1, 1) and pending >= 1
+    assert len(shown) == 1 and all(t["summary"] for t in shown)       # pending never reaches context
+    assert "pending (--budget reached)" in capsys.readouterr().out
+    calls, themes2, pending2, _ = run("--budget", "1")
+    assert calls == 1 and themes2 == 2 and pending2 == pending - 1      # the done one was reused
+    calls, themes3, pending3, shown3 = run()
+    assert calls == pending2 and pending3 == 0 and themes3 == themes + pending
+    assert len(shown3) == themes3

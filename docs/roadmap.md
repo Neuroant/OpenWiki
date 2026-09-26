@@ -888,6 +888,8 @@ The **genuine gaps**, measure-first as always:
   matches in the full memory verified junk. Forgetting **archives** (`forgotten_at`; out of every view, known-at
   still sees it, re-said facts come back). Result: injected junk **31 % → 5 %**, prompts with junk 25 → 10 of 40.
   Remaining junk is stale *state* → re-resolution, not forgetting. Details: `path-b-memory.md` §13.3; ADR-32.
+  **v0.89:** `--budget N` on `consolidate` / `sleep` — at most N new theme summaries per run; the rest are stored
+  *pending* and finished by the next run (the dogfooding memory's first consolidation: 120 themes, ~6 min).
 - **LoCoMo benchmark (P2).** The public long-conversation QA set (snap-research) converted to the cross-session
   format → the first externally comparable number instead of hand-written scenarios only.
 - **Agent-initiated writes (P2, optional).** CoALA's learning action by the agent itself (Letta's

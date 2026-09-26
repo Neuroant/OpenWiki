@@ -128,16 +128,20 @@ class GraphBuilder:
             base = ("MATCH (a:Assertion) RETURN a.id, a.subject, a.predicate, a.object, "
                     "a.session_id, a.created_at, a.emb")
             b7 = ", a.confidence, a.last_seen, a.valid_from, a.valid_to, a.expired_at, a.cardinality"
-            assertions = self._read_rows(conn, base + b7 + ", a.attr, a.source;")       # B9 + P0
+            assertions = self._read_rows(                                           # + sleep
+                conn, base + b7 + ", a.attr, a.source, a.forgotten_at, a.forgotten;")
             if not assertions:
-                assertions = [list(r) + [None] for r in self._read_rows(conn, base + b7 + ", a.attr;")]
+                assertions = [list(r) + [None] * 2 for r in self._read_rows(
+                    conn, base + b7 + ", a.attr, a.source;")]                        # B9 + P0
             if not assertions:
-                assertions = [list(r) + [None] * 2 for r in self._read_rows(conn, base + b7 + ";")]
+                assertions = [list(r) + [None] * 3 for r in self._read_rows(conn, base + b7 + ", a.attr;")]
             if not assertions:
-                assertions = [list(r) + [None] * 6 for r in self._read_rows(
+                assertions = [list(r) + [None] * 4 for r in self._read_rows(conn, base + b7 + ";")]
+            if not assertions:
+                assertions = [list(r) + [None] * 8 for r in self._read_rows(
                     conn, base + ", a.confidence, a.last_seen;")]
             if not assertions:
-                assertions = [list(r) + [1.0, 0] + [None] * 6 for r in self._read_rows(conn, base + ";")]
+                assertions = [list(r) + [1.0, 0] + [None] * 8 for r in self._read_rows(conn, base + ";")]
             sessions = self._read_rows(conn, "MATCH (s:Session) RETURN s.id, s.created_at, s.session_date;")
             if not sessions:
                 sessions = [list(r) + [None] for r in self._read_rows(
@@ -169,7 +173,7 @@ class GraphBuilder:
                          parameters={"id": sid, "t": created, "d": sdate})
         kept, skipped = set(), 0
         for (aid, subj, pred, obj, sid, created, emb, conf, seen,
-             vfrom, vto, expired, card, attr, source) in snap.get("assertions", []):
+             vfrom, vto, expired, card, attr, source, gone_at, gone) in snap.get("assertions", []):
             if emb is None or len(emb) != dim:
                 skipped += 1
                 continue
@@ -177,11 +181,11 @@ class GraphBuilder:
                 "CREATE (:Assertion {id:$id, subject:$s, predicate:$p, object:$o, "
                 "session_id:$sid, created_at:$t, confidence:$c, last_seen:$ls, "
                 "valid_from:$vf, valid_to:$vt, expired_at:$x, cardinality:$card, attr:$attr, "
-                "source:$src, emb:$e});",
+                "source:$src, forgotten_at:$ga, forgotten:$g, emb:$e});",
                 parameters={"id": aid, "s": subj, "p": pred, "o": obj, "sid": sid, "t": created,
                             "c": float(conf if conf is not None else 1.0), "ls": int(seen or 0),
                             "vf": vfrom, "vt": vto, "x": expired, "card": card, "attr": attr,
-                            "src": source,
+                            "src": source, "ga": gone_at, "g": gone,
                             "e": [float(x) for x in emb]})
             kept.add(aid)
         for sid, aid in snap.get("asserts", []):
@@ -259,15 +263,16 @@ class GraphBuilder:
         # embedding so `recall()` can brute-force cosine over them.
         # B7 bi-temporal: valid time (valid_from/valid_to — when the fact held in the world) +
         # transaction time (created_at/expired_at — when we recorded / stopped believing it);
-        # cardinality "many" = a multi-valued predicate (values coexist, no supersession).
+        # cardinality "many" = a multi-valued predicate (values coexist, no supersession);
+        # forgotten_at/forgotten = the sleep pass archived it (when / why) — kept, out of every view.
         conn.execute("CREATE NODE TABLE Session(id STRING, created_at INT64, session_date INT64, "
                      "PRIMARY KEY(id));")
         conn.execute(
             f"CREATE NODE TABLE Assertion(id STRING, subject STRING, predicate STRING, "
             f"object STRING, session_id STRING, created_at INT64, "
             f"confidence DOUBLE, last_seen INT64, valid_from INT64, valid_to INT64, "
-            f"expired_at INT64, cardinality STRING, attr STRING, source STRING, emb FLOAT[{dim}], "
-            f"PRIMARY KEY(id));")
+            f"expired_at INT64, cardinality STRING, attr STRING, source STRING, "
+            f"forgotten_at INT64, forgotten STRING, emb FLOAT[{dim}], PRIMARY KEY(id));")
         conn.execute("CREATE REL TABLE ASSERTS(FROM Session TO Assertion);")
         # B4/B7 provenance: (n)-[:SUPERSEDES]->(o) = n closed or retracted o's validity
         # (same subject+predicate, different object). 'Current' is decided by the B7

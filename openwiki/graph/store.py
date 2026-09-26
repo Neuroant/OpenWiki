@@ -51,6 +51,7 @@ _A_CONF = ("confidence", "last_seen")                                     # v0.5
 _A_B7 = ("valid_from", "valid_to", "expired_at", "cardinality")           # B7 bi-temporal
 _A_B9 = ("attr",)                                                         # B9 attribute key
 _A_P0 = ("source",)                                                       # P0 provenance
+_A_SLEEP = ("forgotten_at", "forgotten")                                  # sleep: archived (when, why)
 MATERIAL_WEIGHT = 0.75                # P0: a claim from discussed material ranks below decisions
 RECENCY_FLOOR = 0.6                   # recall: time decay never takes a fact below 60% of its score
 ATTR_SEP = "\x1f"                     # canonical attribute key = normalized subject ␟ predicate
@@ -971,7 +972,8 @@ class GraphStore:
             f"CREATE NODE TABLE IF NOT EXISTS Assertion(id STRING, subject STRING, predicate STRING, "
             f"object STRING, session_id STRING, created_at INT64, confidence DOUBLE, last_seen INT64, "
             f"valid_from INT64, valid_to INT64, expired_at INT64, cardinality STRING, attr STRING, "
-            f"source STRING, emb FLOAT[{int(dim)}], PRIMARY KEY(id));",
+            f"source STRING, forgotten_at INT64, forgotten STRING, emb FLOAT[{int(dim)}], "
+            f"PRIMARY KEY(id));",
             "CREATE REL TABLE IF NOT EXISTS ASSERTS(FROM Session TO Assertion);",
             "CREATE REL TABLE IF NOT EXISTS SUPERSEDES(FROM Assertion TO Assertion);",   # B4
         ):
@@ -990,6 +992,8 @@ class GraphStore:
                         "ALTER TABLE Assertion ADD cardinality STRING;",
                         "ALTER TABLE Assertion ADD attr STRING;",                     # B9
                         "ALTER TABLE Assertion ADD source STRING;",                   # P0
+                        "ALTER TABLE Assertion ADD forgotten_at INT64;",              # sleep
+                        "ALTER TABLE Assertion ADD forgotten STRING;",
                         "ALTER TABLE Session ADD session_date INT64;"):
                 try:
                     self._exec(ddl)
@@ -1043,8 +1047,8 @@ class GraphStore:
         of an unmigrated graph), B7. Missing validity is derived from the ``SUPERSEDES`` edges
         exactly as the migration would, so every reader sees one model. ``[]`` without the table."""
         rows, cols = None, ()
-        for extra in (_A_CONF + _A_B7 + _A_B9 + _A_P0, _A_CONF + _A_B7 + _A_B9,
-                      _A_CONF + _A_B7, _A_CONF, ()):
+        for extra in (_A_CONF + _A_B7 + _A_B9 + _A_P0 + _A_SLEEP, _A_CONF + _A_B7 + _A_B9 + _A_P0,
+                      _A_CONF + _A_B7 + _A_B9, _A_CONF + _A_B7, _A_CONF, ()):
             fields = _A_BASE + extra + (("emb",) if with_emb else ())
             try:
                 rows = self._rows("MATCH (a:Assertion) RETURN "
@@ -1061,7 +1065,7 @@ class GraphStore:
             r["created_at"] = int(r.get("created_at") or 0)
             r["confidence"] = float(r["confidence"]) if r.get("confidence") is not None else 1.0
             r["last_seen"] = int(r.get("last_seen") or 0)
-            for c in _A_B7 + _A_B9 + _A_P0:
+            for c in _A_B7 + _A_B9 + _A_P0 + _A_SLEEP:
                 r.setdefault(c, None)
             r["cardinality"] = r["cardinality"] or ONE
             recs.append(r)
@@ -1080,7 +1084,7 @@ class GraphStore:
         t_valid = as_of if as_of is not None else (known_at if known_at is not None else now)
         for r in recs:
             r["status"] = temporal_status(r, now)
-            r["superseded"] = r["status"] in ("past", "retracted")
+            r["superseded"] = r["status"] in ("past", "retracted", "forgotten")
             vt = valid_to_known_at(r, known_at, closed)
             r["in_view"] = believed_at(r, known_at) and valid_at(r, t_valid, valid_to=vt)
 
@@ -1148,6 +1152,8 @@ class GraphStore:
             aliases: dict = {}                             # B9: exact key → the attribute it resolved to
             members: list = []                             # (key, normalized emb) — for B9 candidates
             for r in self._load_assertions(with_emb=resolve is not None):
+                if r.get("forgotten_at") is not None:      # archived by sleep: a re-said fact is new
+                    continue
                 r["okey"] = _normalize(r["object"])
                 key = _key_of(r)
                 groups.setdefault(key, []).append(r)
@@ -1396,6 +1402,7 @@ class GraphStore:
             "superseded": states.count("past") + states.count("retracted"),
             "retracted": states.count("retracted"),
             "planned": states.count("future"),
+            "forgotten": states.count("forgotten"),
             "themes": count("MATCH (c:MemoryConcept) RETURN count(c);"),
         }
 
@@ -1416,9 +1423,54 @@ class GraphStore:
                         "last_seen": r["last_seen"], "superseded": r["superseded"],
                         "status": r["status"], "valid_from": r["valid_from"],
                         "valid_to": r["valid_to"], "expired_at": r["expired_at"],
-                        "cardinality": r["cardinality"], "source": r.get("source")})
+                        "cardinality": r["cardinality"], "source": r.get("source"),
+                        "forgotten": r.get("forgotten")})
         out.sort(key=lambda a: -(a["last_seen"] or a["created_at"]))
         return out[:limit]
+
+    # -- sleep: forgetting (archive what the memory policy says not to keep) -----
+
+    def forget_candidates(self) -> list:
+        """What the sleep pass would forget: every held record (not retracted, not yet forgotten)
+        that the memory policy says not to keep — ``reason`` ``"unsafe"`` (the P0 security-sensitive
+        policy, re-applied to facts captured before it existed) or ``"ephemeral"`` (a one-off session
+        event: "was pushed / tagged", a commit hash, "server is serving v0.78.0"). Pure policy, no LLM
+        (an LLM review was measured unstable and harmful). Read-only."""
+        from .memory import MemoryFact, is_ephemeral, is_unsafe_instruction
+        out = []
+        for r in self._load_assertions():
+            if r.get("forgotten_at") is not None or r.get("expired_at") is not None:
+                continue
+            fact = MemoryFact(r["subject"], r["predicate"], r["object"])
+            why = ("unsafe" if is_unsafe_instruction(fact)
+                   else "ephemeral" if is_ephemeral(fact) else None)
+            if why:
+                out.append({"id": r["id"], "subject": r["subject"], "predicate": r["predicate"],
+                            "object": r["object"], "session_id": r["session_id"], "reason": why})
+        return out
+
+    def forget(self, ids, reason: str, now: Optional[int] = None) -> int:
+        """Archive assertions (sleep): stamp ``forgotten_at`` + ``forgotten`` (the reason). Nothing is
+        deleted — a forgotten fact leaves every view (recall, context, consolidation, "current"), stays
+        visible to ``known_at`` views of earlier times, and a later session that says it again adds it
+        afresh. Writable; returns how many were newly forgotten."""
+        if not self.writable:
+            raise RuntimeError("GraphStore is read-only; open it writable to forget.")
+        now = int(now if now is not None else time.time())
+        n = 0
+        with self._lock:
+            for ddl in ("ALTER TABLE Assertion ADD forgotten_at INT64;",
+                        "ALTER TABLE Assertion ADD forgotten STRING;"):
+                try:
+                    self._exec(ddl)
+                except Exception:      # already present
+                    pass
+            for aid in ids:
+                rows = self._rows("MATCH (a:Assertion {id:$id}) WHERE a.forgotten_at IS NULL "
+                                  "SET a.forgotten_at=$t, a.forgotten=$why RETURN a.id;",
+                                  {"id": aid, "t": now, "why": reason})
+                n += len(rows)
+        return n
 
     def forget_all(self) -> None:
         """Reset the remembered tier — delete every Session + Assertion (and their edges).

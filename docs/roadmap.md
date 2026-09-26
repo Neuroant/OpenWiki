@@ -879,9 +879,15 @@ The **genuine gaps**, measure-first as always:
   poisoning 8/8 / 0 leaks. **Opt-in** (`[memory] probes`) — +1 chat call per prompt, and the dogfooding memory holds
   1 personal fact in 1,218. An LLM judge (`constraint_respected`, 30/32 agreement with the audit) scores
   application. Details: `path-b-memory.md` §13.2; ADR-31.
-- **`openwiki sleep` + intentional forgetting (P1).** One schedulable nightly pass (Task Scheduler / cron):
-  consolidate → resolve (B9) → scrub → **forget** → decay. Forgetting = prune low-value, never-recalled facts
-  (today decay only re-ranks; the dogfooding memory grows ~50 facts/day) — the "biological rhythm" at no cost.
+- **`openwiki sleep` + intentional forgetting (P1). ✅ (v0.88).** One schedulable nightly pass (Task Scheduler /
+  cron): fold queued writes → **forget** → re-consolidate → decay. Measured on the dogfooding memory: only ~3 % of
+  facts are clear junk, but **31 % of the facts the hooks inject** for 40 real prompts are ("push and tag vX" →
+  seven "vX was pushed and tagged"). No decay signal exists (2 of 1,218 facts ever re-affirmed; junk is recalled
+  *often*), and an LLM review dropped 11–81 keep-facts depending on batch order — so forgetting is **policy-based**:
+  rules for one-off events / commit hashes / tautologies (+ P0 re-applied), 0 of 232 keep-facts dropped, all 27
+  matches in the full memory verified junk. Forgetting **archives** (`forgotten_at`; out of every view, known-at
+  still sees it, re-said facts come back). Result: injected junk **31 % → 5 %**, prompts with junk 25 → 10 of 40.
+  Remaining junk is stale *state* → re-resolution, not forgetting. Details: `path-b-memory.md` §13.3; ADR-32.
 - **LoCoMo benchmark (P2).** The public long-conversation QA set (snap-research) converted to the cross-session
   format → the first externally comparable number instead of hand-written scenarios only.
 - **Agent-initiated writes (P2, optional).** CoALA's learning action by the agent itself (Letta's

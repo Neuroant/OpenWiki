@@ -350,6 +350,7 @@ the default), then:
 openwiki remember session.md --session 2026-09-08   # capture subject–predicate–object facts
 openwiki recall "which chat model did we standardize on?"   # decay-weighted, current facts
 openwiki consolidate                                 # "sleep": cluster facts into LLM-summarized themes
+openwiki sleep                                       # nightly: forget one-off events, re-consolidate, decay
 openwiki context "which models do we use?"           # assemble the 3-tier session context
 ```
 
@@ -360,7 +361,9 @@ is reader-XOR-writer, so writes queue to a lock-free journal a writer folds in),
 wire into a coding agent's lifecycle via **host hooks** (`claude-code --hooks`: inject memory
 on each prompt, capture on session end). With `[memory] probes = true` (or `context --probes`) a
 context read also reaches **implicit constraints** — "book a venue" recalls "can't stand noisy
-offices" although they share no words (cue-trigger recall). Design: **[docs/path-b-memory.md](docs/path-b-memory.md)**.
+offices" although they share no words (cue-trigger recall). `openwiki sleep` (schedule it nightly) **forgets** one-off
+session events ("vX was pushed and tagged") that would otherwise crowd the injected context — archived, not
+deleted. Design: **[docs/path-b-memory.md](docs/path-b-memory.md)**.
 
 ### Web UI
 

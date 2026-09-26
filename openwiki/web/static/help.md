@@ -275,7 +275,7 @@ zusätzlich einen **Gedächtnis-Tier**: Fakten, die aus Sitzungen *erinnert* wer
 älteren) und einer „Schlaf"-Konsolidierung zu Themen. Der Reiter zeigt:
 
 - die **Identität** (DNA) des Projekts und Kennzahlen (Sitzungen / Fakten / überholt /
-  zurückgezogen / geplant / Themen);
+  zurückgezogen / geplant / vergessen / Themen);
 - ein **Recall/Kontext-Feld** — geben Sie eine Frage ein und sehen Sie die
   gewichtsverfallenen relevanten Fakten bzw. den zusammengesetzten Drei-Tier-Kontext;
   **Verlauf** zeigt die ganze Geschichte der passendsten Fakten (jedes Gültigkeitsintervall,
@@ -293,7 +293,9 @@ Sitzungsdatum) und *wann OpenWiki ihn erfasst hat*. Deshalb landet eine nachträ
 erfasste ältere Sitzung in der Vergangenheit, statt den aktuellen Stand zu überschreiben.
 Status: **überholt** = die Welt hat sich geändert (Intervall beendet); **zurückgezogen** =
 war nie wahr (Korrektur, `remember --correct`); **geplant** = gilt erst ab einem künftigen
-Datum.
+Datum; **vergessen** = vom nächtlichen Schlaf-Durchlauf (`openwiki sleep`) archiviert — ein
+einmaliges Sitzungsereignis wie „v0.74.0 wurde gepusht und getaggt" (nicht gelöscht, nur nicht
+mehr abgerufen).
 
 Nur lesend; ohne Sitzungen (oder im Wiki-Modus) zeigt der Reiter einen Hinweis.
 

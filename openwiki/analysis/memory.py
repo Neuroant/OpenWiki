@@ -65,6 +65,7 @@ def analyze_memory(graph, now: "int | None" = None, half_life: "float | None" = 
         "world_changes": int(superseded) - retracted,
         "corrections": retracted,
         "planned": int(overview.get("planned", 0)),
+        "forgotten": int(overview.get("forgotten", 0)),     # archived by the sleep pass
     }
 
     # -- consolidation ----------------------------------------------------

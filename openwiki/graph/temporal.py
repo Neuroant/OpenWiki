@@ -103,17 +103,22 @@ def valid_at(rec: dict, t: int, valid_to=...) -> bool:
 
 def believed_at(rec: dict, known_at: Optional[int] = None) -> bool:
     """Did OpenWiki hold this record at transaction time ``known_at``? ``None`` = now
-    (i.e. simply: not retracted)."""
-    exp = rec.get("expired_at")
+    (i.e. simply: not retracted, not forgotten). A **forgotten** record (the sleep pass —
+    ``forgotten_at``) was held until it was forgotten: archived, not disbelieved."""
+    exp, gone = rec.get("expired_at"), rec.get("forgotten_at")
     if known_at is None:
-        return exp is None
+        return exp is None and gone is None
     created = rec.get("created_at") or 0
-    return created <= known_at and (exp is None or known_at < exp)
+    return (created <= known_at and (exp is None or known_at < exp)
+            and (gone is None or known_at < gone))
 
 
 def status(rec: dict, now: int) -> str:
     """``current`` | ``past`` (interval closed — the world moved on) | ``future`` (a planned
-    fact, not yet valid) | ``retracted`` (we stopped believing it — a correction)."""
+    fact, not yet valid) | ``retracted`` (we stopped believing it — a correction) |
+    ``forgotten`` (the sleep pass archived it: not worth keeping, e.g. a one-off "was pushed" event)."""
+    if rec.get("forgotten_at") is not None:
+        return "forgotten"
     if rec.get("expired_at") is not None:
         return "retracted"
     vf, vt = rec.get("valid_from"), rec.get("valid_to")

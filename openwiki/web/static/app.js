@@ -794,6 +794,7 @@ const MEM_STATUS = {
   past: ["sup", "überholt", "Gültigkeit beendet — die Welt hat sich geändert"],
   retracted: ["ret", "zurückgezogen", "korrigiert — war nie wahr"],
   future: ["plan", "geplant", "gilt erst ab dem Startdatum"],
+  forgotten: ["fgt", "vergessen", "vom Schlaf-Durchlauf archiviert — ein einmaliges Sitzungsereignis (nicht gelöscht)"],
 };
 // P0 provenance: a claim from a pasted document / email / web page under discussion — not a decision
 const MEM_MATERIAL_BADGE = `<span class="mem-badge mat" title="aus besprochenem Material (Dokument, E-Mail, Webseite) — keine Entscheidung">Material</span>`;
@@ -818,7 +819,7 @@ function memFactRow(f) {
 
 function memTimelineHtml(groups) {
   if (!groups.length) return `<p class="muted">Keine passenden Erinnerungen.</p>`;
-  const mark = { current: "●", past: "○", future: "◌", retracted: "✗" };
+  const mark = { current: "●", past: "○", future: "◌", retracted: "✗", forgotten: "·" };
   return groups.map((g) => `
     <div class="mem-tl"><div class="mem-tl-h"><b>${escapeHtml(g.subject)}</b> ${escapeHtml(g.predicate)} …
       <span class="muted">· Treffer ${g.cos}</span></div>
@@ -828,7 +829,7 @@ function memTimelineHtml(groups) {
         <b class="mem-tl-obj">${escapeHtml(r.object)}</b>
         <span class="mem-src">erfasst ${memDate(r.created_at)}${r.expired_at != null ? ", zurückgezogen " + memDate(r.expired_at) : ""} · ${escapeHtml(r.session_id || "?")}</span>
         ${memStatusBadge(r.status)}</div>`).join("")}</div>`).join("") +
-    `<div class="muted mem-tl-legend">● aktuell · ○ überholt · ◌ geplant · ✗ zurückgezogen</div>`;
+    `<div class="muted mem-tl-legend">● aktuell · ○ überholt · ◌ geplant · ✗ zurückgezogen · · vergessen</div>`;
 }
 
 function renderMemoryView(data) {
@@ -841,6 +842,7 @@ function renderMemoryView(data) {
     <span class="mem-chip"><b>${s.superseded || 0}</b> überholt</span>
     ${s.retracted ? `<span class="mem-chip"><b>${s.retracted}</b> zurückgezogen</span>` : ""}
     ${s.planned ? `<span class="mem-chip"><b>${s.planned}</b> geplant</span>` : ""}
+    ${s.forgotten ? `<span class="mem-chip" title="vom Schlaf-Durchlauf (owiki sleep) archiviert"><b>${s.forgotten}</b> vergessen</span>` : ""}
     <span class="mem-chip"><b>${s.themes || 0}</b> Themen</span></div>`;
 
   const recallBox = data.has_embedder ? `

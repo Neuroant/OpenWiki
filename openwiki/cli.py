@@ -408,6 +408,26 @@ def _build_argparser() -> argparse.ArgumentParser:
     decay_p.add_argument("--floor", type=float, default=0.1,
                          help="Prune edges whose effective weight falls below this (default: 0.1).")
 
+    sleep_p = sub.add_parser("sleep", parents=[common],
+                             help="Nightly memory maintenance (Path B++): fold queued writes, forget one-off "
+                                  "session events + unsafe facts, re-consolidate themes, decay usage edges.")
+    sleep_p.add_argument("--dry-run", action="store_true",
+                         help="List what would be forgotten; write nothing.")
+    sleep_p.add_argument("--no-consolidate", action="store_true",
+                         help="Skip the theme re-consolidation (the only step that calls the chat model).")
+    sleep_p.add_argument("--graph", type=Path, default=None,
+                         help="Graph database dir (default: project's graph, else ./output/graph).")
+    sleep_p.add_argument("-i", "--index", type=Path, default=None,
+                         help="Index dir (the embedder, to fold queued remember ops; default: project's).")
+    sleep_p.add_argument("--min-size", type=int, default=2, help="Smallest fact cluster that becomes a theme (default: 2).")
+    sleep_p.add_argument("--max-facts", type=int, default=12, help="Facts shown to the summarizer per theme (default: 12).")
+    sleep_p.add_argument("--similar-k", type=int, default=6, help="Top-k similarity edges per fact (default: 6).")
+    sleep_p.add_argument("--resummarize", action="store_true", help="Re-summarize every theme from scratch.")
+    sleep_p.add_argument("--half-life", type=float, default=30.0, help="Usage-edge half-life in days (default: 30).")
+    sleep_p.add_argument("--floor", type=float, default=0.1, help="Prune usage edges below this weight (default: 0.1).")
+    sleep_p.add_argument("--model", default=None, help="Chat model (default: manifest models.chat).")
+    sleep_p.add_argument("--host", default=None, help="Ollama host URL.")
+
     cons_p = sub.add_parser("consolidate", parents=[common],
                             help="Path B 'sleep' pass: cluster remembered facts into themes + summaries, then fold usage + decay.")
     cons_p.add_argument("--graph", type=Path, default=None,
@@ -1429,6 +1449,11 @@ def _apply_project(args: argparse.Namespace, project: Optional[Project],
         path("graph", p.graph_path if p else None, Path("output") / "graph")
         val("model", "models", "chat", DEFAULT_CHAT)
         val("host", "models", "host", DEFAULT_HOST)
+    elif cmd == "sleep":
+        path("graph", p.graph_path if p else None, Path("output") / "graph")
+        path("index", p.index_dir if p else None, Path("output") / "index")
+        val("model", "models", "chat", DEFAULT_CHAT)
+        val("host", "models", "host", DEFAULT_HOST)
     elif cmd == "remember":
         path("index", p.index_dir if p else None, Path("output") / "index")
         path("graph", p.graph_path if p else None, Path("output") / "graph")
@@ -2233,12 +2258,137 @@ def _cmd_communities(args: argparse.Namespace) -> int:
     return 0
 
 
+def _consolidate_graph(graph, args) -> tuple:
+    """B5 core, shared by ``consolidate`` and ``sleep``: cluster the current facts
+    (warm-started from the prior partition), LLM-summarize each new/changed theme — an
+    unchanged member set reuses its summary — and write the themes. Uses ``args.similar_k /
+    min_size / max_facts / resummarize / model / host``. → ``(result, summarized, reused)``."""
+    from collections import defaultdict
+
+    reused = summarized = 0
+    # B5 stability + incrementality: warm-start clustering from the prior partition, and
+    # reuse an existing theme's summary when its member set is unchanged (skip the LLM call).
+    prior_assign = {} if args.resummarize else graph.concept_assignment()
+    prior_by_set = {}
+    if not args.resummarize:
+        members_prev = graph.concept_members()
+        prior_by_set = {frozenset(members_prev.get(c["id"], set())): (c["label"], c["summary"])
+                        for c in graph.memory_concepts()}
+    ag = graph.assertion_graph(similar_k=args.similar_k)
+    facts = ag["facts"]
+    assignment0 = detect_communities(ag["edges"], list(facts), seed=prior_assign or None)
+    members: dict = defaultdict(list)
+    for aid, cid in assignment0.items():
+        members[cid].append(aid)
+    # keep only clusters that form a real theme (>= min-size), largest first, renumbered
+    kept = [cid for cid in sorted(members, key=lambda c: (-len(members[c]), min(members[c])))
+            if len(members[cid]) >= args.min_size]
+    degree: dict = defaultdict(float)
+    for a, b, w in ag["edges"]:
+        degree[a] += w
+        degree[b] += w
+
+    chat = OllamaChat(model=args.model, host=args.host, temperature=0.2)
+    if kept:
+        print(f"Consolidating {len(facts)} fact(s) into {len(kept)} theme(s) with {chat.name} "
+              f"(unchanged themes reuse their summary) …", file=sys.stderr)
+    else:
+        print(f"No themes yet — need a cluster of ≥{args.min_size} related facts "
+              f"({len(facts)} fact(s) so far).", file=sys.stderr)
+    assignment, summaries, labels = {}, {}, {}
+    for new_id, cid in enumerate(kept):
+        member_set = frozenset(members[cid])
+        cached = prior_by_set.get(member_set)
+        if cached is not None:                     # membership unchanged → reuse (no LLM call)
+            labels[new_id], summaries[new_id] = cached
+            reused += 1
+            tag = "reuse"
+        else:
+            ranked = sorted(members[cid], key=lambda a: (-degree.get(a, 0.0), a))
+            fact_texts = [facts[a] for a in ranked[: args.max_facts]]
+            labels[new_id], summaries[new_id] = summarize_facts(
+                chat, fact_texts, fallback_label=f"Thema {new_id}")
+            summarized += 1
+            tag = "new"
+        for aid in members[cid]:
+            assignment[aid] = new_id
+        print(f"  [{new_id}] {len(members[cid]):>3} facts — {labels[new_id]}  ({tag})", file=sys.stderr)
+    return graph.upsert_memory_concepts(assignment, summaries, labels), summarized, reused
+
+
+def _cmd_sleep(args: argparse.Namespace) -> int:
+    """Path B++ nightly memory maintenance ("sleep"), schedulable (Task Scheduler / cron):
+    fold what read-only processes queued (usage + journal), **forget** what the memory policy
+    says not to keep (one-off session events; P0-unsafe facts captured before the policy),
+    re-consolidate the themes over what's left, then decay the usage edges. Forgetting archives
+    (``forgotten_at``) — nothing is deleted. ``--dry-run`` lists what would be forgotten."""
+    project = getattr(args, "project_obj", None)
+    if project is not None and not project.memory_enabled:
+        print("(memory is disabled — Wiki mode; set [memory] enabled = true to sleep)")
+        return 0
+    if args.dry_run:
+        graph = _open_graph(args.graph, writable=False)
+        if graph is None:
+            print(f"error: no graph at {args.graph}.", file=sys.stderr)
+            return 2
+        try:
+            cands = graph.forget_candidates()
+        finally:
+            graph.close()
+        print(f"Would forget {len(cands)} fact(s) (dry run — nothing written):")
+        for c in sorted(cands, key=lambda c: (c["reason"], c["subject"].lower())):
+            print(f"  [{c['reason']}] {c['subject']} | {c['predicate']} | {c['object']}  ({c['session_id']})")
+        return 0
+    graph = _open_graph(args.graph, writable=True, retries=6)
+    if graph is None:
+        print(f"error: no graph at {args.graph} (run `openwiki graph-build` first).", file=sys.stderr)
+        return 2
+    if not getattr(graph, "writable", False):
+        print("error: graph is locked by another process (stop `serve --sync`/`chat --sync` or retry).",
+              file=sys.stderr)
+        graph.close()
+        return 2
+    ops, forgotten, consolidated, note = {"records": 0}, {}, None, ""
+    try:
+        if not graph.has_memory():
+            print("(no remembered facts yet — capture sessions with `openwiki remember` first)")
+            return 0
+        folded = graph.fold_usage()
+        embedder = _decay_embedder(args)
+        if embedder is not None and graph.pending_ops():
+            ops = graph.fold_journal(embedder, coexist=_coexist_check(args.model, args.host),
+                                     resolve=_attribute_resolver(args.model, args.host))
+        cands = graph.forget_candidates()
+        for reason in ("unsafe", "ephemeral"):
+            ids = [c["id"] for c in cands if c["reason"] == reason]
+            forgotten[reason] = graph.forget(ids, reason) if ids else 0
+        if not args.no_consolidate:
+            try:                        # an unreachable model must not cost the other steps
+                consolidated = _consolidate_graph(graph, args)
+            except Exception as exc:
+                note = f"  consolidation skipped: {exc}"
+        decayed = graph.decay(half_life_days=args.half_life, floor=args.floor)
+    finally:
+        graph.close()
+    print(f"Slept → {args.graph}")
+    if folded["records"] or ops.get("records"):
+        print(f"  folded {folded['records']} usage record(s), {ops.get('records', 0)} queued op(s)")
+    print(f"  forgot {sum(forgotten.values())} fact(s): {forgotten.get('ephemeral', 0)} one-off event(s), "
+          f"{forgotten.get('unsafe', 0)} unsafe (archived, not deleted)")
+    if consolidated is not None:
+        result, summarized, reused = consolidated
+        print(f"  consolidated {result['assertions']} fact(s) into {result['concepts']} theme(s) "
+              f"({summarized} summarized, {reused} reused)")
+    elif note:
+        print(note)
+    print(f"  decayed {decayed['edges']} usage edge(s) ({decayed['pruned']} pruned)")
+    return 0
+
+
 def _cmd_consolidate(args: argparse.Namespace) -> int:
     """Path B 'sleep' pass (B5): cluster the current remembered facts into topical themes,
     LLM-summarize each (MemoryConcept + CONSOLIDATES), then fold usage + decay — compress
     the accumulated memory into structure and forget the noise. Re-runnable + bounded."""
-    from collections import defaultdict
-
     project = getattr(args, "project_obj", None)
     if project is not None and not project.memory_enabled:
         print("(memory is disabled — Wiki mode; set [memory] enabled = true to consolidate)")
@@ -2251,60 +2401,11 @@ def _cmd_consolidate(args: argparse.Namespace) -> int:
         print("error: graph is locked by another process (stop `serve`/`chat` first).", file=sys.stderr)
         graph.close()
         return 2
-    reused = summarized = 0
     try:
         if not graph.has_memory():
             print("(no remembered facts yet — capture sessions with `openwiki remember` first)")
             return 0
-        # B5 stability + incrementality: warm-start clustering from the prior partition, and
-        # reuse an existing theme's summary when its member set is unchanged (skip the LLM call).
-        prior_assign = {} if args.resummarize else graph.concept_assignment()
-        prior_by_set = {}
-        if not args.resummarize:
-            members_prev = graph.concept_members()
-            prior_by_set = {frozenset(members_prev.get(c["id"], set())): (c["label"], c["summary"])
-                            for c in graph.memory_concepts()}
-        ag = graph.assertion_graph(similar_k=args.similar_k)
-        facts = ag["facts"]
-        assignment0 = detect_communities(ag["edges"], list(facts), seed=prior_assign or None)
-        members: dict = defaultdict(list)
-        for aid, cid in assignment0.items():
-            members[cid].append(aid)
-        # keep only clusters that form a real theme (>= min-size), largest first, renumbered
-        kept = [cid for cid in sorted(members, key=lambda c: (-len(members[c]), min(members[c])))
-                if len(members[cid]) >= args.min_size]
-        degree: dict = defaultdict(float)
-        for a, b, w in ag["edges"]:
-            degree[a] += w
-            degree[b] += w
-
-        chat = OllamaChat(model=args.model, host=args.host, temperature=0.2)
-        if kept:
-            print(f"Consolidating {len(facts)} fact(s) into {len(kept)} theme(s) with {chat.name} "
-                  f"(unchanged themes reuse their summary) …", file=sys.stderr)
-        else:
-            print(f"No themes yet — need a cluster of ≥{args.min_size} related facts "
-                  f"({len(facts)} fact(s) so far).", file=sys.stderr)
-        assignment, summaries, labels = {}, {}, {}
-        for new_id, cid in enumerate(kept):
-            member_set = frozenset(members[cid])
-            cached = prior_by_set.get(member_set)
-            if cached is not None:                     # membership unchanged → reuse (no LLM call)
-                labels[new_id], summaries[new_id] = cached
-                reused += 1
-                tag = "reuse"
-            else:
-                ranked = sorted(members[cid], key=lambda a: (-degree.get(a, 0.0), a))
-                fact_texts = [facts[a] for a in ranked[: args.max_facts]]
-                labels[new_id], summaries[new_id] = summarize_facts(
-                    chat, fact_texts, fallback_label=f"Thema {new_id}")
-                summarized += 1
-                tag = "new"
-            for aid in members[cid]:
-                assignment[aid] = new_id
-            print(f"  [{new_id}] {len(members[cid]):>3} facts — {labels[new_id]}  ({tag})", file=sys.stderr)
-
-        result = graph.upsert_memory_concepts(assignment, summaries, labels)
+        result, summarized, reused = _consolidate_graph(graph, args)
         folded = decayed = None
         if not args.no_decay:
             folded = graph.fold_usage()
@@ -2586,7 +2687,7 @@ def _cmd_recall(args: argparse.Namespace) -> int:
     return 0
 
 
-_TIMELINE_MARK = {"current": "●", "past": "○", "future": "◌", "retracted": "✗"}
+_TIMELINE_MARK = {"current": "●", "past": "○", "future": "◌", "retracted": "✗", "forgotten": "·"}
 
 
 def _format_timeline(groups: list) -> str:
@@ -3182,6 +3283,7 @@ _DISPATCH = {
     "communities": _cmd_communities,
     "decay": _cmd_decay,
     "consolidate": _cmd_consolidate,
+    "sleep": _cmd_sleep,
     "remember": _cmd_remember,
     "recall": _cmd_recall,
     "context": _cmd_context,

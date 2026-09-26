@@ -851,7 +851,7 @@ S-P-O capture (a ~500-token budget vs Memori's reported ~721); Zep/Graphiti temp
    state / goal / value constraints), baseline first; then compare (a) LLM-generated constraint probes at inject
    time ("which remembered preferences/constraints could matter for this request?"), (b) B8 graph priming,
    (c) theme-level recall. Adopt only what wins.
-3. **`openwiki sleep` + intentional forgetting (P1).** One nightly, schedulable pass: `consolidate` → B9
+3. **`openwiki sleep` + intentional forgetting (P1) — built in v0.88, §13.3 (policy-based, not decay-based).** One nightly, schedulable pass: `consolidate` → B9
    re-resolution of recent facts → scrub → **forget** (prune facts that are low-importance, never recalled and
    old; decay today only re-ranks, and the dogfooding memory grows ~50 facts/day) → `decay`. The report's
    "biological rhythm" at the cost of a Task-Scheduler / cron entry.
@@ -980,6 +980,63 @@ facts about "user".
 remaining misses are application errors with the constraint in view (it booked 9:00 "before your 10 AM deep-work
 block"; it gave the *user* the dog's separation anxiety and kept a full day out); personal-fact detection relies on
 capture naming the user "user".
+
+### 13.3 `openwiki sleep` + forgetting (v0.88), as built and measured
+
+**Measurement first — what is worth forgetting?** On a copy of the dogfooding memory (1,218 current + 256
+closed facts, 27 sessions):
+- **Base rate:** a hand-labeled random sample of 150 current facts holds only **~3 % clear junk** (5: "commit | was
+  made | c211fcf", "server | is serving | v0.78.0", an off-topic Russian fact, …) and ~15 % borderline.
+- **What the hooks inject:** 40 real prompts from this repo's Claude Code history, `recall(k=8)` as the inject hook
+  does, every injected fact hand-labeled (172 unique): **31 % of the 320 injected slots are clear junk**, and 25 of 40
+  prompts get at least one. Junk clusters on the frequent actions — "push and tag v0.58.0" was answered with seven
+  "vX | was pushed and tagged | yes". This, not the base rate, is the metric.
+- **No usable decay signal.** Only 2 of 1,218 facts were ever re-affirmed (capture paraphrases), the backfill wrote
+  almost everything on one day, and "recalled often" is no value signal — the junk *is* recalled often. So forgetting
+  is **policy-based**, not decay-based ("low importance, never recalled, old" had no data behind it).
+
+**Candidates, scored against the labels** (30 junk / 40 borderline / 232 keep facts across both sets):
+
+| Forget candidate | Junk dropped | Keep-facts dropped |
+|---|---|---|
+| LLM review (batched, rubric prompt), run 1 | 19/30 | **11** |
+| same, batch order reversed | 18/30 | **81** ("B7 supports as-of queries", "CI runs on ubuntu-latest", …) |
+| **Rules — one-off events, commit hashes, tautologies (shipped)** | **19/30** | **0** |
+
+The LLM review is unstable (order-dependent) and harmful, like the P0 audit (§13.1). The rules re-apply the capture
+prompt's own skip list ("was pushed / tagged / committed" events) to facts captured before it was tightened. They
+match **events only, never states**: a first draft also matched "openwiki | is installed once | in a Python 3.13
+venv", "Phase 2 | is committed as | 0.30.0" and "Web UI | has CI running …", and a normalized tautology check matched
+"OpenWiki help | is available as command | /openwiki-help" — all removed; every one of the final **27 matches** in the
+full memory was read and is junk.
+
+**Result** (the same 40 prompts after forgetting those 27 facts): injected junk **31 % → 5 %** of slots, prompts with
+junk **25 → 10 of 40**, useful facts injected **194 → 271**; the "push and tag vX" prompts go from 7 junk facts of 8
+to 0. The 14 facts that moved up into the freed slots: 11 keep, 3 borderline, 0 junk. No eval scenario contains a
+trigger word, so the temporal / poisoning / cue sets are unaffected by construction.
+
+**Shipped design.** `memory.is_ephemeral(fact)` (pure rules; German forms mirror the English ones) +
+`GraphStore.forget_candidates()` (the P0 `is_unsafe_instruction` re-applied too — facts captured before P0; reason
+`unsafe` / `ephemeral`) + `GraphStore.forget(ids, reason)`. Forgetting **archives**: `Assertion.forgotten_at` +
+`forgotten` (the reason); `temporal.status` → `"forgotten"`, so the fact leaves recall, context, consolidation and
+every "current" count; `believed_at` still holds it for `known_at` views of earlier times (archived, not
+disbelieved); `remember()` skips forgotten records, so a later session that says it again adds it afresh; B0
+snapshots carry the columns; old graphs gain them by `ALTER` on the first sleep. **`openwiki sleep`** runs, in one
+writable pass: fold the queued usage + journal (with the coexistence check and B9 resolver) → forget → re-consolidate
+the themes (`_consolidate_graph`, shared with `consolidate`; an unreachable model only skips this step) → decay the
+usage edges. `--dry-run` lists what would be forgotten. Schedulable — Windows Task Scheduler:
+`schtasks /Create /SC DAILY /ST 03:30 /TN "OpenWiki sleep" /TR "<venv>\Scripts\python.exe -m openwiki sleep --project <project dir>"`;
+cron: `30 3 * * * cd <project dir> && owiki sleep >> .openwiki/sleep.log 2>&1`.
+
+**Not done, and why.** Decay-based forgetting (no signal, above); an LLM importance review (measured harmful); physical
+deletion (archiving costs nothing at this size, and recall stays ~0.2 s at 1,218 facts); B9 re-resolution of old
+facts. The remaining junk is mostly **stale state** the rules can't safely catch ("U7 streaming chat | is the
+remaining large item | yes", "openwiki | has web UI | six tabs …", "test count | increased to | 284") — that is
+supersession by a later fact, i.e. a job for re-resolution, not forgetting.
+
+**Limits.** Labels by one annotator; the rules were written after seeing the injected set (precision was therefore
+re-checked on all 1,218 facts and on the independent random sample: 0 of 108 keep-facts); rules are English + German
+only; 19 of 30 labeled junk facts caught.
 
 ---
 

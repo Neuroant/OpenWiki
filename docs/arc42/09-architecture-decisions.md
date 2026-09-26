@@ -601,6 +601,26 @@
   on capture naming the user "user"; − 8 hand-written scenarios, one run each. Extends the B6 context assembly of
   the Second-Brain tier ([ADR-14](#adr-14)); the bounded-recency ranking fix found on the way refines [ADR-27](#adr-27).
 
+### ADR-32
+**Forgetting is policy-based archiving in a nightly `sleep` pass — not decay-based deletion, not an LLM review.** *(v0.88, Path B++ / P1)*
+- **Context:** the hooks inject recalled facts into every prompt. On the dogfooding memory, 31 % of the facts injected
+  for 40 real prompts were junk (one-off "vX was pushed and tagged" events), although only ~3 % of all facts are —
+  junk clusters on frequent actions. The planned "forget low-importance, never-recalled, old facts" had no signal
+  behind it: 2 of 1,218 facts were ever re-affirmed, and junk is recalled *often*.
+- **Decision:** `openwiki sleep` (fold queued writes → forget → re-consolidate → decay; schedulable, `--dry-run`)
+  forgets by **policy**: pure rules for one-off session events, commit hashes and tautologies (`memory.is_ephemeral`),
+  plus the P0 security policy re-applied to facts captured before it. Forgetting **archives** — `forgotten_at` + a
+  reason; the status `forgotten` takes a fact out of recall, context, consolidation and counts; `known_at` views of
+  earlier times still see it; a fact said again later is added afresh; rebuilds carry it.
+- **Alternatives:** decay-/usage-based forgetting — no signal (above); an LLM importance review — rejected after
+  measuring (dropped 11 and 81 keep-facts in two runs of the same prompt, differing only in batch order); physical
+  deletion — unnecessary at this size and irreversible; forgetting *stale state* ("the remaining item is U7") — left to
+  supersession / re-resolution, since no rule tells a stale state from a current one.
+- **Consequences:** + injected junk 31 % → **5 %** of slots (prompts with junk 25 → 10 of 40) with **0 of 232**
+  labeled keep-facts dropped and all 27 matches in the full memory verified; + no LLM call for forgetting; + reversible.
+  − rules catch 19 of 30 labeled junk facts (stale states remain); − English + German patterns only; − one annotator.
+  Complements [ADR-30](#adr-30) (keep poison out at capture) with a pass that cleans what capture let through.
+
 ---
 *Chapter complete. The Path-B agent-memory direction landed via ADR-14/15/16/17/18/19; the graph then
 deepened (ADR-22 typed relations + relation-aware GraphRAG, ADR-23 entity resolution), gained
@@ -609,6 +629,7 @@ deepened (ADR-22 typed relations + relation-aware GraphRAG, ADR-23 entity resolu
 **capability-complete web UI** (ADR-26, Direction J — U1–U11, incl. SSE streaming), graph connectivity as
 **reader overlays** (ADR-28), and Path B+'s **bi-temporal memory** (ADR-27, B7 — refines ADR-15/18) with
 **fact identity** (ADR-29, B9 — measured on real development history), **memory hygiene** against
-poisoning (ADR-30, P0) and **cue-trigger recall** for implicit constraints (ADR-31, P1). §11
+poisoning (ADR-30, P0), **cue-trigger recall** for implicit constraints (ADR-31, P1) and policy-based
+**forgetting** in a nightly sleep pass (ADR-32). §11
 debts D1/D2/D6 are resolved. Deep designs in `docs/path-b-memory.md` and `docs/RAG-vs-GraphRAG.md`. New significant
 decisions should be appended here with the next id.*

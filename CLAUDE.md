@@ -255,6 +255,23 @@ warm-start `seed`) + `summarize_facts`; `MemoryConcept`/`CONSOLIDATES` are a *de
 (recomputed each pass, not snapshotted across rebuilds — like `Community`). Reports
 `N theme(s) (M summarized, K reused)`.
 
+**Sleep — nightly memory maintenance + forgetting** (Path B++): one schedulable writable pass — fold what
+read-only processes queued (usage + journal) → **forget** what the memory policy says not to keep → re-consolidate
+the themes over what's left → decay the usage edges. Forgetting is **policy-based archiving**, not decay: one-off
+session events ("vX | was pushed and tagged | yes", commit hashes, "server | is serving | v0.78.0", tautologies —
+`memory.is_ephemeral`, pure rules) plus the P0 policy re-applied to facts captured before it. A forgotten fact
+leaves recall, context, consolidation and counts but stays in the graph (`forgotten_at` + reason):
+```
+.venv\Scripts\python -m openwiki sleep --dry-run        # list what would be forgotten
+.venv\Scripts\python -m openwiki sleep                  # schedule it nightly (Task Scheduler / cron)
+```
+Options: `--dry-run`, `--no-consolidate` (skip the only step that calls the chat model), `--min-size` / `--max-facts` /
+`--similar-k` / `--resummarize` (as `consolidate`), `--half-life` / `--floor` (as `decay`), `-i/--index` (embedder for
+queued ops), `--graph`, `--model`, `--host`. Gated by `[memory] enabled`. **Measured** on the dogfooding memory: 31 %
+of the facts injected for 40 real prompts were such junk (vs ~3 % of all facts — it clusters on frequent actions) →
+**5 %** after forgetting 27 facts, 0 of 232 hand-labeled keep-facts dropped; an LLM review dropped 11–81 keep-facts
+depending on batch order (`docs/path-b-memory.md` §13.3, arc42 ADR-32).
+
 **Backfill memory from Claude Code history** — turn existing Claude Code transcripts (JSONL) into the
 memory tier, **one dated session per UTC day** (`claude-YYYY-MM-DD`), each day cut into bounded capture
 windows, so B7's valid-time merge orders the facts by when they happened (a later day's change closes an
@@ -681,6 +698,15 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   (`examples/eval_cue_trigger.jsonl`, 8 scenarios + topic-adjacent distractors, hand-audited): cue in context
   2/8 → **7/8**, constraint respected 1/8 → **6/8** (raw log 4/8); temporal 13/13 and poisoning 8/8 / 0 leaks
   unchanged (`docs/path-b-memory.md` §13.2, arc42 ADR-31).
+  **Sleep + forgetting (v0.88):** `memory.is_ephemeral(fact)` (pure rules — events only, never states: "openwiki is
+  installed once in a venv" / "Phase 2 is committed as 0.30.0" are kept; plain-lowercase tautology check, since
+  `_normalize` folds "/openwiki-help" into "openwiki help") + `GraphStore.forget_candidates()` (reason `ephemeral` /
+  `unsafe`) + `GraphStore.forget(ids, reason)` → `Assertion.forgotten_at` + `forgotten` (column generation `_A_SLEEP`,
+  `ALTER`ed in by `forget`/`_ensure_memory_schema`, carried by B0 snapshots). `temporal.status` returns `"forgotten"`
+  first, so every "current" reader (recall, `context_for`, `current_assertions` → consolidation, `memory_overview`)
+  excludes it with no per-reader code; `believed_at` holds it only for `known_at` before `forgotten_at`; `remember()`
+  skips forgotten records (a re-said fact is added afresh). The `sleep` CLI (`cli._cmd_sleep`) shares the B5 core with
+  `consolidate` (`cli._consolidate_graph`); the Gedächtnis tab shows a "vergessen" chip + badge.
   **B5 consolidation ("sleep"):** the `consolidate` command clusters the *current* assertions by
   embedding similarity (`GraphStore.assertion_graph` → `community.detect_communities`), LLM-summarizes
   each cluster into a theme (`community.summarize_facts`), and writes `MemoryConcept` + `CONSOLIDATES`
@@ -1004,7 +1030,7 @@ http — count, p50/p95, total time, token in/out) + a live recent-events table,
   (`list`/`use`/`add`/`remove`/`add-source`), `opencode`, `claude-code`, `ontology`, `ingest`,
   `build-wiki`, `index`, `search`, `eval`, `ask` (`--global` = global search),
   `chat`, `graph-build`, `references`, `communities`, `decay`, `remember`, `backfill`, `recall`,
-  `consolidate`, `context`,
+  `consolidate`, `sleep` (nightly maintenance + forgetting), `context`,
   `analyze` (world-model analysis — `coupling` | `gaps` | `memory`, offline), `hook` (host-lifecycle
   memory hook — reads the event JSON on stdin), `serve`, and `mcp` subcommands. A shared
   `--project` (parent parser) + `_apply_project(args, project)` fill unset

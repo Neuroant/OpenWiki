@@ -860,7 +860,8 @@ S-P-O capture (a ~500-token budget vs Memori's reported ~721); Zep/Graphiti temp
    open-domain / adversarial categories).
 5. **Agent-initiated writes (P2, optional).** CoALA's learning action by the agent (Letta's `memory_replace`):
    an opt-in MCP `wiki_remember(fact)` that queues to the journal — decisions stored when made, not only at
-   session end.
+   session end. After §13.4–13.5 also the most promising fix for **stale state**: the agent that makes a change
+   records the new state, which the local model could not infer afterwards.
 
 **Out of scope.** Continuous thinking, inner-monologue managers, heartbeat event loops, System-1/2 dual rate
 (agent runtime — Claude Code is the agent; always-on reasoning competes for the single local GPU). SleepGate
@@ -1040,6 +1041,58 @@ supersession by a later fact, i.e. a job for re-resolution, not forgetting.
 **Limits.** Labels by one annotator; the rules were written after seeing the injected set (precision was therefore
 re-checked on all 1,218 facts and on the independent random sample: 0 of 108 keep-facts); rules are English + German
 only; 19 of 30 labeled junk facts caught.
+
+### 13.4 Stale facts — re-resolution and a wiki check, measured and not adopted
+
+After forgetting, the remaining noise in injected contexts is **stale state**: facts that were true when said and
+are still "current" because nothing replaced them — "openwiki | has web UI | six tabs: …" (ten today), "U7
+streaming chat | is the remaining large item" (shipped), "project | has no memory tier | in real projects"
+(openwiki-dev has one), "openwiki-dev | has backfill running". Hand labels (still true on 2026-09-26?) over the
+fact sets of §13.3: **14 stale** (~3 % of a random sample, ~6 % of the injected facts) + 7 unsure.
+
+**Is there a successor to re-resolve against?** For each stale fact, the most similar *newer* facts in memory: for
+**12 of 14 there is none** — no "ten tabs", no "U7 shipped", no "openwiki-dev has memory"; transient states have no
+successor by nature. Only "test count | increased to | 284" (vs "test suite | has | 399 passing tests", cos 0.58)
+and "remaining refinements | include | B1 …" (vs "B1 … | path B status | complete", cos 0.78) have one. The
+sessions that changed a state did not restate the new state as a fact.
+
+**Two candidates**, on the 14 stale + 7 unsure + 70 random true facts:
+
+| Candidate | Stale caught | True facts flagged outdated |
+|---|---|---|
+| Re-resolution in memory — each fact vs its newer neighbors (cos ≥ 0.70) through the B7 coexistence check | **0/14** | 5/70 |
+| Wiki-grounded — the fact vs the top-4 excerpts of the project's current wiki (repo + docs): outdated / current / unknown | **1/14** | 5/70 |
+
+The coexistence check closed compatible facts ("D6 | was addressed by | Path B" by "Path B | is complete | B0–B6");
+the wiki check answered *current* for "U7 … is the remaining large item" and "six tabs", and *outdated* for true
+facts ("serve command default mode | read-only", "recall ranking | applies bounded tie-breaker"). Neither ships —
+the third time the local 30B is unreliable as a judge *of* memory (after the P0 audit, §13.1, and the forgetting
+review, §13.3). The evidence for a change lives in the transcript of the session that made it, which is where the
+next attempt looks (§13.5).
+
+### 13.5 Update-aware capture — measured and not adopted
+
+**Idea (Mem0-style write-time update).** When a session is captured, show the model the older facts related to it
+and ask which ones this conversation shows are **no longer true** (a plan carried out, a "remaining" item done, a
+count changed, a running process finished, a limitation lifted) — the one place where the evidence for a change is
+in view. **Setup:** all 18 backfill windows of the five days on which the labeled stale states changed (09-08
+session sources, 09-13 System + Gedächtnis tabs, 09-14 build observability, 09-20 U7, 09-24 openwiki-dev memory);
+candidates = the older current facts nearest to each ~1,500-char transcript chunk (top 3, cos ≥ 0.5; ≤ 40 per
+window); one call with the window (≤ 20k chars, inside the 16k-token context) + the numbered candidates.
+
+**Result.** A first run let same-day facts (dated to midnight) count as "older", and the model flagged the window's
+*own* new facts ("System tab | was added in | v0.58") as no longer true. Restricted to facts from earlier days:
+**204 of 249 candidates flagged (82 %)**; in **8 of 18 windows every candidate** ("1, 2, 3, …, 33"); of the flagged
+facts with a hand label, **36 of 51 are true**. Of the 14 stale facts, 5 were flagged (a by-product of flagging
+nearly everything), 1 retrieved but not flagged, **8 never retrieved** on their change day (a transcript chunk
+rarely resembles the old phrasing: "U7 streaming chat | is the remaining large item" is not near the day U7 shipped).
+
+**Conclusion for the local 30B.** Four attempts to have it judge memory — the P0 audit, the forgetting review, the
+wiki check and update-aware capture — all failed the same way: it cannot tell "no longer true" from "related".
+Staleness stays visible rather than fixed: every injected fact carries its date ("since 2026-08-17"), and the host
+agent reads the context. The promising route is the **writer that knows what it just changed** — the host agent
+(a strong model) recording the new state explicitly when it makes the change (the planned opt-in MCP
+`wiki_remember`, P2), which B7 then orders by valid time like any other fact.
 
 ---
 

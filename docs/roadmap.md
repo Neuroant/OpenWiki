@@ -890,11 +890,19 @@ The **genuine gaps**, measure-first as always:
   Remaining junk is stale *state* → re-resolution, not forgetting. Details: `path-b-memory.md` §13.3; ADR-32.
   **v0.89:** `--budget N` on `consolidate` / `sleep` — at most N new theme summaries per run; the rest are stored
   *pending* and finished by the next run (the dogfooding memory's first consolidation: 120 themes, ~6 min).
+- **Stale facts — measured, not adopted.** Stale *state* ("six tabs", "U7 is the remaining large item") is ~3–6 % of
+  the facts; for 12 of 14 labeled cases no newer fact in memory states the new state (the changing session never
+  restated it). Three LLM approaches failed with the local 30B: **re-resolution** in memory (0/14 caught, 5/70 true
+  facts flagged), a **wiki-grounded check** against the current docs (1/14, 5/70), and **update-aware capture** —
+  the change-day transcript + related older facts (82 % of candidates flagged, every candidate in 8 of 18 windows,
+  36 of 51 labeled flags wrong). Staleness stays visible via each fact's date; the promising route is the writer
+  that knows what it changed — `wiki_remember` below. Details: `path-b-memory.md` §13.4–13.5.
 - **LoCoMo benchmark (P2).** The public long-conversation QA set (snap-research) converted to the cross-session
   format → the first externally comparable number instead of hand-written scenarios only.
 - **Agent-initiated writes (P2, optional).** CoALA's learning action by the agent itself (Letta's
   `memory_replace`): an opt-in MCP `wiki_remember` tool (via the journal) so a decision is stored when made, not
-  only at session end.
+  only at session end — and, after §13.4–13.5, the most promising fix for **stale state**: the host agent records
+  the new state ("U7 is shipped", "the web UI has ten tabs") when it makes the change, and B7 orders it by valid time.
 
 **Out of scope** (agent runtime or model internals, against the local-substrate role): continuous thinking /
 inner-monologue managers / heartbeat loops / dual-speed System-1–2 (Claude Code is the agent; always-on

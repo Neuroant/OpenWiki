@@ -177,8 +177,10 @@ sequenceDiagram
   U->>M: capture_session(chat, transcript, session_date)
   M->>C: chat(CAPTURE_SYSTEM, session date + transcript)
   C-->>M: JSON facts as MemoryFacts (stated valid_from, cardinality)
-  U->>GS: remember(session_id, facts, embedder, session_date, coexist)
+  U->>GS: remember(session_id, facts, embedder, session_date, coexist, resolve)
+  Note over GS: P0 policy drops security-sensitive facts (ADR-30)
   GS->>E: embed_documents(fact texts)
+  GS->>C: choose_attribute(fact, candidate groups) for a new wording with near candidates (B9)
   Note over GS: plan_merge by valid time, reaffirm or extend or add, a backfill lands in history (B7)
   GS->>C: facts_coexist(older, newer) only for a real conflict
   C-->>GS: yes keeps both as many, no lets the merge close or retract the rival
@@ -186,7 +188,7 @@ sequenceDiagram
   Note over U,GS: recall (read-only graph, a later session)
   U->>GS: recall(query, embedder, k, as_of, known_at)
   GS->>E: embed_query(query)
-  GS-->>U: facts valid now (or at as_of, as believed at known_at) by decay-weighted cosine
+  GS-->>U: facts valid now (or at as_of, as believed at known_at): cosine x confidence x bounded recency
 ```
 
 A doc rebuild preserves these assertions — validity columns + `SUPERSEDES` provenance edges included
@@ -194,7 +196,80 @@ A doc rebuild preserves these assertions — validity columns + `SUPERSEDES` pro
 writable `remember` (no rebuild). The cross-session eval (`eval --cross-session`) measures whether this assembled
 memory beats a cold start and a raw-log paste (`docs/path-b-memory.md` §7).
 
-## 6.8 Cross-cutting runtime aspects
+## 6.8 Scenario: Memory flows with a coding agent (host hooks + backfill)
+
+In Second Brain mode, `claude-code --hooks [--into DIR]` wires memory into Claude Code's lifecycle (bound to a
+memory project, pinned to the installing interpreter). Every hook runs `owiki hook …`, reads the event JSON on
+stdin and **always exits 0** — a failing hook must never block a prompt.
+
+```mermaid
+sequenceDiagram
+  participant CC as Claude Code
+  participant H as owiki hook
+  participant W as detached worker
+  participant C as OllamaChat
+  participant GS as GraphStore
+
+  CC->>H: UserPromptSubmit (prompt)
+  H->>GS: context_for(prompt) (read-only, probes if [memory] probes)
+  GS-->>H: identity + recalled facts + themes
+  H-->>CC: context on stdout (injected into the prompt)
+  CC->>H: SessionEnd / PreCompact (transcript path)
+  H->>W: park the event under .openwiki/, spawn, return at once
+  W->>C: capture_session(transcript) (about a minute on a local 30B)
+  W->>GS: open writable only now (retry with backoff), remember + fold the journal
+  Note over W,GS: graph locked by a reader (e.g. the MCP server) → the facts are queued to the journal
+```
+
+`owiki backfill <transcripts dir>` imports existing history the same way, offline: one dated session per UTC day,
+cut into bounded windows valid from their first turn; resumable (days already remembered are skipped) and robust
+(a failed window is logged and skipped).
+
+## 6.9 Scenario: Nightly maintenance (`openwiki sleep`)
+
+One writable, schedulable pass (Task Scheduler / cron); `--dry-run` lists what would be forgotten.
+
+```mermaid
+sequenceDiagram
+  participant S as owiki sleep
+  participant GS as GraphStore (writable)
+  participant C as OllamaChat
+
+  S->>GS: fold_usage() + fold_journal(embedder, coexist, resolve)
+  S->>GS: forget_candidates() → forget(ids, "ephemeral" / "unsafe") (archive, ADR-32)
+  S->>GS: assertion_graph() → clusters (warm-started from the prior themes)
+  loop each new or changed cluster, at most --budget
+    S->>C: summarize_facts(members)
+  end
+  S->>GS: upsert_memory_concepts (unchanged themes reused, over budget → pending)
+  S->>GS: decay(half_life, floor) (usage edges)
+```
+
+Forgetting needs no model call (pure policy); consolidation is the only step that calls the chat model — an
+unreachable model skips it without costing the other steps.
+
+## 6.10 Scenario: The agent records a changed state (`wiki_remember`)
+
+Stale state ("the web UI has six tabs") could not be inferred afterwards by the local model (§13.4–13.5 of the
+design doc); the writer that makes the change records it (opt-in, `[memory] agent_writes`, ADR-33).
+
+```mermaid
+sequenceDiagram
+  participant A as Coding agent
+  participant M as MCP server (read-only graph)
+  participant GS as GraphStore
+  participant J as graph.journal.jsonl
+  participant F as next writable pass (capture worker / sleep / serve)
+
+  A->>M: wiki_remember(facts = new state, replaces = lines as wiki_memory shows them)
+  M->>M: P0 + ephemeral screening
+  M->>GS: match_facts(replaces) (exact, against the believed facts now)
+  M->>J: append one op (facts, retire = ids, agent = true)
+  M-->>A: queued, closing N, unmatched lines with the 3 closest facts
+  F->>GS: fold_journal: remember(facts) (no B9 for agent ops), then retire(ids, at = op time)
+```
+
+## 6.11 Cross-cutting runtime aspects
 
 ### Error / timeout handling (Ollama unreachable)
 Any embed or chat call goes through `urllib` to Ollama; on failure `OllamaEmbedder` /

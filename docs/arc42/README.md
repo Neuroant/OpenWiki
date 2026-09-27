@@ -17,8 +17,11 @@ quality, and risks.
 > provenance; ADR-26, §8.20, Direction J complete), graph connectivity as **reader overlays** (the
 > "Verwandte Seiten" panel + entity auto-links; ADR-28), and — Path B+ — **bi-temporal memory** (valid +
 > transaction time, merged by valid time, `--as-of`/`--known-at`, a veto-only coexistence check; measured
-> 7/13 → 13/13 on a temporal eval; ADR-27, §8.15, QS-15). Deep detail: `docs/path-b-memory.md`,
-> `docs/RAG-vs-GraphRAG.md`.
+> 7/13 → 13/13 on a temporal eval; ADR-27, §8.15, QS-15), then **fact identity** (B9, ADR-29) and — Path B++ —
+> **memory hygiene by policy** (a source-independent security policy, ADR-30; forgetting in a nightly `sleep`
+> pass, ADR-32), opt-in **cue-trigger recall** (ADR-31), and **agent-recorded state** against stale facts
+> (`wiki_remember`, ADR-33) — with host hooks + `backfill` feeding memory from Claude Code sessions (§6.8–6.10,
+> QS-16–19). Deep detail: `docs/path-b-memory.md`, `docs/RAG-vs-GraphRAG.md`.
 
 ## Audience & relationship to the other docs
 
@@ -29,7 +32,7 @@ quality, and risks.
 | `docs/roadmap.md` | Anyone | What was built (history) + prioritized future directions |
 | `docs/RAG-vs-GraphRAG.md` | Evaluators | The measured findings behind the graph design |
 | `docs/projects.md` | Architects, users | Deep design of the **project** concept (§8.14): manifest, discovery, registry, layout, multi-source merge |
-| `docs/path-b-memory.md` | Architects | **Path B (agent memory)** design + staged plan — realized by ADR-15/16/17/18/19, resolving §11 D1/D2/D6 (B0–B6 + concurrency landed); §12 = Path B+ (B7 as built + measured → ADR-27) |
+| `docs/path-b-memory.md` | Architects | **Path B (agent memory)** design + staged plan — realized by ADR-15/16/17/18/19, resolving §11 D1/D2/D6 (B0–B6 + concurrency landed); §12 = Path B+ (B7 → ADR-27, B9 → ADR-29); §13 = Path B++ (hygiene, cue-trigger, sleep + forgetting, stale facts, `wiki_remember` → ADR-30–33, incl. the measured negative results) |
 | `docs/coding-agents.md` | Users | MCP / OpenCode / Claude Code setup |
 
 The arc42 docs and `CLAUDE.md` overlap by design (both describe the architecture); this doc

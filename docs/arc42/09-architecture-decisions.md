@@ -7,7 +7,9 @@
 > GraphRAG, ADR-23 entity resolution) and add **observability** (ADR-20), a *measured* retrieval-add-on
 > discipline (ADR-21), a **shipping** story (ADR-24 packaging + CI), a **world-model analysis** toolkit
 > (ADR-25, Direction I), a **capability-complete web UI** (ADR-26, Direction J), graph connectivity as
-> **reader overlays** (ADR-28), and — Path B+ — **bi-temporal** memory (ADR-27, B7).
+> **reader overlays** (ADR-28), and — Path B+ — **bi-temporal** memory (ADR-27, B7) and **fact identity** (ADR-29,
+> B9); Path B++ adds **memory hygiene** (ADR-30), **cue-trigger recall** (ADR-31), **forgetting** in a nightly
+> `sleep` pass (ADR-32) and **agent-recorded state** (ADR-33).
 
 ## ADR index
 
@@ -43,6 +45,9 @@
 | [28](#adr-28) | Graph connectivity as read-only reader overlays (Related panel, entity auto-links) | Accepted | usability, Q4 |
 | [29](#adr-29) | Fact identity: paraphrased attributes onto one key; coexistence decides rivalry per pair | Accepted (Path B+ / B9) | correctness, Q5 |
 | [30](#adr-30) | Memory hygiene: a source-independent security-sensitive policy (poisoning) | Accepted (Path B++ / P0) | security, correctness |
+| [31](#adr-31) | Cue-trigger recall: fact-shaped constraint probes, personal-only slots, opt-in | Accepted (Path B++ / P1) | correctness |
+| [32](#adr-32) | Forgetting as policy-based archiving in a nightly `sleep` pass | Accepted (Path B++ / P1) | correctness, Q5 |
+| [33](#adr-33) | Stale state fixed by the writer that makes the change (`wiki_remember`, journaled, exact `replaces`) | Accepted (Path B++ / P2) | correctness, security |
 
 ---
 

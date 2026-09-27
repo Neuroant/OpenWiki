@@ -72,7 +72,8 @@ flowchart TB
 
   subgraph delivery["Delivery"]
     web["web/ (WikiWebApp + SPA)"]
-    mcp["mcp_server.py"]
+    mcp["mcp_server.py\n(read tools + opt-in wiki_remember)"]
+    hooks["claude_code_template.py\n(host hooks, transcript parsing)"]
     evalm["eval.py"]
   end
 
@@ -124,8 +125,9 @@ files, network/Ollama, or Kuzu).
 | Block | kind | Responsibility & key interface |
 |---|---|---|
 | `web/server.py` | I/O (http, Kuzu) | `WikiWebApp` (state + methods) + `make_handler(app)` + `serve(app, host, port)`. See §5.3. |
-| `mcp_server.py` | I/O (stdio) | `build_server(wiki_dir, index, graph, agent) -> MCPStdioServer`; `.handle(msg)` is pure. |
-| `eval.py` | pure (drivers inject I/O) | Metrics (`reciprocal_rank`, `hit_at_k`, `recall_at_k`, `grounding`, `community_grounding`, `judge_pairwise`, `task_success`) + drivers (`evaluate`, `make_retrievers`, `hybrid_pages`, `make_reranker`/`reranking_retriever` (ADR-21), `run_answer_eval`, `run_global_eval`, `run_cross_session_eval`). |
+| `mcp_server.py` | I/O (stdio) | `build_server(wiki_dir, index, graph, agent, identity, context_budget, memory_probes, memory_writes) -> MCPStdioServer`; `.handle(msg)` is pure. Read tools advertised by availability; `wiki_remember` (opt-in, `_remember`: P0 + ephemeral screening, exact `replaces` matching, one journal op — ADR-33). |
+| `claude_code_template.py` | pure (+ file writes) | Claude Code integration: `.mcp.json` + commands/skill scaffolding; **host hooks** (`hooks_config`/`install_hooks`, `--into` a repo's `settings.local.json`, bound + interpreter-pinned); transcript parsing for capture + `backfill` (`iter_claude_turns` strips host-injected blocks, compaction summaries, `isMeta` expansions; `split_transcripts_by_window` → one dated session per day, windows valid from their first turn). |
+| `eval.py` | pure (drivers inject I/O) | Metrics (`reciprocal_rank`, `hit_at_k`, `recall_at_k`, `grounding`, `community_grounding`, `judge_pairwise`, `task_success` (with `a|b` alternatives), `constraint_respected` (P1 judge)) + drivers (`evaluate`, `make_retrievers`, `hybrid_pages`, `make_reranker`/`reranking_retriever` (ADR-21), `run_answer_eval`, `run_global_eval`, `run_cross_session_eval` — dated/correcting sessions, `as_of`/`known_at`, `forbidden` (poisoning leaks), `cue` + `constraint` (cue-trigger), `probe`). |
 | `analysis/` | pure (+NumPy; graph read-only) | **World-model analysis** (ADR-25, Direction I), the structural analog of `eval.py`. `coupling.py` (`analyze_coupling`, `page_vectors` — graph↔semantic edge-cosine-vs-null, neighbor overlap, community coherence, the *graph-reach* headline); `projection.py` (`project_2d` — PCA, or UMAP via the `[analysis]` extra); `gaps.py` (`analyze_gaps` — missing-ref / near-duplicate / isolated-page / entity-merge candidates); `compare.py` (`flatten_fingerprint`/`diff_fingerprints`/`notable_differences`); `memory.py` (`analyze_memory` — Path B revision / consolidation / temperature / breadth / growth). Read-only, offline where possible; the `[analysis]` extra (scikit-learn) enriches, never required. |
 | `project.py` | I/O (files) | `Project.load/find/resolve`; `out_dir`/`wiki_dir`/`index_dir`/`graph_path`; `setting(section, key)`; `render_manifest`. |
 | `pipeline.py` | pure | `compute_fingerprints`, `stale_stages`, `BuildState` (incremental build state). |
@@ -173,10 +175,10 @@ flowchart TB
 | `entities.py` | pure (injected chat/embedder) | `extract_entities(…) -> [Entity]`; `extract_relations(wiki, entities, chat) -> [Relation]` (typed `RELATED_TO`, ADR-22); `resolve_entities(entities, embedder, chat) -> canonical + aliases + descriptions` (ADR-23); `coerce_types`; `DEFAULT_ENTITY_TYPES` | LLM per page + deterministic normalization; relations + resolution opt-in. |
 | `community.py` | pure (injected chat) | `detect_communities(edges, nodes)`; `summarize_community(chat, members)`; `summarize_facts(chat, facts)` (B5 memory themes); `answer_global(chat, q, communities)`; `parse_summary` | Consolidation layer / global search (docs **and**, via B5, memory). |
 | `decay.py` | pure | `effective_weight(w, last_seen, now, half_life)`; `reinforced_weight(w, boost, cap)` | Usage-memory math. |
-| `memory.py` | pure (injected chat) | `capture_session(chat, transcript, session_date) -> [MemoryFact]` (+ stated `valid_from`, `cardinality`); `parse_facts`; `format_memory(recalled)`; `assemble_context`; `facts_coexist(chat, older, newer)` (the veto-only coexistence check, ADR-27) | Path B: session → subject–predicate–object facts + context formatting. |
-| `temporal.py` | pure | `plan_merge(records, okey, valid_from, cardinality, correct, coexists)` (the valid-time merge rule); `status`/`valid_at`/`believed_at`; `derive_legacy_intervals`; `parse_date`/`session_date`/`format_interval` | Path B+ (B7, ADR-27): the bi-temporal model — decides how a fact slots into its history. |
+| `memory.py` | pure (injected chat) | `capture_session` / `capture_session_detailed(chat, transcript, session_date) -> (kept, dropped)` (+ stated `valid_from`, `cardinality`, `source`); `parse_facts`; the **policies** `is_unsafe_instruction` (P0, ADR-30) and `is_ephemeral` (forgetting, ADR-32); `facts_coexist(chat, older, newer, subjects)` (ADR-27/29); `choose_attribute` (B9, ADR-29); `constraint_probes` (P1, ADR-31); `format_memory`; `assemble_context` (budgeted; probe hits first under "Keep in mind") | Path B: session → subject–predicate–object facts, what never to keep, context formatting. |
+| `temporal.py` | pure | `plan_merge(records, okey, valid_from, cardinality, correct, coexists, batch)` (the valid-time merge rule); `status` (current / past / future / retracted / **forgotten**) / `valid_at` / `believed_at`; `derive_legacy_intervals`; `parse_date` / `session_date` / `format_date` (epoch-based: pre-1970 dates) / `format_interval` | Path B+ (B7, ADR-27): the bi-temporal model — decides how a fact slots into its history. |
 | `usage.py` | pure | `usage_log_path(db)`; `append_usage(path, pairs)`; `read_usage`; `clear_usage` | Path B (B1): the append-only read-path usage-log sidecar. |
-| `journal.py` | pure | `journal_path(db)`; `append_remember`/`append_reindex`; `read_journal`/`clear_journal` | Path B (B1, ADR-19): the lock-free write-ahead journal (queued `remember`/`reindex` ops). |
+| `journal.py` | pure | `journal_path(db)`; `append_remember(…, retire, agent)` / `append_reindex`; `read_journal` / `clear_journal` / `pending_journal` | Path B (B1, ADR-19): the lock-free write-ahead journal — queued `remember` (with `retire` ids + an `agent` mark from `wiki_remember`, ADR-33) / `reindex` ops. |
 
 ## 5.3 Level 2 — the `web/` subpackage
 
@@ -206,9 +208,10 @@ for edits + memory. Responsibilities group as:
 | **Entities** | `entities_for_page(slug)`, `pages_for_entity(query)` |
 | **Communities** | `communities()`, `community_members()`, `page_graph()`, `page_snippet()`, `upsert_communities(assignment, summaries, labels)` |
 | **Usage-memory** | `reinforce(from, to, now, boost)`, `decay(now, half_life, floor)`, `record_usage(pairs)` (writable → reinforce / read-only → log), `fold_usage(now)`, `pending_usage()` |
-| **Remembered tier (Path B)** | `remember(session_id, facts, embedder, now, session_date, correct, coexist)` (merge by **valid time** via `temporal.plan_merge` — reaffirm / extend / add, close or retract rivals, ADR-27), `recall(query, embedder, k, include_superseded, as_of, known_at)` (valid now ∧ believed by default), `timeline(query)`, `list_assertions()`/`memory_overview()`, `has_memory()`, `forget_all()`; one schema-tolerant `_load_assertions` + `_view` serve every reader, and `_migrate_temporal` upgrades older graphs in place |
-| **Memory consolidation (Path B / B5)** | `assertion_graph(similar_k)` (similarity over current facts), `upsert_memory_concepts(assignment, summaries, labels)` (the "sleep" pass → `MemoryConcept` themes), `memory_concepts()`, `has_memory_concepts()` |
-| **Context assembly (Path B / B6)** | `relevant_concepts(assertion_ids, limit)` (attractor themes for the activated facts), `context_for(query, embedder, identity, k, max_themes, max_chars, as_of)` (the three-tier assembly → one context string with each fact's validity, read-only + fail-soft) |
+| **Remembered tier (Path B)** | `remember(session_id, facts, embedder, now, session_date, correct, coexist, resolve)` (P0 re-applied; B9 attribute resolution; merge by **valid time** via `temporal.plan_merge` — reaffirm / extend / add, close or retract rivals, ADR-27/29), `recall(query, embedder, k, now, include_superseded, as_of, known_at)` (cosine × confidence × **bounded** recency, `material` ×0.75; valid now ∧ believed by default), `recall_probed(query, embedder, probes, k)` (P1), `timeline(query)`, `list_assertions()`/`memory_overview()`, `has_memory()`, `forget_all()`; one schema-tolerant `_load_assertions` + `_view` serve every reader, and `ALTER` migrations upgrade older graphs in place |
+| **Hygiene + agent writes (Path B++)** | `forget_candidates()` (the `ephemeral` / `unsafe` policies over held facts) + `forget(ids, reason)` (archive: `forgotten_at` + reason, ADR-32); `match_facts(lines)` (exact line → believed-fact ids) + `retire(ids, at)` (close — valid time ends) + `queue_remember(…, retire, agent)` (ADR-33); `fold_journal(embedder, coexist, resolve)` (remember + retire; no B9 for agent ops) |
+| **Memory consolidation (Path B / B5)** | `assertion_graph(similar_k)` (similarity over current facts), `upsert_memory_concepts(assignment, summaries, labels)` (the "sleep" pass → `MemoryConcept` themes; an empty summary = **pending** under `--budget`), `memory_concepts(include_pending)`, `concept_members()` / `concept_assignment()` (reuse + warm start), `has_memory_concepts()` |
+| **Context assembly (Path B / B6)** | `relevant_concepts(assertion_ids, limit)` (attractor themes for the activated facts; pending themes skipped), `context_for(query, embedder, identity, k, max_themes, max_chars, as_of, probes)` (the three-tier assembly → one context string with each fact's validity, read-only + fail-soft) |
 | **Incremental update** | `upsert_page(slug, text, …, embedder)` (MERGE page, replace chunks, recompute `SIMILAR_TO`) |
 | **Hybrid retrieval** | `hybrid_search(vector, k)` (vector k-NN → owning page) |
 
@@ -244,4 +247,6 @@ flowchart LR
 §6. Path B **landed** its blocks: `graph/memory.py` + `graph/usage.py` (§5.2), the remembered-tier
 + usage-log methods on `GraphStore` (§5.4), and read-path `record_usage` in `RAGAgent` (§5.5) —
 authoritative graph (B0/ADR-16), read-path reinforcement (B1/ADR-17), contradiction versioning (B4/ADR-18),
-refined into bi-temporal validity by `graph/temporal.py` (B7/ADR-27).*
+refined into bi-temporal validity by `graph/temporal.py` (B7/ADR-27); then fact identity (B9/ADR-29), the memory
+policies + forgetting (ADR-30/32), cue-trigger probes (ADR-31) and journaled agent writes (ADR-33) in
+`graph/memory.py`, `GraphStore`, `mcp_server.py` and `claude_code_template.py`.*

@@ -26,9 +26,12 @@ The system is a straight, staged pipeline built around an intermediate represent
 10. **Agent memory (Path B)** — an authoritative *remembered tier* (`Session`/`Assertion`) captured
     from session transcripts and recalled across sessions, **bi-temporally versioned** (when a fact
     was true vs. when it was learned — so an out-of-order backfill lands in history and a correction is
-    distinguishable from a change), periodic **consolidation** into themes (the "sleep" pass), and **three-tier context
-    assembly** (identity + activation + attractors) for a new session; gated by a per-project
-    **Wiki vs Second Brain mode** (`[memory] enabled`).
+    distinguishable from a change), paraphrases resolved onto one attribute (**fact identity**), kept clean
+    by **policy** (no security-sensitive or injected instructions; one-off session events **forgotten** by a
+    nightly **`sleep`** pass that also re-consolidates the **themes**), corrected by the coding agent itself
+    when it changes something (**`wiki_remember`**), and assembled as **three-tier context** (identity +
+    activation + attractors — optionally probed for the user's implicit constraints) for every new prompt
+    via Claude Code **host hooks**; gated by a per-project **Wiki vs Second Brain mode** (`[memory] enabled`).
 
 Stages 1–9 run in **Wiki Mode** (documents only, the default); stage 10 adds the remembered tier in
 **Second Brain Mode** — the two coexist as tiers of one substrate (§8.15, ADR-14).
@@ -48,6 +51,9 @@ Core use cases (each maps to a runtime scenario in §6):
 | U5 | Consult the wiki from a coding agent | MCP (`wiki_*`) | §6.2/§6.3 via MCP |
 | U6 | Measure retrieval / answer / global quality | `eval [--answers/--global]` | §6 + `docs/RAG-vs-GraphRAG.md` |
 | U7 | Remember a session & recall it in the next (agent memory) | `remember` / `recall` | §6.7 |
+| U8 | Feed a coding agent's sessions into memory automatically (+ import its history) | `claude-code --hooks --into`, `backfill` | §6.8 |
+| U9 | Keep memory clean + consolidated overnight | `sleep` (schedulable) | §6.9 |
+| U10 | The coding agent records a new state when it changes something | MCP `wiki_remember` | §6.10 |
 
 ## 1.2 Quality Goals
 
@@ -69,7 +75,7 @@ See §10 for the quality tree + concrete quality scenarios.
 |---|---|
 | **Learner / maintainer** (primary) | Small, readable, well-boundaried code; each stage understandable in isolation; fast offline tests. |
 | **End user** (CLI / browser) | Build a KB from their docs and get grounded answers + exploration, fully offline. |
-| **AI coding agent** (via MCP) | Read-only, grounded access to the wiki as MCP tools (`wiki_ask`, `wiki_global`, …). |
+| **AI coding agent** (via MCP + hooks) | Grounded, read-only access to the wiki as MCP tools (`wiki_ask`, `wiki_global`, `wiki_memory`, …); memory injected into every prompt by host hooks; opt-in **write** access to memory (`wiki_remember`) to record what it changed. |
 | **Evaluator** | Reproduce the RAG-vs-GraphRAG-vs-Global findings on their own corpus. |
 | **Future contributor** | Clear extension points and decision records (§9) to build on — e.g. Path B agent memory. |
 

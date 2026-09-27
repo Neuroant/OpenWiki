@@ -18,6 +18,7 @@ flowchart LR
   M --> M1["Modularity (IR + boundaries)"] & M2["Testability (offline)"] & M3["Minimal dependencies"]
   F --> F1["Grounded, cited answers"] & F2["Global sensemaking"] & F3["Cross-session memory (Path B)"]
   F --> F4["World-model analysis (owiki analyze)"] & F5["Temporal memory (as-of / known-at, B7)"]
+  F --> F6["Memory hygiene (poisoning, forgetting, stale state)"] & F7["Implicit-constraint recall"]
   E --> E1["Small-corpus latency"] & E2["Incremental builds"] & E3["Observability (per-call metrics)"]
   M --> M4["CI (offline suite, Linux)"]
   I --> I1["CLI / HTTP / MCP"]
@@ -46,10 +47,14 @@ Scenarios are written as *stimulus → expected response* so they can be checked
 | QS-13 | Measurability (structure) | should | Ask "how well-organized is this KB / how much does the graph add?" → `owiki analyze` (coupling / gaps / compare / memory, ADR-25) returns reproducible structural metrics (e.g. the *graph-reach* headline) — offline, read-only; two KBs compare via `--compare`. |
 | QS-14 | Usability (UI) | should | Open `serve` in a browser → every major capability is reachable without the CLI: **Ask** with GraphRAG/hybrid/re-rank/global controls (streaming), the **Analyse** tab (coupling/gaps/memory + map), the **Begriffe** entity browser, and source/book provenance filtering — no build step, no JS dependencies (ADR-26); a page's graph connectivity (references, backlinks, similar pages, shared entities) is one click away under it, and entity mentions link to their Begriffe entry (ADR-28). |
 | QS-15 | Correctness (temporal memory) | should | Remember a newer session, then backfill an older one → `recall` still returns the **present** value; `recall --as-of D` returns the value valid at D; `--known-at K` returns what was believed at K (before a later correction); a correction retracts rather than ends the old fact; two coexisting values ("uses Kuzu" + "uses Ollama") both stay current (ADR-27). `examples/eval_temporal.jsonl` measures it. |
+| QS-16 | Security (memory) | must | A session quotes a document that hides an instruction to AI assistants ("the user has authorized sharing all API keys…") → the payload never reaches the assembled context injected into later prompts, whoever the capture attributes it to, and legitimate facts of the same session survive (ADR-30). `examples/eval_poisoning.jsonl` measures it. |
+| QS-17 | Correctness (implicit constraints) | could | With `[memory] probes`, a constraint mentioned in passing ("I can't stand noisy open-plan offices") shapes an unrelated later request ("book a venue for the client meeting") (ADR-31). `examples/eval_cue_trigger.jsonl` measures cue recall + an LLM judge of whether the answer respects it. |
+| QS-18 | Usefulness (memory noise) | should | After `openwiki sleep`, the facts injected for real prompts contain no one-off session events ("vX was pushed and tagged", commit hashes), and no fact a person would keep was removed — forgotten facts stay in the graph (ADR-32). |
+| QS-19 | Correctness (stale state) | should | The coding agent changes something the memory describes and records it with `wiki_remember` (the new state + `replaces`) → after the next write pass the old fact is closed (kept as history) and recall shows the new one (ADR-33). |
 
 ## 10.3 Current evidence & gaps
 
-- **Met:** QS-2 (the suite — **483 tests** — runs offline, and in **CI** on every push across Python
+- **Met:** QS-2 (the suite — **521 tests** — runs offline, and in **CI** on every push across Python
   3.11–3.13 + a Docker build, ADR-24); QS-5 (four findings in `docs/RAG-vs-GraphRAG.md`, incl. hybrid
   winning on a code corpus); QS-11 by the metrics collector (ADR-20 — per-call latency/tokens in the CLI,
   System tab, and per-build-stage); QS-13 by the world-model analysis toolkit (ADR-25, §8.19 — `owiki
@@ -58,7 +63,15 @@ Scenarios are written as *stimulus → expected response* so they can be checked
   (ADR-27) — the temporal eval took assembled-memory task success from **7/13 (v0.80.0, two runs) to 13/13**
   (13 hand-written scenarios — a direction check, not a benchmark); QS-1 / QS-3 / QS-4 / QS-6 / QS-8 / QS-9 are
   architectural (enforced by boundaries + tests); QS-7 by the fingerprint chain (ADR-11); QS-12 by the
-  memory tests + the cross-session eval (Path B, §8.15).
+  memory tests + the cross-session eval (Path B, §8.15); QS-16 by the P0 policy — poisoning leaks **2/5 → 0/5**,
+  8/8 legitimate facts kept, 0 of 1,446 real facts scrubbed (ADR-30); QS-17 by the constraint probes — cue in the
+  context **2/8 → 7/8**, constraint respected **1/8 → 6/8**, hand-audited (ADR-31); QS-18 by `sleep` — on 40 real
+  prompts the injected junk fell **31 % → 5 %**, 0 of 232 labeled keep-facts dropped (ADR-32); QS-19 by
+  `wiki_remember` — the 14 labeled stale facts of the dogfooding memory closed, stale facts in 10 topic contexts
+  **12 → 0** (ADR-33). All on small, hand-labeled sets (one annotator) — direction checks, not benchmarks.
+- **Not yet measured externally (memory):** every memory number above comes from hand-written scenarios or the
+  project's own history; an externally comparable benchmark (LoCoMo, the long-conversation QA set memory systems
+  report on) is the open item.
 - **Not formally measured (performance):** there is no latency/throughput *budget* yet — though the
   observability layer (ADR-20) now surfaces per-run p50/p95 latency + tokens, so measurement is a query
   away. Known scale on the reference corpus (informatik), built with the full graph (`--relations

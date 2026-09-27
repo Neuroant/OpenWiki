@@ -39,6 +39,8 @@ reports which excerpts were used — the basis for the grounding metrics in §10
 | Index | `embeddings.npy` + `index.json` | `index` |
 | Graph | single-file Kuzu DB (+ `.wal`) | `graph-build` |
 | Usage log | `graph.usage.jsonl` (append-only sidecar) | read-path `ask`/MCP (B1) |
+| Write-ahead journal | `graph.journal.jsonl` (queued `remember` / `reindex` / agent ops with `retire` ids) | read-only writers: `serve`/`chat`, locked-out captures, MCP `wiki_remember` (ADR-19/33) |
+| Hook worker | `.openwiki/capture-*.json` (parked events) + `.openwiki/hook.log` | host-hook capture (detached) |
 | Build state | `.openwiki/state.json` (fingerprints) | `build` |
 | Config | `openwiki.toml`, `~/.openwiki/*.toml` | `init` / registry |
 
@@ -93,7 +95,7 @@ migration upgrades pre-existing graphs).
 
 Calls to Ollama go through stdlib `urllib`; a `URLError`/`HTTPError` is turned into a
 `RuntimeError` carrying a "is Ollama running / is the model pulled?" hint. It surfaces per
-entry point (detail in §6.8): CLI → stderr + non-zero exit; web API → HTTP **503**; editing
+entry point (detail in §6.11): CLI → stderr + non-zero exit; web API → HTTP **503**; editing
 agent → `WikiTools.dispatch` catches per-tool exceptions and returns an `ERROR: …` string the
 model can react to, keeping the loop alive. Table extraction and graph-hiccups during an
 agent write are caught and logged, never raised (a failed graph sync must not fail the edit).
@@ -107,7 +109,11 @@ The system assumes a **trusted local host** (§3.3, §11 R1):
   Safe on `127.0.0.1`; exposing beyond localhost requires adding authN/authZ first (§7.4).
 - **Path confinement** — `WikiTools` validates slugs against a strict pattern and refuses any
   resolved path outside `pages/` (`_page_path`), so `read/edit/create` can't escape the wiki.
-- **MCP is read-only** — coding-agent tools never write; `edit`/`create` are not exposed there.
+- **MCP reads; memory writes are opt-in** — coding-agent tools never edit the wiki (`edit`/`create` aren't
+  exposed); the one write tool, `wiki_remember` (`[memory] agent_writes`), only queues memory facts to the journal.
+- **Memory hygiene** — memory is injected into every prompt, so it is a persistence path for injected
+  instructions. A **source-independent** policy (ADR-30) drops security-sensitive facts on *every* write path
+  (capture, `remember`, the journal, `wiki_remember`), and `sleep` re-applies it to older facts (ADR-32).
 - **`--dry-run`** — edits can be previewed (no file write, no graph sync) before committing.
 - **No secrets** — no API keys anywhere (local Ollama, ADR-2); nothing to leak.
 
@@ -169,8 +175,12 @@ Alongside the document tier, a project in **Second Brain mode** (`[memory] enabl
   `cardinality`) under a `Session`, captured from a transcript by a pure, chat-injected pass
   (`memory.capture_session`). Reification is what makes a fact versionable + provenanced.
 - **Merge, not append (B3).** `remember` embeds each fact and **dedups** against the *current*
-  assertions by normalized `(subject, predicate, object)` (`_normalize`, ADR-12), so re-affirming a
-  fact is a no-op.
+  assertions by normalized `(subject, predicate, object)` (`_normalize`, ADR-12); re-affirming a fact
+  raises its `confidence` (a recall tie-breaker) instead of adding a copy.
+- **Fact identity (B9, ADR-29).** The same property phrased differently across sessions ("has version" /
+  "is versioned") would never supersede itself, so a new wording is resolved onto an existing attribute key
+  (embedding candidates + one LLM choice; an alias map means a wording is resolved once) and the coexistence
+  check decides rivalry per pair — measured on the real development memory (stale "current" version facts 23 → 11).
 - **Time: bi-temporal validity (ADR-27, refining ADR-18).** Each fact has **valid time** (when it held
   in the world — a stated date, else the session date, else the record time) and **transaction time**
   (when recorded / retracted). The pure `temporal.plan_merge` orders a subject+predicate's history **by
@@ -181,12 +191,26 @@ Alongside the document tier, a project in **Second Brain mode** (`[memory] enabl
   `--known-at` / `--timeline` read the history. In CoALA terms: valid time is a fact's *semantic*
   content, transaction time + session its *episodic* trace — the backfill bug was the learning step
   ordering knowledge by experience instead of by event.
-- **Activation + forgetting.** `recall` ranks assertions by **decay-weighted** cosine (`effective_weight`,
-  the same half-life math as the `REINFORCES` usage overlay), and read-path `record_usage` / `fold_usage`
-  (B1) + `decay` keep the graph at a useful density — strengthen what's used, fade what isn't.
-- **Consolidation — the "sleep" pass (B5).** `openwiki consolidate` clusters the current assertions by
-  embedding similarity (the doc-community Louvain, re-targeted) and LLM-summarizes each cluster into a
-  **`MemoryConcept`** theme, then folds usage + decays. Like `Community` it's a *derived* view
+- **Activation + forgetting.** `recall` ranks assertions by cosine × confidence × a **bounded** recency factor
+  (`RECENCY_FLOOR`: an old relevant fact keeps ≥ 60 % of its score; facts from discussed material ×0.75), and
+  read-path `record_usage` / `fold_usage` (B1) + `decay` keep the usage overlay at a useful density. *Forgetting
+  facts* is by **policy**, not decay (ADR-32): the nightly `sleep` archives one-off session events ("vX was pushed
+  and tagged"), commit hashes and tautologies (`forgotten_at` — out of every view, never deleted) — decay had no
+  signal to go on (2 of 1,218 facts ever re-affirmed; the junk is recalled *often*).
+- **Hygiene by policy, not model judgment.** Four times the local 30B model was measured as a judge *of* memory
+  — a poisoning audit (ADR-30), a forgetting review (ADR-32), a staleness check against the wiki and update-aware
+  capture (`docs/path-b-memory.md` §13.4–13.5) — and each time it confused "related" with "invalid" or dropped keep-facts.
+  So memory keeps deterministic rules for what never to store / what to forget, and leaves judgments about
+  *change* to **the writer that knows**: the coding agent records a new state with **`wiki_remember`** and names
+  the facts it `replaces` (exact match; closed, kept as history — ADR-33).
+- **Implicit constraints (opt-in, ADR-31).** A stored constraint ("can't stand noisy offices") shares no words
+  with the request it should shape; `[memory] probes` spends one call to guess hypothetical user facts, whose
+  best hits *about the user* get reserved slots under "Keep in mind".
+- **Consolidation — the "sleep" pass (B5).** `openwiki consolidate` (and, nightly, `openwiki sleep` — fold the
+  journal → forget → consolidate → decay) clusters the current assertions by embedding similarity (the
+  doc-community Louvain, re-targeted, warm-started from the prior themes) and LLM-summarizes each new or changed
+  cluster into a **`MemoryConcept`** theme (unchanged themes reuse their summary; `--budget N` caps a run's new
+  summaries and leaves the rest *pending* for the next), then folds usage + decays. Like `Community` it's a *derived* view
   (recomputed, not snapshotted), so the consolidated footprint stays **bounded** as raw history grows;
   the theme summaries are the memory's "attractor" tier and support global search over memory.
 - **Three-tier context assembly (B6).** `GraphStore.context_for(query, …)` fuses the tiers into one
@@ -307,12 +331,13 @@ no framework, no bundler, Markdown via one vendored `marked.min.js`.
   (`REFERENCES.labels`, `GraphStore.citations`).
 - **Time view (ADR-27):** the Gedächtnis tab reads the bi-temporal memory — *Stand am* (valid time,
   `as_of`) and *Wissensstand vom* (transaction time, `known_at`) pickers, a **Verlauf** timeline per
-  subject+predicate, a validity column and überholt / zurückgezogen / geplant badges.
+  subject+predicate, a validity column and überholt / zurückgezogen / geplant / **vergessen** (archived by
+  `sleep`, ADR-32) badges, plus a "Material" badge for facts from discussed documents (ADR-30).
 - Everything is **read-only + graceful**: a tab whose artifact is absent (no graph, no memory, no entities)
   shows a hint, not an error (ADR-7).
 
 ---
-*Chapter complete. Cross-refs: runtime error paths → §6.8; the memory tier → §8.15 + ADR-14/15/16/18/27;
+*Chapter complete. Cross-refs: runtime error paths → §6.11; the memory tier → §8.15 + ADR-14/15/16/18/27;
 observability → §8.16 + ADR-20; retrieval → §8.17 + ADR-9/21 + `docs/RAG-vs-GraphRAG.md`; the semantic
 graph → §8.18 + ADR-12/22/23; world-model analysis → §8.19 + ADR-25; the web UI → §8.20 + ADR-26/28; the
 no-auth risk → §11 R1; the project concept → §5, ADR-10/11, §7; the boundaries these concepts rest on →

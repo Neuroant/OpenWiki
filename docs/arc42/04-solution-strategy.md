@@ -17,6 +17,9 @@ ADR referenced in the last column — see [Architecture Decisions](09-architectu
 | **Reader-XOR-writer concurrency via a journal** | Kuzu is reader-XOR-writer, so `serve`/`chat` open **read-only by default** (concurrent readers); all writes (reinforce, remember, edit re-sync) queue to a lock-free write-ahead journal a writer folds in. `--sync` is exclusive-writable. | correctness, Q2 | ADR-8/17/19 |
 | **Coexisting document + remembered tiers (Path B)** | In Second Brain mode the graph adds an *authoritative* remembered tier — sessions → reified `Assertion`s, preserved across document rebuilds. Wiki Mode = memory off. | Q4 | ADR-14/15/16/18 |
 | **Bi-temporal memory (Path B+)** | Every remembered fact carries **valid time** (when it held in the world) and **transaction time** (when it was recorded / retracted); facts merge by valid time, so backfills land in history, corrections differ from changes, and `recall --as-of`/`--known-at` answer point-in-time questions. Measured on a temporal eval (7/13 → 13/13). | correctness, Q5 | ADR-27 |
+| **Fact identity (Path B+)** | Paraphrased attributes across sessions ("has version" / "is versioned") resolve onto one canonical key (embedding candidates + one LLM choice), so the valid-time merge can order them; a coexistence check decides rivalry per pair. Measured on the real development memory. | correctness, Q5 | ADR-29 |
+| **Memory hygiene by policy, not model judgment (Path B++)** | Four measured attempts to let the local model *judge* memory (a poisoning audit, a forgetting review, a staleness check, update-aware capture) failed; so what memory keeps is decided by **deterministic policy** — never persist security-sensitive / injected instructions (source-independent), **forget** one-off session events in a nightly, schedulable **`sleep`** pass (archived, not deleted; also folds the journal, re-consolidates themes within a `--budget`, decays usage) — and by **the writer that knows**: stale state is fixed by the coding agent recording the new state (`wiki_remember`, opt-in, journaled). | correctness, security, Q5 | ADR-30/32/33 |
+| **Implicit constraints on request (Path B++)** | Opt-in constraint probes (one call guesses hypothetical user facts) reserve recall slots for facts *about the user*, shown first under "Keep in mind"; off by default (one call per prompt). | correctness | ADR-31 |
 | **Borrow GraphRAG ideas, not the library** | Community detection + summaries + global search reimplemented natively/locally. | Q2, Q5 | ADR-6 |
 | **Project manifest + settings precedence** | `openwiki.toml` groups a KB; unset settings resolve `flag > manifest > ~/.openwiki config > built-in default`. | usability | ADR-10 |
 | **Incremental, fingerprinted builds** | Per-stage input+param fingerprints skip unchanged stages; each stage records duration + token spend. | performance | ADR-11, ADR-20 |
@@ -55,7 +58,9 @@ source ──parse_source──▶ ParsedDocument (IR) ──▶ JSON / Markdown
                     GraphBuilder ──▶ Kuzu graph ──▶ GraphStore
                                │  (+ entities/typed relations/resolution, communities, REINFORCES)
        capture_session + GraphStore.remember ──▶ remembered tier   (Path B, Second Brain)
-                               │     (Session/Assertion, bi-temporal; recall --as-of/--known-at)
+                               │     (Session/Assertion, bi-temporal, fact identity; recall --as-of/--known-at)
+          host hooks (inject / capture) · backfill · MCP wiki_remember (journal) ──▶ memory in / out
+          sleep: fold journal → forget (policy) → consolidate themes (--budget) → decay
                     WikiWebApp (http.server) ──▶ browser SPA (10 tabs; Ask streams via SSE)
                     MCPStdioServer ──▶ coding agents
    (every LLM/embed call → metrics.COLLECTOR: latency + tokens, observability)

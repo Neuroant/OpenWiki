@@ -905,6 +905,11 @@ The **genuine gaps**, measure-first as always:
   temporal 34.0, open-domain 34.4, single-hop 56.5; adversarial 89.2). Losses: facts never captured (single-hop 34 %
   "Not mentioned"), relative dates stored at the session date (D13), a cautious answer prompt. Mem0 reports ≈ 67 %
   with GPT-4o-mini — not comparable, but now a reference point. Details: `path-b-memory.md` §13.7; ADR-34.
+- **D13 — relative event dates at capture. ✅ (v0.92).** The capture rule now dates an event by what the session
+  says ("yesterday", "last year" — resolved against the session date) while a habit or state the conversation
+  doesn't date gets none (a first draft defaulted whole sessions to the session's year). LoCoMo temporal J
+  **34.0 % → 41.7 %** (net +25 of 321, p ≈ 0.005 — the dates, not more recall); overall 50.0 → 50.5 %, other
+  categories within capture-to-capture churn; temporal eval 13/13 and poisoning 8/8 unchanged. `path-b-memory.md` §13.8.
 - **Agent-initiated writes — `wiki_remember` (P2). ✅ (v0.90).** CoALA's learning action by the agent itself
   (Letta's `memory_replace`), and the fix for **stale state** that the local model couldn't infer afterwards: an
   opt-in MCP tool (`[memory] agent_writes`) — the host agent records facts / the **new state** when it makes a change

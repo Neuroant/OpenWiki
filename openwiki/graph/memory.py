@@ -58,9 +58,13 @@ CAPTURE_SYSTEM = (
     'single run\'s timing, "was pushed / tagged / committed" events). Keep subject/object as short '
     "noun phrases and predicate as a short verb phrase. "
     'Add "valid_from" (an ISO date: YYYY-MM-DD, or YYYY-MM / YYYY) ONLY when the conversation '
-    'explicitly says when the fact became true or takes effect ("since September 1", "from '
-    'October on") — resolve relative dates against the session date if one is given; never '
-    'guess and never use the current date. Add "cardinality" to every fact — a property of the '
+    'says when the fact became true, takes effect or — for an event — happened: an explicit date '
+    '("since September 1", "from October on") or a relative one ("yesterday", "last Friday", '
+    '"two weeks ago", "last year"), resolved against the session date (use YYYY-MM or YYYY when '
+    'only the month or year is known). A date belongs only to the fact it is said about: a fact the '
+    'conversation does not date — a habit, preference, feeling or ongoing state — gets no valid_from '
+    '(never the year or month of the session by default); never guess and never use the current '
+    'date. Add "cardinality" to every fact — a property of the '
     "PREDICATE in general, not of how many objects this conversation happens to mention: "
     '"many" when the subject can relate to several such objects at the same time, so a new one '
     "ADDS to the others (uses, supports, depends on, contains, works with, has member); "

@@ -660,7 +660,8 @@
 - **Alternatives:** keep 0.6 (J 23.7 % on conversation 1); recency-neutral (floor 1.0 — 55.9 %, +3 points, but loses
   the tie-break the dogfooding memory uses for "the latest" among near-equals); a per-query recency switch (no signal
   to set it from).
-- **Consequences:** + conversation 1: 23.7 % → 52.6 %; all 10 conversations: overall J **50.0 %** (1,540 questions),
+- **Consequences:** + conversation 1: 23.7 % → 52.6 %; all 10 conversations: overall J **50.0 %** (1,540 questions; 50.5 %
+  after D13's relative event dates, v0.92),
   the first externally comparable memory number; + the regression sets held (temporal 13/13, poisoning 8/8 with 0
   leaks, cue-trigger cue 7/8). − the remaining gap is capture-side (facts never captured, relative dates — §11
   D13/D14), not ranking. Refines the recall scoring of [ADR-18](#adr-18)/[ADR-31](#adr-31).

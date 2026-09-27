@@ -1180,6 +1180,40 @@ here.
 **Next levers**, each measurable on this harness: capture resolving relative event dates (D13), a denser episodic
 capture for conversational sources (D14), a less abstaining answer prompt for inference questions, a larger `k`.
 
+### 13.8 D13 — capture resolves relative event dates (v0.92), as built and measured
+
+**The gap.** B7's capture rule took `valid_from` only when a date was *stated* ("since September 1"); the model read
+that as "states that take effect", so an event said to have happened "yesterday" or "last year" was stored at the
+session date — LoCoMo's temporal answers were off by exactly that offset (§13.7).
+
+**Prompt check first** (the six LoCoMo sessions carrying the most temporal-question evidence, old vs. candidate
+rule, every dated fact audited by hand):
+- adding "or — for an event — happened … a relative one ("yesterday", "last Friday", "two weeks ago", "last year"),
+  resolved against the session date" resolved the right expressions ("lost her father two days ago" → the right
+  day, "bought the snake a year ago" → 2022, "received the pendant in 2010") but **over-dated**: 50 of 82 facts got a
+  date, a whole session defaulting to the session's year ("Deborah is passionate about teaching yoga" → 2023-01-01);
+- adding "a date belongs only to the fact it is said about … a habit, preference, feeling or ongoing state gets no
+  valid_from (never the year or month of the session by default)": **8 dated facts, all correct** by the audit
+  (the current prompt had also over-dated one whole session — 21 dated).
+
+**Regression:** temporal eval **13/13**, poisoning **8/8, 0/5 leaks** — unchanged.
+
+**LoCoMo, all 10 conversations** (fresh capture, otherwise identical to §13.7):
+
+| Category | before | after | per question |
+|---|---|---|---|
+| **temporal** (321) | 34.0 % | **41.7 %** | 49 → correct, 24 → wrong (net **+25**, sign test p ≈ 0.005) |
+| multi-hop (282) | 54.3 % | 52.8 % | 27 / 31 (net −4) |
+| open-domain (96) | 34.4 % | 32.3 % | 5 / 7 (net −2) |
+| single-hop (841) | 56.5 % | 55.1 % | 92 / 104 (net −12, p ≈ 0.4) |
+| **overall (1–4)** | 50.0 % | **50.5 %** | |
+| adversarial | 89.2 % | 90.6 % | |
+
+The temporal gain is the dates themselves: "Not mentioned" hardly moved (124 → 121) — the facts were there before,
+now with the right date. The other categories churn in both directions by about the same amount — two captures of
+the same conversation at temperature 0.2 differ; their small net dips are within that run-to-run noise (not a
+measured regression, but not measured away either: one run per condition).
+
 ---
 
 *Cross-refs: overview → [`docs/roadmap.md`](roadmap.md#path-b--the-second-brain-memory-model);

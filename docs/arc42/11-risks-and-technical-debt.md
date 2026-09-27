@@ -32,7 +32,7 @@
 | D10 | **Inline citations stay plain text** — "Abschnitt 1.6 / Seite 42" in the prose is not a link (the targets appear only in the "Verwandte Seiten" panel) | The reference label wasn't stored on `REFERENCES` (ADR-28) | ✅ **Addressed (v0.83)** — `REFERENCES.labels` + client-side inline linking; `openwiki references` refreshes an older graph in place (informatik: 33/33 phrases linked). |
 | D11 | **Fact identity** — paraphrased subjects/predicates across sessions ("project version is" / "has version") are different keys, so supersession never fires; measured on real history: 43 version facts on 23 keys, 23 still "current" (v0.84 dogfooding) | Exact normalized-key matching (ADR-18/27) | ✅ **Largely addressed (v0.85, B9 / ADR-29)** — attribute resolution + per-pair coexistence: version facts still "current" 23 → 11, stale current facts 1,355 → 1,195; remaining: declined merges (~4), no general subject resolution. |
 | D12 | **Stale state stays current** — a fact true when said ("the web UI has six tabs", "U7 is the remaining item") remains current when no later session restates the new state; measured: for 12 of 14 labeled stale facts memory holds no successor, and re-resolution / a wiki check / update-aware capture with the local model fail | Capture records what a session *says*, not what it *changed* | ✅ **Partly addressed (v0.90, ADR-33)** — the agent records the new state via `wiki_remember` (14/14 labeled stale facts closed on the dogfooding memory); depends on the agent calling it — unprompted behavior is unmeasured (a `CLAUDE.local.md` instruction nudges it). |
-| D13 | **Relative event dates are not resolved at capture** — "went to a support group *yesterday*" is stored as valid from the session date, not the day before | The capture prompt takes `valid_from` only when a date is *stated* (B7 never guesses) | Low–Medium — have capture resolve relative event expressions ("yesterday", "last week", "last year") against the session date. **Measured (LoCoMo, ADR-34):** temporal J 34 %, answers off by exactly the relative offset. |
+| D13 | **Relative event dates are not resolved at capture** — "went to a support group *yesterday*" is stored as valid from the session date, not the day before | The capture prompt took `valid_from` only when a date is *stated* (B7 never guesses) | ✅ **Addressed (v0.92)** — the capture rule dates an event by a relative expression resolved against the session date, and gives an undated habit / state none (never a default year). LoCoMo temporal J 34.0 → 41.7 % (net +25 of 321, p ≈ 0.005); regression sets unchanged. |
 | D14 | **Capture keeps too little episodic detail** — ~12 facts per session, tuned for durable project facts | The capture prompt skips chit-chat and one-off details by design | Medium — LoCoMo: "Not mentioned" for 34 % of single-hop questions; a denser capture for conversational sources, measured on the same harness. |
 | D8 | **Packaging is Windows/pipx-only** | Primary platform | ✅ **Partly addressed (v0.64/v0.65, ADR-24)** — a Docker image + compose, CI, and a clean build as the `owiki` distribution; the actual PyPI publish remains (license-gated, R7). |
 
@@ -60,7 +60,7 @@ For a single-user, local, learning project the sensible posture is:
   - *Portability* → R6 (a Windows/macOS CI leg, now that Linux is covered).
   - *Memory fidelity* → R8 / D9 / D11 ✅ / **D12** / **D13** (LLM-decided dates + coexistence; negation capture,
     exact belief history; fact identity (v0.85); stale state — the agent must record changes (v0.90); relative event
-    dates at capture); **R9** (agent write access — opt-in + screened).
+    dates at capture — addressed v0.92); **R9** (agent write access — opt-in + screened).
   - *Wiki linking* → D10 ✅ (inline citation links, v0.83).
 
 ## 11.5 Debt → roadmap direction
@@ -74,7 +74,7 @@ For a single-user, local, learning project the sensible posture is:
 | D9 B7 limits | Path B+ — B7 follow-ups (negation capture; row versioning only if needed) |
 | ✅ D11 fact identity (v0.85) | Path B+ — **B9** attribute-key resolution (ADR-29) |
 | D12 stale state *partly* (v0.90) | Path B++ — `wiki_remember` (ADR-33); the local-model alternatives measured and rejected |
-| D13 relative event dates · D14 episodic detail | Path B++ — capture refinements, measured on LoCoMo (`owiki eval --locomo`) |
+| ✅ D13 relative event dates (v0.92) · D14 episodic detail | Path B++ — capture refinements, measured on LoCoMo (`owiki eval --locomo`) |
 | ✅ D10 inline citation links (v0.83) | The wiki-linking track (#1) — `REFERENCES.labels` + `openwiki references` |
 | ✅ D8 packaging *partly* (v0.64/v0.65, ADR-24) | Direction F — Docker + CI + `owiki` build; PyPI publish license-gated |
 

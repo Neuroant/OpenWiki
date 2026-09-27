@@ -269,7 +269,9 @@ re-run continues) and **phased** against GPU model swaps (`CachingEmbedder`: all
 merge checks → one question batch → answer + judge). Options: `--conversations N`, `--categories 1,2,3,4`,
 `--recall-k`, `--recall-now present|today`. **Measured** (all 10, local 30B answering + judging): overall J
 **50.0 %** (multi-hop 54.3 %, temporal 34.0 %, open-domain 34.4 %, single-hop 56.5 %; adversarial 89.2 %) — it set
-`RECENCY_FLOOR` to 0.9 (`docs/path-b-memory.md` §13.7, arc42 ADR-34).
+`RECENCY_FLOOR` to 0.9 (`docs/path-b-memory.md` §13.7, arc42 ADR-34). **D13 (v0.92):** the capture prompt now
+dates events by relative expressions ("yesterday", "last year" → resolved against the session date) but gives
+undated habits/states no `valid_from` (never a default year) — temporal J 34.0 → **41.7 %**, overall 50.5 % (§13.8).
 
 **Sleep — nightly memory maintenance + forgetting** (Path B++): one schedulable writable pass — fold what
 read-only processes queued (usage + journal) → **forget** what the memory policy says not to keep → re-consolidate

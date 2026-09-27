@@ -148,6 +148,16 @@ def test_capture_messages_carry_session_date():
     assert "Session date" not in build_capture_messages("hi")[1]["content"]
 
 
+def test_capture_resolves_relative_event_dates_but_never_defaults_one():
+    """D13 (LoCoMo): an event said to have happened "yesterday" / "last year" is dated by it (resolved
+    against the session date), while an undated habit or state gets no valid_from — an earlier draft
+    dated whole sessions to the session's year and was measured over-dating 13 of 13 facts."""
+    system = build_capture_messages("hi", session_date=T("2023-05-08"))[0]["content"]
+    assert "yesterday" in system and "last year" in system and "happened" in system
+    assert "never the year or month of the session by default" in system
+    assert "never guess" in system
+
+
 def test_journal_remember_record_carries_b7_fields(tmp_path):
     jp = tmp_path / "g.journal.jsonl"
     facts = [MemoryFact("a", "b", "c"),

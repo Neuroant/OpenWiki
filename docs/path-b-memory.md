@@ -926,7 +926,7 @@ ideal — before your 10 AM deep-work block" names the constraint and breaks it)
 **A ranking bug came first.** The first baseline scored every recalled fact 0.0: since B9, `last_seen` counts from
 when a fact was *said*, so on 2025-dated scenarios the recency decay drove every score to ≈0, and ranking then
 sorted rounded zeros. Recency is now a **bounded** tie-breaker (`RECENCY_FLOOR` 0.6 — a year-old relevant fact
-keeps ≥ 60 % of its score) and recall sorts on the unrounded score.
+keeps ≥ 60 % of its score; raised to 0.9 in v0.91 after LoCoMo, §13.7) and recall sorts on the unrounded score.
 
 **What was tried** (8 scenarios, `--recall-k 8`, one run each; every answer hand-audited — *respected* = does the
 task **and** honors the constraint):
@@ -1129,6 +1129,56 @@ would have failed, and the fail-soft hook would have injected nothing. Dates are
 **Limits.** The measurement shows the mechanism works when the agent records the change; whether an agent does so
 unprompted, at the right moments, is a behavior of the host (the tool description asks for it; `CLAUDE.md` / skills
 can reinforce it) and is not measured here. Writes land at the next writable pass, not instantly.
+
+### 13.7 LoCoMo — the first externally comparable number (v0.91)
+
+**The benchmark.** LoCoMo (snap-research) is 10 two-person conversations (19–32 dated sessions each, 57k–90k
+characters) with 1,986 questions: 282 multi-hop, 321 temporal, 96 open-domain, 841 single-hop, 446 adversarial
+(asks about something that never happened; right answer "not mentioned"). It is what memory systems report on.
+`owiki eval --locomo locomo10.json --work DIR` (`openwiki/locomo.py`) runs it the way the memory tier is used:
+capture every session (dated), remember it into a per-conversation graph (B7 + B9 + the coexistence check, as in
+production), answer each question from the assembled recall (`k` = 10), score token F1 and an LLM judge (J —
+Mem0-style generous matching; adversarial by the "not mentioned" pattern). The data isn't bundled (not an open
+license). Resumable + time-budgeted per conversation; **phased** so the models don't swap on a 12 GB GPU (every
+capture, one embedding batch, the merge checks, one question-embedding batch, answer + judge — ~26 s → ~1 s per
+question, ~58 s → ~33 s per session); a transient Ollama CUDA error gets one retry.
+
+**First finding: recency must be a tie-breaker, not a factor.** On conversation 1 (152 questions, categories 1–4),
+recall as shipped — recency against the conversation's present, floor 0.6 — scored J **23.7 %**: facts from the
+last session outranked much more relevant months-old facts ("Caroline attended an LGBTQ support group", session 1,
+fell out of the top 10). Floor **0.9: 52.6 %**; recency-neutral: 55.9 %. Adopted 0.9 (`RECENCY_FLOOR`), after the
+regression sets held: temporal **13/13**, poisoning **8/8, 0/5 leaks**, cue-trigger cue in context **7/8** (judged
+5/8 vs 6/8 — the one difference an answer that had the cue in view and didn't apply it).
+
+**Result — all 10 conversations** (local `qwen3:30b-a3b` answering *and* judging, bge-m3, floor 0.9):
+
+| Category | n | F1 | J |
+|---|---|---|---|
+| multi-hop | 282 | 0.248 | 54.3 % |
+| temporal | 321 | 0.057 | 34.0 % |
+| open-domain | 96 | 0.104 | 34.4 % |
+| single-hop | 841 | 0.331 | 56.5 % |
+| **overall (1–4)** | **1,540** | **0.244** | **50.0 %** |
+| adversarial | 446 | 0.891 | 89.2 % |
+
+Per conversation 41–59 %. For orientation only — not comparable: the Mem0 paper reports overall J ≈ 67 % for Mem0,
+≈ 73 % for full context, ≈ 53 % for OpenAI's memory and ≈ 48 % for A-Mem, with GPT-4o-mini answering and judging;
+here a local 30B does both, and the judge's strictness is unknown. Full context doesn't fit the 16k-token window
+here.
+
+**Where it loses** (from the answers):
+- **Missing detail** — "Not mentioned" answers 34 % of single-hop and 22 % of multi-hop questions: capture keeps
+  ~12 facts per session (it is tuned for durable project facts, not episodic detail), so the fact asked about
+  often never entered memory (§11 D14).
+- **Relative dates** — temporal J 34 %: 124 of 321 temporal answers are "Not mentioned", and many others are off by
+  exactly the relative offset ("When did Maria get in a car accident?" → 2023-07-03, gold July 2: she said
+  "yesterday", and capture stored the session date — §11 D13).
+- **Open-domain** (34 %) needs inference on top of the conversation ("what would Caroline likely pursue?"); the
+  answer prompt's "only from the memories, else Not mentioned" suppresses it (57 % "Not mentioned").
+- **Adversarial 89 %** is partly the same caution scoring well.
+
+**Next levers**, each measurable on this harness: capture resolving relative event dates (D13), a denser episodic
+capture for conversational sources (D14), a less abstaining answer prompt for inference questions, a larger `k`.
 
 ---
 

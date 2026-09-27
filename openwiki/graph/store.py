@@ -53,7 +53,7 @@ _A_B9 = ("attr",)                                                         # B9 a
 _A_P0 = ("source",)                                                       # P0 provenance
 _A_SLEEP = ("forgotten_at", "forgotten")                                  # sleep: archived (when, why)
 MATERIAL_WEIGHT = 0.75                # P0: a claim from discussed material ranks below decisions
-RECENCY_FLOOR = 0.6                   # recall: time decay never takes a fact below 60% of its score
+RECENCY_FLOOR = 0.9                   # recall: recency is a tie-breaker — a fact keeps ≥ 90% of its score (LoCoMo)
 ATTR_SEP = "\x1f"                     # canonical attribute key = normalized subject ␟ predicate
 RESOLVE_THRESHOLD = 0.75              # min fact-embedding cosine for an attribute candidate (B9)
 RESOLVE_K = 6                         # candidates shown to the attribute chooser

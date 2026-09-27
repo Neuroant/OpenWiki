@@ -192,7 +192,7 @@ Alongside the document tier, a project in **Second Brain mode** (`[memory] enabl
   content, transaction time + session its *episodic* trace — the backfill bug was the learning step
   ordering knowledge by experience instead of by event.
 - **Activation + forgetting.** `recall` ranks assertions by cosine × confidence × a **bounded** recency factor
-  (`RECENCY_FLOOR`: an old relevant fact keeps ≥ 60 % of its score; facts from discussed material ×0.75), and
+  (`RECENCY_FLOOR` 0.9: recency only breaks ties — measured on LoCoMo, ADR-34; facts from discussed material ×0.75), and
   read-path `record_usage` / `fold_usage` (B1) + `decay` keep the usage overlay at a useful density. *Forgetting
   facts* is by **policy**, not decay (ADR-32): the nightly `sleep` archives one-off session events ("vX was pushed
   and tagged"), commit hashes and tautologies (`forgotten_at` — out of every view, never deleted) — decay had no

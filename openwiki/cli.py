@@ -236,6 +236,23 @@ def _build_argparser() -> argparse.ArgumentParser:
     eval_p.add_argument("--global", dest="global_search", action="store_true",
                         help="Evaluate global search on a thematic set: community grounding "
                              "(+ --judge = Global vs RAG). Needs a graph with communities.")
+    eval_p.add_argument("--locomo", type=Path, default=None, metavar="JSON",
+                        help="Run the LoCoMo long-conversation memory benchmark (the downloaded "
+                             "locomo10.json): capture + remember each conversation, answer its questions "
+                             "from the assembled recall, report F1 + LLM-judge J per category. Resumable.")
+    eval_p.add_argument("--work", type=Path, default=None, metavar="DIR",
+                        help="--locomo: work directory (per-conversation graphs + answers; a re-run "
+                             "continues where it stopped). Default: ./locomo-work.")
+    eval_p.add_argument("--conversations", type=int, default=None, metavar="N",
+                        help="--locomo: only the first N conversations (default: all 10).")
+    eval_p.add_argument("--categories", default=None, metavar="LIST",
+                        help="--locomo: question categories, e.g. 1,2,3,4 (1 multi-hop, 2 temporal, "
+                             "3 open-domain, 4 single-hop, 5 adversarial; default: all).")
+    eval_p.add_argument("--recall-now", choices=("present", "today"), default="present",
+                        help="--locomo: recall's reference time — the conversation's present (default) or "
+                             "today (every session equally old: recency-neutral ranking).")
+    eval_p.add_argument("--time-budget", type=float, default=None, metavar="SECONDS",
+                        help="--locomo: stop cleanly after this many seconds; re-run to continue.")
     eval_p.add_argument("--cross-session", dest="cross_session", action="store_true",
                         help="Evaluate the Path B memory tier: cross-session task success "
                              "(cold vs raw-log vs assembled; + --judge = assembled vs raw-log). "
@@ -1620,6 +1637,8 @@ def _resolve_eval_set(spec, project: Optional[Project]) -> Path:
 
 def _cmd_eval(args: argparse.Namespace) -> int:
     project = getattr(args, "project_obj", None)
+    if getattr(args, "locomo", None) is not None:
+        return _locomo_eval(args)
     if getattr(args, "cross_session", False):
         return _cross_session_eval(args, project)
     path = _resolve_eval_set(args.eval_set, project)
@@ -1773,6 +1792,63 @@ def _build_stub_graph(tmp_dir: Path, embedder) -> Path:
     gpath = tmp_dir / "graph"
     GraphBuilder(gpath).build(wiki, index)
     return gpath
+
+
+def _locomo_eval(args: argparse.Namespace) -> int:
+    """LoCoMo (Path B++ / P2): the public long-conversation memory benchmark — each conversation's
+    sessions captured + remembered into its own graph (as in production: B7 dates, B9, coexistence),
+    each question answered from the assembled recall, scored by token F1 + an LLM judge (J)."""
+    from .locomo import CATEGORIES, load_locomo, run_locomo
+
+    if not args.locomo.is_file():
+        print(f"error: LoCoMo data not found: {args.locomo} (download locomo10.json from "
+              f"github.com/snap-research/locomo).", file=sys.stderr)
+        return 2
+    if not (args.index / "index.json").is_file():
+        print(f"error: no index at {args.index} (needed for the embedder).", file=sys.stderr)
+        return 2
+    index = SemanticIndex.load(args.index)
+    if isinstance(index.embedder, OllamaEmbedder):
+        index.embedder.host = args.host.rstrip("/")
+    convs = load_locomo(args.locomo)[: args.conversations or None]
+    cats = [int(c) for c in args.categories.split(",")] if args.categories else None
+    work = args.work or Path("locomo-work")
+    stub = work / "_stub"
+
+    def open_graph(path: Path):
+        if not path.exists():                  # a fresh memory graph (the schema) for this conversation
+            stub.mkdir(parents=True, exist_ok=True)
+            src = _build_stub_graph(stub, index.embedder)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(src, path)
+        return GraphStore(path, writable=True)
+
+    if not stub.exists():
+        stub.mkdir(parents=True, exist_ok=True)
+        _build_stub_graph(stub, index.embedder)
+    chat = OllamaChat(model=args.model, host=args.host, temperature=0.2, timeout=900.0,
+                      options={"num_predict": 4096})
+    judge = OllamaChat(model=args.model, host=args.host, temperature=0.0)
+    print(f"LoCoMo: {len(convs)} conversation(s), {chat.name}, recall k={args.recall_k} → {work}",
+          file=sys.stderr)
+    res = run_locomo(convs, work, open_graph, index.embedder, chat, judge=judge, recall_k=args.recall_k,
+                     categories=cats, budget_s=args.time_budget,
+                     coexist=_coexist_check(args.model, args.host),
+                     resolve=_attribute_resolver(args.model, args.host),
+                     on_progress=lambda msg: print(f"  {msg}", file=sys.stderr),
+                     now_mode=args.recall_now)
+    s = res["summary"]
+    state = "complete" if res["complete"] else "partial — re-run to continue"
+    print(f"\nLoCoMo  [{len(res['records'])} answered question(s), {state}, {res['seconds']}s this run]")
+    print(f"  {'category':<12} {'n':>5} {'F1':>7} {'J':>7}")
+    for name in CATEGORIES.values():
+        row = s["by_category"].get(name)
+        if row:
+            print(f"  {name:<12} {row['n']:>5} {row['f1']:>7.3f} {row['j']:>7.1%}")
+    o = s["overall"]
+    if o.get("n"):
+        print(f"  {'overall 1-4':<12} {o['n']:>5} {o['f1']:>7.3f} {o['j']:>7.1%}")
+    return 0
 
 
 def _cross_session_eval(args: argparse.Namespace, project) -> int:

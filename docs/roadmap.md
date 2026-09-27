@@ -897,8 +897,14 @@ The **genuine gaps**, measure-first as always:
   the change-day transcript + related older facts (82 % of candidates flagged, every candidate in 8 of 18 windows,
   36 of 51 labeled flags wrong). Staleness stays visible via each fact's date; the promising route is the writer
   that knows what it changed — `wiki_remember` below. Details: `path-b-memory.md` §13.4–13.5.
-- **LoCoMo benchmark (P2).** The public long-conversation QA set (snap-research) converted to the cross-session
-  format → the first externally comparable number instead of hand-written scenarios only.
+- **LoCoMo benchmark (P2). ✅ (v0.91).** `owiki eval --locomo` (`openwiki/locomo.py`): capture + remember each of
+  the 10 conversations as in production, answer from the assembled recall, token F1 + an LLM judge (J); resumable,
+  time-budgeted, phased against GPU model swaps. **First finding:** recall's recency weighting halved the score
+  (conversation 1: floor 0.6 → J 23.7 %, 0.9 → 52.6 %, neutral → 55.9 %) → `RECENCY_FLOOR` 0.9, regression sets
+  unchanged. **Result, all 1,986 questions** (local 30B answering + judging): overall J **50.0 %** (multi-hop 54.3,
+  temporal 34.0, open-domain 34.4, single-hop 56.5; adversarial 89.2). Losses: facts never captured (single-hop 34 %
+  "Not mentioned"), relative dates stored at the session date (D13), a cautious answer prompt. Mem0 reports ≈ 67 %
+  with GPT-4o-mini — not comparable, but now a reference point. Details: `path-b-memory.md` §13.7; ADR-34.
 - **Agent-initiated writes — `wiki_remember` (P2). ✅ (v0.90).** CoALA's learning action by the agent itself
   (Letta's `memory_replace`), and the fix for **stale state** that the local model couldn't infer afterwards: an
   opt-in MCP tool (`[memory] agent_writes`) — the host agent records facts / the **new state** when it makes a change

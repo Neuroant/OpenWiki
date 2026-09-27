@@ -259,6 +259,18 @@ warm-start `seed`) + `summarize_facts`; `MemoryConcept`/`CONSOLIDATES` are a *de
 (recomputed each pass, not snapshotted across rebuilds — like `Community`). Reports
 `N theme(s) (M summarized, K reused)` (+ pending with `--budget`).
 
+**LoCoMo — the external memory benchmark** (Path B++, v0.91): `owiki eval --locomo locomo10.json --work DIR`
+(`openwiki/locomo.py`; download the data from github.com/snap-research/locomo — not bundled) captures + remembers
+each conversation's dated sessions into its own graph (production settings: B7, B9, coexistence), answers every
+question from the assembled recall and scores token **F1** + an LLM judge (**J**); categories 1 multi-hop, 2
+temporal, 3 open-domain, 4 single-hop, 5 adversarial ("not mentioned" pattern). **Resumable + time-budgeted**
+(`--time-budget S`: per conversation the graph, `captured.jsonl`, `sessions.json` and `answers*.jsonl` persist; a
+re-run continues) and **phased** against GPU model swaps (`CachingEmbedder`: all captures → one embed batch → the
+merge checks → one question batch → answer + judge). Options: `--conversations N`, `--categories 1,2,3,4`,
+`--recall-k`, `--recall-now present|today`. **Measured** (all 10, local 30B answering + judging): overall J
+**50.0 %** (multi-hop 54.3 %, temporal 34.0 %, open-domain 34.4 %, single-hop 56.5 %; adversarial 89.2 %) — it set
+`RECENCY_FLOOR` to 0.9 (`docs/path-b-memory.md` §13.7, arc42 ADR-34).
+
 **Sleep — nightly memory maintenance + forgetting** (Path B++): one schedulable writable pass — fold what
 read-only processes queued (usage + journal) → **forget** what the memory policy says not to keep → re-consolidate
 the themes over what's left → decay the usage edges. Forgetting is **policy-based archiving**, not decay: one-off
@@ -608,8 +620,9 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   `cos × confidence_weight(confidence) × (RECENCY_FLOOR + (1 − RECENCY_FLOOR) × decay(last_seen, now))` — a
   **gentle, log-scaled** confidence lift (`decay.confidence_weight`: a *tie-breaker* among similar-relevance
   facts, so a restated fact outranks a one-off, but relevance still dominates) and a **bounded** recency
-  factor (`RECENCY_FLOOR` 0.6: a year-old relevant fact keeps ≥ 60 % of its score — unbounded decay once
-  scored 2025-dated facts ≈0; it sorts on the unrounded score); returns **current only** by default. `has_memory()` gates both. `_ensure_memory_schema`
+  factor (`RECENCY_FLOOR` **0.9**: recency is a tie-breaker — an old relevant fact keeps ≥ 90 % of its score;
+  unbounded decay once scored 2025-dated facts ≈0, and a 0.6 floor halved LoCoMo accuracy; it sorts on the
+  unrounded score); returns **current only** by default. `has_memory()` gates both. `_ensure_memory_schema`
   lazily creates the tables + `ALTER`s in `confidence`/`last_seen` on pre-0.54 graphs; B0's
   `_snapshot_memory`/`_restore_memory` preserve `SUPERSEDES` + confidence across a rebuild. Exposed as
   the `remember`/`recall` (+`--all`) CLI commands.

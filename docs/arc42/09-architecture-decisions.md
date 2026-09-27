@@ -9,7 +9,7 @@
 > (ADR-25, Direction I), a **capability-complete web UI** (ADR-26, Direction J), graph connectivity as
 > **reader overlays** (ADR-28), and — Path B+ — **bi-temporal** memory (ADR-27, B7) and **fact identity** (ADR-29,
 > B9); Path B++ adds **memory hygiene** (ADR-30), **cue-trigger recall** (ADR-31), **forgetting** in a nightly
-> `sleep` pass (ADR-32) and **agent-recorded state** (ADR-33).
+> `sleep` pass (ADR-32), **agent-recorded state** (ADR-33) and **recency as a tie-breaker**, set by LoCoMo (ADR-34).
 
 ## ADR index
 
@@ -48,6 +48,7 @@
 | [31](#adr-31) | Cue-trigger recall: fact-shaped constraint probes, personal-only slots, opt-in | Accepted (Path B++ / P1) | correctness |
 | [32](#adr-32) | Forgetting as policy-based archiving in a nightly `sleep` pass | Accepted (Path B++ / P1) | correctness, Q5 |
 | [33](#adr-33) | Stale state fixed by the writer that makes the change (`wiki_remember`, journaled, exact `replaces`) | Accepted (Path B++ / P2) | correctness, security |
+| [34](#adr-34) | Recency in recall is a tie-breaker (floor 0.9), set by the LoCoMo benchmark | Accepted (Path B++ / P2) | correctness, Q5 |
 
 ---
 
@@ -647,6 +648,23 @@
   next writable pass; − an agent with write access is a poisoning vector (hence opt-in + the P0 screen, [ADR-30](#adr-30)).
   Uses [ADR-19](#adr-19)'s journal and [ADR-27](#adr-27)'s valid-time model.
 
+### ADR-34
+**Recency in recall is a tie-breaker (`RECENCY_FLOOR` 0.9), set by an external benchmark.** *(v0.91, Path B++ / P2)*
+- **Context:** recall scores facts by cosine × confidence × a recency factor `floor + (1 − floor) · decay`. The floor
+  was 0.6 (v0.87, after unbounded decay had scored old facts ≈0). LoCoMo — the long-conversation benchmark memory
+  systems report on, now runnable as `owiki eval --locomo` — asks about any point in months of dated sessions: with
+  0.6, facts from the last session outranked far more relevant older ones and conversation 1 scored J 23.7 %.
+- **Decision:** floor **0.9** — recency may move a fact by at most 10 %, enough to prefer the recent of two equally
+  relevant facts, never enough to outrank a clearly more relevant one. B7 already keeps outdated values out of
+  "current", and `sleep` + `wiki_remember` handle noise and stale state, so recency no longer carries correctness.
+- **Alternatives:** keep 0.6 (J 23.7 % on conversation 1); recency-neutral (floor 1.0 — 55.9 %, +3 points, but loses
+  the tie-break the dogfooding memory uses for "the latest" among near-equals); a per-query recency switch (no signal
+  to set it from).
+- **Consequences:** + conversation 1: 23.7 % → 52.6 %; all 10 conversations: overall J **50.0 %** (1,540 questions),
+  the first externally comparable memory number; + the regression sets held (temporal 13/13, poisoning 8/8 with 0
+  leaks, cue-trigger cue 7/8). − the remaining gap is capture-side (facts never captured, relative dates — §11
+  D13/D14), not ranking. Refines the recall scoring of [ADR-18](#adr-18)/[ADR-31](#adr-31).
+
 ---
 *Chapter complete. The Path-B agent-memory direction landed via ADR-14/15/16/17/18/19; the graph then
 deepened (ADR-22 typed relations + relation-aware GraphRAG, ADR-23 entity resolution), gained
@@ -656,6 +674,7 @@ deepened (ADR-22 typed relations + relation-aware GraphRAG, ADR-23 entity resolu
 **reader overlays** (ADR-28), and Path B+'s **bi-temporal memory** (ADR-27, B7 — refines ADR-15/18) with
 **fact identity** (ADR-29, B9 — measured on real development history), **memory hygiene** against
 poisoning (ADR-30, P0), **cue-trigger recall** for implicit constraints (ADR-31, P1) and policy-based
-**forgetting** in a nightly sleep pass (ADR-32), and **agent-recorded state** against stale facts (ADR-33). §11
+**forgetting** in a nightly sleep pass (ADR-32), **agent-recorded state** against stale facts (ADR-33), and recall
+recency as a tie-breaker set by the **LoCoMo** benchmark (ADR-34). §11
 debts D1/D2/D6 are resolved. Deep designs in `docs/path-b-memory.md` and `docs/RAG-vs-GraphRAG.md`. New significant
 decisions should be appended here with the next id.*

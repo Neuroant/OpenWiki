@@ -69,9 +69,10 @@ Scenarios are written as *stimulus → expected response* so they can be checked
   prompts the injected junk fell **31 % → 5 %**, 0 of 232 labeled keep-facts dropped (ADR-32); QS-19 by
   `wiki_remember` — the 14 labeled stale facts of the dogfooding memory closed, stale facts in 10 topic contexts
   **12 → 0** (ADR-33). All on small, hand-labeled sets (one annotator) — direction checks, not benchmarks.
-- **Not yet measured externally (memory):** every memory number above comes from hand-written scenarios or the
-  project's own history; an externally comparable benchmark (LoCoMo, the long-conversation QA set memory systems
-  report on) is the open item.
+- **Measured externally (memory):** LoCoMo (`owiki eval --locomo`, ADR-34) — all 10 conversations, 1,986 questions,
+  a local 30B answering + judging: overall J **50.0 %** (multi-hop 54.3, temporal 34.0, open-domain 34.4, single-hop
+  56.5; adversarial 89.2). Mem0 reports ≈ 67 % with GPT-4o-mini — a reference point, not a like-for-like comparison.
+  The benchmark changed a default (recency floor 0.6 → 0.9) and located the remaining losses in capture (§11 D13/D14).
 - **Not formally measured (performance):** there is no latency/throughput *budget* yet — though the
   observability layer (ADR-20) now surfaces per-run p50/p95 latency + tokens, so measurement is a query
   away. Known scale on the reference corpus (informatik), built with the full graph (`--relations

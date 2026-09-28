@@ -73,7 +73,8 @@ Scenarios are written as *stimulus → expected response* so they can be checked
   a local 30B answering + judging: overall J **50.0 %** (multi-hop 54.3, temporal 34.0, open-domain 34.4, single-hop
   56.5; adversarial 89.2). Mem0 reports ≈ 67 % with GPT-4o-mini — a reference point, not a like-for-like comparison.
   The benchmark changed a default (recency floor 0.6 → 0.9) and located the remaining losses in capture (§11 D13/D14);
-  D13 (relative event dates, v0.92) then took temporal J 34.0 → **41.7 %**, overall **50.5 %**.
+  D13 (relative event dates, v0.92) then took temporal J 34.0 → **41.7 %**, overall **50.5 %**; an answer prompt that
+  allows inference (v0.93, paired on the same memory) took overall J to **55.0 %** (adversarial 90.6 → 86.3 %).
 - **Not formally measured (performance):** there is no latency/throughput *budget* yet — though the
   observability layer (ADR-20) now surfaces per-run p50/p95 latency + tokens, so measurement is a query
   away. Known scale on the reference corpus (informatik), built with the full graph (`--relations

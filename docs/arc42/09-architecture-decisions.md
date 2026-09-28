@@ -662,7 +662,7 @@
   to set it from).
 - **Consequences:** + conversation 1: 23.7 % → 52.6 %; all 10 conversations: overall J **50.0 %** (1,540 questions; 50.5 %
   after D13's relative event dates, v0.92),
-  the first externally comparable memory number; + the regression sets held (temporal 13/13, poisoning 8/8 with 0
+  the first externally comparable memory number (55.0 % with the inference answer prompt, v0.93); + the regression sets held (temporal 13/13, poisoning 8/8 with 0
   leaks, cue-trigger cue 7/8). − the remaining gap is capture-side (facts never captured, relative dates — §11
   D13/D14), not ranking. Refines the recall scoring of [ADR-18](#adr-18)/[ADR-31](#adr-31).
 

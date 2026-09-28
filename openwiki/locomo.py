@@ -154,6 +154,20 @@ ANSWER_SYSTEM = (
     "expressions like 'last week' against the date shown). If the memories do not contain the answer, reply "
     f"exactly: {NOT_MENTIONED}.")
 
+# "infer" (the default): the strict prompt answered "Not mentioned" to 57 % of open-domain questions ("what would
+# Caroline likely pursue?"). Measured paired on the same graphs: overall J 50.5 → 55.0 % (+45 single-hop, +10
+# multi-hop, +8 temporal, +7 open-domain) for −19 adversarial (path-b-memory.md §13.9).
+ANSWER_SYSTEM_INFER = (
+    "You answer questions about a long conversation between two people, from your memory of it: facts "
+    "remembered from its sessions, each with the date it held. Answer with a short phrase — a few words, no "
+    "explanation. For 'when' questions give the date, month or year from the memories (resolve relative "
+    "expressions like 'last week' against the date shown). When the question asks what someone would likely "
+    "do, prefer, think or be — or the answer follows from the remembered facts without being stated — give "
+    "your best inference from them. Reply exactly "
+    f"{NOT_MENTIONED} only when nothing remembered bears on the question, or when it asks about something the "
+    "memories attribute to someone else or never mention happening.")
+ANSWER_STYLES = {"strict": ANSWER_SYSTEM, "infer": ANSWER_SYSTEM_INFER}
+
 JUDGE_SYSTEM = (
     "You label a generated answer to a question about a conversation as CORRECT or WRONG, given the gold answer. "
     "Be generous: if the generated answer captures the same fact as the gold answer — even phrased differently, "
@@ -162,10 +176,10 @@ JUDGE_SYSTEM = (
     "Reply with one word: CORRECT or WRONG.")
 
 
-def build_answer_messages(question: str, context: str) -> list:
+def build_answer_messages(question: str, context: str, style: str = "infer") -> list:
     user = (f"{context}\n\nQuestion: {question}" if context.strip()
             else f"(Nothing is remembered about this.)\n\nQuestion: {question}")
-    return [{"role": "system", "content": ANSWER_SYSTEM}, {"role": "user", "content": user}]
+    return [{"role": "system", "content": ANSWER_STYLES[style]}, {"role": "user", "content": user}]
 
 
 def judge_answer(chat, question: str, gold: str, prediction: str) -> bool:
@@ -245,7 +259,8 @@ def _read_jsonl(path: Path) -> list:
 
 def run_locomo(conversations, work_dir, open_graph: Callable, embedder, chat, judge=None, recall_k: int = 12,
                categories=None, budget_s: Optional[float] = None, coexist=None, resolve=None,
-               on_progress: Optional[Callable] = None, now_mode: str = "present") -> dict:
+               on_progress: Optional[Callable] = None, now_mode: str = "present",
+               answer_style: str = "infer") -> dict:
     """Capture + remember each conversation (once — resumable per session), then answer + score its questions
     (resumable per question). ``open_graph(path)`` returns a **writable** memory graph at ``path`` (created if
     absent). Stops when ``budget_s`` seconds are spent (``complete: False``); the next call continues.
@@ -264,7 +279,9 @@ def run_locomo(conversations, work_dir, open_graph: Callable, embedder, chat, ju
         cdir = work / conv.sample_id
         cdir.mkdir(parents=True, exist_ok=True)
         done_path, cap_path = cdir / "sessions.json", cdir / "captured.jsonl"
-        ans_path = cdir / ("answers.jsonl" if now_mode == "present" else f"answers-{now_mode}.jsonl")
+        tag = "".join(f"-{t}" for t in (now_mode if now_mode != "present" else "",
+                                        answer_style) if t)
+        ans_path = cdir / f"answers{tag}.jsonl"             # each variant keeps its own answers
         done = json.loads(done_path.read_text(encoding="utf-8")) if done_path.is_file() else []
         captured = {r["sid"]: r["facts"] for r in _read_jsonl(cap_path)}
         answers = {r["i"]: r for r in _read_jsonl(ans_path)}
@@ -308,7 +325,8 @@ def run_locomo(conversations, work_dir, open_graph: Callable, embedder, chat, ju
                             break
                         hits = graph.recall(q.question, emb, k=recall_k, now=now)
                         ctx = assemble_context("", hits, [], max_facts=recall_k)
-                        raw = _retry(lambda: chat.chat(build_answer_messages(q.question, ctx))) or ""
+                        raw = _retry(lambda: chat.chat(build_answer_messages(q.question, ctx,
+                                                                             answer_style))) or ""
                         pred = re.sub(r"<think>.*?</think>", "", raw, flags=re.S).strip()
                         ok = (abstains(pred) if q.category == 5
                               else _retry(lambda: judge_answer(judge or chat, q.question, q.answer, pred)))

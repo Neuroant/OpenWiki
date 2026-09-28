@@ -1214,6 +1214,33 @@ now with the right date. The other categories churn in both directions by about 
 the same conversation at temperature 0.2 differ; their small net dips are within that run-to-run noise (not a
 measured regression, but not measured away either: one run per condition).
 
+### 13.9 The benchmark's answer prompt — strict vs. inference (v0.93)
+
+The answering model is a harness choice (in real use the host agent reads the injected memory), and the first
+prompt was strict: "if the memories do not contain the answer, reply exactly: Not mentioned" — it answered "Not
+mentioned" to 57 % of open-domain questions ("what would Caroline likely pursue?"), which ask for inference on top
+of the conversation. The **infer** style keeps the short-answer and date rules, asks for the best inference when a
+question is about what someone would likely do / prefer / be or the answer follows from the facts, and keeps "Not
+mentioned" for questions nothing bears on — or about something the memories attribute to someone else or never
+mention happening (the adversarial trap).
+
+**Measured paired** — the same D13 graphs, only the prompt differs, all 1,986 questions:
+
+| Category | strict | infer | per question |
+|---|---|---|---|
+| multi-hop (282) | 52.8 % | 56.4 % | +15 / −5 (p ≈ 0.04) |
+| temporal (321) | 41.7 % | 44.2 % | +12 / −4 (p ≈ 0.08) |
+| open-domain (96) | 32.3 % | 39.6 % | +8 / −1 (p ≈ 0.05) |
+| single-hop (841) | 55.1 % | 60.4 % | +51 / −6 (p < 0.001) |
+| **overall (1–4)** | 50.5 % | **55.0 %** | |
+| adversarial (446) | 90.6 % | 86.3 % | +1 / −20 (p < 0.001) |
+
+The gain is fewer abstentions where the answer *was* in memory ("Not mentioned" on single-hop 282 → 219); the price
+is 19 adversarial questions now answered instead of refused. About +70 / −19 overall → **infer is the default**
+(`--answer-style infer`; `strict` stays available — its answers keep their own file). LoCoMo so far: recall
+recency 0.6 → 0.9 (ADR-34), relative event dates (D13), the answer prompt — **overall J 50.0 → 55.0 %** with a
+local 30B; the remaining gap is mainly facts capture never kept (D14).
+
 ---
 
 *Cross-refs: overview → [`docs/roadmap.md`](roadmap.md#path-b--the-second-brain-memory-model);

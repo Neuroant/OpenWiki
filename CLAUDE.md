@@ -272,6 +272,9 @@ merge checks → one question batch → answer + judge). Options: `--conversatio
 `RECENCY_FLOOR` to 0.9 (`docs/path-b-memory.md` §13.7, arc42 ADR-34). **D13 (v0.92):** the capture prompt now
 dates events by relative expressions ("yesterday", "last year" → resolved against the session date) but gives
 undated habits/states no `valid_from` (never a default year) — temporal J 34.0 → **41.7 %**, overall 50.5 % (§13.8).
+**Answer prompt (v0.93):** `--answer-style infer` (default; `ANSWER_SYSTEM_INFER`) answers "would / likely"
+questions by inference from the memories, `strict` only from what they say; each style writes its own
+`answers-<style>.jsonl`. Paired on the same graphs: overall J 50.5 → **55.0 %**, adversarial 90.6 → 86.3 % (§13.9).
 
 **Sleep — nightly memory maintenance + forgetting** (Path B++): one schedulable writable pass — fold what
 read-only processes queued (usage + journal) → **forget** what the memory policy says not to keep → re-consolidate

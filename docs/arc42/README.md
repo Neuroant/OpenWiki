@@ -5,7 +5,7 @@ This is the architecture documentation for **OpenWiki**, structured after the
 into 12 sections, from goals and constraints down to building blocks, runtime, decisions,
 quality, and risks.
 
-> **Status: COMPLETE** (maintained through v0.92). All 12 chapters are complete; diagrams use Mermaid
+> **Status: COMPLETE** (maintained through v0.93). All 12 chapters are complete; diagrams use Mermaid
 > (rendered by GitHub) and have been validated. The **Path B agent-memory** direction is complete
 > (B0–B6; ADR-14–19). Since then the architecture has grown eight more decision clusters (§9), all
 > reflected here: the graph **deepened** — typed `Entity→Entity` relations + relation-aware GraphRAG
@@ -21,8 +21,8 @@ quality, and risks.
 > **memory hygiene by policy** (a source-independent security policy, ADR-30; forgetting in a nightly `sleep`
 > pass, ADR-32), opt-in **cue-trigger recall** (ADR-31), and **agent-recorded state** against stale facts
 > (`wiki_remember`, ADR-33) — with host hooks + `backfill` feeding memory from Claude Code sessions (§6.8–6.10,
-> QS-16–19) — and the first external memory benchmark, **LoCoMo** (overall J 50.0 % with a local 30B; it set recall
-> recency to a tie-breaker, ADR-34). Deep detail: `docs/path-b-memory.md`, `docs/RAG-vs-GraphRAG.md`.
+> QS-16–19) — and the first external memory benchmark, **LoCoMo** (overall J 50.0 % with a local 30B → 55.0 % after
+> relative event dates + an inference answer prompt; it set recall recency to a tie-breaker, ADR-34). Deep detail: `docs/path-b-memory.md`, `docs/RAG-vs-GraphRAG.md`.
 
 ## Audience & relationship to the other docs
 

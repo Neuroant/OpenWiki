@@ -88,7 +88,7 @@ class _Chat:
             if "cat" in user:
                 return '[{"subject":"Ann","predicate":"adopted a cat named","object":"Tom"}]'
             return '[{"subject":"Bob","predicate":"ran","object":"a marathon"}]'
-        if system == lc.ANSWER_SYSTEM:
+        if system in lc.ANSWER_STYLES.values():
             return "Tom" if "cat" in user.split("Question:")[-1] else lc.NOT_MENTIONED
         return "CORRECT" if user.split("Gold answer: ")[1].split("\n")[0] in user.split("Generated answer: ")[1] \
             else "WRONG"
@@ -132,4 +132,8 @@ def test_run_is_phased_resumable_and_scored(tmp_path):
     assert len(_Graph.store[str(work / "conv-x" / "graph")]) == 2   # each session remembered once
     # another recall mode writes its own answers file
     today = lc.run_locomo(convs, work, _Graph, _Emb(), _Chat(), now_mode="today", categories=[4])
-    assert (work / "conv-x" / "answers-today.jsonl").is_file() and len(today["records"]) == 1
+    assert (work / "conv-x" / "answers-today-infer.jsonl").is_file() and len(today["records"]) == 1
+    strict = lc.run_locomo(convs, work, _Graph, _Emb(), _Chat(), answer_style="strict", categories=[4])
+    assert (work / "conv-x" / "answers-strict.jsonl").is_file() and len(strict["records"]) == 1
+    assert lc.build_answer_messages("q", "ctx")[0]["content"] == lc.ANSWER_SYSTEM_INFER
+    assert lc.build_answer_messages("q", "ctx", "strict")[0]["content"] == lc.ANSWER_SYSTEM

@@ -910,6 +910,11 @@ The **genuine gaps**, measure-first as always:
   doesn't date gets none (a first draft defaulted whole sessions to the session's year). LoCoMo temporal J
   **34.0 % → 41.7 %** (net +25 of 321, p ≈ 0.005 — the dates, not more recall); overall 50.0 → 50.5 %, other
   categories within capture-to-capture churn; temporal eval 13/13 and poisoning 8/8 unchanged. `path-b-memory.md` §13.8.
+- **LoCoMo answer prompt — inference allowed. ✅ (v0.93).** The strict "only what the memories say, else Not
+  mentioned" prompt abstained on 57 % of open-domain questions; the `infer` style answers "would / likely"
+  questions from the remembered facts and keeps refusing what nothing bears on. Paired on the same graphs: overall J
+  **50.5 → 55.0 %** (single-hop +45 net, p < 0.001; multi-hop +10; open-domain +7; temporal +8) for −19 adversarial →
+  the default. `path-b-memory.md` §13.9.
 - **Agent-initiated writes — `wiki_remember` (P2). ✅ (v0.90).** CoALA's learning action by the agent itself
   (Letta's `memory_replace`), and the fix for **stale state** that the local model couldn't infer afterwards: an
   opt-in MCP tool (`[memory] agent_writes`) — the host agent records facts / the **new state** when it makes a change

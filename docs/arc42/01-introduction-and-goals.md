@@ -49,7 +49,7 @@ Core use cases (each maps to a runtime scenario in §6):
 | U3 | Ask a thematic, whole-corpus question | `ask --global` | §6.3 |
 | U4 | Explore & edit the wiki in a browser | `serve` | §6.4 |
 | U5 | Consult the wiki from a coding agent | MCP (`wiki_*`) | §6.2/§6.3 via MCP |
-| U6 | Measure retrieval / answer / global quality | `eval [--answers/--global]` | §6 + `docs/RAG-vs-GraphRAG.md` |
+| U6 | Measure retrieval / answer / global / memory quality — incl. the external **LoCoMo** memory benchmark | `eval [--answers/--global/--cross-session/--locomo]` | §6 + `docs/RAG-vs-GraphRAG.md` + `docs/path-b-memory.md` §13.7–13.10 |
 | U7 | Remember a session & recall it in the next (agent memory) | `remember` / `recall` | §6.7 |
 | U8 | Feed a coding agent's sessions into memory automatically (+ import its history) | `claude-code --hooks --into`, `backfill` | §6.8 |
 | U9 | Keep memory clean + consolidated overnight | `sleep` (schedulable) | §6.9 |

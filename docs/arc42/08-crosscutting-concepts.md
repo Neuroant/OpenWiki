@@ -197,6 +197,11 @@ Alongside the document tier, a project in **Second Brain mode** (`[memory] enabl
   facts* is by **policy**, not decay (ADR-32): the nightly `sleep` archives one-off session events ("vX was pushed
   and tagged"), commit hashes and tautologies (`forgotten_at` — out of every view, never deleted) — decay had no
   signal to go on (2 of 1,218 facts ever re-affirmed; the junk is recalled *often*).
+- **Measured externally (LoCoMo, ADR-34).** The long-conversation benchmark memory systems report on runs as
+  `owiki eval --locomo`, capturing and recalling exactly as production does. It set recall recency to a tie-breaker
+  (0.6 → 0.9), located the remaining losses in capture, and moved overall J from 50.0 to 55.0 % with a local 30B via
+  paired, adopted changes (relative event dates in capture; an inference-allowing answer prompt in the harness); an
+  episodic capture style (~2× facts) was measured and not adopted (`docs/path-b-memory.md` §13.7–13.10).
 - **Hygiene by policy, not model judgment.** Four times the local 30B model was measured as a judge *of* memory
   — a poisoning audit (ADR-30), a forgetting review (ADR-32), a staleness check against the wiki and update-aware
   capture (`docs/path-b-memory.md` §13.4–13.5) — and each time it confused "related" with "invalid" or dropped keep-facts.

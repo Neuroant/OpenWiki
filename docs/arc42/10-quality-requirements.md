@@ -19,6 +19,7 @@ flowchart LR
   F --> F1["Grounded, cited answers"] & F2["Global sensemaking"] & F3["Cross-session memory (Path B)"]
   F --> F4["World-model analysis (owiki analyze)"] & F5["Temporal memory (as-of / known-at, B7)"]
   F --> F6["Memory hygiene (poisoning, forgetting, stale state)"] & F7["Implicit-constraint recall"]
+  F --> F8["External memory benchmark (LoCoMo)"]
   E --> E1["Small-corpus latency"] & E2["Incremental builds"] & E3["Observability (per-call metrics)"]
   M --> M4["CI (offline suite, Linux)"]
   I --> I1["CLI / HTTP / MCP"]
@@ -51,6 +52,7 @@ Scenarios are written as *stimulus → expected response* so they can be checked
 | QS-17 | Correctness (implicit constraints) | could | With `[memory] probes`, a constraint mentioned in passing ("I can't stand noisy open-plan offices") shapes an unrelated later request ("book a venue for the client meeting") (ADR-31). `examples/eval_cue_trigger.jsonl` measures cue recall + an LLM judge of whether the answer respects it. |
 | QS-18 | Usefulness (memory noise) | should | After `openwiki sleep`, the facts injected for real prompts contain no one-off session events ("vX was pushed and tagged", commit hashes), and no fact a person would keep was removed — forgotten facts stay in the graph (ADR-32). |
 | QS-19 | Correctness (stale state) | should | The coding agent changes something the memory describes and records it with `wiki_remember` (the new state + `replaces`) → after the next write pass the old fact is closed (kept as history) and recall shows the new one (ADR-33). |
+| QS-20 | Measurability (memory, external) | should | Run `owiki eval --locomo locomo10.json --work DIR` → per-category token F1 + LLM-judge J over the public LoCoMo conversations, captured and recalled as in production; resumable across runs, each variant (recall time, answer / capture style) in its own answers file, so two variants compare paired on the same memory (ADR-34). |
 
 ## 10.3 Current evidence & gaps
 
@@ -74,7 +76,9 @@ Scenarios are written as *stimulus → expected response* so they can be checked
   56.5; adversarial 89.2). Mem0 reports ≈ 67 % with GPT-4o-mini — a reference point, not a like-for-like comparison.
   The benchmark changed a default (recency floor 0.6 → 0.9) and located the remaining losses in capture (§11 D13/D14);
   D13 (relative event dates, v0.92) then took temporal J 34.0 → **41.7 %**, overall **50.5 %**; an answer prompt that
-  allows inference (v0.93, paired on the same memory) took overall J to **55.0 %** (adversarial 90.6 → 86.3 %).
+  allows inference (v0.93, paired on the same memory) took overall J to **55.0 %** (adversarial 90.6 → 86.3 %); an
+  episodic capture style was measured and not adopted (v0.94: +2.8 on 4 conversations, p ≈ 0.26, at ~2× cost). QS-20
+  is met by the harness itself.
 - **Not formally measured (performance):** there is no latency/throughput *budget* yet — though the
   observability layer (ADR-20) now surfaces per-run p50/p95 latency + tokens, so measurement is a query
   away. Known scale on the reference corpus (informatik), built with the full graph (`--relations

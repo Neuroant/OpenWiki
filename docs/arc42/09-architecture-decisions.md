@@ -510,6 +510,10 @@
   hand-written (a direction check, not a benchmark). Refines [ADR-15](#adr-15) (fields) and
   [ADR-18](#adr-18) (supersession semantics); [ADR-16](#adr-16) snapshots the columns;
   [ADR-19](#adr-19) journal records keep their own record time.
+- **Refinement (v0.92, D13):** "a date the transcript *states*" now includes a relative expression for an
+  event ("yesterday", "last year" — resolved against the session date), while a fact the conversation doesn't
+  date gets no `valid_from` (never a default year — a draft that allowed it over-dated whole sessions). Measured on
+  LoCoMo: temporal J 34.0 → 41.7 % (net +25 of 321, p ≈ 0.005); the temporal eval stayed 13/13.
 
 ### ADR-28
 **Graph connectivity surfaced as read-only reader overlays, not written into page source.** *(v0.79–v0.80)*

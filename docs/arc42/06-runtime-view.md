@@ -284,6 +284,15 @@ Any embed or chat call goes through `urllib` to Ollama; on failure `OllamaEmbedd
 Note: even plain RAG retrieval needs the embedder (to embed the *query*), so a down Ollama
 fails retrieval, not just generation.
 
+### Model-call grouping for bulk jobs (GPU memory)
+On the reference 12 GB GPU the 30B chat model and the embedder don't fit together, so Ollama reloads a model
+whenever an embedding call follows a chat call or vice versa (~19 s each). Interactive paths accept that; **bulk
+jobs group their calls** instead. The LoCoMo runner (`locomo.run_locomo`) captures every pending session first
+(chat), embeds all captured facts in one batch through a `CachingEmbedder`, merges them (chat checks, embeddings
+served from the cache), embeds all pending questions in one batch, then answers and judges (chat) — measured ~26 s
+→ ~1 s per question and ~58 s → ~33 s per session. Its state persists per conversation (graph, captured facts,
+answers), so a `--time-budget` stop and a transient model-server error (one retry) cost no work.
+
 ### Concurrency & the write-ahead journal (B1 / ADR-19)
 Kuzu 0.11 is **reader-XOR-writer** (measured): a writable connection blocks all readers, and readers
 block a writer — no simultaneous read+write. So `serve`/`chat` open the graph **read-only by default**,

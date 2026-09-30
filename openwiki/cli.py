@@ -254,6 +254,9 @@ def _build_argparser() -> argparse.ArgumentParser:
     eval_p.add_argument("--answer-style", choices=("strict", "infer"), default="infer",
                         help="--locomo: the answer prompt — infer (default: best inference from the memories "
                              "for 'would / likely' questions) or strict (only what the memories say).")
+    eval_p.add_argument("--capture-style", choices=("durable", "episodic"), default="durable",
+                        help="--locomo: capture prompt — durable (project facts, default) or episodic (every "
+                             "concrete detail of a conversation). Use a separate --work dir per style.")
     eval_p.add_argument("--time-budget", type=float, default=None, metavar="SECONDS",
                         help="--locomo: stop cleanly after this many seconds; re-run to continue.")
     eval_p.add_argument("--cross-session", dest="cross_session", action="store_true",
@@ -1839,7 +1842,8 @@ def _locomo_eval(args: argparse.Namespace) -> int:
                      coexist=_coexist_check(args.model, args.host),
                      resolve=_attribute_resolver(args.model, args.host),
                      on_progress=lambda msg: print(f"  {msg}", file=sys.stderr),
-                     now_mode=args.recall_now, answer_style=args.answer_style)
+                     now_mode=args.recall_now, answer_style=args.answer_style,
+                     capture_style=args.capture_style)
     s = res["summary"]
     state = "complete" if res["complete"] else "partial — re-run to continue"
     print(f"\nLoCoMo  [{len(res['records'])} answered question(s), {state}, {res['seconds']}s this run]")

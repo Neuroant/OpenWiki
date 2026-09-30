@@ -275,6 +275,10 @@ undated habits/states no `valid_from` (never a default year) — temporal J 34.0
 **Answer prompt (v0.93):** `--answer-style infer` (default; `ANSWER_SYSTEM_INFER`) answers "would / likely"
 questions by inference from the memories, `strict` only from what they say; each style writes its own
 `answers-<style>.jsonl`. Paired on the same graphs: overall J 50.5 → **55.0 %**, adversarial 90.6 → 86.3 % (§13.9).
+**D14 (measured, not adopted):** `--capture-style episodic` (`memory.CAPTURE_SYSTEM_EPISODIC`, `capture_session(…,
+style=)`) captures every concrete detail — ~2× the facts; paired on 4 conversations overall 58.2 → 61.0 %, p ≈ 0.26,
+inconsistent per conversation, adversarial −4 → experiment option only, no project setting; production stays
+`durable` (§13.10). Use a separate `--work` dir per capture style.
 
 **Sleep — nightly memory maintenance + forgetting** (Path B++): one schedulable writable pass — fold what
 read-only processes queued (usage + journal) → **forget** what the memory policy says not to keep → re-consolidate

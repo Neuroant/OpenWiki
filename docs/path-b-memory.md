@@ -1241,6 +1241,40 @@ is 19 adversarial questions now answered instead of refused. About +70 / −19 o
 recency 0.6 → 0.9 (ADR-34), relative event dates (D13), the answer prompt — **overall J 50.0 → 55.0 %** with a
 local 30B; the remaining gap is mainly facts capture never kept (D14).
 
+### 13.10 D14 — an episodic capture style, measured and not adopted
+
+**Idea.** The durable capture prompt keeps ~12 facts per session — right for a project memory (no session trivia),
+possibly too sparse for conversations between people, where any detail may be asked about later (single-hop "Not
+mentioned" 26 % after §13.9). An **episodic** style asks for every concrete, specific fact — events, the people,
+pets, places and groups involved by name, objects, titles, numbers, preferences, feelings, goals — one per triple,
+named after the person; the date / cardinality / source rules are shared with the durable style.
+
+**A proxy that misled.** Counting gold answers that appear in some captured fact (≥ 80 % of the gold's words) on the
+six sessions with the most single-/multi-hop evidence: durable 105 facts → 25/88 covered, episodic 216 facts →
+26/88. Reading the facts showed the proxy under-counts (answers in other words — "is considering a career in
+counseling and mental health" for "counseling or mental health for Transgender people"; multi-part answers spread
+over sessions), so only an end-to-end run decides.
+
+**End to end, paired** (the same answer prompt, only the capture differs; 4 of the 10 conversations, 584 scored
+questions):
+
+| Category | durable | episodic | per question |
+|---|---|---|---|
+| multi-hop (111) | 56.8 % | 53.2 % | +15 / −19 |
+| temporal (130) | 53.1 % | 62.3 % | +28 / −16 (p ≈ 0.10) |
+| open-domain (32) | 37.5 % | 37.5 % | +3 / −3 |
+| single-hop (311) | 63.0 % | 65.6 % | +51 / −43 (p ≈ 0.47) |
+| **overall (1–4)** | 58.2 % | 61.0 % | **+97 / −81 (p ≈ 0.26)** |
+| adversarial (173) | 83.2 % | 79.2 % | +8 / −15 |
+
+Per conversation +3.9, −2.5, −2.0, +7.5 points. **Not adopted:** the +2.8 is not significant and not consistent
+across conversations — two captures of the same conversation with the *same* prompt already flip ~200 single-hop
+answers (§13.8) — while the cost is certain: ~2× the facts per session (216 vs. 105), ~60 s instead of ~33 s per
+capture, a slower merge, and adversarial down 4 points (more material for the trap questions). The style stays in
+the code for experiments only (`capture_session(…, style="episodic")`, `owiki eval --locomo --capture-style
+episodic`); there is no project setting, and every production path captures durably. What would settle it: all 10
+conversations × 2 captures per style, to separate the style from capture-to-capture variance.
+
 ---
 
 *Cross-refs: overview → [`docs/roadmap.md`](roadmap.md#path-b--the-second-brain-memory-model);

@@ -260,7 +260,7 @@ def _read_jsonl(path: Path) -> list:
 def run_locomo(conversations, work_dir, open_graph: Callable, embedder, chat, judge=None, recall_k: int = 12,
                categories=None, budget_s: Optional[float] = None, coexist=None, resolve=None,
                on_progress: Optional[Callable] = None, now_mode: str = "present",
-               answer_style: str = "infer") -> dict:
+               answer_style: str = "infer", capture_style: str = "durable") -> dict:
     """Capture + remember each conversation (once — resumable per session), then answer + score its questions
     (resumable per question). ``open_graph(path)`` returns a **writable** memory graph at ``path`` (created if
     absent). Stops when ``budget_s`` seconds are spent (``complete: False``); the next call continues.
@@ -290,7 +290,7 @@ def run_locomo(conversations, work_dir, open_graph: Callable, embedder, chat, ju
         for s in todo_s:                                               # 1. capture (chat only)
             if s.sid in captured or over():
                 continue
-            facts = _retry(lambda: capture_session(chat, s.text, session_date=s.date))
+            facts = _retry(lambda: capture_session(chat, s.text, session_date=s.date, style=capture_style))
             captured[s.sid] = [[f.subject, f.predicate, f.object, f.valid_from, f.cardinality, f.source]
                                for f in facts]
             with cap_path.open("a", encoding="utf-8") as fh:

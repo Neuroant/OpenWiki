@@ -827,3 +827,15 @@ def test_format_date_handles_dates_before_1970():
     assert format_date(T("1900-06-15")) == "1900-06-15"
     assert format_interval(T("1969-01-01"), T("2026-09-01")) == "1969-01-01 → 2026-09-01"
     assert format_date(T("2026-09-26")) == "2026-09-26"
+
+
+def test_capture_styles_durable_by_default_episodic_opt_in():
+    """D14 (measured, not adopted): the episodic style exists for the LoCoMo harness (--capture-style) and
+    shares the date / cardinality / source rules; the durable style stays the default everywhere."""
+    from openwiki.graph.memory import (CAPTURE_SYSTEM, CAPTURE_SYSTEM_EPISODIC, coerce_capture_style)
+    assert build_capture_messages("hi")[0]["content"] == CAPTURE_SYSTEM
+    assert build_capture_messages("hi", style="episodic")[0]["content"] == CAPTURE_SYSTEM_EPISODIC
+    assert coerce_capture_style("Episodic") == "episodic" and coerce_capture_style("??") == "durable"
+    shared = "never the year or month of the session by default"
+    assert shared in CAPTURE_SYSTEM and shared in CAPTURE_SYSTEM_EPISODIC
+    assert "every concrete, specific fact" in CAPTURE_SYSTEM_EPISODIC and "durable" in CAPTURE_SYSTEM

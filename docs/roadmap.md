@@ -915,6 +915,11 @@ The **genuine gaps**, measure-first as always:
   questions from the remembered facts and keeps refusing what nothing bears on. Paired on the same graphs: overall J
   **50.5 → 55.0 %** (single-hop +45 net, p < 0.001; multi-hop +10; open-domain +7; temporal +8) for −19 adversarial →
   the default. `path-b-memory.md` §13.9.
+- **D14 — an episodic capture style. Measured, not adopted.** Twice the facts per session ("every concrete detail"
+  of a conversation between people) vs. the durable style, paired end-to-end on 4 LoCoMo conversations: overall J
+  58.2 → 61.0 % (+97 / −81 questions, p ≈ 0.26; per conversation +3.9 / −2.5 / −2.0 / +7.5), temporal +9, adversarial
+  −4 — within capture-to-capture variance, at ~2× the capture + merge cost. Kept as an experiment option only
+  (`--capture-style episodic`); production captures durably. `path-b-memory.md` §13.10.
 - **Agent-initiated writes — `wiki_remember` (P2). ✅ (v0.90).** CoALA's learning action by the agent itself
   (Letta's `memory_replace`), and the fix for **stale state** that the local model couldn't infer afterwards: an
   opt-in MCP tool (`[memory] agent_writes`) — the host agent records facts / the **new state** when it makes a change

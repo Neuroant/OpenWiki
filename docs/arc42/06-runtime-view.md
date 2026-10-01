@@ -211,7 +211,7 @@ sequenceDiagram
   participant GS as GraphStore
 
   CC->>H: UserPromptSubmit (prompt)
-  H->>GS: context_for(prompt) (read-only, probes if [memory] probes)
+  H->>GS: context_for(prompt, k = context_k, within context_budget) (read-only, probes if [memory] probes)
   GS-->>H: identity + recalled facts + themes
   H-->>CC: context on stdout (injected into the prompt)
   CC->>H: SessionEnd / PreCompact (transcript path)

@@ -203,7 +203,8 @@ Alongside the document tier, a project in **Second Brain mode** (`[memory] enabl
   paired, adopted changes (relative event dates in capture; an inference-allowing answer prompt and a 20-fact recall
   budget in the harness); an episodic capture style (~2× facts) was measured and not adopted. A hand audit of 60
   judgments puts the local judge ≈ 7 points generous — paired comparisons stand, absolute numbers carry that caveat
-  (`docs/path-b-memory.md` §13.7–13.11).
+  (`docs/path-b-memory.md` §13.7–13.11). Its more-facts finding reached production only after a measurement on
+  the live path itself (ADR-35, §13.12).
 - **Hygiene by policy, not model judgment.** Four times the local 30B model was measured as a judge *of* memory
   — a poisoning audit (ADR-30), a forgetting review (ADR-32), a staleness check against the wiki and update-aware
   capture (`docs/path-b-memory.md` §13.4–13.5) — and each time it confused "related" with "invalid" or dropped keep-facts.
@@ -228,7 +229,9 @@ Alongside the document tier, a project in **Second Brain mode** (`[memory] enabl
   memory project and pinned to the installing interpreter; capture runs in a detached worker that takes
   the graph lock only for the write — v0.84; `UserPromptSubmit`→inject, `SessionEnd`/`PreCompact`→capture, through the
   fail-soft `owiki hook` command), so memory flows automatically. The cross-session eval scores it
-  ("assembled" beats raw-log). *Load the concentrate, not the log.*
+  ("assembled" beats raw-log). *Load the concentrate, not the log.* Its size is a per-prompt cost, so it is set
+  by measurement: `[memory] context_k` facts (16) within `context_budget` chars (3,000 ≈ 710 tokens on real
+  prompts) — facts take the majority share plus whatever the themes don't need (ADR-35).
 
 The lifecycle is **independent of documents** (ADR-14/16): `graph-build` rebuilds the document tier but
 preserves the remembered tier; consolidation touches memory, never documents. The payoff metric — *does

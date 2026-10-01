@@ -9,7 +9,8 @@
 > (ADR-25, Direction I), a **capability-complete web UI** (ADR-26, Direction J), graph connectivity as
 > **reader overlays** (ADR-28), and — Path B+ — **bi-temporal** memory (ADR-27, B7) and **fact identity** (ADR-29,
 > B9); Path B++ adds **memory hygiene** (ADR-30), **cue-trigger recall** (ADR-31), **forgetting** in a nightly
-> `sleep` pass (ADR-32), **agent-recorded state** (ADR-33) and **recency as a tie-breaker**, set by LoCoMo (ADR-34).
+> `sleep` pass (ADR-32), **agent-recorded state** (ADR-33), **recency as a tie-breaker**, set by LoCoMo (ADR-34),
+> and a **live context sized by measurement** on its own path (ADR-35).
 
 ## ADR index
 
@@ -49,6 +50,7 @@
 | [32](#adr-32) | Forgetting as policy-based archiving in a nightly `sleep` pass | Accepted (Path B++ / P1) | correctness, Q5 |
 | [33](#adr-33) | Stale state fixed by the writer that makes the change (`wiki_remember`, journaled, exact `replaces`) | Accepted (Path B++ / P2) | correctness, security |
 | [34](#adr-34) | Recency in recall is a tie-breaker (floor 0.9), set by the LoCoMo benchmark | Accepted (Path B++ / P2) | correctness, Q5 |
+| [35](#adr-35) | The live memory context recalls 16 facts within 3,000 chars — sized by measurement on the live path | Accepted (Path B++) | efficiency, correctness, Q5 |
 
 ---
 
@@ -671,6 +673,29 @@
   leaks, cue-trigger cue 7/8). − the remaining gap is capture-side (facts never captured, relative dates — §11
   D13/D14), not ranking. Refines the recall scoring of [ADR-18](#adr-18)/[ADR-31](#adr-31).
 
+### ADR-35
+**The live memory context recalls 16 facts within 3,000 chars — sized by measurement on the live path.** *(v0.96, Path B++)*
+- **Context:** LoCoMo showed that more recalled facts help (k 10 → 20: overall J 55.0 → 60.7 %, [ADR-34](#adr-34)),
+  but on the benchmark path — no char budget, no identity, no themes, a cost paid once per question. The live path
+  (inject hook, `wiki_memory`, `context`, the web context box) assembled 8 facts within 2,000 chars, and the hook pays
+  that on **every** prompt of a coding session.
+- **Decision:** a project setting `[memory] context_k` (default **16**) sets the facts recalled into every assembled
+  context, and the default `[memory] context_budget` rises from 2,000 to **3,000** chars; the fact section may also
+  take the part of the theme share that the themes don't need.
+- **Alternatives:** keep 8 / 2,000 (the cue-trigger set loses half its cues); 12 / 3,000 — the same cost, more
+  themes, and it would have caught every cue of that set too; chosen against because LoCoMo's gain came from going
+  further and ranks 13–16 were judged almost as useful as 9–12 (facts vs. themes at equal cost was not measured);
+  16 / 4,000 (≈ 920 tokens, all 16 facts + ~4 themes) — more cost for themes; probes on by default
+  ([ADR-31](#adr-31)) — also reaches the cues, but costs a local LLM call per prompt instead of ~240 tokens.
+- **Consequences:** + measured three ways on the live path (`docs/path-b-memory.md` §13.12): 335 real prompts against
+  the dev memory cost ≈ 471 → **710 tokens** per prompt (15.8 facts + 2.1 themes shown); a judge on 80 prompts found
+  ranks 9–16 helpful at 17–19 % (ranks 1–8: 25–37 %), helpful facts per prompt 2.5 → 3.9; the cue-trigger set,
+  paired over two captures and without probes: cue in context **8/16 → 16/16**, constraint respected **7/16 → 12/16**
+  (+5 / −0) — temporal and poisoning build identical contexts (≤ 4 facts recalled). − ~50 % more injected tokens per
+  prompt, which accumulate in a long session's history (`context_k = 8` / `context_budget = 2000` restore the old
+  size); − the cue set places its cues near the k = 8 boundary by design, so it shows the mechanism, not how often it
+  matters. Sizes the B6 assembly of [ADR-14](#adr-14); carries the [ADR-34](#adr-34) finding into production.
+
 ---
 *Chapter complete. The Path-B agent-memory direction landed via ADR-14/15/16/17/18/19; the graph then
 deepened (ADR-22 typed relations + relation-aware GraphRAG, ADR-23 entity resolution), gained
@@ -680,7 +705,8 @@ deepened (ADR-22 typed relations + relation-aware GraphRAG, ADR-23 entity resolu
 **reader overlays** (ADR-28), and Path B+'s **bi-temporal memory** (ADR-27, B7 — refines ADR-15/18) with
 **fact identity** (ADR-29, B9 — measured on real development history), **memory hygiene** against
 poisoning (ADR-30, P0), **cue-trigger recall** for implicit constraints (ADR-31, P1) and policy-based
-**forgetting** in a nightly sleep pass (ADR-32), **agent-recorded state** against stale facts (ADR-33), and recall
-recency as a tie-breaker set by the **LoCoMo** benchmark (ADR-34). §11
+**forgetting** in a nightly sleep pass (ADR-32), **agent-recorded state** against stale facts (ADR-33), recall
+recency as a tie-breaker set by the **LoCoMo** benchmark (ADR-34), and a live context sized by measurement on its own
+path (ADR-35). §11
 debts D1/D2/D6 are resolved. Deep designs in `docs/path-b-memory.md` and `docs/RAG-vs-GraphRAG.md`. New significant
 decisions should be appended here with the next id.*

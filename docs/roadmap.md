@@ -920,6 +920,11 @@ The **genuine gaps**, measure-first as always:
   58.2 → 61.0 % (+97 / −81 questions, p ≈ 0.26; per conversation +3.9 / −2.5 / −2.0 / +7.5), temporal +9, adversarial
   −4 — within capture-to-capture variance, at ~2× the capture + merge cost. Kept as an experiment option only
   (`--capture-style episodic`); production captures durably. `path-b-memory.md` §13.10.
+- **Judge audit + a larger recall budget. ✅ (v0.95).** 60 random LoCoMo answers hand-labelled: the local judge
+  agrees 51/60, never rejects a right answer, and accepts 5 wrong ones (dates off by days, near misses) → the 55.0 %
+  is ≈ 48 % ± 6 audit-corrected; paired comparisons stand. Recall k 10 → 20 (re-answered, same graphs): overall J
+  **55.0 → 60.7 %** (+117 / −29, p ≈ 6·10⁻¹³; multi-hop +8.8, single-hop +6.2) → the benchmark default; the live
+  hook context (k = 8) is the next place to test it. `path-b-memory.md` §13.11.
 - **Agent-initiated writes — `wiki_remember` (P2). ✅ (v0.90).** CoALA's learning action by the agent itself
   (Letta's `memory_replace`), and the fix for **stale state** that the local model couldn't infer afterwards: an
   opt-in MCP tool (`[memory] agent_writes`) — the host agent records facts / the **new state** when it makes a change

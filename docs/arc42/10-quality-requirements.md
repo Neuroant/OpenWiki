@@ -77,8 +77,10 @@ Scenarios are written as *stimulus → expected response* so they can be checked
   The benchmark changed a default (recency floor 0.6 → 0.9) and located the remaining losses in capture (§11 D13/D14);
   D13 (relative event dates, v0.92) then took temporal J 34.0 → **41.7 %**, overall **50.5 %**; an answer prompt that
   allows inference (v0.93, paired on the same memory) took overall J to **55.0 %** (adversarial 90.6 → 86.3 %); an
-  episodic capture style was measured and not adopted (v0.94: +2.8 on 4 conversations, p ≈ 0.26, at ~2× cost). QS-20
-  is met by the harness itself.
+  episodic capture style was measured and not adopted (v0.94: +2.8 on 4 conversations, p ≈ 0.26, at ~2× cost); a
+  recall budget of 20 facts (v0.95) took overall J to **60.7 %** (+117 / −29 paired, p ≈ 6·10⁻¹³). A hand audit of 60
+  judgments: the judge agrees 51/60, never rejects a right answer, accepts 8 % wrong ones (dates off by days) — J is
+  generous by ~7 points, paired comparisons stand. QS-20 is met by the harness itself.
 - **Not formally measured (performance):** there is no latency/throughput *budget* yet — though the
   observability layer (ADR-20) now surfaces per-run p50/p95 latency + tokens, so measurement is a query
   away. Known scale on the reference corpus (informatik), built with the full graph (`--relations

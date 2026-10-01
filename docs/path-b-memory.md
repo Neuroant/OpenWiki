@@ -1275,6 +1275,41 @@ the code for experiments only (`capture_session(…, style="episodic")`, `owiki 
 episodic`); there is no project setting, and every production path captures durably. What would settle it: all 10
 conversations × 2 captures per style, to separate the style from capture-to-capture variance.
 
+### 13.11 How far to trust J — a judge audit; and a larger recall budget (v0.95)
+
+**Judge audit.** Every LoCoMo number is judged by the same local 30B that answers. A fixed random sample of 60
+scored answers (categories 1–4, the 55.0 % configuration) was labelled by hand with the judge's verdicts hidden —
+*correct* (the key facts present, in any words), *wrong* (a wrong fact or date, or "Not mentioned"), *borderline*
+(partial lists, near misses):
+- the judge accepted **34/60** (consistent with 55 %); the hand labels: 21 correct, 12 borderline, 27 wrong;
+- agreement **51/60** if borderline counts as correct, 47/60 if not; **no false negatives** — the judge never
+  rejected an answer the audit accepted;
+- **5 lenient false positives (8 %)**: dates off by a day or a week ("last Saturday (2023-05-20)" for "the Sunday
+  before 25 May"; "2022-10-06" for "the week before 6 October"), "host a celebration" for "savor all the good vibes",
+  a date range for "six months", "Bookstore" for "House of MinaLima"; on partial lists it said yes 8 times of 12.
+
+So J ≈ "about right, partial lists count", and an audit-corrected estimate of the 55.0 % is **≈ 48 % ± 6**
+(29/60). Paired comparisons stay valid (same judge, no false negatives); absolute numbers carry this caveat. A
+stricter judge on dates is the obvious next refinement — a re-judge of the saved answers, no re-answering.
+
+**k = 10 → 20.** Multi-hop questions ("what books has Tim read?") need several facts at once, and the context had
+room for only ten. Re-answered on the same graphs with the same prompt, all 1,986 questions:
+
+| Category | k = 10 | k = 20 | per question |
+|---|---|---|---|
+| multi-hop (282) | 56.4 % | **65.2 %** | +31 / −6 (p ≈ 0.0001) |
+| temporal (321) | 44.2 % | 45.8 % | +13 / −8 |
+| open-domain (96) | 39.6 % | 45.8 % | +10 / −4 |
+| single-hop (841) | 60.4 % | **66.6 %** | +63 / −11 (p < 0.0001) |
+| **overall (1–4)** | 55.0 % | **60.7 %** | **+117 / −29 (p ≈ 6·10⁻¹³)** |
+| adversarial (446) | 86.3 % | 84.5 % | +8 / −16 (n.s.) |
+
+The largest single step so far ("Not mentioned" on single-hop 219 → 178). **Adopted for the benchmark**:
+`eval --locomo` recalls 20 facts by default (`--recall-k`; the cross-session sets keep 10). Not yet carried into
+the live context — the hooks assemble k = 8 within a 2,000-character budget, a per-prompt token cost; the finding
+suggests trying a larger k there, measured on that path. LoCoMo now: **overall J 60.7 %** with a local 30B (Mem0
+reports ≈ 67 % with GPT-4o-mini — and both are generous-judge numbers).
+
 ---
 
 *Cross-refs: overview → [`docs/roadmap.md`](roadmap.md#path-b--the-second-brain-memory-model);

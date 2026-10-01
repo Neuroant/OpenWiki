@@ -278,7 +278,10 @@ questions by inference from the memories, `strict` only from what they say; each
 **D14 (measured, not adopted):** `--capture-style episodic` (`memory.CAPTURE_SYSTEM_EPISODIC`, `capture_session(…,
 style=)`) captures every concrete detail — ~2× the facts; paired on 4 conversations overall 58.2 → 61.0 %, p ≈ 0.26,
 inconsistent per conversation, adversarial −4 → experiment option only, no project setting; production stays
-`durable` (§13.10). Use a separate `--work` dir per capture style.
+`durable` (§13.10). Use a separate `--work` dir per capture style. **v0.95:** `--recall-k` defaults to **20** for
+`--locomo` (10 for `--cross-session`; answers files gain a `-k<N>` tag when ≠ 10): overall J 55.0 → **60.7 %**,
+multi-hop +8.8, single-hop +6.2 (paired, p ≈ 6·10⁻¹³). A hand audit of 60 judgments: the local judge agrees 51/60,
+no false negatives, 5 lenient false positives (dates off by days) → treat J as generous (≈ −7 points) (§13.11).
 
 **Sleep — nightly memory maintenance + forgetting** (Path B++): one schedulable writable pass — fold what
 read-only processes queued (usage + journal) → **forget** what the memory policy says not to keep → re-consolidate

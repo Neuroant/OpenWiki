@@ -257,7 +257,7 @@ def _read_jsonl(path: Path) -> list:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
-def run_locomo(conversations, work_dir, open_graph: Callable, embedder, chat, judge=None, recall_k: int = 12,
+def run_locomo(conversations, work_dir, open_graph: Callable, embedder, chat, judge=None, recall_k: int = 10,
                categories=None, budget_s: Optional[float] = None, coexist=None, resolve=None,
                on_progress: Optional[Callable] = None, now_mode: str = "present",
                answer_style: str = "infer", capture_style: str = "durable") -> dict:
@@ -279,8 +279,8 @@ def run_locomo(conversations, work_dir, open_graph: Callable, embedder, chat, ju
         cdir = work / conv.sample_id
         cdir.mkdir(parents=True, exist_ok=True)
         done_path, cap_path = cdir / "sessions.json", cdir / "captured.jsonl"
-        tag = "".join(f"-{t}" for t in (now_mode if now_mode != "present" else "",
-                                        answer_style) if t)
+        tag = "".join(f"-{t}" for t in (now_mode if now_mode != "present" else "", answer_style,
+                                        f"k{recall_k}" if recall_k != 10 else "") if t)
         ans_path = cdir / f"answers{tag}.jsonl"             # each variant keeps its own answers
         done = json.loads(done_path.read_text(encoding="utf-8")) if done_path.is_file() else []
         captured = {r["sid"]: r["facts"] for r in _read_jsonl(cap_path)}

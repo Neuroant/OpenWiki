@@ -135,5 +135,7 @@ def test_run_is_phased_resumable_and_scored(tmp_path):
     assert (work / "conv-x" / "answers-today-infer.jsonl").is_file() and len(today["records"]) == 1
     strict = lc.run_locomo(convs, work, _Graph, _Emb(), _Chat(), answer_style="strict", categories=[4])
     assert (work / "conv-x" / "answers-strict.jsonl").is_file() and len(strict["records"]) == 1
+    k20 = lc.run_locomo(convs, work, _Graph, _Emb(), _Chat(), recall_k=20, categories=[4])
+    assert (work / "conv-x" / "answers-infer-k20.jsonl").is_file() and len(k20["records"]) == 1
     assert lc.build_answer_messages("q", "ctx")[0]["content"] == lc.ANSWER_SYSTEM_INFER
     assert lc.build_answer_messages("q", "ctx", "strict")[0]["content"] == lc.ANSWER_SYSTEM

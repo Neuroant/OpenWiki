@@ -263,8 +263,9 @@ def _build_argparser() -> argparse.ArgumentParser:
                         help="Evaluate the Path B memory tier: cross-session task success "
                              "(cold vs raw-log vs assembled; + --judge = assembled vs raw-log). "
                              "Default set: <project>/eval_cross_session.jsonl.")
-    eval_p.add_argument("--recall-k", type=int, default=10,
-                        help="Facts recalled for the 'assembled' condition (--cross-session; default 10).")
+    eval_p.add_argument("--recall-k", type=int, default=None,
+                        help="Facts recalled for the answer: --cross-session default 10; --locomo default 20 "
+                             "(k=10 -> 20 measured +5.7 points overall J, ADR-34).")
     eval_p.add_argument("--probes", action="store_true",
                         help="--cross-session: cue-trigger recall — constraint probes reserve recall "
                              "slots for the user's implicit constraints (P1; +1 chat call/scenario).")
@@ -1835,9 +1836,10 @@ def _locomo_eval(args: argparse.Namespace) -> int:
     chat = OllamaChat(model=args.model, host=args.host, temperature=0.2, timeout=900.0,
                       options={"num_predict": 4096})
     judge = OllamaChat(model=args.model, host=args.host, temperature=0.0)
-    print(f"LoCoMo: {len(convs)} conversation(s), {chat.name}, recall k={args.recall_k} → {work}",
+    recall_k = args.recall_k if args.recall_k is not None else 20
+    print(f"LoCoMo: {len(convs)} conversation(s), {chat.name}, recall k={recall_k} → {work}",
           file=sys.stderr)
-    res = run_locomo(convs, work, open_graph, index.embedder, chat, judge=judge, recall_k=args.recall_k,
+    res = run_locomo(convs, work, open_graph, index.embedder, chat, judge=judge, recall_k=recall_k,
                      categories=cats, budget_s=args.time_budget,
                      coexist=_coexist_check(args.model, args.host),
                      resolve=_attribute_resolver(args.model, args.host),
@@ -1912,7 +1914,8 @@ def _cross_session_eval(args: argparse.Namespace, project) -> int:
             return 2
         try:
             result = run_cross_session_eval(
-                subset, graph, index.embedder, chat, judge=judge, recall_k=args.recall_k,
+                subset, graph, index.embedder, chat, judge=judge,
+                recall_k=args.recall_k if args.recall_k is not None else 10,
                 on_progress=lambda done, total: print(f"  {done}/{total} done", file=sys.stderr),
                 probe=probe)
         finally:

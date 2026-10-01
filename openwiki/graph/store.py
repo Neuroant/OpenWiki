@@ -1686,7 +1686,7 @@ class GraphStore:
         return sorted(agg.values(), key=lambda c: (-c["hits"], -(c["size"] or 0), c["id"]))[:limit]
 
     def context_for(self, query: str, embedder, identity: str = "",
-                    k: int = 8, max_themes: int = 4, max_chars=None,
+                    k: int = 16, max_themes: int = 4, max_chars=None,
                     as_of: Optional[int] = None, probes=None) -> str:
         """B6: assemble a session's context for ``query`` from the three memory tiers —
         identity + decay-weighted ``recall`` (activation) + the relevant consolidated themes

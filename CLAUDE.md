@@ -330,8 +330,9 @@ concentrate, not the log.* Read-only + fail-soft (empty tiers degrade gracefully
 ```
 .venv\Scripts\python -m openwiki context "which models do we use?"
 ```
-Options: `-k N` (activation facts; default 8), `--themes N` (default 4), `--max-chars N` (fit within
-~a char budget, ~4/token; default the project's `[memory] context_budget`, 2000; `0` = unbounded),
+Options: `-k N` (activation facts; default the project's `[memory] context_k`, 16), `--themes N` (default 4),
+`--max-chars N` (fit within ~a char budget, ~4/token; default the project's `[memory] context_budget`, 3000; `0` =
+unbounded),
 `--identity TEXT` (override), `--probes/--no-probes` (P1 cue-trigger recall — default the project's
 `[memory] probes`, off) + `--model NAME` (the probe chat model), `-i/--index DIR` (embedder), `--graph DIR`,
 `--host URL`. Gated by `[memory] enabled`. Backed by `GraphStore.context_for` (→ `recall` + `relevant_concepts` + pure
@@ -769,7 +770,9 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   identity + top facts and drops themes gracefully. `GraphStore.context_for(query, embedder, identity,
   max_chars)` orchestrates it (`recall` for activation + `relevant_concepts` for the themes those facts
   belong to), read-only + fail-soft. The budget defaults to `Project.context_budget` (`[memory]
-  context_budget`, 2000). Exposed as the `context` CLI (`--max-chars`) and the MCP `wiki_memory` tool
+  context_budget`, 3000) and the fact count to `Project.context_k` (`[memory] context_k`, 16 — v0.96, measured on
+  the live path: ~710 tokens/prompt; the cue-trigger set's cue reached the context 8/16 → 16/16, path-b-memory.md
+  §13.12); facts may use theme budget the themes don't need. Exposed as the `context` CLI (`--max-chars`) and the MCP `wiki_memory` tool
   (both budgeted); the cross-session eval's "assembled" condition is this assembler. Design in `docs/path-b-memory.md`.
   `usage.py` + `journal.py` are the **lock-free deferred-write log** (**B1 concurrency**): Kuzu is
   reader-XOR-writer (no simultaneous read+write), so a read-only process queues its intended writes to a

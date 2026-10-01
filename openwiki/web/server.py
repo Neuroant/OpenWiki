@@ -704,7 +704,8 @@ class WikiWebApp:
         if chat is not None and self.project is not None and self.project.memory_probes:
             from ..graph.memory import constraint_probes
             probes = constraint_probes(chat, query)          # P1 cue-trigger; fail-soft → []
-        context = self.graph.context_for(query, embedder, identity=identity, max_chars=budget,
+        k = self.project.context_k if self.project is not None else 16
+        context = self.graph.context_for(query, embedder, identity=identity, k=k, max_chars=budget,
                                          as_of=parse_date(as_of), probes=probes)
         return {"query": query, "context": context, "identity": identity, "budget": budget}
 

@@ -126,11 +126,22 @@ class Project:
     @property
     def context_budget(self) -> int:
         """Char budget for an assembled memory context (B6, ~4 chars/token). Bounds what the
-        auto-inject hook / `wiki_memory` put into a prompt. ``[memory] context_budget``, else 2000."""
+        auto-inject hook / `wiki_memory` put into a prompt. ``[memory] context_budget``, else 3000
+        (v0.96: 2000 → 3000 so the larger ``context_k`` fits next to identity + themes)."""
         try:
-            return max(0, int(self.setting("memory", "context_budget", 2000)))
+            return max(0, int(self.setting("memory", "context_budget", 3000)))
         except (TypeError, ValueError):
-            return 2000
+            return 3000
+
+    @property
+    def context_k(self) -> int:
+        """Facts recalled into an assembled memory context (B6 activation tier) — the inject hook,
+        `wiki_memory`, `context` and the web context box. ``[memory] context_k``, else 16 (v0.96:
+        8 → 16, measured on the live path — path-b-memory.md §13.12)."""
+        try:
+            return max(1, int(self.setting("memory", "context_k", 16)))
+        except (TypeError, ValueError):
+            return 16
 
     @property
     def agent_writes(self) -> bool:
@@ -275,7 +286,8 @@ entities = {str(entities).lower()}
 # Second Brain mode (Path B): capture sessions into a remembered tier the graph keeps
 # across doc rebuilds, and recall them later. Off = Wiki mode (docs only).
 enabled = {str(memory).lower()}
-# context_budget = 2000   # chars (~4/token) for an assembled memory context (B6 / hooks)
+# context_budget = 3000   # chars (~4/token) for an assembled memory context (B6 / hooks)
+# context_k = 16          # facts recalled into that context
 # probes = false          # cue-trigger recall: +1 chat call per context read to surface the user's implicit constraints
 # agent_writes = false    # let a coding agent record facts / new states via MCP wiki_remember
 

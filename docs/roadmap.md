@@ -925,6 +925,12 @@ The **genuine gaps**, measure-first as always:
   is ≈ 48 % ± 6 audit-corrected; paired comparisons stand. Recall k 10 → 20 (re-answered, same graphs): overall J
   **55.0 → 60.7 %** (+117 / −29, p ≈ 6·10⁻¹³; multi-hop +8.8, single-hop +6.2) → the benchmark default; the live
   hook context (k = 8) is the next place to test it. `path-b-memory.md` §13.11.
+- **A larger k in the live context. ✅ (v0.96).** Measured on the hook's own path: 335 real prompts against the
+  dev memory (k 8 / 2,000 chars ≈ 470 tokens → k 16 / 3,000 ≈ 710 tokens per prompt); a judge on 80 of them found
+  ranks 9–16 helpful at 17–19 % vs. 25–37 % for ranks 1–8 (helpful facts per prompt 2.5 → 3.9); on the cue-trigger
+  set (paired, 2 captures, no probes) the cue reached the context 8/16 → 16/16 and the constraint was applied
+  7/16 → 12/16 (+5 / −0). Adopted: `[memory] context_k` (default 16) + `context_budget` 2,000 → 3,000; facts may
+  use theme budget the themes don't need. `path-b-memory.md` §13.12.
 - **Agent-initiated writes — `wiki_remember` (P2). ✅ (v0.90).** CoALA's learning action by the agent itself
   (Letta's `memory_replace`), and the fix for **stale state** that the local model couldn't infer afterwards: an
   opt-in MCP tool (`[memory] agent_writes`) — the host agent records facts / the **new state** when it makes a change

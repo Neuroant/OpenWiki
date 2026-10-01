@@ -50,6 +50,17 @@ def test_memory_mode_defaults_off_and_toggles(tmp_path):
     assert Project.load(root).memory_enabled is True                 # [memory] enabled = true
 
 
+def test_project_context_defaults_and_overrides(tmp_path):
+    from openwiki.project import Project
+    (tmp_path / "openwiki.toml").write_text('[project]\nname = "x"\n', encoding="utf-8")
+    p = Project.load(tmp_path)
+    assert (p.context_k, p.context_budget) == (16, 3000)          # v0.96 live-path defaults
+    (tmp_path / "openwiki.toml").write_text(
+        '[project]\nname = "x"\n[memory]\ncontext_k = 8\ncontext_budget = 2000\n', encoding="utf-8")
+    p = Project.load(tmp_path)
+    assert (p.context_k, p.context_budget) == (8, 2000)
+
+
 def test_project_identity_falls_back(tmp_path):
     root = tmp_path / "id"
     root.mkdir()

@@ -520,11 +520,12 @@ def _build_argparser() -> argparse.ArgumentParser:
                            help="Assemble a session's memory context for a query (Path B / B6): "
                                 "identity + recalled facts + relevant themes.")
     ctx_p.add_argument("query", help="The query/topic to assemble memory context for.")
-    ctx_p.add_argument("-k", "--top-k", type=int, default=8, help="Recalled facts (activation tier; default: 8).")
+    ctx_p.add_argument("-k", "--top-k", type=int, default=None,
+                       help="Recalled facts (activation tier; default: the project's [memory] context_k, 16).")
     ctx_p.add_argument("--themes", type=int, default=4, help="Relevant themes (attractor tier; default: 4).")
     ctx_p.add_argument("--max-chars", type=int, default=None,
                        help="Fit the context within ~this many chars (~4/token); default: the "
-                            "project's [memory] context_budget (2000). Use 0 for unbounded.")
+                            "project's [memory] context_budget (3000). Use 0 for unbounded.")
     ctx_p.add_argument("--identity", default=None, help="Override the identity tier (default: the project's).")
     ctx_p.add_argument("--as-of", type=_date_arg, default=None, metavar="DATE",
                        help="B7: assemble the memory as it was true at DATE (default: now).")
@@ -2840,9 +2841,10 @@ def _cmd_context(args: argparse.Namespace) -> int:
         max_chars = project.context_budget if project else None
     use_probes = args.probes if args.probes is not None else bool(project and project.memory_probes)
     probes = _memory_probes(args.query, args.model, args.host) if use_probes else None
+    top_k = args.top_k if args.top_k is not None else (project.context_k if project else 16)
     try:
         context = graph.context_for(args.query, index.embedder, identity=identity,
-                                    k=args.top_k, max_themes=args.themes, max_chars=max_chars,
+                                    k=top_k, max_themes=args.themes, max_chars=max_chars,
                                     as_of=getattr(args, "as_of", None), probes=probes)
     finally:
         graph.close()
@@ -3165,7 +3167,7 @@ def _hook_inject(project: Project, payload: dict) -> None:
                                 project.setting("models", "host", DEFAULT_HOST))
     graph = GraphStore(project.graph_path)   # read-only
     try:
-        context = graph.context_for(prompt, embedder, identity=project.identity,
+        context = graph.context_for(prompt, embedder, identity=project.identity, k=project.context_k,
                                     max_chars=project.context_budget, probes=probes)
     finally:
         graph.close()
@@ -3362,6 +3364,7 @@ def _cmd_mcp(args: argparse.Namespace) -> int:
     budget = project.context_budget if (project is not None and project.memory_enabled) else None
     server = build_server(args.wiki, index=index, graph=graph, agent=agent,
                           version=__version__, identity=identity, context_budget=budget,
+                          context_k=project.context_k if project is not None else 16,
                           memory_probes=bool(project is not None and project.memory_enabled
                                              and project.memory_probes),
                           memory_writes=bool(project is not None and project.memory_enabled

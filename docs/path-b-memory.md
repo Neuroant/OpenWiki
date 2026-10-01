@@ -1307,8 +1307,59 @@ room for only ten. Re-answered on the same graphs with the same prompt, all 1,98
 The largest single step so far ("Not mentioned" on single-hop 219 → 178). **Adopted for the benchmark**:
 `eval --locomo` recalls 20 facts by default (`--recall-k`; the cross-session sets keep 10). Not yet carried into
 the live context — the hooks assemble k = 8 within a 2,000-character budget, a per-prompt token cost; the finding
-suggests trying a larger k there, measured on that path. LoCoMo now: **overall J 60.7 %** with a local 30B (Mem0
-reports ≈ 67 % with GPT-4o-mini — and both are generous-judge numbers).
+suggests trying a larger k there, measured on that path (→ §13.12). LoCoMo now: **overall J 60.7 %** with a local
+30B (Mem0 reports ≈ 67 % with GPT-4o-mini — and both are generous-judge numbers).
+
+### 13.12 A larger k in the live context (v0.96)
+
+§13.11 measured more facts on the benchmark path (no budget, no identity, no themes). The live path — the inject
+hook, `wiki_memory`, `context`, the web context box — assembles identity + facts + themes into a char budget and
+pays for it on **every** prompt, so it was measured on its own terms, three ways.
+
+**Cost and coverage** — the 335 distinct user prompts of this repo's Claude Code history, assembled against the
+dev memory (~1,190 current facts, 118 themes) exactly as the hook does (probes off, the default; ~4 chars/token):
+
+| k / budget | chars (mean / p95) | ≈ tokens | facts shown | themes shown |
+|---|---|---|---|---|
+| 8 / 2,000 (before) | 1,883 / 2,101 | 471 | 8.0 | 1.6 |
+| 12 / 3,000 | 2,830 / 3,096 | 707 | 12.0 | 2.8 |
+| **16 / 3,000 (now)** | 2,841 / 3,084 | **710** | 15.8 | 2.1 |
+| 16 / 4,000 | 3,691 / 4,031 | 923 | 16.0 | 3.8 |
+| 20 / 4,000 | 3,836 / 4,081 | 959 | 19.9 | 3.4 |
+
+**Are the extra facts useful?** Recall scores barely separate ranks (0.60 for ranks 1–4 → 0.535 for 13–16), so for
+80 of those prompts the local 30B marked which of the top 20 facts would help with the request, shown in a
+shuffled order (no rank leak). Helpful share by rank: **1–4: 36.6 %, 5–8: 24.7 %, 9–12: 19.4 %, 13–16: 16.6 %,
+17–20: 15.9 %**. k = 8 → 16 raises the helpful facts per prompt from 2.5 to 3.9 (+59 %), while the prompts with at
+least one helpful fact barely move (62 → 64 of 80): a larger k mostly adds supporting facts where memory already
+helps. A hand check of 8 prompts: the judge is roughly right — a few lenient low-rank picks, a few misses.
+
+**Does it change answers?** The cue-trigger set (§13.2) is where k binds: its distractor sessions compete for the
+recall slots. Paired — one capture per scenario, then both contexts assembled from it and answered — over two
+capture passes (16 scenario runs), without probes as the hook runs by default:
+
+| | k 8 / 2,000 | k 16 / 3,000 | flips |
+|---|---|---|---|
+| cue fact reached the context | 8/16 | **16/16** | +8 / −0 |
+| answer success (substring) | 7/16 | **12/16** | +5 / −0 (p ≈ 0.06) |
+| constraint applied (LLM judge) | 7/16 | **12/16** | +5 / −0 (p ≈ 0.06) |
+
+The cue facts ranked 2–12, so with eight slots half of them fell out; at 16 every one is in, and no scenario got
+worse from the extra distractors. The two remaining misses have the cue in context and still ignore it — an
+answer-side miss, not a recall one. Caveats: the set is built so cues sit near the k = 8 boundary, so it shows the
+mechanism rather than its frequency (the relevance numbers above are the frequency side); k = 12 at the same
+budget would have caught every cue here too. 16 is chosen because LoCoMo's gain came from going further (10 → 20)
+and ranks 13–16 are judged almost as useful as 9–12 — facts vs. themes at equal cost was not measured. The
+temporal and poisoning sets were not re-run: they recall at most four facts per scenario, so both settings build
+the identical context. For comparison, P1 probes reach the cue at k = 8 too (§13.2), but cost a local LLM call on
+every prompt; k = 16 costs ~240 tokens.
+
+**Adopted:** a new `[memory] context_k` setting (default **16**) drives the hook, `wiki_memory`, `context` (`-k`
+overrides) and the web context box, and the default `[memory] context_budget` rises **2,000 → 3,000** chars, so the
+injected context grows from ~470 to ~710 tokens per prompt (set `context_k = 8` / `context_budget = 2000` to keep
+the old size). Alongside it, a budgeting fix: facts may use whatever part of the theme share the themes don't need
+(none yet, few, or short ones), so an unconsolidated memory no longer leaves 40 % of its budget empty; with the dev
+memory's themes this changes nothing.
 
 ---
 

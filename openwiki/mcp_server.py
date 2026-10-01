@@ -163,13 +163,13 @@ def _tool(name, description, properties, required):
 
 
 def build_server(wiki_dir, index=None, graph=None, agent=None, name="openwiki",
-                 version="0", identity="", context_budget=None,
+                 version="0", identity="", context_budget=None, context_k: int = 16,
                  memory_probes: bool = False, memory_writes: bool = False) -> MCPStdioServer:
     """Assemble the MCP server from already-loaded OpenWiki components.
 
     `index` (SemanticIndex) enables search/ask; `graph` (GraphStore) enables the
     graph tools; `agent` (RAGAgent) powers `wiki_ask`. Read-only `WikiTools` back
-    the rest. `identity` + `context_budget` seed/bound the B6 `wiki_memory` context;
+    the rest. `identity` + `context_budget` + `context_k` seed/bound the B6 `wiki_memory` context;
     `memory_probes` (P1 cue-trigger, needs the agent's chat model) probes it for the
     user's implicit constraints. `memory_writes` (``[memory] agent_writes``) adds
     `wiki_remember` — the agent records facts / new states, queued to the journal.
@@ -246,7 +246,7 @@ def build_server(wiki_dir, index=None, graph=None, agent=None, name="openwiki",
                 if probe_chat is not None:
                     from .graph.memory import constraint_probes
                     probes = constraint_probes(probe_chat, query)     # fail-soft → []
-                return (graph.context_for(query, index.embedder, identity=identity,
+                return (graph.context_for(query, index.embedder, identity=identity, k=context_k,
                                           max_chars=context_budget, as_of=parse_date(a.get("as_of")),
                                           probes=probes)
                         or "(no relevant memory yet)")

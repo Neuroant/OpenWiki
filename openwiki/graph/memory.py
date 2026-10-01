@@ -395,6 +395,7 @@ def format_memory(recalled: list) -> str:
 
 
 _FACT_BUDGET_SHARE = 0.6   # facts (activation) get the majority of the char budget; themes the rest
+_THEMES_HEADER = "## Themes across my memory"
 
 
 def _fit_section(header: str, lines: list, budget) -> tuple:
@@ -447,7 +448,11 @@ def assemble_context(identity: str, facts: list, themes: list, max_facts: int = 
             if remaining is not None:
                 remaining = max(0, remaining - len(block) - 2)   # -2 ≈ the blank-line separator
 
-    fact_budget = None if remaining is None else int(remaining * _FACT_BUDGET_SHARE)
+    fact_budget = None
+    if remaining is not None:
+        # facts get the majority share — plus whatever the themes won't use (none, few or short)
+        theme_need = (len(_THEMES_HEADER) + sum(len(t) + 1 for t in theme_lines) + 2) if theme_lines else 0
+        fact_budget = max(int(remaining * _FACT_BUDGET_SHARE), remaining - theme_need)
     keep_block, keep_used = _fit_section(
         "## Keep in mind — the user's own circumstances; apply them where they bear on the request",
         keep_lines, fact_budget)
@@ -462,7 +467,7 @@ def assemble_context(identity: str, facts: list, themes: list, max_facts: int = 
         if remaining is not None:
             remaining = max(0, remaining - fact_used - 2)
 
-    theme_block, _ = _fit_section("## Themes across my memory", theme_lines, remaining)
+    theme_block, _ = _fit_section(_THEMES_HEADER, theme_lines, remaining)
     if theme_block:
         blocks.append(theme_block)
 

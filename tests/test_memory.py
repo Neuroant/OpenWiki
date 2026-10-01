@@ -452,6 +452,25 @@ def test_assemble_context_char_budget_bounds_and_prioritizes_facts():
     assert "- fact number" in tight                                # facts prioritized (present under budget)
 
 
+def test_assemble_context_facts_take_the_budget_themes_dont_need():
+    from openwiki.graph.memory import assemble_context
+
+    facts = [{"subject": "fact", "predicate": "number", "object": str(i), "session_id": "s"}
+             for i in range(30)]
+    big = [{"label": f"Theme{i}", "summary": "x" * 300} for i in range(4)]
+    small = [{"label": "T", "summary": "short."}]
+
+    def shown(ctx):
+        return sum(1 for ln in ctx.splitlines() if ln.startswith("- fact"))
+
+    with_big = assemble_context("", facts, big, max_facts=30, max_chars=600)
+    with_small = assemble_context("", facts, small, max_facts=30, max_chars=600)
+    without = assemble_context("", facts, [], max_facts=30, max_chars=600)
+    assert shown(with_big) < shown(with_small) <= shown(without)   # unused theme share goes to facts
+    assert "short." in with_small                                  # …while the small theme still fits
+    assert len(without) <= 600 and len(with_small) <= 600
+
+
 def test_assemble_context_identity_truncated_to_fit():
     from openwiki.graph.memory import assemble_context
     out = assemble_context("X" * 500, [], [], max_chars=100)

@@ -16,7 +16,9 @@ agent writes · surfaces and sharing · evaluation.
 4. [Letta (MemGPT)](#4-letta-memgpt) (reviewed 2026-10-03)
 5. [Cognee](#5-cognee) (reviewed 2026-10-03)
 6. [LangMem](#6-langmem) (reviewed 2026-10-03)
+7. [Hindsight](#7-hindsight) (reviewed 2026-10-03 — first of the world-model shortlist)
 - [Across the series — what it suggests for OpenWiki](#across-the-series--what-it-suggests-for-openwiki)
+- [Candidates — world models and CoALA](#candidates--world-models-and-coala)
 
 ---
 
@@ -674,29 +676,202 @@ evaluation of its own, and little recent development. Its lessons are conceptual
 next to the facts, capture in the background once a conversation goes quiet, and treat `CLAUDE.md` as procedural
 memory the system can propose edits to.
 
+
+---
+
+## 7. Hindsight
+
+*Sources: [github.com/vectorize-io/hindsight](https://github.com/vectorize-io/hindsight) at `f7dd3f4` (2026-10-02),
+`hindsight-api` 0.10.2, MIT, Python ≥ 3.11; the paper "Hindsight is 20/20: Building Agent Memory that Retains,
+Recalls, and Reflects" (Latimer et al., [arXiv 2512.12818](https://arxiv.org/abs/2512.12818), December 2025); the
+README of its coding-agents integration. The first project from the world-model shortlist below.*
+
+**What it is.** An agent memory server — API and UI; Docker, pip, Kubernetes, or embedded in a Python process with
+an embedded Postgres — with Python, TypeScript and Go clients, a CLI, an MCP server, integrations for dozens of
+frameworks and about twenty coding agents. It works with 25+ model providers, local ones included (Ollama, LM
+Studio, llama.cpp); a hosted cloud is optional. Memories live in **banks** — one per user, agent or project — each
+with a *mission* (what to track) and *disposition* traits (skepticism, literalism, empathy) that shape how it
+reasons.
+
+### How its memory works
+- **World facts and experiences, kept apart.** Retain extracts *world* facts (objective facts, including the user's
+  preferences, rules and corrections) and *experiences* (what the agent itself did, tried, decided). Each fact
+  has *what / when / where / who / why*, a kind — an event with `occurred_start` / `occurred_end`, or an ongoing
+  state without dates — and entities (always including "user" when the fact is about the user). References are
+  resolved into names ("my roommate" + "Emily" → "Emily (user's roommate)"), relative dates are written as
+  absolute ones, and coarse dates span their whole period ("in March 2026" → the entire month). A fact also keeps
+  **`mentioned_at`** — when its source said it, which may be long after the event. Facts stay as recorded; entity,
+  temporal and causal links connect them.
+- **Observations — beliefs in a derived layer.** A background consolidator merges facts into one belief per facet,
+  each with its source-fact ids, a proof count and supporting quotes. Its rules read like lessons learned: prefer
+  updating an observation over creating a sibling; one facet per observation; match by entity, not by topic; a
+  state change updates the observation with its date ("owned a 2019 Honda Civic; sold it on March 15, 2025");
+  cascade to every affected observation; preserve history; **never do arithmetic** on counts; every create,
+  update and delete carries a reason, which is audited. Belief sets can be scoped per bank, per tag, or per source
+  (what the commits say vs. what was decided in conversation).
+- **Mental models and knowledge pages.** A mental model is a standing question whose answer the bank rewrites in
+  the background; reading it is a database read, with no retrieval and no model call. Knowledge pages are mental
+  models organized like a wiki — searchable, and projectable to disk as ordinary Markdown.
+- **Recall:** four strategies in parallel — semantic, BM25, graph (entity / temporal / causal links), and a time
+  range parsed from the query by a rule-based date parser (no model call) — fused by reciprocal rank fusion,
+  reranked by a cross-encoder, trimmed to a token budget.
+- **Reflect:** an agentic reasoning loop over the bank, shaped by its disposition, that can also refine or
+  retract observations.
+- **Hygiene:** *Memory Defense*, opt-in per bank, scans every retain against 45 secret and PII patterns and redacts
+  or blocks the match before storage. Facts keep their language and entities their script.
+- **Coding agents:** one package wires about twenty CLI agents (for Claude Code: three hooks, an MCP server and a
+  skill). Each repository gets a bank built automatically from its **git history** (a commit-message seed, then
+  per-commit diffs, newest first) and from past sessions (written back at the end of each turn), plus **five
+  knowledge pages** — component map, core concepts, conventions and patterns, key decisions and rationale,
+  initiatives — each synthesized only from the facts routed to its tier. One belief set per repository, whichever
+  agent wrote. Recall runs on every prompt; a reflect runs once per session, on the first prompt, and is cached.
+  The injected context says how many pages exist and how to search them — **not their titles**: measured over 40
+  real Claude Code turns, a visible roster made the agent open pages by the copied id and never search (0 searches
+  at 3 pages, still 0 at 12). Memory lives in the hosted cloud (the default), on a self-hosted server, or in a local
+  daemon whose extraction needs a model (it falls back to the Claude Code CLI).
+- **Evaluation:** the paper reports **83.6 % on LongMemEval with a 20B open-source backbone**, against 39 % for full
+  context with the same model, and 91.4 % on LongMemEval / 89.61 % on LoCoMo with larger models; independent
+  reproduction is claimed for Virginia Tech and The Washington Post, and a live site publishes per-model accuracy,
+  latency and cost.
+
+### Side by side
+
+| | Hindsight | OpenWiki (Path B) |
+|---|---|---|
+| Purpose | an agent memory server; per-repo memory for coding agents | the memory under a coding agent, next to a document wiki |
+| Models | 25+ providers, local ones included | local only (a 30B chat model + bge-m3) |
+| Store | Postgres + pgvector (embedded or server), Oracle | Kuzu (archived upstream, R10) |
+| World vs. agent | world facts apart from the agent's experiences | one fact store; `source` tags user / assistant / material |
+| Unit of memory | a 5W fact sentence with entities, event time and mention time | an atomic fact with validity interval, cardinality, source |
+| Consolidation | per-facet observations over immutable facts, with evidence and reasons | warm-start Louvain themes over facts |
+| Time | event time + mention time; coarse dates as intervals; query-time ranges | valid + transaction time; as-of / known-at |
+| Retrieval | semantic + BM25 + graph + time range, fused, cross-encoder reranked | cosine × confidence × recency |
+| Live injection | recall every prompt; one cached reflect per session; page count, not titles | 16 facts + themes on every prompt |
+| Coding-agent sources | git history + sessions | sessions (hooks, backfill) + `wiki_remember` |
+| Synthesized documents | five knowledge pages per repository, projectable to Markdown | none — the wiki is built from documents only |
+| Hygiene | opt-in secret / PII redaction (45 patterns) | an unsafe-instruction policy, forgetting; no credential redaction |
+| Evaluation | LongMemEval 83.6 % (20B open model) / 91.4 %; LoCoMo 89.61 % | LoCoMo 60.7 % J (local 30B, audited ≈ 7 points generous) |
+
+### What we learn
+1. **A model of our size can score far higher.** 83.6 % on LongMemEval with a 20B open model — against 39 % for full
+   context with the same model — is the calibration point this series was missing: our 60.7 % LoCoMo J with a local
+   30B is not a model ceiling. The benchmarks differ and their judges differ, but the gap is architecture, and most
+   of it sits on the retrieval side — four recall strategies with cross-encoder reranking, rich 5W facts with
+   resolved references, a belief layer. It makes the measurable experiments on our list (BM25 in recall, the
+   question's time window, the add-only ablation) worth running soon.
+2. **Don't inject an index of titles.** This answers our own idea (§4) of injecting theme labels as a table of
+   contents: a visible roster makes the agent open entries by id and never search. Name the count and the way in,
+   not the contents — or, if we try it, measure both variants.
+3. **Memory writes the wiki.** Five knowledge pages per repository — component map, core concepts, conventions,
+   decisions, initiatives — synthesized from tiered facts and projectable to Markdown. For OpenWiki that is the
+   missing bridge between its two halves: the memory tier could *write* wiki pages — a "Decisions" and a
+   "Conventions" page regenerated at `sleep` from facts and themes, readable in the Wiki tab and exportable (R10).
+   And **git history as a source**: our dev memory ignores 400+ commit messages that record most decisions.
+4. **Model curation only in a derived layer.** Raw facts are immutable; the model rewrites only observations, which
+   can be rebuilt. That reconciles our two findings — model judgments of memory hurt, so keep them away from the
+   facts; consolidation needs judgment, so confine it to a recomputable view (our themes already are one). A
+   per-facet belief layer over our facts would be safe by construction.
+5. **Capture rules we found missing ourselves.** References resolved into names ("Emily (user's roommate)") is
+   exactly the "my dog Bruno" loss from our cue experiments; "always include *user* in a fact about the user" makes
+   personal facts detectable without relying on the subject; coarse dates as whole-period intervals avoid
+   collapsing "March 2026" onto March 1, as our `YYYY-MM` valid-from does.
+6. **A third time per fact — when it was said.** Event time and mention time are kept apart. B7 has valid and
+   transaction time; "when it was said" we only approximate through the session date. Hindsight makes it a field and
+   uses it for recency.
+7. **Query-time dates without a model** — a rule-based date parser, for the time-window experiment (Cognee uses a
+   model call).
+8. **Secret redaction** — the third project with it (Mem0, Cognee, Hindsight).
+
+### What we would not adopt
+- **The stack:** Postgres (embedded or server), a reranker model and a model server are heavier than embedded Kuzu
+  and NumPy — though its local daemon mode resembles ours.
+- **A reasoning loop at the start of every session.** A reflect call per session is the per-prompt probe cost
+  again on a local GPU.
+- **Cloud as the default** of the coding-agent integration.
+
+**In short.** Hindsight is the most complete system of the series and the closest to what OpenWiki's memory is for:
+a per-repository memory for coding agents built from sessions and git history, world facts kept apart from the
+agent's own experiences, evidence-backed beliefs in a derived layer, wiki-like knowledge pages — and strong results
+with an open 20B model. It is also the most direct challenge to our own numbers: the distance between our 60.7 % and
+what it reports with a model of our size is architecture, and much of it is retrieval.
+
 ---
 
 ## Across the series — what it suggests for OpenWiki
 
-Six systems, read from their source in October 2026. Where OpenWiki stands out: a real time model (only Graphiti
-matches it; Mem0 keeps time-aware retrieval on its hosted platform, Cognee has a query-time window), deterministic
-hygiene against poisoning (none of the six has a comparable policy), policy-based forgetting, local-first operation
-on a 30B model, and audited measurement. Where it lags, the same gaps recur:
+Seven systems — six in a first round, then Hindsight from the world-model shortlist — read from their source in
+October 2026. Where OpenWiki stands out: a real time model (only Graphiti matches it; Hindsight has event and
+mention time; Mem0 keeps time-aware retrieval on its hosted platform; Cognee has a query-time window),
+deterministic hygiene against poisoning (none of the seven has a comparable policy), policy-based forgetting,
+local-first operation on a 30B model, and audited measurement. Where it lags, the same gaps recur — and Hindsight
+shows how large the distance can be (83.6 % on LongMemEval with a 20B open model):
 
 | Theme | Seen in | OpenWiki today | Candidate | Cost |
 |---|---|---|---|---|
-| Credentials in memory | Mem0, Cognee (redaction in their coding plugins) | no redaction — a pasted key can become an injected fact | regex redaction of transcripts before capture and of facts in `remember()` | small, deterministic |
+| Credentials in memory | Mem0, Cognee, Hindsight (redaction before storage) | no redaction — a pasted key can become an injected fact | regex redaction of transcripts before capture and of facts in `remember()` | small, deterministic |
 | Readable, portable memory | waku (`MEMORY.md`), Letta (git), Cognee (COGX) | memory lives only in a Kuzu file — archived upstream (R10) | a COGX export + a git-tracked Markdown view, written at `sleep` | small–medium; mitigates R10 |
-| When to inject | waku (model gate), Mem0 (first prompt + pull), Letta (core + index + pull), Cognee (per file read) | 16 facts on every prompt; a score gate failed (§1) | inject on the first prompt and after compaction, an index of themes, facts on file reads; `wiki_memory` for the rest | small; judged by real sessions |
-| BM25 next to embeddings | waku, Graphiti, Mem0, Cognee | memory recall is dense-only | BM25 + rank fusion in `recall` | small; a paired LoCoMo re-answer |
-| Capture during a session | Mem0, Letta, Cognee, LangMem | at session end / compaction | debounced idle capture through the detached worker | small–medium |
-| Raw sessions searchable | Graphiti, Letta, Mem0, Cognee | transcripts stay outside the memory tier | a session search tool for agents | medium |
-| A curated always-present core | waku, Letta, LangMem | a hand-written identity string | user-sourced conventions in the identity tier | small; must pass the poisoning set |
-| Richer context than atomic facts | waku (episodes), Graphiti (sagas), Mem0 (rich memories), Cognee (lessons with reasons) | atomic subject–predicate–object facts | episode summaries or a detail sentence per fact | medium; a paired LoCoMo run |
-| Write-time model judgments | Mem0 dropped them; Letta and LangMem rely on strong curators | two LLM checks in the merge (attribute resolution, coexistence) | an add-only ablation on LoCoMo — do they earn their place? | small; replay saved captures |
-| Time in the question | Cognee (query-time window), Mem0 platform | recall ignores times in the query | boost facts whose validity overlaps a window extracted from the question | small; LoCoMo temporal |
+| When to inject | waku (model gate), Mem0 (first prompt + pull), Letta (core + index + pull), Cognee (per file read), Hindsight (every prompt + one reflect per session; page count, not titles) | 16 facts on every prompt; a score gate failed (§1) | inject on the first prompt and after compaction, an index of themes, facts on file reads; `wiki_memory` for the rest | small; judged by real sessions |
+| BM25 next to embeddings | waku, Graphiti, Mem0, Cognee, Hindsight (+ graph, time range, cross-encoder) | memory recall is dense-only | BM25 + rank fusion in `recall` | small; a paired LoCoMo re-answer |
+| Capture during a session | Mem0, Letta, Cognee, LangMem, Hindsight (write-back every turn) | at session end / compaction | debounced idle capture through the detached worker | small–medium |
+| Raw sessions searchable | Graphiti, Letta, Mem0, Cognee, Hindsight | transcripts stay outside the memory tier | a session search tool for agents | medium |
+| A curated always-present core | waku, Letta, LangMem, Hindsight (mental models) | a hand-written identity string | user-sourced conventions in the identity tier | small; must pass the poisoning set |
+| Richer context than atomic facts | waku (episodes), Graphiti (sagas), Mem0 (rich memories), Cognee (lessons with reasons), Hindsight (5W facts) | atomic subject–predicate–object facts | episode summaries or a detail sentence per fact | medium; a paired LoCoMo run |
+| Write-time model judgments | Mem0 dropped them; Letta and LangMem rely on strong curators; Hindsight confines them to a derived layer over immutable facts | two LLM checks in the merge (attribute resolution, coexistence) | an add-only ablation on LoCoMo — do they earn their place? | small; replay saved captures |
+| Time in the question | Cognee (query-time window), Mem0 platform, Hindsight (rule-based date parser) | recall ignores times in the query | boost facts whose validity overlaps a window extracted from the question | small; LoCoMo temporal |
+| Memory writes documents | Hindsight (five knowledge pages per repository), Letta (memory as Markdown) | the wiki is built from documents only; memory writes no pages | "Decisions" / "Conventions" pages regenerated from facts at `sleep`; git history as a capture source | medium |
 
 **Suggested order:** credential redaction first (a clear gap, deterministic, cheap); then the COGX + Markdown
 export together with the LadybugDB spike (R10); then the measurable LoCoMo experiments — BM25 in recall, the add-only
 ablation, the question's time window — each a paired re-answer on graphs we already have; the injection policy and
 idle capture after that, judged in real sessions.
+
+
+---
+
+## Candidates — world models and CoALA
+
+A shortlist from a search on 2026-10-03 for projects that build world models from incoming data and organize memory
+the CoALA way, as `G:\Claude\Cognitive Substrate` does (episodic / semantic / procedural memory plus a canonical
+ground-truth tier, consolidation as a sleep cycle, perception from many sources). Reviewed ones link to their section.
+
+**Closest matches — for full reviews**
+1. **Hindsight** — world facts apart from the agent's experiences, evidence-backed beliefs, mental models; per-repo
+   memory for coding agents from git history and sessions. → [§7](#7-hindsight)
+2. **[MIRIX](https://github.com/Mirix-AI/MIRIX)** ([paper](https://arxiv.org/abs/2507.07957)) — six memory types (core,
+   episodic, semantic, procedural, resource, knowledge vault), each managed by its own agent, fed by continuous
+   screen observation: a perception-driven world model of a user's digital life, stored locally.
+3. **[AriGraph](https://github.com/airi-institute/arigraph)** (IJCAI 2025, [paper](https://arxiv.org/abs/2407.04363)) —
+   the most literal world model from observations: an agent exploring text-game environments builds a semantic
+   knowledge graph plus episodic nodes linking each observation to its triples, replacing outdated triples as the
+   world changes.
+4. **[Nemori](https://github.com/nemori-ai/nemori)** ([paper](https://arxiv.org/abs/2508.03341)) — event segmentation of
+   the stream into episodes, semantic memory learned by *predict-calibrate* (store what existing memory failed to
+   predict; after the free-energy principle).
+5. **[memory-champ](https://github.com/mikeleewoodai/memory-champ)** — CoALA as an MCP service (episodic, semantic,
+   procedural in SQLite + sqlite-vec; FTS5 + vector fusion weighted by recency and importance); the agent can only
+   *queue* procedures — approval needs an Ed25519 signature from a key it doesn't have.
+
+**Brain-inspired and theory**
+6. **[HippoRAG 2](https://arxiv.org/abs/2502.14802)** (ICML 2025) — the LLM as neocortex, a knowledge graph with
+   Personalized PageRank as hippocampus; non-parametric continual learning over documents.
+7. **[Human-Inspired Memory Architecture for LLM Agents](https://arxiv.org/abs/2605.08538)** (Microsoft Research) —
+   sleep consolidation, interference-based forgetting, engram maturation, reconsolidation on retrieval, an entity
+   graph, multi-cue retrieval; a streaming LongMemEval evaluation (475 sessions, ~540 K turns).
+8. **[The Missing Knowledge Layer in Cognitive Architectures](https://arxiv.org/abs/2604.11364)** — argues CoALA lacks
+   a knowledge layer with its own persistence: facts are superseded, never decayed; applying decay to factual claims
+   is a category error — a challenge to our recency factor in recall.
+9. **[OpenCog Hyperon](https://arxiv.org/abs/2310.18318)** + **[Hyperon-MCP](https://glama.ai/mcp/servers/amiroussama/Hyperon-MCP)**
+   — a symbolic metagraph world model with probabilistic logic inference; symbolic memory with inference for coding
+   agents.
+10. **[MemOS](https://github.com/MemTensor/MemOS)** ([paper](https://arxiv.org/abs/2507.03724)) — memory types below the
+    prompt: plaintext, activation (KV cache) and parametric (LoRA) memory under one scheduler.
+11. **Generative Agents** (Park et al., 2023) — the memory stream, reflection into beliefs, planning: the archetype
+    CoALA draws on.
+
+**Trends and references.** Between-session "dreaming" consolidation is spreading (OpenDream, Opencode-Dreams,
+clawdreamer; Anthropic's Dreaming for Claude Managed Agents, research preview since May 2026). A second exchange
+format besides COGX: [memorywire](https://arxiv.org/abs/2606.01138). No open-source project was found that combines an
+LLM world model with OPC UA or sensor telemetry the way Cognitive Substrate does — that work is academic (industrial
+digital-twin architectures). Lists: [Awesome-Agent-Memory](https://github.com/TeleAI-UAGI/Awesome-Agent-Memory),
+[Agent-Memory-Paper-List](https://github.com/Shichun-Liu/Agent-Memory-Paper-List),
+[Awesome-GraphMemory](https://github.com/DEEP-PolyU/Awesome-GraphMemory).

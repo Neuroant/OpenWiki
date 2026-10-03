@@ -673,7 +673,7 @@ unfinished part*, which is exactly why our plan front-loads a measurable thin ve
 *Source: `G:\Claude\Cognitive Substrate\docs\ARCHITECTURE.md` + `ROADMAP.md` (v3), read 2026-09.*
 
 **Other agent-memory projects** are compared one at a time, on one yardstick, in
-[`memory-systems-review.md`](memory-systems-review.md) — so far waku-agent, Zep / Graphiti, Mem0, Letta, Cognee and LangMem, with a cross-series summary (2026-10).
+[`memory-systems-review.md`](memory-systems-review.md) — so far waku-agent, Zep / Graphiti, Mem0, Letta, Cognee, LangMem and Hindsight, with a cross-series summary and a shortlist of world-model / CoALA candidates (2026-10).
 
 ## 12. Second-Brain refinements (B7 / B9 built; A2 / B8 open)
 

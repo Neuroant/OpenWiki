@@ -1134,7 +1134,10 @@ http — count, p50/p95, total time, token in/out) + a live recent-events table,
   does **not** read `output/wiki/`. `graph-build` does the same, so keep
   `--split-level` consistent across `index` and `graph-build` or the graph's page
   slugs won't match the index's chunk provenance.
-- `cli.main()` reconfigures stdout/stderr to UTF-8 so umlauts render on Windows.
+- `cli.main()` reconfigures stdin/stdout/stderr to UTF-8 (`_utf8_stdio`) — output so umlauts render on
+  Windows, input because the MCP server and the hooks read JSON their host sends as UTF-8 (before v0.96.1 a
+  piped stdin was decoded as cp1252: "Lautstärke" arrived as "LautstÃ¤rke"). `MCPStdioServer.serve()` does the
+  same for the streams it defaults to.
 - **Kuzu:** the graph is a *mirror* — `SemanticIndex` stays the source of truth;
   embeddings are copied into `Chunk` nodes so vector search + traversal work in
   one Cypher query. Kuzu 0.11 stores the DB as a **single file** (+ `.wal`), not a

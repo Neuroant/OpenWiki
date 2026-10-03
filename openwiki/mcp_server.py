@@ -29,6 +29,18 @@ from typing import Callable, Optional
 PROTOCOL_VERSION = "2024-11-05"
 
 
+def _utf8(stream, errors=None):
+    """``stream`` switched to UTF-8 (a no-op for streams that can't be reconfigured)."""
+    try:
+        if errors:
+            stream.reconfigure(encoding="utf-8", errors=errors)
+        else:
+            stream.reconfigure(encoding="utf-8")
+    except (AttributeError, ValueError):
+        pass
+    return stream
+
+
 class MCPStdioServer:
     """Minimal MCP server: `initialize`, `tools/list`, `tools/call`, `ping`."""
 
@@ -82,8 +94,10 @@ class MCPStdioServer:
     # -- stdio transport ------------------------------------------------
 
     def serve(self, stdin=None, stdout=None) -> None:
-        stdin = stdin or sys.stdin
-        stdout = stdout or sys.stdout
+        # JSON-RPC over stdio is UTF-8; on Windows a pipe defaults to the locale's code page, which
+        # garbled every non-ASCII argument ("Lautstärke" → "LautstÃ¤rke") until v0.96.1
+        stdin = stdin or _utf8(sys.stdin, errors="replace")
+        stdout = stdout or _utf8(sys.stdout)
         print(f"openwiki MCP server ready ({len(self.tools)} tools) — stdio",
               file=sys.stderr, flush=True)
         for line in stdin:

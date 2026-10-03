@@ -77,6 +77,21 @@ def test_serve_stdio_roundtrip():
     assert responses[2]["result"]["content"][0]["text"] == "hey"
 
 
+def test_serve_reads_utf8_from_a_locale_encoded_pipe(monkeypatch):
+    # On Windows a piped stdin/stdout defaults to the locale's code page (cp1252), but MCP clients send
+    # UTF-8: without reconfiguring, "Lautstärke" arrived as "LautstÃ¤rke" (v0.96.1).
+    text = "Lautst\u00e4rke \u2014 5 \u20ac"
+    request = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                          "params": {"name": "echo", "arguments": {"x": text}}}, ensure_ascii=False)
+    raw_out = io.BytesIO()
+    monkeypatch.setattr("sys.stdin", io.TextIOWrapper(io.BytesIO((request + "\n").encode("utf-8")),
+                                                      encoding="cp1252"))
+    monkeypatch.setattr("sys.stdout", io.TextIOWrapper(raw_out, encoding="cp1252"))
+    _echo_server().serve()                      # defaults to sys.stdin / sys.stdout
+    response = json.loads(raw_out.getvalue().decode("utf-8"))
+    assert response["result"]["content"][0]["text"] == text
+
+
 # -- OpenWiki toolset -------------------------------------------------------
 
 class _FakeEmbedder:

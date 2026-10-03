@@ -12,7 +12,7 @@
 | TC3 | **Windows-primary** | Primary dev/runtime is Windows 11 + a `.venv`. Paths, stdout UTF-8 reconfiguration, and the pipx installer target Windows first; cross-platform is an aim, not yet CI-verified. |
 | TC4 | **Minimal dependencies** | Runtime deps are essentially **NumPy, PyMuPDF, Kuzu** (+ pytest for dev). Everything else is Python stdlib (`http.server`, `urllib`, `html.parser`, `argparse`, `tomllib`, `json`). |
 | TC5 | **Heavy deps isolated behind boundaries** | `fitz` (PyMuPDF) lives only in `pdf_parser.py`; `kuzu` only in `graph/builder.py` + `graph/store.py`. Non-PDF, non-graph use paths import neither (lazy imports). |
-| TC6 | **UTF-8 everywhere** | Sample corpora are German (non-ASCII); all file I/O is UTF-8 with `ensure_ascii=False`; `cli.main()` reconfigures stdout/stderr to UTF-8 for Windows code pages. |
+| TC6 | **UTF-8 everywhere** | Sample corpora are German (non-ASCII); all file I/O is UTF-8 with `ensure_ascii=False`; `cli.main()` reconfigures stdin/stdout/stderr to UTF-8 for Windows code pages. |
 | TC7 | **No build step for the web UI** | The SPA is hand-written vanilla JS + a vendored `marked.min.js`; served by a stdlib `http.server`. No Node/bundler toolchain. |
 | TC8 | **Embedded, file-based persistence** | Kuzu stores the graph as a single file (+ `.wal`); the index is `embeddings.npy` + `index.json`; the wiki is Markdown + `wiki.json`. No external database server. |
 | TC9 | **Local model resources** | Assumes enough RAM/VRAM to run the configured Ollama models. The *default* chat model (`qwen3:30b-a3b-instruct-2507-q4_K_M`, a 30B-parameter MoE, q4) needs a capable machine; smaller models can be configured (ADR-2), since the agent depends on the `ChatModel` protocol, not a specific model. |

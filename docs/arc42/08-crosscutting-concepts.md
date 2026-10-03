@@ -74,8 +74,9 @@ historical `./output` defaults apply (back-compat).
 ## 8.8 Internationalization / encoding
 
 The reference corpora are German. All file I/O is UTF-8 with `ensure_ascii=False`; entity
-normalization folds umlauts/ß and German inflections; `cli.main()` reconfigures stdout/stderr
-to UTF-8 so non-ASCII renders on Windows code pages.
+normalization folds umlauts/ß and German inflections; `cli.main()` reconfigures stdin, stdout and
+stderr to UTF-8 so non-ASCII renders on Windows code pages — and so the JSON that MCP clients and the
+Claude Code hooks pipe in is decoded correctly (v0.96.1; a cp1252 stdin had garbled every umlaut).
 
 ## 8.9 Testing strategy
 

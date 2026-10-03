@@ -3404,14 +3404,23 @@ _DISPATCH = {
 }
 
 
-def main(argv: Optional[Sequence[str]] = None) -> int:
-    # Ensure non-ASCII output (German umlauts, ·, –) prints correctly on Windows,
-    # where stdout may otherwise default to a non-UTF-8 code page.
-    for stream in (sys.stdout, sys.stderr):
+def _utf8_stdio() -> None:
+    """UTF-8 on every stdio stream, whatever the Windows code page. Output, so German umlauts and
+    symbols print; input, because the MCP server and the Claude Code hooks read JSON their host sends
+    as UTF-8 — decoded with the locale's cp1252, "Lautstärke" arrived as "LautstÃ¤rke" (v0.96.1).
+    Undecodable input bytes become U+FFFD instead of ending the read."""
+    for stream, errors in ((sys.stdin, "replace"), (sys.stdout, None), (sys.stderr, None)):
         try:
-            stream.reconfigure(encoding="utf-8")
+            if errors:
+                stream.reconfigure(encoding="utf-8", errors=errors)
+            else:
+                stream.reconfigure(encoding="utf-8")
         except (AttributeError, ValueError):
             pass
+
+
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    _utf8_stdio()
 
     args = _build_argparser().parse_args(argv)
 

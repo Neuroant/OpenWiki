@@ -931,6 +931,11 @@ The **genuine gaps**, measure-first as always:
   set (paired, 2 captures, no probes) the cue reached the context 8/16 → 16/16 and the constraint was applied
   7/16 → 12/16 (+5 / −0). Adopted: `[memory] context_k` (default 16) + `context_budget` 2,000 → 3,000; facts may
   use theme budget the themes don't need. `path-b-memory.md` §13.12.
+- **Fix (v0.96.1): stdin is read as UTF-8.** `cli.main()` switched only stdout/stderr to UTF-8, so on Windows the
+  MCP server and the Claude Code hooks decoded their piped JSON as cp1252: German questions to `wiki_ask`, facts
+  sent to `wiki_remember` and the prompts the inject hook recalls against lost their umlauts ("Lautstärke" →
+  "LautstÃ¤rke"). Found when a `wiki_remember` fact came back garbled; `_utf8_stdio` + the same default in
+  `MCPStdioServer.serve()`, with regression tests that force a cp1252 stdin.
 - **Agent-initiated writes — `wiki_remember` (P2). ✅ (v0.90).** CoALA's learning action by the agent itself
   (Letta's `memory_replace`), and the fix for **stale state** that the local model couldn't infer afterwards: an
   opt-in MCP tool (`[memory] agent_writes`) — the host agent records facts / the **new state** when it makes a change

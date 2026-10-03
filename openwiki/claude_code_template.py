@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
+from typing import Optional
 
 CLAUDE_CODE_FILES = (
     ".mcp.json",
@@ -23,7 +24,9 @@ CLAUDE_CODE_FILES = (
     ".claude/commands/wiki-explore.md",
     ".claude/commands/openwiki-help.md",
     ".claude/skills/openwiki/SKILL.md",
+    ".claude/skills/session-restart/SKILL.md",
 )
+SESSION_RESTART_SKILL = ".claude/skills/session-restart/SKILL.md"
 
 
 def _mcp_json(command: str, args: list) -> str:
@@ -82,8 +85,9 @@ Project-aware (run inside the project folder):
 - `ontology` — propose a domain entity-type ontology (review, then `--write`).
 
 MCP tools (this wiki): `wiki_ask`, `wiki_global`, `wiki_search`, `wiki_read_page`,
-`wiki_list_pages`, `wiki_graph_neighbors`, `wiki_find_path`, `wiki_find_entity`. Full docs: `README.md`,
-`CLAUDE.md`, `docs/coding-agents.md`, or the web UI **Hilfe** tab.
+`wiki_list_pages`, `wiki_graph_neighbors`, `wiki_find_path`, `wiki_find_entity`; memory: `wiki_memory`,
+`wiki_remember`, `wiki_handoff`. Between sessions: `/session-restart prepare` (end) and `/session-restart
+resume` (start). Full docs: `README.md`, `CLAUDE.md`, `docs/coding-agents.md`, or the web UI **Hilfe** tab.
 """
 
 
@@ -117,6 +121,89 @@ MCP tools rather than guessing:
 Always cite the page slugs the tools return so the user can verify. For how to use
 or build OpenWiki itself, see the **`/openwiki-help`** command.
 """
+
+
+_SESSION_RESTART = """\
+---
+name: session-restart
+description: >
+  Hand a working session over to the next one, or pick up where the last one stopped. Use
+  "/session-restart prepare" before ending or clearing a long session, and "/session-restart resume"
+  at the start of a new one (the SessionStart hook usually injects the brief already). OpenWiki
+  derives the repository, memory and environment state; wiki_remember keeps the decisions.
+argument-hint: prepare | resume
+---
+
+# Session restart — prepare | resume
+
+Mode: **$ARGUMENTS** — if empty: `resume` when this session hasn't started any work yet, else ask.
+
+Tools: the `openwiki` MCP server's **`wiki_handoff`** (modes `preview`, `prepare`, `resume`). Without it,
+the same from a shell in the repository root: `{cli} handoff prepare --dry-run`,
+`{cli} handoff prepare --note FILE`, `{cli} handoff resume`.
+
+## prepare — at the end of a session
+
+1. **Look at what OpenWiki derives:** `wiki_handoff` with `mode: "preview"` (shell: `handoff prepare
+   --dry-run`) — the repository (branch, HEAD, uncommitted files, commits this session), the memory (facts
+   learned this session, facts closed, writes still queued, turns not yet captured), the environment, and
+   the memory the next session will see for the current "Next" task.
+2. **Record decisions and new states in long-term memory** with `wiki_remember`: one subject / predicate /
+   object fact per decision or changed state, `source: "user"` for what the user decided. Put remembered
+   facts that are now outdated (in the preview or the injected memory) in `replaces`, copied exactly.
+   Record the state, not the event: "v1.4.0 is the current release", not "v1.4.0 was pushed".
+3. **Write the note** — short, for a reader who starts cold:
+   - `## Next (start here)` — numbered; the first item is the task to start with, as an instruction.
+   - `## Summary` — what this session did, 3–8 bullets, with versions / commits where they matter.
+   - `## Decisions` — what was decided, and why.
+   - `## Open threads` — unfinished work, open questions, anything waiting on the user.
+   - `## Ready-to-use prompts` — 2–3 prompts the user can paste into the next session.
+
+   Keep credentials, standing permissions and instructions that weaken security out of the note: it is
+   injected into later sessions, and the memory policy drops such lines.
+4. **Write the handoff:** `wiki_handoff` with `mode: "prepare"` and the note (shell: save the note to a
+   file, then `handoff prepare --note FILE`). It writes `HANDOFF.md` (+ an archived copy and
+   `handoff.json`) to the OpenWiki project's `handoff/` folder and starts capturing this session's
+   remaining turns in the background.
+5. **Report back** in a few lines: where the handoff is, HEAD and anything uncommitted or unpushed (offer
+   to commit or push — do it only when the user says so), and the ready-to-use prompts.
+
+## resume — at the start of a session
+
+1. Use the "Session handoff" block injected at session start, if there is one; otherwise call
+   `wiki_handoff` (`mode: "resume"`; shell: `handoff resume`). Read the `HANDOFF.md` it names when you
+   need the full write-up.
+2. **Check it before trusting it:** new commits or uncommitted files since the handoff mean parts of
+   "Next" may be done; Ollama not reachable, a graph that isn't readable or hook-log problems need
+   attention first; a capture worker still running means the last session's facts are still landing.
+3. **Summarize in about five lines:** where things stand, what changed since the handoff, what needs
+   attention.
+4. **Propose the first "Next" task** and wait for the user's go-ahead.
+"""
+
+
+def _cli_of(mcp_command: list) -> str:
+    """The shell command for OpenWiki itself, from the MCP command (``owiki mcp`` → ``owiki``;
+    ``<python> -m openwiki mcp`` → ``"<python>" -m openwiki``)."""
+    parts = list(mcp_command)[:-1] or ["owiki"]
+    return " ".join(f'"{x}"' if " " in x or "/" in x or "\\" in x else x for x in parts)
+
+
+def session_restart_skill(cli: str) -> str:
+    """The ``session-restart`` skill (``/session-restart prepare | resume``), with ``cli`` as the
+    shell fallback for the ``wiki_handoff`` MCP tool."""
+    return _SESSION_RESTART.replace("{cli}", cli)
+
+
+def write_session_restart_skill(root, cli: str, force: bool = False) -> Optional[Path]:
+    """Write the ``session-restart`` skill into ``root/.claude/skills/`` (an existing one is kept
+    unless ``force``) → its path, or ``None`` if kept."""
+    target = Path(root) / SESSION_RESTART_SKILL
+    if target.exists() and not force:
+        return None
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(session_restart_skill(cli), encoding="utf-8")
+    return target
 
 
 def _text_of(content) -> str:
@@ -239,7 +326,8 @@ def split_transcripts_by_day(texts, max_chars: int = 20000) -> list:
             for day, windows in split_transcripts_by_window(texts, max_chars)]
 
 
-def install_hooks(settings_file, inject_command: str, capture_command: str) -> Path:
+def install_hooks(settings_file, inject_command: str, capture_command: str,
+                  resume_command: str = "") -> Path:
     """Merge the memory hooks into a Claude Code settings file (created if absent; other
     settings preserved). Returns the path written."""
     settings_file = Path(settings_file)
@@ -249,17 +337,18 @@ def install_hooks(settings_file, inject_command: str, capture_command: str) -> P
             existing = json.loads(settings_file.read_text(encoding="utf-8"))
         except ValueError:
             existing = {}
-    merged = merge_hooks(existing, inject_command, capture_command)
+    merged = merge_hooks(existing, inject_command, capture_command, resume_command)
     settings_file.parent.mkdir(parents=True, exist_ok=True)
     settings_file.write_text(json.dumps(merged, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     return settings_file
 
 
-def hooks_config(inject_command: str, capture_command: str) -> dict:
+def hooks_config(inject_command: str, capture_command: str, resume_command: str = "") -> dict:
     """The Claude Code ``hooks`` block wiring OpenWiki memory into the session lifecycle
-    (B6): inject recalled context on every prompt, capture the session on end/compaction.
-    Capture is best-effort; inject must be fast + fail-soft (it never exits non-zero)."""
-    return {
+    (B6): inject recalled context on every prompt, capture the session on end/compaction, and —
+    with ``resume_command`` — inject the last session handoff when a session starts. Capture is
+    best-effort; inject and resume must be fast + fail-soft (they never exit non-zero)."""
+    hooks = {
         "UserPromptSubmit": [
             {"hooks": [{"type": "command", "command": inject_command, "timeout": 30}]}],
         "SessionEnd": [
@@ -267,14 +356,19 @@ def hooks_config(inject_command: str, capture_command: str) -> dict:
         "PreCompact": [
             {"hooks": [{"type": "command", "command": capture_command, "timeout": 120}]}],
     }
+    if resume_command:
+        hooks["SessionStart"] = [
+            {"hooks": [{"type": "command", "command": resume_command, "timeout": 30}]}]
+    return hooks
 
 
-def merge_hooks(existing: dict, inject_command: str, capture_command: str) -> dict:
+def merge_hooks(existing: dict, inject_command: str, capture_command: str,
+                resume_command: str = "") -> dict:
     """Merge the OpenWiki memory hooks into an existing ``.claude/settings.json`` dict,
-    preserving other settings and other hook events (our three events are overwritten)."""
+    preserving other settings and other hook events (our events are overwritten)."""
     settings = dict(existing) if isinstance(existing, dict) else {}
     hooks = dict(settings.get("hooks") or {}) if isinstance(settings.get("hooks"), dict) else {}
-    hooks.update(hooks_config(inject_command, capture_command))
+    hooks.update(hooks_config(inject_command, capture_command, resume_command))
     settings["hooks"] = hooks
     return settings
 
@@ -288,12 +382,13 @@ def render_files(chat_model: str, embed_model: str, mcp_command: list) -> dict:
         ".claude/commands/wiki-explore.md": _WIKI_EXPLORE,
         ".claude/commands/openwiki-help.md": _help_md(chat_model, embed_model),
         ".claude/skills/openwiki/SKILL.md": _SKILL,
+        SESSION_RESTART_SKILL: session_restart_skill(_cli_of(mcp_command)),
     }
 
 
 def scaffold_claude_code(root, *, chat_model: str, embed_model: str, mcp_command: list,
                          force: bool = False, inject_command: str = "",
-                         capture_command: str = "") -> tuple[list, list]:
+                         capture_command: str = "", resume_command: str = "") -> tuple[list, list]:
     """Write the Claude Code config into ``root``. Existing files are left untouched
     unless ``force``. When ``inject_command``/``capture_command`` are given, also **merge**
     the B6 memory hooks into ``.claude/settings.json`` (preserving other settings — always
@@ -310,5 +405,6 @@ def scaffold_claude_code(root, *, chat_model: str, embed_model: str, mcp_command
         target.write_text(content, encoding="utf-8")
         written.append(target)
     if inject_command and capture_command:
-        written.append(install_hooks(root / ".claude" / "settings.json", inject_command, capture_command))
+        written.append(install_hooks(root / ".claude" / "settings.json", inject_command, capture_command,
+                                     resume_command))
     return written, skipped

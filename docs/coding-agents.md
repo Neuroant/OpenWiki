@@ -164,7 +164,7 @@ OpenWiki's cross-session memory into Claude Code's session lifecycle:
 owiki claude-code --hooks     # merges memory hooks into .claude/settings.json
 ```
 
-This adds three hooks (`owiki hook` reads the event JSON on stdin, and is **fail-soft** — it never
+This adds four hooks (`owiki hook` reads the event JSON on stdin, and is **fail-soft** — it never
 blocks a prompt):
 
 - **`UserPromptSubmit` → `owiki hook inject`** — assembles the three-tier memory context
@@ -173,6 +173,8 @@ blocks a prompt):
   `wiki_memory` MCP tool.
 - **`SessionEnd` / `PreCompact` → `owiki hook capture`** — captures the conversation transcript into
   memory (`remember`), so what you discussed persists into the next session.
+- **`SessionStart` → `owiki hook resume`** — on a new session (and after `/clear`) injects the brief of
+  the last **session handoff**: its next steps and what changed since (below).
 
 **Let the agent write memory (opt-in).** With `agent_writes = true` under `[memory]`, the MCP server also offers
 **`wiki_remember`**: the agent records facts — above all the **new state** when it changes something ("the web UI
@@ -182,6 +184,16 @@ remembered, the replaced ones closed (kept as history). This is how stale memory
 reliably infer it afterwards (`docs/path-b-memory.md` §13.4–13.6). A line such as *"When you change something the
 memory describes, record the new state with wiki_remember and list the outdated facts in `replaces`"* in your
 `CLAUDE.md` makes the agent use it.
+
+**Hand a session over to the next one.** At the end of a long session, `/session-restart prepare` (the skill
+`owiki claude-code` installs) has the agent look at what OpenWiki derives (`wiki_handoff` with `mode: "preview"`:
+the repository, the memory, the environment), record decisions with `wiki_remember`, write a short note — Next (start
+here), Summary, Decisions, Open threads, Ready-to-use prompts — and save the handoff (`wiki_handoff` with `mode:
+"prepare"`, or `owiki handoff prepare --note FILE`). The next session gets the brief from the `SessionStart` hook —
+Next, what changed since (commits, facts learned or closed, Ollama / graph / capture state) and the memory for the
+first Next task — or asks for it with `/session-restart resume` (`owiki handoff resume`). The handoff lives in the
+project's `handoff/` folder; the note passes the same memory policy as captured facts, since it is injected into later
+sessions.
 
 Memory only accumulates if you also **capture + consolidate** (`owiki remember` / `owiki consolidate`,
 or let the capture hook do it) and the project has a built graph. In Wiki mode (the default) the hooks

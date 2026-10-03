@@ -40,7 +40,8 @@ reports which excerpts were used — the basis for the grounding metrics in §10
 | Graph | single-file Kuzu DB (+ `.wal`) | `graph-build` |
 | Usage log | `graph.usage.jsonl` (append-only sidecar) | read-path `ask`/MCP (B1) |
 | Write-ahead journal | `graph.journal.jsonl` (queued `remember` / `reindex` / agent ops with `retire` ids) | read-only writers: `serve`/`chat`, locked-out captures, MCP `wiki_remember` (ADR-19/33) |
-| Hook worker | `.openwiki/capture-*.json` (parked events) + `.openwiki/hook.log` | host-hook capture (detached) |
+| Hook worker | `.openwiki/capture-*.json` (parked events), `capture-state.json` (per-session watermarks), `capture-<sid>.lock`, `hook.log` | host-hook capture (detached) |
+| Session handoff | `handoff/HANDOFF.md` + `handoff.json` + `archive/HANDOFF-<stamp>.md` | `handoff prepare` / `wiki_handoff` (ADR-36) |
 | Build state | `.openwiki/state.json` (fingerprints) | `build` |
 | Config | `openwiki.toml`, `~/.openwiki/*.toml` | `init` / registry |
 
@@ -96,7 +97,7 @@ migration upgrades pre-existing graphs).
 
 Calls to Ollama go through stdlib `urllib`; a `URLError`/`HTTPError` is turned into a
 `RuntimeError` carrying a "is Ollama running / is the model pulled?" hint. It surfaces per
-entry point (detail in §6.11): CLI → stderr + non-zero exit; web API → HTTP **503**; editing
+entry point (detail in §6.12): CLI → stderr + non-zero exit; web API → HTTP **503**; editing
 agent → `WikiTools.dispatch` catches per-tool exceptions and returns an `ERROR: …` string the
 model can react to, keeping the loop alive. Table extraction and graph-hiccups during an
 agent write are caught and logged, never raised (a failed graph sync must not fail the edit).
@@ -229,8 +230,8 @@ Alongside the document tier, a project in **Second Brain mode** (`[memory] enabl
   **Claude Code host hooks** (installable into any repo via `claude-code --hooks --into DIR`, bound to a
   memory project and pinned to the installing interpreter; capture runs in a detached worker that takes
   the graph lock only for the write — v0.84 — and captures every turn since the session's watermark, in bounded
-  windows — v0.97; `UserPromptSubmit`→inject, `SessionEnd`/`PreCompact`→capture, through the
-  fail-soft `owiki hook` command), so memory flows automatically. The cross-session eval scores it
+  windows — v0.97; `UserPromptSubmit`→inject, `SessionEnd`/`PreCompact`→capture, `SessionStart`→resume (the
+  last session handoff, ADR-36 — v0.98), through the fail-soft `owiki hook` command), so memory flows automatically. The cross-session eval scores it
   ("assembled" beats raw-log). *Load the concentrate, not the log.* Its size is a per-prompt cost, so it is set
   by measurement: `[memory] context_k` facts (16) within `context_budget` chars (3,000 ≈ 710 tokens on real
   prompts) — facts take the majority share plus whatever the themes don't need (ADR-35).
@@ -349,7 +350,7 @@ no framework, no bundler, Markdown via one vendored `marked.min.js`.
   shows a hint, not an error (ADR-7).
 
 ---
-*Chapter complete. Cross-refs: runtime error paths → §6.11; the memory tier → §8.15 + ADR-14/15/16/18/27;
+*Chapter complete. Cross-refs: runtime error paths → §6.12; the memory tier → §8.15 + ADR-14/15/16/18/27;
 observability → §8.16 + ADR-20; retrieval → §8.17 + ADR-9/21 + `docs/RAG-vs-GraphRAG.md`; the semantic
 graph → §8.18 + ADR-12/22/23; world-model analysis → §8.19 + ADR-25; the web UI → §8.20 + ADR-26/28; the
 no-auth risk → §11 R1; the project concept → §5, ADR-10/11, §7; the boundaries these concepts rest on →

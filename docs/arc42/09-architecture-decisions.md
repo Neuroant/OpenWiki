@@ -699,6 +699,31 @@
   size); − the cue set places its cues near the k = 8 boundary by design, so it shows the mechanism, not how often it
   matters. Sizes the B6 assembly of [ADR-14](#adr-14); carries the [ADR-34](#adr-34) finding into production.
 
+### ADR-36
+**A session hands over to the next through a handoff that OpenWiki derives and the agent annotates.** *(v0.98)*
+- **Context:** memory carries facts across sessions, not the narrative — what a session was in the middle of, what
+  it decided and why, what comes next. A hand-written handoff (the user's session-restart skill in another project:
+  `HANDOFF.md` + a daily overview, maintained by the agent and committed) carries the narrative, but most of what it
+  records — git state, environment checks, what was learned — is state maintained by hand, which drifts.
+- **Decision:** `owiki handoff prepare` merges a short agent note (Next (start here), Summary, Decisions, Open
+  threads, Ready-to-use prompts) with derived state — the repository, the memory (learned / closed / queued /
+  uncaptured), the environment (Ollama, graph, wiki-index staleness, capture workers, hook log) and the memory +
+  pages for the first Next item — into the memory project's `handoff/`; `resume` derives again what changed since. A
+  `SessionStart` hook injects the brief into every new session (startup / clear, same repository, ≤ 6,000 chars);
+  agents get `wiki_handoff` (MCP) and the `session-restart` skill. Decisions also go to memory (`wiki_remember`), not
+  only into the note. The note passes the P0 policy (now `openwiki/policy.py`): it is injected into later sessions.
+- **Alternatives:** a hand-maintained `docs/HANDOFF.md` in the repository — drifts and adds noise to the history;
+  memory alone — facts lose the narrative and the order of the next steps; capturing the next steps as facts — they
+  are exactly the volatile state that goes stale in memory ([ADR-33](#adr-33)), and a fact list keeps neither their
+  order nor their reasons; injecting the whole `HANDOFF.md` — too long for every session start.
+- **Consequences:** + a new session starts oriented before its first prompt (a ~3,000-char brief once per session;
+  `resume` 1.4 s, `prepare` 3.4 s on the dev project); + the derived parts can't go stale; + its first run surfaced two
+  real states nobody had noticed — 137 facts queued for a week (the session never ended, so no writable pass ran) and
+  a wiki index 34 commits behind the repository. − a new injection path, hence the P0 screen (same accepted cost: a
+  genuine "we skip the review for docs-only changes" line is dropped); − one handoff per project — repositories bound
+  to one memory project each see only their own (`same_repo`), the latest overwrites; − not measured: whether a
+  session with the brief starts better than one without (no eval set yet).
+
 ---
 *Chapter complete. The Path-B agent-memory direction landed via ADR-14/15/16/17/18/19; the graph then
 deepened (ADR-22 typed relations + relation-aware GraphRAG, ADR-23 entity resolution), gained
@@ -709,7 +734,7 @@ deepened (ADR-22 typed relations + relation-aware GraphRAG, ADR-23 entity resolu
 **fact identity** (ADR-29, B9 — measured on real development history), **memory hygiene** against
 poisoning (ADR-30, P0), **cue-trigger recall** for implicit constraints (ADR-31, P1) and policy-based
 **forgetting** in a nightly sleep pass (ADR-32), **agent-recorded state** against stale facts (ADR-33), recall
-recency as a tie-breaker set by the **LoCoMo** benchmark (ADR-34), and a live context sized by measurement on its own
-path (ADR-35). §11
+recency as a tie-breaker set by the **LoCoMo** benchmark (ADR-34), a live context sized by measurement on its own
+path (ADR-35), and a **session handoff** of derived state + the agent's note (ADR-36). §11
 debts D1/D2/D6 are resolved. Deep designs in `docs/path-b-memory.md` and `docs/RAG-vs-GraphRAG.md`. New significant
 decisions should be appended here with the next id.*

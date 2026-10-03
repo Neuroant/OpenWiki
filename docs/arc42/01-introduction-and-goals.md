@@ -54,6 +54,7 @@ Core use cases (each maps to a runtime scenario in §6):
 | U8 | Feed a coding agent's sessions into memory automatically (+ import its history) | `claude-code --hooks --into`, `backfill` | §6.8 |
 | U9 | Keep memory clean + consolidated overnight | `sleep` (schedulable) | §6.9 |
 | U10 | The coding agent records a new state when it changes something | MCP `wiki_remember` | §6.10 |
+| U11 | The next session picks up where the last one stopped | `handoff prepare` / `resume`, the `SessionStart` hook, MCP `wiki_handoff` | §6.11 |
 
 ## 1.2 Quality Goals
 

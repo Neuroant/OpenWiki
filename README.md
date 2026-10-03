@@ -423,9 +423,15 @@ agents — **Claude Code**, **OpenCode**, Cursor, … — can query it as tools:
 `wiki_ask` (grounded, cited answers), `wiki_global` (thematic answers from community
 summaries), `wiki_search`, `wiki_list_pages`, `wiki_read_page`, `wiki_graph_neighbors`,
 `wiki_find_path`, `wiki_find_entity` (with its typed relations), `wiki_memory` (the
-three-tier memory context, in Second Brain mode) and — opt-in via `[memory] agent_writes` —
-`wiki_remember` (the agent records facts / a new state and closes what it `replaces`).
-Tools are advertised by availability.
+three-tier memory context, in Second Brain mode), `wiki_handoff` (the session handoff, below) and —
+opt-in via `[memory] agent_writes` — `wiki_remember` (the agent records facts / a new state and closes
+what it `replaces`). Tools are advertised by availability.
+
+**Session handoff.** `owiki handoff prepare` at the end of a session writes what the next one needs —
+the agent's note (Next, Summary, Decisions, Open threads, Ready-to-use prompts) plus the repository,
+memory and environment state OpenWiki derives itself — and `owiki handoff resume` reads it back with
+what changed since. In Claude Code, a `SessionStart` hook injects that brief into every new session, and
+the `/session-restart prepare | resume` skill drives both ends.
 
 ```bash
 openwiki mcp --wiki output/wiki --index output/index --graph output/graph

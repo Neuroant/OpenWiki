@@ -53,6 +53,7 @@ Scenarios are written as *stimulus → expected response* so they can be checked
 | QS-17 | Correctness (implicit constraints) | could | With `[memory] probes`, a constraint mentioned in passing ("I can't stand noisy open-plan offices") shapes an unrelated later request ("book a venue for the client meeting") (ADR-31). `examples/eval_cue_trigger.jsonl` measures cue recall + an LLM judge of whether the answer respects it. |
 | QS-18 | Usefulness (memory noise) | should | After `openwiki sleep`, the facts injected for real prompts contain no one-off session events ("vX was pushed and tagged", commit hashes), and no fact a person would keep was removed — forgotten facts stay in the graph (ADR-32). |
 | QS-21 | Efficiency (prompt context) | should | Every prompt of a coding session gets the assembled memory injected → its size stays within `[memory] context_budget` (3,000 chars ≈ 750 tokens; measured mean ≈ 710 tokens over 335 real prompts) while recalling `[memory] context_k` facts (16), and both are project settings a user can lower; a change to either is measured on the live path — cost, usefulness of the facts, effect on answers — before it ships (ADR-35). |
+| QS-22 | Usability (continuity) | should | A new Claude Code session starts in a repository whose last session wrote a handoff → before the first prompt the agent has the next steps and what changed since (commits, memory, environment), within 6,000 chars; a stale handoff says so (new commits, "already resumed"); a handoff line that would weaken security or address AI assistants never reaches it (ADR-36). |
 | QS-19 | Correctness (stale state) | should | The coding agent changes something the memory describes and records it with `wiki_remember` (the new state + `replaces`) → after the next write pass the old fact is closed (kept as history) and recall shows the new one (ADR-33). |
 | QS-20 | Measurability (memory, external) | should | Run `owiki eval --locomo locomo10.json --work DIR` → per-category token F1 + LLM-judge J over the public LoCoMo conversations, captured and recalled as in production; resumable across runs, each variant (recall time, answer style, recall `k`; capture styles in separate work dirs) in its own answers file, so two variants compare paired on the same memory (ADR-34). |
 
@@ -74,7 +75,8 @@ Scenarios are written as *stimulus → expected response* so they can be checked
   QS-21 by the live-path measurement behind those defaults (≈ 471 → 710 tokens per prompt, ADR-35); QS-18 by `sleep` — on 40 real
   prompts the injected junk fell **31 % → 5 %**, 0 of 232 labeled keep-facts dropped (ADR-32); QS-19 by
   `wiki_remember` — the 14 labeled stale facts of the dogfooding memory closed, stale facts in 10 topic contexts
-  **12 → 0** (ADR-33). All on small, hand-labeled sets (one annotator) — direction checks, not benchmarks.
+  **12 → 0** (ADR-33); QS-22 by the handoff tests and the dev project (`resume` 1.4 s; the effect on a session's
+  start is not measured). All on small, hand-labeled sets (one annotator) — direction checks, not benchmarks.
 - **Measured externally (memory):** LoCoMo (`owiki eval --locomo`, ADR-34) — all 10 conversations, 1,986 questions,
   a local 30B answering + judging: overall J **50.0 %** (multi-hop 54.3, temporal 34.0, open-domain 34.4, single-hop
   56.5; adversarial 89.2). Mem0 reports ≈ 67 % with GPT-4o-mini — a reference point, not a like-for-like comparison.

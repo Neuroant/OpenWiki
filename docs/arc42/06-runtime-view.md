@@ -277,7 +277,43 @@ sequenceDiagram
   F->>GS: fold_journal: remember(facts) (no B9 for agent ops), then retire(ids, at = op time)
 ```
 
-## 6.11 Cross-cutting runtime aspects
+## 6.11 Scenario: A session hands over to the next (`owiki handoff`, `SessionStart`)
+
+Memory carries facts across sessions; the handoff carries the narrative — what was decided, what's half done, what
+comes next — and the state at the moment of handing over (ADR-36). The agent writes a short note; OpenWiki derives
+the rest, and derives it again at resume time, so the brief says what changed since.
+
+```mermaid
+sequenceDiagram
+  participant A as Coding agent (ending session)
+  participant O as handoff (CLI or wiki_handoff)
+  participant G as git
+  participant GS as GraphStore (read-only)
+  participant P as project handoff/
+  participant W as capture worker
+  participant H as SessionStart hook
+  participant N as Coding agent (new session)
+
+  A->>O: preview — repository, memory, environment
+  A->>A: wiki_remember the decisions, write the note
+  A->>O: prepare(note)
+  O->>O: screen the note (P0 policy)
+  O->>G: branch, HEAD, tag, sync, uncommitted files, commits in the window
+  O->>GS: facts learned / closed in the window, memory for the first Next item
+  O->>P: HANDOFF.md + handoff.json + archive/
+  O->>W: capture the turns since the watermark (background)
+  H->>P: load the handoff (written for this repository?)
+  H->>G: commits since its HEAD
+  H->>GS: facts learned since, memory for the first Next item
+  H-->>N: brief on stdout — Next, what changed, threads, prompts (startup / clear)
+```
+
+The window reaches back to the session start or the last handoff, whichever is later, and at most 7 days (sessions
+can run for months). The hook brief is bounded (6,000 chars: header and Next always, then what changed, the note's
+other sections, files and memory as room allows) and notes the session that resumed it, so a later session reads
+"already resumed".
+
+## 6.12 Cross-cutting runtime aspects
 
 ### Error / timeout handling (Ollama unreachable)
 Any embed or chat call goes through `urllib` to Ollama; on failure `OllamaEmbedder` /

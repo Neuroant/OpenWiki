@@ -84,6 +84,7 @@ my-project/
 ├─ sources/                 # inputs — committed
 ├─ output/                  # artifacts — gitignored, regenerable
 │   ├─ parsed/  wiki/  index/  graph
+├─ handoff/                 # session handoff (HANDOFF.md, handoff.json, archive/) — `owiki handoff`
 └─ .openwiki/state.json     # build provenance / staleness — gitignored
 ```
 

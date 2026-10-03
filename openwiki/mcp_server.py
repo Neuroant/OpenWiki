@@ -178,7 +178,8 @@ def _tool(name, description, properties, required):
 
 def build_server(wiki_dir, index=None, graph=None, agent=None, name="openwiki",
                  version="0", identity="", context_budget=None, context_k: int = 16,
-                 memory_probes: bool = False, memory_writes: bool = False) -> MCPStdioServer:
+                 memory_probes: bool = False, memory_writes: bool = False,
+                 handoff: Optional[Callable] = None) -> MCPStdioServer:
     """Assemble the MCP server from already-loaded OpenWiki components.
 
     `index` (SemanticIndex) enables search/ask; `graph` (GraphStore) enables the
@@ -187,6 +188,8 @@ def build_server(wiki_dir, index=None, graph=None, agent=None, name="openwiki",
     `memory_probes` (P1 cue-trigger, needs the agent's chat model) probes it for the
     user's implicit constraints. `memory_writes` (``[memory] agent_writes``) adds
     `wiki_remember` — the agent records facts / new states, queued to the journal.
+    `handoff` (``handoff(mode, note, repo) -> str``, from the CLI) adds `wiki_handoff` — the
+    session handoff (resume / preview / prepare) for the project the server belongs to.
     """
     from .tools import WikiTools
 
@@ -304,6 +307,26 @@ def build_server(wiki_dir, index=None, graph=None, agent=None, name="openwiki",
                 "main themes' / 'how do X and Y relate across the corpus' questions; use "
                 "wiki_ask for a specific fact on a page.", {"question": {"type": "string"}}, ["question"]))
             handlers["wiki_global"] = lambda a: _global_answer(agent.chat, graph, str(a["question"]))
+
+    # Session handoff (the CLI wires it when the server belongs to a project): the previous session's
+    # Next steps + what changed since, or write one for the next session.
+    if handoff is not None:
+        specs.append(_tool(
+            "wiki_handoff",
+            "Session handoff between coding sessions. mode 'resume' (default): the previous session's "
+            "handoff — its Next steps, summary, decisions, open threads and ready-to-use prompts — and "
+            "what changed since (commits, memory, environment). mode 'preview': what a handoff written "
+            "now would record (repository, memory, environment, the memory for the next task) — look "
+            "before writing. mode 'prepare': write the handoff for the next session; pass `note`, "
+            "Markdown with '## Next (start here)', '## Summary', '## Decisions', '## Open threads', "
+            "'## Ready-to-use prompts'.",
+            {"mode": {"type": "string", "enum": ["resume", "preview", "prepare"]},
+             "note": {"type": "string", "description": "prepare / preview: the handoff note (Markdown)."},
+             "repo": {"type": "string",
+                      "description": "The session's working directory (default: the server's)."}},
+            []))
+        handlers["wiki_handoff"] = lambda a: handoff(str(a.get("mode") or "resume"), a.get("note"),
+                                                     a.get("repo"))
 
     def call_tool(tool_name: str, args: dict) -> str:
         handler = handlers.get(tool_name)

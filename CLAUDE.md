@@ -323,6 +323,33 @@ in a code repo feed a separate memory project without putting a manifest in the 
 OpenWiki itself: project `G:\OpenWiki\Projects\openwiki-dev` (this repo + docs as a code-corpus wiki,
 memory on), hooks in this repo's `.claude/settings.local.json`, backfilled from the development history.
 
+**Session handoff — share context between sessions (v0.98)** — `owiki handoff prepare` (end of a session) writes
+what the next session needs: the agent's own note (`--note FILE`: `## Next (start here)` / `## Summary` /
+`## Decisions` / `## Open threads` / `## Ready-to-use prompts`; without one, the last handoff's Next / threads /
+prompts carry over) merged with the state OpenWiki derives itself — the repository (branch, HEAD, tag, upstream
+sync, uncommitted files, commits since the session start or the last handoff, at most 7 days back), the memory
+(facts learned — the session's captures, the agent's `wiki_remember` writes, other sessions — and closed, writes
+still queued in the journal, turns not yet captured), the environment (Ollama + models, graph readable, the wiki
+index's commits behind the repo, running capture workers, hook-log problems) and the memory + wiki pages for the
+first Next item — into `<project>/handoff/` (`HANDOFF.md` + `handoff.json` + `archive/`), and starts capturing the
+session's remaining turns in the background. `owiki handoff resume` (start of one) prints the brief: Next, what
+changed since (new commits, facts learned / closed, environment), the note's other sections, relevant files, the
+memory for the first Next item:
+```
+.venv\Scripts\python -m openwiki handoff prepare --note note.md   # run in the repo: the project = its hooks' --project
+.venv\Scripts\python -m openwiki handoff resume
+```
+Options: `--note FILE|-`, `--session ID`, `--transcript FILE`, `--dry-run`, `--no-capture` (prepare), `--max-chars N`
+(resume), `--repo DIR`, `--out DIR`; the project is `--project`, else the one the repo's Claude Code hooks are bound to
+(`handoff.bound_project`), else discovery. The **`SessionStart` hook** (`owiki hook resume`, installed by
+`claude-code --hooks [--into]`) injects the brief on `startup` / `clear` (≤ `HOOK_BRIEF_CHARS` = 6,000; only a handoff
+for the same repository; the session is noted in `handoff.json`, so a later one reads "already resumed"). Agents get
+both modes as the MCP tool **`wiki_handoff`** (`resume` / `preview` / `prepare`; writing needs `[memory]
+agent_writes`) and the **`/session-restart prepare | resume`** skill (`.claude/skills/session-restart/`, written by
+`claude-code` and `--into`): preview → record decisions with `wiki_remember` → write the note → prepare → report; at
+the start: check, summarize, propose the first Next task. The note is screened line by line by the P0 policy
+(`policy.is_unsafe_text`) — it is injected into later sessions like memory. `openwiki status` shows the latest handoff.
+
 **Assemble a session's memory context (B6)** — the Path B payoff: build the context for a query
 from the **three memory tiers** — **identity** (the project's, or `[memory] identity`), **activation**
 (decay-weighted `recall`), and **attractors** (the B5 themes the recalled facts belong to). *Load the
@@ -905,6 +932,8 @@ http — count, p50/p95, total time, token in/out) + a live recent-events table,
   pure (unit-tested without stdio). `wiki_global` (thematic answer over the community
   summaries, via `agent.chat` + `answer_global`) is advertised only when the graph has
   communities *and* a chat model is available — the MCP twin of the CLI `ask --global`.
+  `wiki_handoff` (the session handoff — `resume` / `preview` / `prepare`) is advertised when the CLI
+  passes `handoff=` (the server belongs to a project).
 - **`openwiki/project.py`** — the **project** layer: `Project` (discover via
   `find`, `load`, `resolve`; `out_dir`/`wiki_dir`/`index_dir`/`graph_path`; manifest
   `setting()` lookup) + a hand-rolled `render_manifest` (stdlib `tomllib` *reads*
@@ -1078,13 +1107,30 @@ http — count, p50/p95, total time, token in/out) + a live recent-events table,
   6 h) keeps one worker per session, and turns that arrive meanwhile are picked up before it exits. A session first
   seen with a long history keeps only its last `CAPTURE_FIRST_WINDOWS` (8) windows (older turns: `backfill`). Before,
   the hook read only the transcript's last 20,000 characters per capture point — ~13 % of a long session.
+  **v0.98:** `hooks_config(…, resume_command)` adds **`SessionStart` → `owiki hook resume`** (the last session
+  handoff), and `render_files` / `write_session_restart_skill` write the **`session-restart`** skill (its shell
+  fallback is the scaffold's own OpenWiki command, `_cli_of`).
+- **`openwiki/handoff.py`** — the **session handoff** (`owiki handoff`, v0.98). `prepare(env, note)` gathers it:
+  the agent's note (`parse_note` → canonical sections by `note_key`, `screen_note` with the P0 policy) plus derived
+  state — `git_state` / `git_commits` (git via subprocess), the Claude Code transcript (`find_transcript` via
+  `claude_slug` under `~/.claude/projects/`, `transcript_stats`, `capture_watermark`), `memory_changes` /
+  `queued_writes` (graph + journal), `environment` (`ollama_state`, `capture_workers` — live lock holders, checked
+  without signalling them —, `hook_log_problems` since the last handoff's byte offset, `wiki_freshness`) and
+  `next_memory` / `relevant_pages` for the first Next item; `save_handoff` writes `HANDOFF.md` (`render_handoff`) +
+  `handoff.json` + `archive/`; `resume(env)` re-derives what changed and renders the brief (`render_brief`, fitted by
+  `_fit`). `HandoffEnv` carries the repo, the project and the opened graph / embedder / index — the CLI
+  (`_handoff_env`), the MCP server (`_mcp_handoff`) and the SessionStart hook (`_hook_resume`) pass them in, so the
+  module imports neither Kuzu nor NumPy.
+- **`openwiki/policy.py`** — the P0 security-sensitive memory policy (`UNSAFE_PATTERNS`, `is_unsafe_text`), pure and
+  shared by `graph.memory.is_unsafe_instruction` (capture, `remember`), `wiki_remember` and the handoff note.
 - **`openwiki/cli.py`** — argparse CLI with `init`, `build`, `status`, `project`
   (`list`/`use`/`add`/`remove`/`add-source`), `opencode`, `claude-code`, `ontology`, `ingest`,
   `build-wiki`, `index`, `search`, `eval`, `ask` (`--global` = global search),
   `chat`, `graph-build`, `references`, `communities`, `decay`, `remember`, `backfill`, `recall`,
   `consolidate`, `sleep` (nightly maintenance + forgetting), `context`,
   `analyze` (world-model analysis — `coupling` | `gaps` | `memory`, offline), `hook` (host-lifecycle
-  memory hook — reads the event JSON on stdin), `serve`, and `mcp` subcommands. A shared
+  memory hook — `inject` / `capture` / `resume`, reads the event JSON on stdin), `handoff` (`prepare` /
+  `resume` — the session handoff), `serve`, and `mcp` subcommands. A shared
   `--project` (parent parser) + `_apply_project(args, project)` fill unset
   path/model/host/split-level args from the active project before dispatch (flags
   override; no project → `./output`). `init`/`project add-source` take **`--session`**

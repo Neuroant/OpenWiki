@@ -931,6 +931,17 @@ The **genuine gaps**, measure-first as always:
   set (paired, 2 captures, no probes) the cue reached the context 8/16 → 16/16 and the constraint was applied
   7/16 → 12/16 (+5 / −0). Adopted: `[memory] context_k` (default 16) + `context_budget` 2,000 → 3,000; facts may
   use theme budget the themes don't need. `path-b-memory.md` §13.12.
+- **Session handoff (v0.98): share context between sessions.** `owiki handoff prepare` writes what the next session
+  needs — the agent's note (Next, Summary, Decisions, Open threads, Ready-to-use prompts; screened by the P0 policy,
+  now its own module `openwiki/policy.py`) plus the state OpenWiki derives itself: the repository (branch, HEAD, tag,
+  sync, uncommitted files, commits since the session start or the last handoff), the memory (facts learned and
+  closed, writes queued, turns not yet captured), the environment (Ollama and its models, the graph, how far the wiki
+  index lags the repository, capture workers, hook-log problems) and the memory + pages for the first Next item — into
+  the memory project's `handoff/`; `resume` reads it back with what changed since. A `SessionStart` hook injects the
+  brief into every new session; agents get the MCP tool `wiki_handoff` and the `/session-restart prepare | resume`
+  skill. Modeled on a hand-written session-restart skill, with the state derived instead of maintained by hand; its
+  first run on the dev project surfaced 137 queued facts (the session had never ended) and a wiki index 34 commits
+  behind. ADR-36.
 - **Incremental capture (v0.97): the hooks capture a whole session.** Found while reviewing Nemori, which segments the
   whole stream: the capture hook read only the transcript's **last 20,000 characters** per capture point, so the
   long dogfooding session — 1.5 M characters over 36 days, nine compactions — reached memory to at most ~13 %. Now

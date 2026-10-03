@@ -19,7 +19,7 @@ flowchart TB
       ollama["Ollama service\n(:11434)"]
     end
     subgraph disk["Filesystem"]
-      proj["project dir/\n openwiki.toml, sources/,\n output/wiki, output/index,\n output/graph (+ .journal/.usage.jsonl),\n .openwiki/state.json, hook.log"]
+      proj["project dir/\n openwiki.toml, sources/,\n output/wiki, output/index,\n output/graph (+ .journal/.usage.jsonl),\n .openwiki/state.json, hook.log,\n handoff/"]
       home["~/.openwiki/\n config.toml, registry.toml"]
     end
   end
@@ -43,7 +43,7 @@ flowchart TB
 | **MCP server** | `owiki mcp` is **spawned by the coding agent** over stdio (config via `owiki claude-code` / `owiki opencode` scaffolders, or for a code repo that feeds a separate memory project: `claude mcp add --scope local openwiki -- <venv python> -m openwiki mcp --project <memory project>` — machine-local, never committed). |
 | **Host hooks (Second Brain)** | `owiki claude-code --hooks` (a project's `.claude/settings.json`) or `--hooks --into DIR` (any repo's machine-local `.claude/settings.local.json`, bound to a memory project with `--project` and **pinned to the installing interpreter** — a stale `owiki` on PATH would fail on new arguments). Capture runs as a **detached worker**, logging to `<project>/.openwiki/hook.log`. |
 | **Nightly maintenance** | `owiki sleep --project <dir>` — e.g. Windows `schtasks /Create /SC DAILY /ST 03:30 /TN "OpenWiki sleep" /TR "<venv>\Scripts\python.exe -m openwiki sleep --project <dir>"`, or cron `30 3 * * * cd <dir> && owiki sleep >> .openwiki/sleep.log 2>&1`. Schedule it when no agent session holds the graph (below); `--budget N` bounds its LLM work. |
-| **State** | Per-project under `<project>/output` + `.openwiki/state.json`; user-global under `~/.openwiki/` (override `$OPENWIKI_HOME`). |
+| **State** | Per-project under `<project>/output` + `.openwiki/state.json` (+ the hook capture's `capture-state.json` watermarks) and the session handoff under `<project>/handoff/`; user-global under `~/.openwiki/` (override `$OPENWIKI_HOME`). |
 | **Docker** | `docker build -t owiki .` → the `owiki` CLI as entrypoint (`python:3.13-slim`; the sample PDF/tests never enter the image). Ollama stays **external** (`--host http://host.docker.internal:11434`); `docker-compose.yml` serves a mounted project. CI builds + smoke-tests the image (ADR-24). |
 | **Distribution / PyPI** | Distribution name **`owiki`** (import package stays `openwiki`; `openwiki` is taken on PyPI). Builds clean (`python -m build` → sdist + wheel, `twine check`); a **manual** OIDC trusted-publishing workflow exists but publishing is **license-gated** — not yet on PyPI (ADR-24). |
 | **CI** | GitHub Actions (`.github/workflows/ci.yml`) runs the offline test suite (Python 3.11–3.13) + the Docker build on every push/PR to `main` (ADR-24). |
@@ -99,5 +99,5 @@ write path (`wiki_remember`) is opt-in, screened by the memory policy and journa
 carry this risk.
 
 ---
-*Chapter complete. Cross-refs: process behaviour → §6.11 (concurrency/fallback); the
+*Chapter complete. Cross-refs: process behaviour → §6.12 (concurrency/fallback); the
 no-auth exposure risk → §11 R1; resource assumptions → §2 TC9.*

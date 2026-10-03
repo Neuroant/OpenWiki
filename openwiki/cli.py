@@ -44,6 +44,7 @@ from .embeddings import OllamaEmbedder
 from .graph.journal import journal_path, pending_journal
 from .graph.temporal import format_date, format_interval, parse_date
 from .graph.temporal import session_date as session_date_of
+from .handoff import CAPTURE_STATE_FILE, capture_watermark
 from .llm import OllamaChat
 from .mcp_server import build_server
 from .merge import combine_documents
@@ -111,8 +112,8 @@ def _build_argparser() -> argparse.ArgumentParser:
                            "with Claude Code; no MCP/command files are written there.")
     cc_p.add_argument("--hooks", action="store_true",
                       help="Also wire Path B memory hooks into .claude/settings.json — auto-inject "
-                           "recalled memory on each prompt + capture the session on end/compaction "
-                           "(Second Brain mode; runs `owiki hook` per prompt).")
+                           "recalled memory on each prompt, capture the session on end/compaction, and "
+                           "inject the last session handoff when a session starts (runs `owiki hook`).")
 
     build_p = sub.add_parser("build", parents=[common],
                              help="Run the pipeline (ingest → wiki → index → graph) from the manifest.")
@@ -561,14 +562,42 @@ def _build_argparser() -> argparse.ArgumentParser:
     hook_p = sub.add_parser("hook",
                             help="Host-lifecycle memory hook (reads the event JSON on stdin) — wired "
                                  "into Claude Code by `claude-code --hooks`, not run by hand.")
-    hook_p.add_argument("event", choices=["inject", "capture"],
+    hook_p.add_argument("event", choices=["inject", "capture", "resume"],
                         help="inject = UserPromptSubmit (recall → inject context); "
-                             "capture = SessionEnd/PreCompact (remember the session).")
+                             "capture = SessionEnd/PreCompact (remember the session); "
+                             "resume = SessionStart (inject the last session handoff).")
     hook_p.add_argument("--project", default=None, metavar="DIR",
                         help="Bind the hook to this OpenWiki project (else: discovered from the "
                              "session's working directory — never the registry's active project).")
     hook_p.add_argument("--payload", type=Path, default=None, metavar="FILE",
                         help=argparse.SUPPRESS)   # internal: the detached capture worker's event file
+
+    ho_p = sub.add_parser("handoff", parents=[common],
+                          help="Session handoff: write down what the next session needs (prepare), or read "
+                               "the last handoff back with what changed since (resume).")
+    ho_p.add_argument("mode", choices=["prepare", "resume"],
+                      help="prepare = end of a session: the agent's note + the derived repository / memory / "
+                           "environment state → HANDOFF.md; resume = start of one: the last handoff + what "
+                           "changed since.")
+    ho_p.add_argument("--note", default=None, metavar="FILE",
+                      help="prepare: the agent's note — Markdown with '## Next (start here)', '## Summary', "
+                           "'## Decisions', '## Open threads', '## Ready-to-use prompts' ('-' = stdin). "
+                           "Without one, the last handoff's Next / Open threads / prompts carry over.")
+    ho_p.add_argument("--repo", type=Path, default=None, metavar="DIR",
+                      help="The session's working directory (default: the current one).")
+    ho_p.add_argument("--session", default=None, metavar="ID",
+                      help="prepare: the Claude Code session id (default: the repository's most recent "
+                           "transcript — the running session).")
+    ho_p.add_argument("--transcript", type=Path, default=None, metavar="FILE",
+                      help="prepare: the session transcript (JSONL) instead of looking it up.")
+    ho_p.add_argument("--out", type=Path, default=None, metavar="DIR",
+                      help="The handoff folder (default: the project's handoff/).")
+    ho_p.add_argument("--dry-run", action="store_true",
+                      help="prepare: print the handoff instead of writing it (and start no capture).")
+    ho_p.add_argument("--no-capture", action="store_true",
+                      help="prepare: don't start capturing the session's remaining turns in the background.")
+    ho_p.add_argument("--max-chars", type=int, default=None, metavar="N",
+                      help="resume: fit the brief within about N characters.")
     bf_redo_help = "Re-capture days whose session is already in memory (default: skip them — resume)."
 
     bf_p = sub.add_parser("backfill", parents=[common],
@@ -757,6 +786,14 @@ def _mcp_command() -> list:
     return [Path(sys.executable).as_posix(), "-m", "openwiki", "mcp"]
 
 
+def _openwiki_command(portable: bool = True) -> str:
+    """The base command that runs this OpenWiki from a shell — `owiki` when ``portable`` and on PATH,
+    else the current interpreter (quoted; ``-m openwiki``), so a stale global `owiki` can't be picked up."""
+    if portable and shutil.which("owiki"):
+        return "owiki"
+    return f'"{Path(sys.executable).as_posix()}" -m openwiki'
+
+
 def _hook_command(event: str, project_root=None, portable: bool = True) -> str:
     """The shell command string a Claude Code hook runs for OpenWiki memory
     (``inject``/``capture``), optionally **bound** to a project (``--project``) — for hooks
@@ -765,9 +802,7 @@ def _hook_command(event: str, project_root=None, portable: bool = True) -> str:
     OpenWiki that installed it (a stale `owiki` would fail on unknown args, and an argparse exit
     code 2 would *block* the user's prompt). Quoted — paths may contain spaces on Windows."""
     bind = f' --project "{Path(project_root).as_posix()}"' if project_root else ""
-    if portable and shutil.which("owiki"):
-        return f"owiki hook {event}{bind}"
-    return f'"{Path(sys.executable).as_posix()}" -m openwiki hook {event}{bind}'
+    return f"{_openwiki_command(portable)} hook {event}{bind}"
 
 
 def _scaffold_opencode_for(project: Project, force: bool,
@@ -826,22 +861,28 @@ def _cmd_claude_code(args: argparse.Namespace) -> int:
             print("error: --into installs the memory hooks — pass it together with --hooks.",
                   file=sys.stderr)
             return 2
-        from .claude_code_template import install_hooks
+        from .claude_code_template import install_hooks, write_session_restart_skill
         target = install_hooks(Path(into) / ".claude" / "settings.local.json",
                                _hook_command("inject", project.root, portable=False),
-                               _hook_command("capture", project.root, portable=False))
+                               _hook_command("capture", project.root, portable=False),
+                               _hook_command("resume", project.root, portable=False))
+        skill = write_session_restart_skill(Path(into), _openwiki_command(portable=False),
+                                            force=args.force)
         mode = "on" if project.memory_enabled else "OFF — enable [memory] to use them"
         print(f"Installed OpenWiki memory hooks → {target}\n"
               f"  bound to project '{project.name}' ({project.root}); Second Brain mode is {mode}\n"
-              f"  UserPromptSubmit→inject, SessionEnd/PreCompact→capture — restart Claude Code in "
-              f"{Path(into).resolve()} (or review them with /hooks) to activate.")
+              f"  UserPromptSubmit→inject, SessionEnd/PreCompact→capture, SessionStart→resume (the last "
+              f"session handoff)\n"
+              f"  skill /session-restart → {skill or 'kept (exists; --force to overwrite)'}\n"
+              f"  Restart Claude Code in {Path(into).resolve()} (or review the hooks with /hooks) to activate.")
         return 0
     inject_cmd = _hook_command("inject") if hooks else ""
     capture_cmd = _hook_command("capture") if hooks else ""
+    resume_cmd = _hook_command("resume") if hooks else ""
     print(f"Scaffolding Claude Code config into project '{project.name}' ({project.root})")
     written, skipped = scaffold_claude_code(
         project.root, chat_model=chat, embed_model=embed, mcp_command=command, force=args.force,
-        inject_command=inject_cmd, capture_command=capture_cmd)
+        inject_command=inject_cmd, capture_command=capture_cmd, resume_command=resume_cmd)
     for path in written:
         print(f"  wrote    {path.relative_to(project.root)}")
     for path in skipped:
@@ -849,8 +890,8 @@ def _cmd_claude_code(args: argparse.Namespace) -> int:
     print(f"  MCP server 'openwiki' via `{' '.join(command)}`")
     if hooks:
         mode = "on" if project.memory_enabled else "OFF — enable [memory] to use them"
-        print(f"  memory hooks: UserPromptSubmit→inject, SessionEnd/PreCompact→capture "
-              f"(`{inject_cmd}`); Second Brain mode is {mode}")
+        print(f"  memory hooks: UserPromptSubmit→inject, SessionEnd/PreCompact→capture, "
+              f"SessionStart→resume (`{inject_cmd}`); Second Brain mode is {mode}")
     if not shutil.which("owiki"):
         print("  note: `owiki` is not on PATH; the MCP uses this Python. Install it globally "
               "(install-openwiki.ps1 / .sh) for a portable `owiki mcp`.", file=sys.stderr)
@@ -1383,6 +1424,14 @@ def _cmd_status(args: argparse.Namespace) -> int:
             meta.append(f"{llm['calls']} call(s), {llm.get('eval_tokens', 0)} tok")
         metastr = ("  [" + " · ".join(meta) + "]") if meta else ""
         print(f"    {stage:<7} {label:<11}{metastr}{extra}")
+    from .handoff import HANDOFF_DIR, HANDOFF_MD, load_handoff, next_query
+    handoff = load_handoff(project.root / HANDOFF_DIR)
+    if handoff:
+        sid = (handoff.get("session") or {}).get("id", "")
+        nxt = next_query(handoff.get("note") or {})
+        print(f"  handoff: {format_date(handoff.get('created_at'))}"
+              + (f" (session {sid[:8]})" if sid else "") + f" → {project.root / HANDOFF_DIR / HANDOFF_MD}"
+              + (f"\n           next: {nxt[:110]}" if nxt else ""))
     return 0
 
 
@@ -3136,8 +3185,13 @@ def _run_hook(event: str, payload: dict, project_dir=None) -> None:
     # an explicit binding wins; else discover from the session's cwd — deliberately *not* the
     # registry's active project (that would feed every Claude Code session into one memory)
     project = Project.load(project_dir) if project_dir else Project.find(payload.get("cwd") or None)
-    if project is None or not project.memory_enabled:
-        return   # no project / Wiki mode → nothing to inject or capture
+    if project is None:
+        return
+    if event == "resume":            # a handoff needs no memory tier — Wiki-mode projects have them too
+        _hook_resume(project, payload)
+        return
+    if not project.memory_enabled:
+        return   # Wiki mode → nothing to inject or capture
     if event == "inject":
         _hook_inject(project, payload)
     elif event == "capture":
@@ -3175,6 +3229,31 @@ def _hook_inject(project: Project, payload: dict) -> None:
         sys.stdout.write(
             "Relevant memory from earlier sessions (OpenWiki Second Brain) — use if helpful; "
             "this is not the user's current message:\n\n" + context + "\n")
+
+
+HANDOFF_EMBED_TIMEOUT = 8.0   # s — the resume hook embeds the next task under a 30 s limit
+
+
+def _hook_resume(project: Project, payload: dict) -> None:
+    """SessionStart → inject the brief of the project's latest session handoff (``owiki handoff``):
+    on a new session (``startup``) or after ``/clear`` — a resumed or compacted session still has its
+    context. Only a handoff written for this repository; bounded (``HOOK_BRIEF_CHARS``) and fail-soft.
+    The session is noted in ``handoff.json``, so the next one sees it was already picked up."""
+    from . import handoff as ho
+    if str(payload.get("source") or "startup") not in ("startup", "clear"):
+        return
+    repo = Path(payload.get("cwd") or os.getcwd())
+    found = ho.load_handoff(project.root / ho.HANDOFF_DIR)
+    if found is None or not ho.same_repo(found, repo):
+        return
+    env = _handoff_env(project, repo, embed_timeout=HANDOFF_EMBED_TIMEOUT)
+    try:
+        brief = ho.resume(env, max_chars=ho.HOOK_BRIEF_CHARS,
+                          record_session=str(payload.get("session_id") or "") or None)
+    finally:
+        _close_handoff_env(env)
+    if brief:
+        sys.stdout.write(ho.HOOK_HEADER + brief + "\n")
 
 
 PROBE_TIMEOUT = 12.0     # s — the inject hook runs under a 30 s limit (embed + recall + this call)
@@ -3231,16 +3310,16 @@ CAPTURE_LOCK_STALE_S = 6 * 3600   # a capture lock older than this is a crashed 
 
 
 def _capture_state_path(project: Project) -> Path:
-    return project.state_dir / "capture-state.json"
+    return project.state_dir / CAPTURE_STATE_FILE
 
 
 def _capture_watermark(project: Project, sid: str) -> str:
     """The timestamp of the last turn of session ``sid`` already captured (``""`` = none yet)."""
-    try:
-        state = json.loads(_capture_state_path(project).read_text(encoding="utf-8"))
-        return str(state.get(sid, "")) if isinstance(state, dict) else ""
-    except (OSError, ValueError):
-        return ""
+    return capture_watermark(project.state_dir, sid)
+
+
+def _capture_lock_name(sid: str) -> str:
+    return re.sub(r"[^A-Za-z0-9._-]", "_", sid)[:80] or "session"
 
 
 def _save_capture_watermark(project: Project, sid: str, ts: str) -> None:
@@ -3262,8 +3341,7 @@ def _acquire_capture_lock(project: Project, sid: str) -> Optional[Path]:
     """One capture worker per session at a time: a second worker would capture the same turns.
     Returns the lock file, or ``None`` when another live worker holds it (it picks up the new turns
     before it exits). A lock older than ``CAPTURE_LOCK_STALE_S`` is a crashed worker's and is taken over."""
-    safe = re.sub(r"[^A-Za-z0-9._-]", "_", sid)[:80] or "session"
-    lock = project.state_dir / f"capture-{safe}.lock"
+    lock = project.state_dir / f"capture-{_capture_lock_name(sid)}.lock"
     lock.parent.mkdir(parents=True, exist_ok=True)
     for _ in range(2):
         try:
@@ -3371,6 +3449,171 @@ def _hook_capture(project: Project, payload: dict) -> None:
             pass
 
 
+def _handoff_project(args: argparse.Namespace, repo: Path) -> Optional[Project]:
+    """The project a session handoff belongs to: ``--project``; else the one the repository's Claude
+    Code hooks are bound to (a code repo keeps its memory in a separate project); else the project
+    around the repository; else the registry's active one."""
+    from .handoff import bound_project, git
+    if getattr(args, "project", None) is not None:
+        return getattr(args, "project_obj", None)
+    top = git(repo, "rev-parse", "--show-toplevel")
+    for base in ([Path(top)] if top else []) + [repo]:
+        bound = bound_project(base)
+        if bound is not None and (bound / MANIFEST).is_file():
+            return Project.load(bound)
+    return Project.find(repo) or getattr(args, "project_obj", None)
+
+
+def _handoff_env(project: Project, repo: Path, embed_timeout: Optional[float] = None):
+    """Open what a handoff reads: the project's graph **read-only** (a capture worker, `serve --sync`
+    or a build may hold it writable — then none, and the reason is noted) and its index + embedder."""
+    from .handoff import HandoffEnv
+    userconfig = UserConfig.load()
+
+    def model(key: str, default: str) -> str:
+        return str(project.setting("models", key, None) or userconfig.setting("models", key, None)
+                   or default)
+    host = model("host", DEFAULT_HOST).rstrip("/")
+    graph, note = None, ""
+    if project.graph_path.exists():
+        try:
+            graph = GraphStore(project.graph_path)
+        except Exception as exc:
+            note = ("locked by a writer (a capture worker, `serve --sync` or a build)"
+                    if "lock" in str(exc).lower() else str(exc)[:160])
+    index = None
+    if (project.index_dir / "index.json").is_file():
+        try:
+            index = SemanticIndex.load(project.index_dir)
+            if isinstance(index.embedder, OllamaEmbedder):
+                index.embedder.host = host
+                if embed_timeout:
+                    index.embedder.timeout = embed_timeout
+        except Exception:
+            index = None
+    return HandoffEnv(repo=Path(repo), project=project, graph=graph,
+                      embedder=index.embedder if index is not None else None, index=index,
+                      graph_note=note, chat_model=model("chat", DEFAULT_CHAT),
+                      embed_model=model("embed", DEFAULT_EMBED), host=host)
+
+
+def _close_handoff_env(env) -> None:
+    if env.graph is not None:
+        try:
+            env.graph.close()
+        except Exception:
+            pass
+
+
+def _handoff_capture(project: Project, data: dict) -> str:
+    """Start capturing the session's turns since its last capture in the background, so its facts
+    land before the next session starts (the SessionEnd capture then only takes what is left)."""
+    session = data.get("session") or {}
+    pending = (((data.get("memory") or {}).get("capture")) or {}).get("pending_turns", 0)
+    if not project.memory_enabled or not session.get("id") or not session.get("transcript"):
+        return ""
+    if not pending:
+        return "every turn of this session is already captured"
+    safe = _capture_lock_name(session["id"])
+    if any(w.get("session") == safe for w in (data.get("env") or {}).get("workers") or []):
+        return f"a capture worker for this session is running — it picks up the remaining {pending} turn(s)"
+    ok = _spawn_capture(project, {"session_id": session["id"], "transcript_path": session["transcript"],
+                                  "cwd": data.get("cwd"), "hook_event_name": "Handoff"})
+    return (f"capturing the {pending} turn(s) since the last capture in the background "
+            f"(log: {project.state_dir / 'hook.log'})" if ok else "could not start the capture worker")
+
+
+def _handoff_report(project: Project, data: dict, path: Path, capture: bool) -> list:
+    """What `handoff prepare` / `wiki_handoff` report after writing: the file, the repository and
+    memory at a glance, the capture started, the first Next item, and lines the policy left out."""
+    from .handoff import _dirty_text, _queued_text, _sync_text, next_query
+    repo = data.get("repo") or {}
+    out = [f"Handoff written → {path}  (+ handoff.json and archive/ beside it)"]
+    if repo:
+        out.append(f"  repository: {repo.get('branch')} at {str(repo.get('head'))[:7]}"
+                   + (f" ({repo['describe']})" if repo.get("describe") else "")
+                   + f" — {_dirty_text(repo)}, {_sync_text(repo)}")
+    mem = data.get("memory")
+    if mem is not None:
+        ch = mem.get("changes")
+        learned = (f"{ch['new_count']} fact(s) learned {data.get('since_label')}, "
+                   f"{ch['closed_count']} closed · " if ch else "")
+        out.append(f"  memory: {learned}{_queued_text(mem.get('queued') or {})}")
+    if capture:
+        note = _handoff_capture(project, data)
+        if note:
+            out.append(f"  capture: {note}")
+    nxt = next_query(data.get("note") or {})
+    out.append(f"  next: {nxt}" if nxt else "  next: (the note names no next step)")
+    if data.get("carried_from"):
+        out.append("  note: none given — Next, Open threads and prompts carried over from the last handoff")
+    for line in data.get("dropped") or []:
+        out.append(f"  left out by the memory policy (security-sensitive): {line[:120]}")
+    return out
+
+
+def _cmd_handoff(args: argparse.Namespace) -> int:
+    from . import handoff as ho
+    repo = Path(args.repo or os.getcwd()).resolve()
+    project = _handoff_project(args, repo)
+    if project is None:
+        print("error: no OpenWiki project for this repository — pass --project, or bind one with "
+              "`owiki claude-code --hooks --into <repo>` (run inside the project).", file=sys.stderr)
+        return 2
+    if project is not getattr(args, "project_obj", None):
+        print(f"[openwiki] handoff project '{project.name}'  ({project.root})", file=sys.stderr)
+    note = None
+    if args.mode == "prepare" and args.note:
+        try:
+            note = sys.stdin.read() if str(args.note) == "-" else Path(args.note).read_text(encoding="utf-8")
+        except OSError as exc:
+            print(f"error: can't read the note: {exc}", file=sys.stderr)
+            return 2
+    env = _handoff_env(project, repo)
+    try:
+        if args.mode == "resume":
+            print(ho.resume(env, out=args.out, max_chars=args.max_chars)
+                  or "No handoff yet — `owiki handoff prepare` at the end of a session writes one.")
+            return 0
+        data = ho.prepare(env, note, transcript=args.transcript, session_id=args.session, out=args.out)
+    finally:
+        _close_handoff_env(env)
+    if args.dry_run:
+        print(ho.render_handoff(data))
+        return 0
+    path = ho.save_handoff(ho.handoff_dir(project, args.out), data)
+    print("\n".join(_handoff_report(project, data, path, capture=not args.no_capture)))
+    return 0
+
+
+def _mcp_handoff(project: Project, graph, index, model: str, host: str, writes: bool):
+    """``wiki_handoff`` for the MCP server — over the server's own (read-only) graph and index. The
+    session's repository is the server's working directory (Claude Code starts it there) unless the
+    call names one. Writing a handoff is an agent write, so ``prepare`` needs ``[memory] agent_writes``."""
+    from . import handoff as ho
+    embed = str(project.setting("models", "embed", None) or DEFAULT_EMBED)
+
+    def run(mode: str, note=None, repo=None) -> str:
+        env = ho.HandoffEnv(repo=Path(repo or os.getcwd()), project=project, graph=graph,
+                            embedder=index.embedder if index is not None else None, index=index,
+                            graph_note="" if graph is not None else "not loaded by the MCP server",
+                            chat_model=model, embed_model=embed, host=host)
+        if mode == "resume":
+            return (ho.resume(env)
+                    or "No handoff yet — `wiki_handoff` with mode 'prepare' at the end of a session writes one.")
+        if mode not in ("preview", "prepare"):
+            return f"Unknown mode '{mode}' — use resume, preview or prepare."
+        if mode == "prepare" and not writes:
+            return ("Writing a handoff through MCP needs `[memory] agent_writes = true` in openwiki.toml — "
+                    "or run `owiki handoff prepare --note FILE` in a shell.")
+        data = ho.prepare(env, note)
+        if mode == "preview":
+            return ho.render_handoff(data)
+        path = ho.save_handoff(ho.handoff_dir(project), data)
+        return "\n".join(_handoff_report(project, data, path, capture=True))
+    return run
+
+
 def _fold_pending_usage(graph) -> None:
     """B1: when a writable process starts, fold any read-path usage logged since the
     last writer into the graph (best-effort). No-op on a read-only/None graph or empty log."""
@@ -3461,13 +3704,15 @@ def _cmd_mcp(args: argparse.Namespace) -> int:
     project = getattr(args, "project_obj", None)
     identity = project.identity if (project is not None and project.memory_enabled) else ""
     budget = project.context_budget if (project is not None and project.memory_enabled) else None
+    writes = bool(project is not None and project.memory_enabled and project.agent_writes)
+    handoff = (_mcp_handoff(project, graph, index, args.model, args.host.rstrip("/"), writes)
+               if project is not None else None)
     server = build_server(args.wiki, index=index, graph=graph, agent=agent,
                           version=__version__, identity=identity, context_budget=budget,
                           context_k=project.context_k if project is not None else 16,
                           memory_probes=bool(project is not None and project.memory_enabled
                                              and project.memory_probes),
-                          memory_writes=bool(project is not None and project.memory_enabled
-                                             and project.agent_writes))
+                          memory_writes=writes, handoff=handoff)
     server.serve()   # blocks on stdio (JSON-RPC)
     return 0
 
@@ -3488,6 +3733,7 @@ _DISPATCH = {
     "chat": _cmd_chat,
     "serve": _cmd_serve,
     "mcp": _cmd_mcp,
+    "handoff": _cmd_handoff,
     "graph-build": _cmd_graph_build,
     "references": _cmd_references,
     "backfill": _cmd_backfill,

@@ -25,6 +25,7 @@ claude-code/
   commands/wiki-ask.md            # /wiki-ask <question>
   commands/wiki-explore.md        # /wiki-explore <topic>        — graph traversal
   skills/openwiki/SKILL.md        # auto-applied: when to consult the wiki
+  skills/session-restart/SKILL.md # /session-restart prepare | resume — hand a session over to the next
 opencode/
   opencode.json                   # register the MCP server (mcp.openwiki)
   command/openwiki-tutorial.md    # /openwiki-tutorial [module]

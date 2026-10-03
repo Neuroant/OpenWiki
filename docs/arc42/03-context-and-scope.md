@@ -31,8 +31,8 @@ flowchart LR
 |---|---|---|
 | **CLI user** | in | Commands (`build`, `ask`, `serve`, `communities`, `eval`, `remember`/`recall`/`context`, `consolidate`, `sleep`, `backfill`, …) |
 | **Browser user** | in/out | HTTP requests → JSON + static SPA (browse, search, chat/edit, graph, eval) |
-| **Coding agent** | in/out | MCP JSON-RPC (stdio): `wiki_ask`, `wiki_global`, `wiki_search`, graph tools, `wiki_memory`; opt-in **write** `wiki_remember` (queued to the journal) |
-| **Claude Code host hooks** | in/out | `UserPromptSubmit` → the assembled memory context on stdout (injected into the prompt); `SessionEnd` / `PreCompact` → the transcript path, captured by a detached worker (§6.8) |
+| **Coding agent** | in/out | MCP JSON-RPC (stdio): `wiki_ask`, `wiki_global`, `wiki_search`, graph tools, `wiki_memory`, `wiki_handoff` (session handoff); opt-in **write** `wiki_remember` (queued to the journal) |
+| **Claude Code host hooks** | in/out | `UserPromptSubmit` → the assembled memory context on stdout (injected into the prompt); `SessionEnd` / `PreCompact` → the transcript path, captured by a detached worker (§6.8); `SessionStart` → the last session handoff's brief on stdout (§6.11) |
 | **Claude Code history** | in | Transcript JSONL files imported by `backfill` as one dated session per day (§6.8) |
 | **Source documents** | in | PDF, Markdown/text, HTML file, `http(s)` URL, or a code-repo directory |
 | **Session transcripts** | in | A conversation transcript (`type = "session"` source) captured into the memory tier — Path B, Second Brain mode (§8.15) |
@@ -106,6 +106,8 @@ context, `as_of`, in Second Brain mode). Write tool, **opt-in** (`[memory] agent
 `wiki_remember(facts, replaces, source)` — the agent records facts / a new state and names the remembered
 facts it makes outdated (matched exactly at call time; unmatched lines return the closest facts). The server
 keeps the graph read-only: the call **queues** one journal op that the next writable pass folds (ADR-33).
+`wiki_handoff(mode, note, repo)` — the session handoff (§6.11, ADR-36): `resume` and `preview` read; `prepare` writes
+the project's `handoff/` and is gated like the write tool (`[memory] agent_writes`).
 
 ### 3.2.4 Ollama interface
 
@@ -115,7 +117,7 @@ keeps the graph read-only: the call **queues** one journal op that the next writ
 | **Chat** | `POST {host}/api/chat` · `{model, messages:[{role, content}], stream:false, options:{temperature, …}, tools?}` | `{message:{role, content, tool_calls?}}` |
 
 Both via stdlib `urllib`, no API key; a `URLError`/`HTTPError` becomes a `RuntimeError` with a
-"is Ollama running / model pulled?" hint (§6.11).
+"is Ollama running / model pulled?" hint (§6.12).
 
 ## 3.3 Scope boundaries (what OpenWiki is *not*)
 
@@ -128,4 +130,4 @@ Both via stdlib `urllib`, no API key; a `URLError`/`HTTPError` becomes a `Runtim
 ---
 *Chapter complete. Payload shapes verified against `web/server.py`, `mcp_server.py`,
 `embeddings.py`, `llm.py` (re-checked for v0.90). Cross-refs: interfaces used at runtime → §6; error handling →
-§6.11/§8.*
+§6.12/§8.*

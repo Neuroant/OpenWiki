@@ -20,6 +20,7 @@ agent writes · surfaces and sharing · evaluation.
 8. [MIRIX](#8-mirix) (reviewed 2026-10-03)
 9. [AriGraph](#9-arigraph) (reviewed 2026-10-03)
 10. [Nemori](#10-nemori) (reviewed 2026-10-03)
+11. [memory-champ](#11-memory-champ) (reviewed 2026-10-03)
 - [Across the series — what it suggests for OpenWiki](#across-the-series--what-it-suggests-for-openwiki)
 - [Candidates — world models and CoALA](#candidates--world-models-and-coala)
 
@@ -1030,14 +1031,105 @@ keep each segment as a dated narrative, and distill into semantic memory only wh
 predict. Its LoCoMo profile is strongest where we are weakest — temporal questions — which points at narrative
 episodes; and its insistence on segmenting the whole stream exposed a real gap in our own capture.
 
+
+---
+
+## 11. memory-champ
+
+*Source: [github.com/mikeleewoodai/memory-champ](https://github.com/mikeleewoodai/memory-champ) at `60691eb` (2026-10-01),
+`memory-champ` 1.0.0, MIT, Python ≥ 3.10 (not on PyPI; installed from GitHub); its published tool contract and policy
+schema (`contracts/`). A small, carefully engineered project (~7,900 lines with tests, one test per acceptance
+criterion).*
+
+**What it is.** A memory *service* for agent orchestrations, structured explicitly on CoALA: episodic, semantic and
+procedural memory, plus CoALA's working memory as "decision cycles", exposed as nine MCP tools (stdio only) and kept
+by an independent daemon. SQLite with sqlite-vec and FTS5; a local embedding model; **no language model by default**
+— the host agent writes its own memories through the tools. It never reaches the network, never touches files
+outside its database, never talks to a user: "safe to attach to an arbitrary agentic loop".
+
+### How its memory works
+- **Learning gates per memory type** (in `policy.yaml`). *Episodic* writes are automatic — "a record of what happened
+  is not a claim". *Semantic* writes are automatic too, but **contradictions are surfaced, never resolved**: a write
+  that conflicts with existing facts returns them as a warning, recall returns them alongside the results, and only
+  an explicit `supersedes` replaces a fact. *Procedural* memory is **always a proposal**: the agent can only queue a
+  procedure; approving it requires an **Ed25519 signature** from a reviewer key the agent does not have, and the daemon
+  may never approve. Procedures carry success statistics and are judged after enough invocations.
+- **Importance priors:** 0.5 by default, +0.2 when the record is a failure ("failures teach more than successes"),
+  +0.3 when a human wrote it, +0.1 per corroboration.
+- **Forgetting by type:** episodes expire after 90 days and older ones are consolidated into semantic facts (clusters
+  of three or more); semantic facts never expire but carry a **volatility class** — stable, slow, volatile — that
+  schedules a recheck after 365, 90 or 14 days. Removal is a tombstone (reversible), a redaction (content
+  overwritten, shape and provenance kept — for personal data written by mistake), or an explicit hard delete.
+- **Working memory as decision cycles.** A host may open a cycle, record observations in it, and close it, which
+  promotes them to episodes; a crashed or abandoned cycle is reaped and promoted by the daemon. Loop safety detects an
+  agent repeating itself and caps writes per minute.
+- **Recall:** reciprocal rank fusion over FTS5 and vector search, weighted by relevance 0.5, recency 0.2 (half-life
+  72 hours) and importance 0.3; strategies hybrid / semantic / keyword / recent; 12 records and a **measured** hard
+  ceiling of 1,500 tokens for the context block; episodes are opt-in; records flagged sensitive are redacted in the
+  context block.
+- **The daemon** (every six hours): reap cycles, expire by TTL, consolidate episodes, detect contradictions, turn
+  repeated successful patterns into procedure *proposals*, re-embed after a model change. An optional LLM
+  adjudication pass is off by default.
+- **Health:** `memory_stats` returns warnings — proposals nobody reviews, procedures that keep failing, cycles that
+  never close.
+
+### Side by side
+
+| | memory-champ | OpenWiki (Path B) |
+|---|---|---|
+| Who writes memories | the host agent, through tools (no LLM in the server) | a local 30B captures transcripts; the agent may add via `wiki_remember` |
+| Memory types | episodic, semantic, procedural + working-memory cycles | one fact store |
+| Contradictions | surfaced, never resolved (explicit `supersedes` only) | resolved by a valid-time merge and a coexistence check |
+| Risky writes | procedures behind a signed human approval | instructions blocked by policy; agent writes opt-in |
+| Staleness | volatility classes with recheck intervals | restatement + `wiki_remember`; ephemeral events forgotten |
+| Importance | priors by failure, human authorship, corroboration | confidence by corroboration; material ×0.75 |
+| Recall | FTS5 + vectors fused; relevance / recency / importance weights | cosine × confidence × recency |
+| Budget | 12 records, a measured 1,500-token ceiling | 16 facts in 3,000 characters (~4 per token) |
+| Store | SQLite + sqlite-vec + FTS5 | Kuzu (archived upstream, R10) |
+| Evaluation | acceptance tests, a recall eval on fixtures | cross-session sets; LoCoMo 60.7 % J |
+
+### What we learn
+1. **Volatility classes for facts.** A fact that is true "now" — a current release, a count, "the remaining item",
+   "next on the roadmap" — goes stale on its own, while a definition does not. Every stale fact we corrected this week
+   through `wiki_remember` was of the first kind. A volatility tag at capture (one more field in the existing call)
+   would let recall mark a volatile fact as "possibly outdated" after a few weeks, or rank it lower — a deterministic
+   handle on the stale-state debt (D12).
+2. **A human gate for the riskiest write path.** memory-champ puts procedural memory behind a signature the agent
+   cannot produce. We have the matching open question: an always-present core of user conventions (§1, §6) would be
+   the most powerful — and most poisonable — memory we could add. Gate it the same way: conventions enter the core
+   only by explicit human approval (a CLI or Gedächtnis-tab action), never by capture alone.
+3. **Surface contradictions you cannot resolve.** The second system after MIRIX to keep both sides of an unresolved
+   conflict and say so. Our merge resolves conflicts by valid time; where it cannot decide, a "disputed" mark shown in
+   the context would be more honest than either outcome.
+4. **Importance by provenance and outcome.** Failures and human-authored records start with higher importance. We
+   down-weight discussed material, but give no lift to the user's own decisions — and capture no failures at all
+   (§8, lesson 2).
+5. **Health warnings.** A memory that reports its own warning signs — for us: a journal that is not draining, capture
+   failures in the hook log, a growing share of volatile facts past their recheck date — would make `openwiki status`
+   more useful than counts alone.
+6. **The other way to write memory.** Here the host agent — usually a frontier model — writes its memories itself, and
+   the server stays deterministic. That sidesteps local-model capture quality entirely, at the price of depending on
+   the agent's diligence. `wiki_remember` is the same mechanism for us; memory-champ shows it can be the main path.
+
+### What we would not adopt
+- **Agent writes as the only path** — memory would depend on the agent remembering to write.
+- **An English-only small embedder** (all-MiniLM-L6-v2) for a German corpus.
+- **The decision-cycle API** as a requirement — even memory-champ makes it optional.
+
+**In short.** memory-champ is CoALA taken literally and engineered carefully: three memory types with their own write
+rules, contradictions surfaced rather than resolved, procedures behind a signed human gate, volatility-driven
+rechecks, and a server with no model of its own. Of all the systems in the series it is the closest to Cognitive
+Substrate's "server-enforced authority per tier". For OpenWiki its sharpest ideas are a volatility class per fact and a
+human gate for whatever memory becomes always-present.
+
 ---
 
 ## Across the series — what it suggests for OpenWiki
 
-Ten systems — six in a first round, then Hindsight, MIRIX, AriGraph and Nemori from the world-model shortlist —
-read from their source in October 2026. Where OpenWiki stands out: a real time model (only Graphiti matches it; Hindsight has event and
+Eleven systems — six in a first round, then Hindsight, MIRIX, AriGraph, Nemori and memory-champ from the world-model
+shortlist — read from their source in October 2026. Where OpenWiki stands out: a real time model (only Graphiti matches it; Hindsight has event and
 mention time; Mem0 keeps time-aware retrieval on its hosted platform; Cognee has a query-time window),
-deterministic hygiene against poisoning (none of the ten has a comparable policy), policy-based forgetting,
+deterministic hygiene against poisoning (none of the eleven has a comparable policy), policy-based forgetting,
 local-first operation on a 30B model, and audited measurement. Where it lags, the same gaps recur — and Hindsight
 shows how large the distance can be (83.6 % on LongMemEval with a 20B open model):
 
@@ -1050,13 +1142,15 @@ shows how large the distance can be (83.6 % on LongMemEval with a 20B open model
 | Capture during a session | Mem0, Letta, Cognee, LangMem, Hindsight (write-back every turn) | at session end / compaction | debounced idle capture through the detached worker | small–medium |
 | Capture coverage | Nemori (segments the whole stream), Cognee (a watermark per session), Mem0 (every batch) | the hook reads only the last 20,000 characters per capture — ~13 % of a long session | capture everything since a per-session watermark, in bounded windows | small; mechanical |
 | Raw sessions searchable | Graphiti, Letta, Mem0, Cognee, Hindsight, AriGraph (episodes ranked by overlap with retrieved facts) | transcripts stay outside the memory tier | a session search tool for agents | medium |
-| A curated always-present core | waku, Letta, LangMem, Hindsight (mental models) | a hand-written identity string | user-sourced conventions in the identity tier | small; must pass the poisoning set |
+| A curated always-present core | waku, Letta, LangMem, Hindsight (mental models) | a hand-written identity string | user-sourced conventions in the identity tier, entering only by human approval (memory-champ's gate) | small; must pass the poisoning set |
 | Richer context than atomic facts | waku (episodes), Graphiti (sagas), Mem0 (rich memories), Cognee (lessons with reasons), Hindsight (5W facts), Nemori (dated narrative episodes) | atomic subject–predicate–object facts | episode summaries or a detail sentence per fact | medium; a paired LoCoMo run |
 | Write-time model judgments | Mem0 dropped them; Letta and LangMem rely on strong curators; Hindsight confines them to a derived layer over immutable facts | two LLM checks in the merge (attribute resolution, coexistence) | an add-only ablation on LoCoMo — do they earn their place? | small; replay saved captures |
 | Time in the question | Cognee (query-time window), Mem0 platform, Hindsight and MIRIX (rule-based date parsers) | recall ignores times in the query | boost facts whose validity overlaps a window extracted from the question | small; LoCoMo temporal |
 | Multi-hop recall by expansion | AriGraph (semantic BFS over triplets), Graphiti (BFS from entities), Hindsight (graph links), Cognee (graph completion) | memory recall is single-hop similarity (the wiki side has GraphRAG expansion) | expand from the recalled facts through shared subjects / objects, thresholded, depth 2 | small; LoCoMo multi-hop |
-| Typed memory | waku (facts / episodes / skills / persona), Letta (core / deferred / skills), Hindsight (world / experience), MIRIX (six purpose types) | one untyped fact store (`source` tags only) | a type tag at capture, per-type recall budgets | small–medium |
+| Typed memory | waku (facts / episodes / skills / persona), Letta (core / deferred / skills), Hindsight (world / experience), MIRIX (six purpose types), memory-champ (episodic / semantic / procedural, per-type write gates) | one untyped fact store (`source` tags only) | a type tag at capture, per-type recall budgets | small–medium |
 | Procedural memory from errors | Mem0 plugin (failed commands with fixes), MIRIX (tool errors → skills) | tool output stripped from capture | capture bounded failure → fix pairs | medium |
+| Staleness by volatility | memory-champ (stable / slow / volatile facts, rechecked after 365 / 90 / 14 days) | stale "current" facts persist until restated or corrected via `wiki_remember` (D12) | a volatility tag at capture; volatile facts flagged "possibly outdated" after a few weeks | small |
+| Unresolved conflicts shown | MIRIX (keep both, note the discrepancy), memory-champ (surfaced, never resolved) | the merge closes or keeps silently | a "disputed" mark in the context | small |
 | Memory writes documents | Hindsight (five knowledge pages per repository), Letta (memory as Markdown) | the wiki is built from documents only; memory writes no pages | "Decisions" / "Conventions" pages regenerated from facts at `sleep`; git history as a capture source | medium |
 
 **Suggested order:** credential redaction and full capture coverage first (two clear gaps, both mechanical); then the COGX + Markdown
@@ -1082,9 +1176,8 @@ ground-truth tier, consolidation as a sleep cycle, perception from many sources)
    episodic nodes linking each observation to its triples. → [§9](#9-arigraph)
 4. **Nemori** — topic-segmented narrative episodes, semantic memory learned by *predict–calibrate* (store only what
    existing memory failed to predict). → [§10](#10-nemori)
-5. **[memory-champ](https://github.com/mikeleewoodai/memory-champ)** — CoALA as an MCP service (episodic, semantic,
-   procedural in SQLite + sqlite-vec; FTS5 + vector fusion weighted by recency and importance); the agent can only
-   *queue* procedures — approval needs an Ed25519 signature from a key it doesn't have.
+5. **memory-champ** — CoALA as an MCP service with per-type write gates; procedures behind a signed human approval.
+   → [§11](#11-memory-champ)
 
 **Brain-inspired and theory**
 6. **[HippoRAG 2](https://arxiv.org/abs/2502.14802)** (ICML 2025) — the LLM as neocortex, a knowledge graph with

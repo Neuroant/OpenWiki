@@ -178,6 +178,119 @@ def test_hook_worker_mode_reads_and_removes_its_payload(tmp_path, monkeypatch):
     assert not job.exists()
 
 
+def test_capture_windows_since_a_watermark():
+    from openwiki.claude_code_template import capture_windows
+
+    text = _transcript()
+    allw = capture_windows(text, "", max_chars=60)       # day 1 fits one window; day 2 needs two
+    assert [(a, b) for a, b, _ in allw] == [("2026-08-01T09:00:00Z", "2026-08-01T09:00:05Z"),
+                                            ("2026-08-02T09:00:00Z", "2026-08-02T09:00:00Z"),
+                                            ("2026-08-02T09:00:03Z", "2026-08-02T09:00:03Z")]
+    assert "CLAUDE.md" not in " ".join(w for _, _, w in allw)       # host blocks stay stripped
+    since = capture_windows(text, "2026-08-01T09:00:05Z", max_chars=60)
+    assert [a for a, _, _ in since] == ["2026-08-02T09:00:00Z", "2026-08-02T09:00:03Z"]
+    assert capture_windows(text, "2026-08-02T09:00:03Z") == []      # nothing new
+
+
+def _capture_fakes(monkeypatch, cli):
+    """Fake the model, embedder and graph around the capture worker; returns what it captured."""
+    seen = {"windows": [], "remembered": []}
+
+    class _Fact:
+        def __init__(self, text):
+            self.subject, self.predicate, self.object = "user", "said", text
+
+    def fake_capture(chat, window, session_date=None, **kw):
+        seen["windows"].append((window, session_date))
+        return [_Fact(window[:20])], []
+
+    class _Graph:
+        writable = True
+
+        def remember(self, sid, facts, embedder, session_date=None, **kw):
+            seen["remembered"].append((sid, len(facts), session_date))
+
+        def fold_journal(self, *a, **kw):
+            return {}
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(cli, "capture_session_detailed", fake_capture)
+    monkeypatch.setattr(cli, "_hook_embedder", lambda project: object())
+    monkeypatch.setattr(cli, "_capture_chat", lambda model, host: None)
+    monkeypatch.setattr(cli, "_open_graph", lambda *a, **kw: _Graph())
+    monkeypatch.setattr(cli, "_coexist_check", lambda *a: None)
+    monkeypatch.setattr(cli, "_attribute_resolver", lambda *a: None)
+    return seen
+
+
+def _turns(n, day="2026-08-03", start_hour=9):
+    return "\n".join(_line("user" if i % 2 == 0 else "assistant", f"turn {i} " + "x" * 30,
+                            f"{day}T{start_hour + i // 60:02d}:{i % 60:02d}:00Z") for i in range(n))
+
+
+def test_hook_worker_captures_every_turn_since_the_watermark(tmp_path, monkeypatch):
+    from openwiki import cli
+    from openwiki.project import Project
+
+    proj = Project.load(_project(tmp_path))
+    proj.graph_path.parent.mkdir(parents=True, exist_ok=True)
+    proj.graph_path.write_text("", encoding="utf-8")
+    seen = _capture_fakes(monkeypatch, cli)
+    monkeypatch.setattr(cli, "CAPTURE_WINDOW_CHARS", 120)          # ~2 turns per window
+    tpath = tmp_path / "t.jsonl"
+    tpath.write_text(_turns(6), encoding="utf-8")
+    payload = {"_worker": True, "session_id": "s1", "transcript_path": str(tpath)}
+
+    cli._hook_capture(proj, payload)
+    first = len(seen["windows"])
+    assert first == 3 and len(seen["remembered"]) == 3               # the whole session, not a tail
+    assert "turn 0" in seen["windows"][0][0] and "turn 5" in seen["windows"][-1][0]
+    assert all(sid == "s1" and d for sid, _, d in seen["remembered"])  # dated by their first turn
+    assert cli._capture_watermark(proj, "s1") == "2026-08-03T09:05:00Z"
+
+    tpath.write_text(_turns(10), encoding="utf-8")                   # the session went on
+    cli._hook_capture(proj, payload)
+    new = [w for w, _ in seen["windows"][first:]]
+    assert new and all("turn 0 " not in w for w in new) and "turn 9" in new[-1]   # only new turns
+    cli._hook_capture(proj, payload)                                 # nothing new → nothing captured
+    assert len(seen["windows"]) == first + len(new)
+    assert not list(proj.state_dir.glob("capture-*.lock"))           # lock released
+
+
+def test_hook_worker_first_seen_long_session_keeps_recent_windows(tmp_path, monkeypatch):
+    from openwiki import cli
+    from openwiki.project import Project
+
+    proj = Project.load(_project(tmp_path))
+    proj.graph_path.parent.mkdir(parents=True, exist_ok=True)
+    proj.graph_path.write_text("", encoding="utf-8")
+    seen = _capture_fakes(monkeypatch, cli)
+    monkeypatch.setattr(cli, "CAPTURE_WINDOW_CHARS", 60)            # one turn per window
+    monkeypatch.setattr(cli, "CAPTURE_FIRST_WINDOWS", 3)
+    tpath = tmp_path / "t.jsonl"
+    tpath.write_text(_turns(10), encoding="utf-8")
+    cli._hook_capture(proj, {"_worker": True, "session_id": "old", "transcript_path": str(tpath)})
+    assert len(seen["windows"]) == 3 and "turn 9" in seen["windows"][-1][0]   # the most recent ones
+
+
+def test_hook_worker_defers_to_a_running_worker(tmp_path, monkeypatch):
+    from openwiki import cli
+    from openwiki.project import Project
+
+    proj = Project.load(_project(tmp_path))
+    proj.graph_path.parent.mkdir(parents=True, exist_ok=True)
+    proj.graph_path.write_text("", encoding="utf-8")
+    seen = _capture_fakes(monkeypatch, cli)
+    tpath = tmp_path / "t.jsonl"
+    tpath.write_text(_turns(4), encoding="utf-8")
+    proj.state_dir.mkdir(parents=True, exist_ok=True)
+    (proj.state_dir / "capture-s1.lock").write_text("123", encoding="utf-8")   # a live worker
+    cli._hook_capture(proj, {"_worker": True, "session_id": "s1", "transcript_path": str(tpath)})
+    assert seen["windows"] == []
+
+
 def test_split_by_window_carries_each_windows_start():
     from openwiki.claude_code_template import split_transcripts_by_window
 

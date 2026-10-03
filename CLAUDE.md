@@ -1069,8 +1069,15 @@ http — count, p50/p95, total time, token in/out) + a live recent-events table,
   The hooks run `cli._cmd_hook`
   (reads the event JSON on stdin, **always exits 0** — fail-soft — else exit 2 would reject the
   prompt): `inject` = `GraphStore.context_for(prompt)` → stdout (Claude Code injects it), `capture`
-  = parse transcript → `capture_session` → `remember` (skipped if the graph is write-locked). Gated
-  by the project's `[memory] enabled`. Design: Path B / B6 host-hook refinement.
+  = **every turn since the session's watermark** → `capture_session` per window → `remember` (queued if the
+  graph is write-locked). Gated by the project's `[memory] enabled`. Design: Path B / B6 host-hook refinement.
+  **Incremental capture (v0.97):** `claude_code_template.capture_windows(text, after_ts, max_chars)` cuts the turns
+  dated after a watermark into per-day windows (≤ `CAPTURE_WINDOW_CHARS` = 20,000, at turn boundaries); the worker
+  captures each window dated by its first turn, writes it (graph writable only for that write), and advances the
+  per-session watermark in `.openwiki/capture-state.json`; a per-session lock file (`capture-<sid>.lock`, stale after
+  6 h) keeps one worker per session, and turns that arrive meanwhile are picked up before it exits. A session first
+  seen with a long history keeps only its last `CAPTURE_FIRST_WINDOWS` (8) windows (older turns: `backfill`). Before,
+  the hook read only the transcript's last 20,000 characters per capture point — ~13 % of a long session.
 - **`openwiki/cli.py`** — argparse CLI with `init`, `build`, `status`, `project`
   (`list`/`use`/`add`/`remove`/`add-source`), `opencode`, `claude-code`, `ontology`, `ingest`,
   `build-wiki`, `index`, `search`, `eval`, `ask` (`--global` = global search),

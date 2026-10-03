@@ -1364,6 +1364,24 @@ the live context — the hooks assemble k = 8 within a 2,000-character budget, a
 suggests trying a larger k there, measured on that path (→ §13.12). LoCoMo now: **overall J 60.7 %** with a local
 30B (Mem0 reports ≈ 67 % with GPT-4o-mini — and both are generous-judge numbers).
 
+### 13.13 Capture coverage — the hooks capture a whole session (v0.97)
+
+The host hook captured `parse_claude_transcript(text)` — the transcript's **last 20,000 characters** — at each
+PreCompact and at SessionEnd. For a long session that is a small fraction: the dogfooding session behind this
+document, 1.5 M characters of conversation over 36 days with nine compactions, was captured to at most ~13 %
+(`backfill` had covered the older history once). Found by contrast while reviewing Nemori, which segments the whole
+stream (`memory-systems-review.md` §10).
+
+Now the worker keeps a **per-session watermark** — the timestamp of the last captured turn, in
+`.openwiki/capture-state.json` — and captures every turn after it, cut into per-day windows of at most 20,000
+characters at turn boundaries (`claude_code_template.capture_windows`). Each window is captured, dated by its first
+turn (so facts are valid from when they were said, as in `backfill`), written immediately (the graph is writable only
+for that write; a locked graph queues to the journal), and the watermark advances; a failed window is logged and
+skipped. A per-session lock file keeps one worker per session; turns that arrive while it runs are picked up before
+it exits. A session first seen with a long history — one that predates this change — keeps only its last eight
+windows; older turns are `backfill`'s job. On this session that first capture takes ~98 K characters (from
+2026-09-28), and every capture after it is incremental.
+
 ### 13.12 A larger k in the live context (v0.96)
 
 §13.11 measured more facts on the benchmark path (no budget, no identity, no themes). The live path — the inject

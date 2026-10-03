@@ -3225,34 +3225,66 @@ def _spawn_capture(project: Project, payload: dict) -> bool:
         return False
 
 
-def _hook_capture(project: Project, payload: dict) -> None:
-    """SessionEnd/PreCompact → capture the transcript into the remembered tier (best-effort).
-    The hook itself only **spawns a detached worker** and returns (the LLM call outlives a hook's
-    timeout); the worker captures *first* and only then opens the graph writable (so the exclusive
-    Kuzu lock is held for the short write, not the ~1-min LLM call). If the graph is locked by a
-    running serve/chat, the facts are **queued** to the write-ahead journal instead of dropped."""
-    from .claude_code_template import parse_claude_transcript
+CAPTURE_WINDOW_CHARS = 20000     # one capture call per window, as in `backfill`
+CAPTURE_FIRST_WINDOWS = 8         # a session first seen with a long history keeps its most recent windows
+CAPTURE_LOCK_STALE_S = 6 * 3600   # a capture lock older than this is a crashed worker's — taken over
 
-    if not payload.get("_worker") and _spawn_capture(project, payload):
-        return
-    tpath = payload.get("transcript_path")
-    embedder = _hook_embedder(project)
-    if not tpath or not Path(tpath).is_file() or embedder is None or not project.graph_path.exists():
-        return
-    transcript = parse_claude_transcript(Path(tpath).read_text(encoding="utf-8", errors="ignore"))
-    if not transcript.strip():
-        return
-    model = project.setting("models", "chat", DEFAULT_CHAT)
-    host = project.setting("models", "host", DEFAULT_HOST)
-    # the session ends now → today is the date relative mentions ("since yesterday") resolve against
-    facts, dropped = capture_session_detailed(_capture_chat(model, host), transcript,
-                                              session_date=int(time.time()))
-    for f in dropped:                  # logged to .openwiki/hook.log by the detached worker
-        print(f"openwiki hook: scrubbed instruction-like fact: {f.subject} | {f.predicate} | "
-              f"{f.object}", file=sys.stderr)
-    if not facts and not pending_journal(journal_path(project.graph_path)):
-        return                         # nothing captured and nothing queued (wiki_remember) to fold
-    sid = str(payload.get("session_id") or "session")
+
+def _capture_state_path(project: Project) -> Path:
+    return project.state_dir / "capture-state.json"
+
+
+def _capture_watermark(project: Project, sid: str) -> str:
+    """The timestamp of the last turn of session ``sid`` already captured (``""`` = none yet)."""
+    try:
+        state = json.loads(_capture_state_path(project).read_text(encoding="utf-8"))
+        return str(state.get(sid, "")) if isinstance(state, dict) else ""
+    except (OSError, ValueError):
+        return ""
+
+
+def _save_capture_watermark(project: Project, sid: str, ts: str) -> None:
+    path = _capture_state_path(project)
+    try:
+        state = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(state, dict):
+            state = {}
+    except (OSError, ValueError):
+        state = {}
+    state[sid] = ts
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(state, ensure_ascii=False, indent=1), encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def _acquire_capture_lock(project: Project, sid: str) -> Optional[Path]:
+    """One capture worker per session at a time: a second worker would capture the same turns.
+    Returns the lock file, or ``None`` when another live worker holds it (it picks up the new turns
+    before it exits). A lock older than ``CAPTURE_LOCK_STALE_S`` is a crashed worker's and is taken over."""
+    safe = re.sub(r"[^A-Za-z0-9._-]", "_", sid)[:80] or "session"
+    lock = project.state_dir / f"capture-{safe}.lock"
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    for _ in range(2):
+        try:
+            fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.write(fd, str(os.getpid()).encode())
+            os.close(fd)
+            return lock
+        except FileExistsError:
+            try:
+                if time.time() - lock.stat().st_mtime < CAPTURE_LOCK_STALE_S:
+                    return None
+                lock.unlink()
+            except OSError:
+                return None
+    return None
+
+
+def _write_captured(project: Project, sid: str, facts, embedder, wdate: int,
+                    model: str, host: str) -> None:
+    """Remember one window's facts — the graph is opened writable only for this short write — or
+    queue them to the journal when a serve/chat holds the lock; folds pending journal ops too."""
     graph = _open_graph(project.graph_path, writable=True, retries=6)
     if graph is None:
         return
@@ -3261,15 +3293,82 @@ def _hook_capture(project: Project, payload: dict) -> None:
             coexist = _coexist_check(model, host)
             resolve = _attribute_resolver(model, host)
             if facts:
-                graph.remember(sid, facts, embedder, coexist=coexist, resolve=resolve)
+                graph.remember(sid, facts, embedder, session_date=wdate, coexist=coexist,
+                               resolve=resolve)
             try:
                 graph.fold_journal(embedder, coexist=coexist, resolve=resolve)
             except Exception:
                 pass
         elif facts:
-            graph.queue_remember(sid, facts)   # locked → queue; a later writer folds it in
+            graph.queue_remember(sid, facts, session_date=wdate)   # locked → a later writer folds it
     finally:
         graph.close()
+
+
+def _hook_capture(project: Project, payload: dict) -> None:
+    """SessionEnd/PreCompact → capture the session into the remembered tier (best-effort).
+    The hook itself only **spawns a detached worker** and returns (capture outlives a hook's
+    timeout). The worker captures **every turn since the session's watermark** — the last turn it
+    captured, kept in ``.openwiki/capture-state.json`` — in bounded windows (``capture_windows``),
+    each dated by its first turn, and advances the watermark after each window; before v0.97 it read
+    only the transcript's last 20,000 characters, so a long session was mostly never captured. Each
+    window is captured *first* and only then written (the exclusive Kuzu lock is held for the short
+    write, not the LLM call); a locked graph means the facts are **queued** to the journal. One
+    worker per session at a time; turns that arrive while it runs are picked up before it exits. A
+    session first seen with a long history keeps only its last ``CAPTURE_FIRST_WINDOWS`` windows
+    (older turns: ``openwiki backfill``)."""
+    from .claude_code_template import capture_windows
+
+    if not payload.get("_worker") and _spawn_capture(project, payload):
+        return
+    tpath = payload.get("transcript_path")
+    embedder = _hook_embedder(project)
+    if not tpath or not Path(tpath).is_file() or embedder is None or not project.graph_path.exists():
+        return
+    sid = str(payload.get("session_id") or "session")
+    lock = _acquire_capture_lock(project, sid)
+    if lock is None:
+        print(f"openwiki hook: a capture worker for session {sid} is already running; "
+              "it captures these turns too", file=sys.stderr)
+        return
+    model = project.setting("models", "chat", DEFAULT_CHAT)
+    host = project.setting("models", "host", DEFAULT_HOST)
+    wrote = False
+    try:
+        chat = _capture_chat(model, host)
+        for _ in range(4):                       # a few rounds: turns may arrive while capturing
+            mark = _capture_watermark(project, sid)
+            text = Path(tpath).read_text(encoding="utf-8", errors="ignore")
+            windows = capture_windows(text, mark, CAPTURE_WINDOW_CHARS)
+            if not windows:
+                break
+            if not mark and len(windows) > CAPTURE_FIRST_WINDOWS:
+                print(f"openwiki hook: session {sid} first seen with {len(windows)} windows — capturing "
+                      f"the last {CAPTURE_FIRST_WINDOWS} (older turns: `openwiki backfill`)",
+                      file=sys.stderr)
+                windows = windows[-CAPTURE_FIRST_WINDOWS:]
+            for first, last, window in windows:
+                wdate = parse_date(first[:19]) or int(time.time())
+                try:
+                    facts, dropped = capture_session_detailed(chat, window, session_date=wdate)
+                except Exception as exc:           # one bad window must not block the session
+                    print(f"openwiki hook: capture of session {sid} window from {first} failed "
+                          f"({exc}); skipped", file=sys.stderr)
+                    facts, dropped = [], []
+                for f in dropped:                  # logged to .openwiki/hook.log by the worker
+                    print(f"openwiki hook: scrubbed instruction-like fact: {f.subject} | "
+                          f"{f.predicate} | {f.object}", file=sys.stderr)
+                if facts:
+                    _write_captured(project, sid, facts, embedder, wdate, model, host)
+                    wrote = True
+                _save_capture_watermark(project, sid, last)
+        if not wrote and pending_journal(journal_path(project.graph_path)):
+            _write_captured(project, sid, [], embedder, int(time.time()), model, host)  # fold queued ops
+    finally:
+        try:
+            lock.unlink()
+        except OSError:
+            pass
 
 
 def _fold_pending_usage(graph) -> None:

@@ -216,10 +216,18 @@ sequenceDiagram
   H-->>CC: context on stdout (injected into the prompt)
   CC->>H: SessionEnd / PreCompact (transcript path)
   H->>W: park the event under .openwiki/, spawn, return at once
-  W->>C: capture_session(transcript) (about a minute on a local 30B)
-  W->>GS: open writable only now (retry with backoff), remember + fold the journal
+  loop each window of turns since the session's watermark
+    W->>C: capture_session(window) (about a minute on a local 30B)
+    W->>GS: open writable only now (retry with backoff), remember + fold the journal
+    W->>W: advance the watermark to the window's last turn
+  end
   Note over W,GS: graph locked by a reader (e.g. the MCP server) → the facts are queued to the journal
 ```
+
+Since v0.97 the worker captures **every turn since the session's watermark** (the last captured turn, kept in
+`.openwiki/capture-state.json`), in per-day windows of at most 20,000 characters dated by their first turn; one
+worker per session (a lock file), and turns that arrive while it runs are picked up before it exits. Before, each
+capture read only the transcript's last 20,000 characters — about 13 % of a long session.
 
 `owiki backfill <transcripts dir>` imports existing history the same way, offline: one dated session per UTC day,
 cut into bounded windows valid from their first turn; resumable (days already remembered are skipped) and robust

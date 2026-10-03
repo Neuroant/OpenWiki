@@ -1140,7 +1140,7 @@ shows how large the distance can be (83.6 % on LongMemEval with a 20B open model
 | When to inject | waku (model gate), Mem0 (first prompt + pull), Letta (core + index + pull), Cognee (per file read), Hindsight (every prompt + one reflect per session; page count, not titles) | 16 facts on every prompt; a score gate failed (§1) | inject on the first prompt and after compaction, an index of themes, facts on file reads; `wiki_memory` for the rest | small; judged by real sessions |
 | BM25 next to embeddings | waku, Graphiti, Mem0, Cognee, Hindsight (+ graph, time range, cross-encoder) | memory recall is dense-only | BM25 + rank fusion in `recall` | small; a paired LoCoMo re-answer |
 | Capture during a session | Mem0, Letta, Cognee, LangMem, Hindsight (write-back every turn) | at session end / compaction | debounced idle capture through the detached worker | small–medium |
-| Capture coverage | Nemori (segments the whole stream), Cognee (a watermark per session), Mem0 (every batch) | the hook reads only the last 20,000 characters per capture — ~13 % of a long session | capture everything since a per-session watermark, in bounded windows | small; mechanical |
+| Capture coverage | Nemori (segments the whole stream), Cognee (a watermark per session), Mem0 (every batch) | **fixed in v0.97** — before, the hook read only the last 20,000 characters per capture (~13 % of a long session) | every turn since a per-session watermark, in bounded windows — done | — |
 | Raw sessions searchable | Graphiti, Letta, Mem0, Cognee, Hindsight, AriGraph (episodes ranked by overlap with retrieved facts) | transcripts stay outside the memory tier | a session search tool for agents | medium |
 | A curated always-present core | waku, Letta, LangMem, Hindsight (mental models) | a hand-written identity string | user-sourced conventions in the identity tier, entering only by human approval (memory-champ's gate) | small; must pass the poisoning set |
 | Richer context than atomic facts | waku (episodes), Graphiti (sagas), Mem0 (rich memories), Cognee (lessons with reasons), Hindsight (5W facts), Nemori (dated narrative episodes) | atomic subject–predicate–object facts | episode summaries or a detail sentence per fact | medium; a paired LoCoMo run |
@@ -1153,7 +1153,7 @@ shows how large the distance can be (83.6 % on LongMemEval with a 20B open model
 | Unresolved conflicts shown | MIRIX (keep both, note the discrepancy), memory-champ (surfaced, never resolved) | the merge closes or keeps silently | a "disputed" mark in the context | small |
 | Memory writes documents | Hindsight (five knowledge pages per repository), Letta (memory as Markdown) | the wiki is built from documents only; memory writes no pages | "Decisions" / "Conventions" pages regenerated from facts at `sleep`; git history as a capture source | medium |
 
-**Suggested order:** credential redaction and full capture coverage first (two clear gaps, both mechanical); then the COGX + Markdown
+**Suggested order:** credential redaction first (full capture coverage, the other mechanical gap, landed in v0.97); then the COGX + Markdown
 export together with the LadybugDB spike (R10); then the measurable LoCoMo experiments — BM25 in recall, the add-only
 ablation, the question's time window — each a paired re-answer on graphs we already have; the injection policy and
 idle capture after that, judged in real sessions.

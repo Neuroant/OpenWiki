@@ -209,6 +209,30 @@ def split_transcripts_by_window(texts, max_chars: int = 20000) -> list:
     return out
 
 
+def capture_windows(text: str, after_ts: str = "", max_chars: int = 20000) -> list:
+    """The turns of one Claude Code transcript (JSONL) dated **after** ``after_ts``, cut into capture
+    windows → ``[(first_ts, last_ts, window), …]``, oldest first. Windows never span midnight (each
+    day is cut separately, as in :func:`split_transcripts_by_window`) and break at turn boundaries
+    within ``max_chars`` (an over-long single turn is truncated); undated turns are dropped. The host
+    hook captures this way, so a long session is captured in full — not only its last
+    ``max_chars`` — with ``last_ts`` as the watermark for the next capture."""
+    dated = sorted((ts, turn[:max_chars]) for ts, turn in iter_claude_turns(text)
+                   if len(ts) >= 10 and ts > after_ts)
+    out: list = []
+    cur, first, last, day = "", "", "", ""
+    for ts, turn in dated:
+        if cur and (ts[:10] != day or len(cur) + 2 + len(turn) > max_chars):
+            out.append((first, last, cur))
+            cur = ""
+        if cur:
+            cur, last = f"{cur}\n\n{turn}", ts
+        else:
+            cur, first, last, day = turn, ts, ts, ts[:10]
+    if cur:
+        out.append((first, last, cur))
+    return out
+
+
 def split_transcripts_by_day(texts, max_chars: int = 20000) -> list:
     """:func:`split_transcripts_by_window` without the start timestamps: ``[(day, [window, …])]``."""
     return [(day, [text for _, text in windows])

@@ -228,7 +228,8 @@ Alongside the document tier, a project in **Second Brain mode** (`[memory] enabl
   empty). Exposed as the `context` CLI, the MCP `wiki_memory` tool, and — via `claude-code --hooks` —
   **Claude Code host hooks** (installable into any repo via `claude-code --hooks --into DIR`, bound to a
   memory project and pinned to the installing interpreter; capture runs in a detached worker that takes
-  the graph lock only for the write — v0.84; `UserPromptSubmit`→inject, `SessionEnd`/`PreCompact`→capture, through the
+  the graph lock only for the write — v0.84 — and captures every turn since the session's watermark, in bounded
+  windows — v0.97; `UserPromptSubmit`→inject, `SessionEnd`/`PreCompact`→capture, through the
   fail-soft `owiki hook` command), so memory flows automatically. The cross-session eval scores it
   ("assembled" beats raw-log). *Load the concentrate, not the log.* Its size is a per-prompt cost, so it is set
   by measurement: `[memory] context_k` facts (16) within `context_budget` chars (3,000 ≈ 710 tokens on real

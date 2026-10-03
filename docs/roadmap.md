@@ -931,6 +931,13 @@ The **genuine gaps**, measure-first as always:
   set (paired, 2 captures, no probes) the cue reached the context 8/16 → 16/16 and the constraint was applied
   7/16 → 12/16 (+5 / −0). Adopted: `[memory] context_k` (default 16) + `context_budget` 2,000 → 3,000; facts may
   use theme budget the themes don't need. `path-b-memory.md` §13.12.
+- **Incremental capture (v0.97): the hooks capture a whole session.** Found while reviewing Nemori, which segments the
+  whole stream: the capture hook read only the transcript's **last 20,000 characters** per capture point, so the
+  long dogfooding session — 1.5 M characters over 36 days, nine compactions — reached memory to at most ~13 %. Now
+  the worker captures every turn since a per-session watermark in per-day windows (`capture_windows`, ≤ 20,000
+  characters, dated by their first turn), writes each window as soon as it is captured, and advances the
+  watermark; a lock file keeps one worker per session. A session first seen with a long history keeps its last
+  eight windows. `docs/memory-systems-review.md` §10.
 - **Fix (v0.96.1): stdin is read as UTF-8.** `cli.main()` switched only stdout/stderr to UTF-8, so on Windows the
   MCP server and the Claude Code hooks decoded their piped JSON as cp1252: German questions to `wiki_ask`, facts
   sent to `wiki_remember` and the prompts the inject hook recalls against lost their umlauts ("Lautstärke" →

@@ -18,6 +18,7 @@ agent writes · surfaces and sharing · evaluation.
 6. [LangMem](#6-langmem) (reviewed 2026-10-03)
 7. [Hindsight](#7-hindsight) (reviewed 2026-10-03 — first of the world-model shortlist)
 8. [MIRIX](#8-mirix) (reviewed 2026-10-03)
+9. [AriGraph](#9-arigraph) (reviewed 2026-10-03)
 - [Across the series — what it suggests for OpenWiki](#across-the-series--what-it-suggests-for-openwiki)
 - [Candidates — world models and CoALA](#candidates--world-models-and-coala)
 
@@ -875,14 +876,92 @@ ground-truth tier and no per-tier write authority — every type is written by i
 value is the taxonomy (typed facts with per-type budgets), procedural memory distilled from errors and fixes, and a
 rule for disagreements: keep both and say so.
 
+
+---
+
+## 9. AriGraph
+
+*Sources: [github.com/AIRI-Institute/AriGraph](https://github.com/AIRI-Institute/AriGraph) at `e884b76` (2024-09-10),
+MIT, research code (~4,000 lines; Linux only because of TextWorld; unchanged since September 2024); the paper
+"AriGraph: Learning Knowledge Graph World Models with Episodic Memory for LLM Agents" (Anokhin et al., AIRI,
+[arXiv 2407.04363](https://arxiv.org/abs/2407.04363), IJCAI 2025).*
+
+**What it is.** The memory of *Ariadne*, an LLM agent that plays text adventures (TextWorld): it explores rooms,
+picks up items, reads notes and follows recipes, and builds a **knowledge-graph world model** of the environment
+from scratch as it goes — the most literal "world model from incoming data" of the shortlist.
+
+### How its memory works
+- **Per observation, two LLM calls.** First, extract triplets from the new observation ("kitchen, contains, fridge";
+  "key, is in, locker"), with earlier triplets as examples; subjects and objects stay atomic, and **uncertain
+  statements become hypotheses** ("John, could be, winner", never "John, will be, winner"). Second, a *refining*
+  call compares the new triplets with the existing ones around the same entities and names the **outdated** ones to
+  replace — "item, is in, locker" → "item, is in, inventory" when the player takes it — with a strongly
+  conservative bias: replace only on a conflict about the *same* aspect; when unsure, keep.
+- **Semantic memory = the current state.** Outdated triplets are deleted from the semantic graph; it always describes
+  the world *now*.
+- **Episodic memory = the history.** Every raw observation is stored as an episodic vertex, linked to the triplets
+  extracted from it.
+- **Retrieval by semantic breadth-first search.** For each entity in the agent's plan, find the triplets most similar
+  to it (above a 0.75 threshold), then queue the entities of those triplets as new queries, down to a set depth —
+  spreading activation over facts. **Episodes are ranked** by how much their triplets overlap the retrieved subgraph,
+  weighted by their similarity to the plan; the top ones come back as raw text.
+- **Evaluation:** on its five TextWorld environments AriGraph reaches normalized scores of 1.0 / 0.79 / 1.0 (Treasure
+  Hunt / Cleaning / Cooking) and 1.0 on both hard variants, against 0.05–0.52 for full history, summaries and RAG,
+  and at or above the top human players. Without architecture changes it also answers multi-hop QA (MuSiQue F1
+  47.4, HotpotQA F1 69.9 with GPT-4).
+
+### Side by side
+
+| | AriGraph | OpenWiki (Path B) |
+|---|---|---|
+| Purpose | the world model of a game-playing agent | the memory under a coding agent, next to a document wiki |
+| Input | one observation per step | conversation transcripts per session |
+| Write path | extract triplets + an LLM names outdated ones (per step) | one capture call per session + a deterministic valid-time merge |
+| Current vs. history | current state in the semantic graph; history in raw episodes | both in one fact store (closed intervals), as-of / known-at |
+| Uncertainty | hypotheses as their own triplets | not captured (planned facts have their own status) |
+| Retrieval | semantic BFS over triplets from the plan's entities; episodes ranked by overlap | single-hop similarity over facts + themes |
+| Raw source | episodes returned with the facts | transcripts stay outside the memory tier |
+| Evaluation | TextWorld games, MuSiQue, HotpotQA | cross-session sets; LoCoMo 60.7 % J |
+
+### What we learn
+1. **Multi-hop recall by expansion.** Retrieve facts similar to the query, then the facts around *their* subjects and
+   objects, with a similarity threshold and a depth limit. Our memory recall is single-hop similarity, and multi-hop
+   is a LoCoMo category we lose (65.2 %). The expansion runs over the facts already in memory — subjects and objects
+   are strings, so "around" means sharing one — and is cheap to test as a paired re-answer. (It is also a concrete
+   version of B8, spreading activation.)
+2. **Episodes linked to their facts, returned with them.** Keeping the raw observation as an episode linked to the
+   facts it produced, and ranking episodes by overlap with the retrieved facts, gives the answering model the context
+   that atomic facts lose. For us: store each capture window's text (or a short summary) with links to its facts, and
+   add the best-matching windows to the context — the "raw sessions searchable" theme, in its simplest form.
+3. **The current state and the history, kept in different places.** AriGraph's graph always says what is true *now*,
+   while history lives in the episodes. We keep both in one fact store (closed facts stay as history), which serves
+   as-of questions — at the price of history competing with the present in recall. Our recall filters to current
+   facts, so the outcome is similar; the split is still a clean way to think about a world model.
+4. **Hypotheses as hypotheses.** Uncertain statements are stored as such ("could be"), not as facts — the second
+   project after LangMem to do so; it strengthens the hedged-facts idea (§6, lesson 4).
+5. **When unsure, keep.** The refining prompt's conservative bias — replace only on a conflict about the same aspect
+   — is the same lesson as our veto-only coexistence check, arrived at independently.
+
+### What we would not adopt
+- **Destructive deletes** in the semantic graph — the history survives only as raw episodes, with no as-of view.
+- **Two LLM calls per observation** — fine for a game agent, too much for a local 30B over long sessions.
+- **The code as a dependency** — research code, Linux only, unmaintained since 2024.
+
+**In short.** AriGraph is the purest "world model from incoming data" of the series: per observation, extract
+triplets, replace what has become false, keep the raw observation as an episode linked to its triplets, and retrieve
+by expanding through the graph from the entities the agent is planning around. Close in spirit to Cognitive
+Substrate (semantic + episodic, current state vs. history), and research-grade. For OpenWiki its two retrieval
+ideas — semantic expansion through shared entities, and episodes ranked by overlap with the retrieved facts — are
+cheap to test on LoCoMo's multi-hop questions.
+
 ---
 
 ## Across the series — what it suggests for OpenWiki
 
-Eight systems — six in a first round, then Hindsight and MIRIX from the world-model shortlist — read from their
-source in October 2026. Where OpenWiki stands out: a real time model (only Graphiti matches it; Hindsight has event and
+Nine systems — six in a first round, then Hindsight, MIRIX and AriGraph from the world-model shortlist — read from
+their source in October 2026. Where OpenWiki stands out: a real time model (only Graphiti matches it; Hindsight has event and
 mention time; Mem0 keeps time-aware retrieval on its hosted platform; Cognee has a query-time window),
-deterministic hygiene against poisoning (none of the eight has a comparable policy), policy-based forgetting,
+deterministic hygiene against poisoning (none of the nine has a comparable policy), policy-based forgetting,
 local-first operation on a 30B model, and audited measurement. Where it lags, the same gaps recur — and Hindsight
 shows how large the distance can be (83.6 % on LongMemEval with a 20B open model):
 
@@ -893,11 +972,12 @@ shows how large the distance can be (83.6 % on LongMemEval with a 20B open model
 | When to inject | waku (model gate), Mem0 (first prompt + pull), Letta (core + index + pull), Cognee (per file read), Hindsight (every prompt + one reflect per session; page count, not titles) | 16 facts on every prompt; a score gate failed (§1) | inject on the first prompt and after compaction, an index of themes, facts on file reads; `wiki_memory` for the rest | small; judged by real sessions |
 | BM25 next to embeddings | waku, Graphiti, Mem0, Cognee, Hindsight (+ graph, time range, cross-encoder) | memory recall is dense-only | BM25 + rank fusion in `recall` | small; a paired LoCoMo re-answer |
 | Capture during a session | Mem0, Letta, Cognee, LangMem, Hindsight (write-back every turn) | at session end / compaction | debounced idle capture through the detached worker | small–medium |
-| Raw sessions searchable | Graphiti, Letta, Mem0, Cognee, Hindsight | transcripts stay outside the memory tier | a session search tool for agents | medium |
+| Raw sessions searchable | Graphiti, Letta, Mem0, Cognee, Hindsight, AriGraph (episodes ranked by overlap with retrieved facts) | transcripts stay outside the memory tier | a session search tool for agents | medium |
 | A curated always-present core | waku, Letta, LangMem, Hindsight (mental models) | a hand-written identity string | user-sourced conventions in the identity tier | small; must pass the poisoning set |
 | Richer context than atomic facts | waku (episodes), Graphiti (sagas), Mem0 (rich memories), Cognee (lessons with reasons), Hindsight (5W facts) | atomic subject–predicate–object facts | episode summaries or a detail sentence per fact | medium; a paired LoCoMo run |
 | Write-time model judgments | Mem0 dropped them; Letta and LangMem rely on strong curators; Hindsight confines them to a derived layer over immutable facts | two LLM checks in the merge (attribute resolution, coexistence) | an add-only ablation on LoCoMo — do they earn their place? | small; replay saved captures |
 | Time in the question | Cognee (query-time window), Mem0 platform, Hindsight and MIRIX (rule-based date parsers) | recall ignores times in the query | boost facts whose validity overlaps a window extracted from the question | small; LoCoMo temporal |
+| Multi-hop recall by expansion | AriGraph (semantic BFS over triplets), Graphiti (BFS from entities), Hindsight (graph links), Cognee (graph completion) | memory recall is single-hop similarity (the wiki side has GraphRAG expansion) | expand from the recalled facts through shared subjects / objects, thresholded, depth 2 | small; LoCoMo multi-hop |
 | Typed memory | waku (facts / episodes / skills / persona), Letta (core / deferred / skills), Hindsight (world / experience), MIRIX (six purpose types) | one untyped fact store (`source` tags only) | a type tag at capture, per-type recall budgets | small–medium |
 | Procedural memory from errors | Mem0 plugin (failed commands with fixes), MIRIX (tool errors → skills) | tool output stripped from capture | capture bounded failure → fix pairs | medium |
 | Memory writes documents | Hindsight (five knowledge pages per repository), Letta (memory as Markdown) | the wiki is built from documents only; memory writes no pages | "Decisions" / "Conventions" pages regenerated from facts at `sleep`; git history as a capture source | medium |
@@ -921,10 +1001,8 @@ ground-truth tier, consolidation as a sleep cycle, perception from many sources)
    memory for coding agents from git history and sessions. → [§7](#7-hindsight)
 2. **MIRIX** — six memory types (core, episodic, semantic, procedural, resource, knowledge vault), each managed by
    its own agent, fed by continuous screen observation. → [§8](#8-mirix)
-3. **[AriGraph](https://github.com/airi-institute/arigraph)** (IJCAI 2025, [paper](https://arxiv.org/abs/2407.04363)) —
-   the most literal world model from observations: an agent exploring text-game environments builds a semantic
-   knowledge graph plus episodic nodes linking each observation to its triples, replacing outdated triples as the
-   world changes.
+3. **AriGraph** — the most literal world model from observations: a semantic knowledge graph of the current state plus
+   episodic nodes linking each observation to its triples. → [§9](#9-arigraph)
 4. **[Nemori](https://github.com/nemori-ai/nemori)** ([paper](https://arxiv.org/abs/2508.03341)) — event segmentation of
    the stream into episodes, semantic memory learned by *predict-calibrate* (store what existing memory failed to
    predict; after the free-energy principle).

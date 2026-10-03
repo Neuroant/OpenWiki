@@ -14,6 +14,7 @@ agent writes · surfaces and sharing · evaluation.
 2. [Zep / Graphiti](#2-zep--graphiti) (reviewed 2026-10-03)
 3. [Mem0](#3-mem0) (reviewed 2026-10-03)
 4. [Letta (MemGPT)](#4-letta-memgpt) (reviewed 2026-10-03)
+5. [Cognee](#5-cognee) (reviewed 2026-10-03)
 
 ---
 
@@ -477,3 +478,119 @@ files in git, curated by the agent and a dreaming subagent, with git as the hist
 retrieval. OpenWiki sits at the database end — structured facts, validity intervals, an assembled context — built
 for a local model that cannot be trusted to curate. The two meet at three cheap ideas: a git-tracked Markdown
 export (which also mitigates R10), a context that is an index plus a pull, and raw sessions kept searchable.
+
+
+---
+
+## 5. Cognee
+
+*Sources: [github.com/topoteretes/cognee](https://github.com/topoteretes/cognee) at `b32d8af` (2026-10-01), `cognee`
+1.6.2, Apache-2.0, Python 3.10–3.14; its BEAM evaluation report (`cognee/eval_framework/beam/REPORT.md`); the
+[Claude Code plugin](https://github.com/topoteretes/cognee-integrations/tree/main/integrations/claude-code) README;
+the paper "Optimizing the Interface Between Knowledge Graphs and LLMs for Complex Reasoning" (Markovic et al.,
+[arXiv 2505.24478](https://arxiv.org/abs/2505.24478), 2025).*
+
+**What it is.** A knowledge and memory engine for documents, code, conversations and agent sessions — "a company
+brain" — behind four operations: `remember`, `recall`, `improve`, `forget`. It turns text into chunks, an
+LLM-extracted entity–relationship graph, summaries and embeddings, and code into a graph of symbols. Its default
+stack is embedded: SQLite, LanceDB for vectors, and a graph store that was **Kuzu and is now LadybugDB**. It runs
+without an LLM key (local GLiNER extraction and local embeddings), with Ollama, or with hosted models; plugins exist
+for Claude Code, Codex and OpenClaw, and an MCP server for other clients.
+
+### How its memory works
+- **Permanent memory:** `cognify` chunks each document, extracts entities and relationships with an LLM (optionally
+  guided by an ontology), writes summaries, and embeds everything; a *global context index* organizes the local
+  summaries into a tree with one root. An optional event graph extracts timestamped events.
+- **Sessions:** turns are first stored as session memory. *Candidate lessons* carry a confidence and
+  **helpful / harmful counts** from feedback that an LLM detects in later user turns; a lesson is served only while
+  it has never been rated harmful and its confidence is ≥ 0.75. At the end, **session distillation** curates the
+  session in batches (one curator call each), checks each proposed lesson against prior lessons for novelty, lets a
+  writer accept or reject it with a reason ("why learned"), and cognifies the accepted lessons into the graph. The
+  curator may not promote a claim that exists only in an assistant answer unless the user or a candidate backs it.
+  A watermark makes sure a failed call never marks a session as distilled.
+- **Retrieval:** some twenty strategies — chunks, BM25 over chunks, summaries, triplets, graph completion with
+  decomposition or chain of thought, Cypher, natural language to Cypher, agentic completion, code, skills — and a
+  router. The `TEMPORAL` strategy has an LLM extract the time window a question refers to ("in 2015", "before X",
+  "now") and searches events within it.
+- **Time:** no validity intervals on facts; time lives in the event graph and in that query-time window.
+- **Portability:** **COGX**, a memory exchange format — a manifest plus one JSONL file per record kind: documents,
+  episodes (turns with timestamps), entities (type, description, aliases), *facts* (subject, predicate, object,
+  `valid_at` / `invalid_at`, confidence, provenance), Mem0-style memories and Letta-style memory blocks. Importers
+  exist for Mem0, Zep / Graphiti, Letta and LangMem.
+- **Claude Code plugin:** hooks capture prompts, tool traces and answers into session memory; memory is injected on
+  **every prompt** (a 12 s budget, ≤ 12,000 characters); **before Claude reads a file, facts about that file are
+  injected** (once per session); session-to-graph improvement runs after 60 idle seconds, every 150 tool calls, and
+  at session end. Credentials, authorization values, database URLs and private keys are redacted by default, and
+  paths such as `.env` are never captured. It runs against a local Cognee server by default.
+- **Evaluation:** BEAM — **0.79** at 100 K tokens (one held-out conversation, 20 questions, four rounds) and
+  **0.67** at 10 M, explicitly called exploratory because its question-type routing was tuned on the scored
+  questions. The report also discusses overfitting to a fully public benchmark and says no ablations were run.
+  Earlier HotpotQA comparisons are archived.
+
+### Side by side
+
+| | Cognee | OpenWiki (Path B) |
+|---|---|---|
+| Purpose | a knowledge + memory engine (documents, code, sessions), a "company brain" | the memory under a coding agent, next to a document wiki |
+| Models | none needed (GLiNER + local embeddings), Ollama, or hosted | local only (a 30B chat model + bge-m3) |
+| Store | SQLite + LanceDB + **LadybugDB** (formerly Kuzu) | Kuzu 0.11 (archived upstream, R10) |
+| Unit of memory | chunks, entities, relationships, summaries; distilled session lessons | subject–predicate–object facts with validity |
+| Capture | session turns → curator + writer calls → lessons → cognify | one capture call per session → valid-time merge |
+| Time | an optional event graph; query-time windows | bi-temporal facts, as-of / known-at |
+| Feedback | helpful / harmful counts per lesson; harmful ones withheld | confidence from re-affirmation; `wiki_remember` replacements |
+| Retrieval | ~20 strategies + routing | similarity recall + themes, 16 facts per prompt |
+| Live injection | every prompt (≤ 12,000 chars) + facts about each file Claude reads | every prompt (≤ 3,000 chars) |
+| Hygiene | credential redaction, denied paths, an assistant-claim grounding rule | the unsafe-instruction policy, forgetting, source tags |
+| Portability | COGX export / import, importers from four other systems | none yet (planned export, R10) |
+| Evaluation | BEAM 0.79 (100 K, held out) / 0.67 (10 M, exploratory) | cross-session sets; LoCoMo 60.7 % J (local 30B) |
+
+### What we learn
+1. **The Kuzu → LadybugDB path, already walked.** Cognee runs `ladybug` 0.19.0 behind a `kuzu` compatibility
+   package (`from ladybug import *` — the API is near-identical), reads each database's on-disk storage code
+   (Kuzu 0.11.3 writes 39, Ladybug 0.19.0 writes 43), and migrates by running `EXPORT DATABASE` in a venv with the
+   old engine and `IMPORT DATABASE` in the new one. The caveats it documents: storage-corruption fixes in 0.18.2 and
+   0.19.1; 0.19.1 segfaulting mid-write in its CI (hence the pin on 0.19.0); no JSON extension published for
+   0.19.1; Windows wheels that no longer bundle OpenSSL, so a DLL shim is needed or the first open fails with
+   "Could not find lbug C API shared library"; macOS ≤ 14 limited to 0.17. **Ladybug publishes Windows wheels for
+   Python 3.13 and 3.14** (checked with `pip download`), so the move would also lift our 3.13 ceiling. The R10 spike
+   now has a map.
+2. **Export in an existing exchange format.** Our assertions map onto COGX facts almost field for field — subject,
+   predicate, object, `valid_from` → `valid_at`, `valid_to` → `invalid_at`, confidence, the session as provenance;
+   sessions map to episodes, wiki entities to entities, and the rest (cardinality, source, attribute key,
+   transaction times, forgotten) goes into metadata. An export to COGX makes the memory R10 needs to protect
+   portable not only across engines but across memory systems — paired with the readable git-tracked Markdown view
+   (§4).
+3. **Memory triggered by the file being read.** Cognee's plugin injects facts about a file at the moment Claude
+   reads it. Our dev memory is full of module-level facts ("`context_for` recalls 16 facts by default") that today
+   surface only when a prompt's wording happens to match. A hook before file reads that recalls with the file's path
+   or module name as the query is a structural trigger — like an index plus pull (§4), it needs no judgment.
+4. **Credential redaction is standard among coding-agent plugins** — Mem0 and Cognee both do it (credentials,
+   authorization headers, database URLs, private keys, plus denied paths like `.env`). It strengthens §3, lesson 2.
+5. **Feedback on served memory.** Cognee withholds a lesson once it has been rated harmful. Our facts gain
+   confidence only by being restated. The cheap version for us: `wiki_remember`'s `replaces` already marks a fact as
+   wrong; a way for the agent to flag an injected fact as stale or irrelevant could lower its confidence without any
+   model judgment.
+6. **A grounding rule for assistant claims.** Cognee's curator never promotes a claim that only the assistant made.
+   We store assistant-established facts freely (source `assistant`), and some have been wrong — the dev memory once
+   held the assistant's mislabel of an arc42 section until `wiki_remember` corrected it. Worth measuring first: how
+   many of the dev memory's wrong facts are assistant-only?
+7. **Time in the question.** The `TEMPORAL` retriever extracts the window a question refers to; our recall ignores
+   times in the query unless a caller passes `as_of`. For LoCoMo's temporal questions (45.8 %), extracting explicit
+   dates, months and years from the question (rules first, the local model for the rest) and boosting facts whose
+   validity overlaps the window is a cheap paired test.
+8. **Honest reporting, and BEAM.** The BEAM report keeps a held-out score apart from an in-sample one and names the
+   overfitting risk of a public benchmark — the standard we hold ourselves to. BEAM itself tests knowledge updates,
+   contradiction resolution, event ordering, abstention and preference following — what B7 is built for, and what
+   LoCoMo lacks (Zep's critique, §2). A candidate for our next external benchmark.
+
+### What we would not adopt
+- **The weight.** A relational, vector and graph database with migration chains, access control and a distributed
+  mode, in some 2,500 Python modules.
+- **A chain of curator and writer calls per session** — several model calls to curate memory, the pattern our local
+  measurements argue against.
+- **A per-prompt budget of 12,000 characters**, four times ours, measured nowhere in the plugin.
+
+**In short.** Cognee is the most "platform" of the five systems: a knowledge engine over documents, code and
+sessions, with a session layer that distills lessons, feedback counts, provenance, an exchange format and a
+time-window retriever. For OpenWiki it turns out to be the most practically useful review so far: it has already
+taken the Kuzu → LadybugDB path we face (R10), and COGX gives our planned memory export a ready-made target.

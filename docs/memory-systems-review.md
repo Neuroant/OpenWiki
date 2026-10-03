@@ -15,6 +15,8 @@ agent writes · surfaces and sharing · evaluation.
 3. [Mem0](#3-mem0) (reviewed 2026-10-03)
 4. [Letta (MemGPT)](#4-letta-memgpt) (reviewed 2026-10-03)
 5. [Cognee](#5-cognee) (reviewed 2026-10-03)
+6. [LangMem](#6-langmem) (reviewed 2026-10-03)
+- [Across the series — what it suggests for OpenWiki](#across-the-series--what-it-suggests-for-openwiki)
 
 ---
 
@@ -594,3 +596,107 @@ for Claude Code, Codex and OpenClaw, and an MCP server for other clients.
 sessions, with a session layer that distills lessons, feedback counts, provenance, an exchange format and a
 time-window retriever. For OpenWiki it turns out to be the most practically useful review so far: it has already
 taken the Kuzu → LadybugDB path we face (R10), and COGX gives our planned memory export a ready-made target.
+
+
+---
+
+## 6. LangMem
+
+*Source: [github.com/langchain-ai/langmem](https://github.com/langchain-ai/langmem) at `48e3c11` (2026-10-02),
+`langmem` 0.0.30, MIT, Python ≥ 3.10, built on LangChain / LangGraph / trustcall. Recent activity is maintenance:
+the last commits are dependency bumps and documentation fixes.*
+
+**What it is.** A toolkit of memory primitives for LangGraph agents rather than a memory system: memory managers
+that turn conversations into memories, tools an agent calls to manage and search its memory, prompt optimizers that
+rewrite an agent's instructions, and a summarization node for short-term memory. Storage is LangGraph's `BaseStore`
+— in process by default (memories are lost on restart) or Postgres — with namespaces such as `("memories",
+"{user_id}")`.
+
+### How its memory works
+- **Memory types, cleanly framed:** *semantic* memory as a **collection** (many documents, searched at run time) or
+  a **profile** (one schema-typed document per user, updated in place, always current); *episodic* memory as stored
+  successful interactions; *procedural* memory as the agent's own instructions.
+- **Memory manager:** one structured-extraction call sees the conversation plus the current memories and may insert
+  new documents, patch existing ones (JSON patch) or delete them, for up to `max_steps` passes ending with a `Done`
+  tool. Its default instructions ask it to extract with stated confidence ("p(x)"), consolidate and compress, remove
+  incorrect or redundant memories, and draw conclusions by deduction, induction and abduction. A store manager first
+  has a model write search queries to fetch the related existing memories (5 by default), and can run *phases* — for
+  example extract, then consolidate — with different instructions.
+- **Hot path vs background:** the agent can manage memory itself through tools during a conversation, or a
+  background manager reflects afterwards. The `ReflectionExecutor` **debounces** per thread: each new submission
+  cancels the pending one, so reflection runs once a conversation has been quiet for N seconds.
+- **Procedural memory:** prompt optimizers (`gradient`, `metaprompt`, `prompt_memory`) propose a new system prompt
+  from conversation trajectories and feedback.
+- **Retrieval, time, evaluation:** semantic search and metadata filters through the store; no time model —
+  contradictions are resolved by the model rewriting memories (waku's lab, §1: three sentences in, two memories out,
+  "launch is scheduled for June (updated from May)"); no evaluation in the repository.
+
+### Side by side
+
+| | LangMem | OpenWiki (Path B) |
+|---|---|---|
+| Purpose | a toolkit of memory primitives for LangGraph agents | the memory under a coding agent, next to a document wiki |
+| Models | hosted by default (OpenAI / Anthropic via LangChain) | local only (a 30B chat model + bge-m3) |
+| Store | LangGraph `BaseStore` (in-memory default, Postgres) | Kuzu (archived upstream, R10) |
+| Memory shapes | collections, typed profiles, episodes, prompts | facts with validity; themes; an identity string |
+| Write path | a model inserts, patches and deletes documents, in several passes | one capture call, a deterministic valid-time merge |
+| Contradictions | resolved by rewriting the memory (no history) | the old fact is closed and kept |
+| Background | debounced reflection after N quiet seconds | capture at session end / compaction |
+| Procedural memory | prompt optimizers rewrite the agent's instructions | out of scope |
+| Evaluation | none in the repository | cross-session sets; LoCoMo 60.7 % J (local 30B) |
+
+### What we learn
+1. **A profile next to the collection.** A typed profile — one document that is always current and always in
+   context — next to the searched collection. waku's learned rules and Letta's core files are the same idea: three
+   of the six systems keep a small, curated, always-present core. Ours is only the hand-written identity string;
+   user-stated conventions must win recall to appear. An automatically maintained core (user-sourced conventions,
+   decisions with high confidence) is the candidate — subject to the poisoning set, as noted in §1.
+2. **Debounced background capture.** Reflect once the conversation has been quiet for N seconds, each new message
+   pushing it back. Mem0 (every 5 exchanges), Letta (every N steps), Cognee (after 60 idle seconds) and LangMem all
+   capture *during* a session; we capture at session end or compaction only. With the detached worker and the
+   journal already in place, an idle-triggered capture is mostly plumbing; deduplication absorbs the overlap.
+3. **Procedural memory as proposed instruction edits.** LangMem's optimizers rewrite the agent's prompt from
+   feedback. For a coding agent the procedural memory is `CLAUDE.md`. A command that *proposes* `CLAUDE.md` edits
+   from remembered corrections and conventions would close that loop — proposals only: `CLAUDE.md` is the user's
+   file.
+4. **Stated uncertainty.** Memories can carry a probability in their text. Our confidence comes only from being
+   restated; hedged statements ("we might switch to X") are captured like settled ones. A capture tag for hedged
+   facts (lower starting confidence) is cheap — B7 already gives planned facts their own status.
+
+### What we would not adopt
+- **Model-driven rewrites and deletes** — the contradiction disappears into a parenthetical; no history, no as-of.
+- **An in-process store by default**, and the LangChain / LangGraph / LangSmith stack as a dependency.
+- **A library in maintenance mode** as a foundation.
+
+**In short.** LangMem is a toolkit rather than a system — the clearest conceptual framing of the six (semantic
+memory as profiles or collections, episodic, procedural; hot path vs background), but with no storage, time model or
+evaluation of its own, and little recent development. Its lessons are conceptual: keep a small profile-like core
+next to the facts, capture in the background once a conversation goes quiet, and treat `CLAUDE.md` as procedural
+memory the system can propose edits to.
+
+---
+
+## Across the series — what it suggests for OpenWiki
+
+Six systems, read from their source in October 2026. Where OpenWiki stands out: a real time model (only Graphiti
+matches it; Mem0 keeps time-aware retrieval on its hosted platform, Cognee has a query-time window), deterministic
+hygiene against poisoning (none of the six has a comparable policy), policy-based forgetting, local-first operation
+on a 30B model, and audited measurement. Where it lags, the same gaps recur:
+
+| Theme | Seen in | OpenWiki today | Candidate | Cost |
+|---|---|---|---|---|
+| Credentials in memory | Mem0, Cognee (redaction in their coding plugins) | no redaction — a pasted key can become an injected fact | regex redaction of transcripts before capture and of facts in `remember()` | small, deterministic |
+| Readable, portable memory | waku (`MEMORY.md`), Letta (git), Cognee (COGX) | memory lives only in a Kuzu file — archived upstream (R10) | a COGX export + a git-tracked Markdown view, written at `sleep` | small–medium; mitigates R10 |
+| When to inject | waku (model gate), Mem0 (first prompt + pull), Letta (core + index + pull), Cognee (per file read) | 16 facts on every prompt; a score gate failed (§1) | inject on the first prompt and after compaction, an index of themes, facts on file reads; `wiki_memory` for the rest | small; judged by real sessions |
+| BM25 next to embeddings | waku, Graphiti, Mem0, Cognee | memory recall is dense-only | BM25 + rank fusion in `recall` | small; a paired LoCoMo re-answer |
+| Capture during a session | Mem0, Letta, Cognee, LangMem | at session end / compaction | debounced idle capture through the detached worker | small–medium |
+| Raw sessions searchable | Graphiti, Letta, Mem0, Cognee | transcripts stay outside the memory tier | a session search tool for agents | medium |
+| A curated always-present core | waku, Letta, LangMem | a hand-written identity string | user-sourced conventions in the identity tier | small; must pass the poisoning set |
+| Richer context than atomic facts | waku (episodes), Graphiti (sagas), Mem0 (rich memories), Cognee (lessons with reasons) | atomic subject–predicate–object facts | episode summaries or a detail sentence per fact | medium; a paired LoCoMo run |
+| Write-time model judgments | Mem0 dropped them; Letta and LangMem rely on strong curators | two LLM checks in the merge (attribute resolution, coexistence) | an add-only ablation on LoCoMo — do they earn their place? | small; replay saved captures |
+| Time in the question | Cognee (query-time window), Mem0 platform | recall ignores times in the query | boost facts whose validity overlaps a window extracted from the question | small; LoCoMo temporal |
+
+**Suggested order:** credential redaction first (a clear gap, deterministic, cheap); then the COGX + Markdown
+export together with the LadybugDB spike (R10); then the measurable LoCoMo experiments — BM25 in recall, the add-only
+ablation, the question's time window — each a paired re-answer on graphs we already have; the injection policy and
+idle capture after that, judged in real sessions.

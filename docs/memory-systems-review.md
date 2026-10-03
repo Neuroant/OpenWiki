@@ -13,6 +13,7 @@ agent writes · surfaces and sharing · evaluation.
 1. [waku-agent](#1-waku-agent) (reviewed 2026-10-03)
 2. [Zep / Graphiti](#2-zep--graphiti) (reviewed 2026-10-03)
 3. [Mem0](#3-mem0) (reviewed 2026-10-03)
+4. [Letta (MemGPT)](#4-letta-memgpt) (reviewed 2026-10-03)
 
 ---
 
@@ -365,3 +366,114 @@ live in the hosted platform. Its numbers (gpt-4o answering and judging) are not 
 teaches is concrete and cheap to test: inject once and let the agent pull, redact credentials, fuse BM25 into
 recall, try larger benchmark budgets, write richer facts, and check whether our write-time temporal logic earns its
 place.
+
+
+---
+
+## 4. Letta (MemGPT)
+
+*Sources: [github.com/letta-ai/letta](https://github.com/letta-ai/letta) — now a landing page: the Letta V1 Python
+server is retired, unsupported and kept on an `archive` branch; current development is
+[github.com/letta-ai/letta-code](https://github.com/letta-ai/letta-code) at `0828add` (2026-10-02),
+`@letta-ai/letta-code` 0.34.2, Apache-2.0, TypeScript (Node ≥ 22.19). Background: "MemGPT: Towards LLMs as
+Operating Systems" (Packer et al., [arXiv 2310.08560](https://arxiv.org/abs/2310.08560), October 2023);
+"Sleep-time Compute" (Lin et al., [arXiv 2504.13171](https://arxiv.org/abs/2504.13171), April 2025); the Letta blog
+post ["Benchmarking AI Agent Memory: Is a Filesystem All You Need?"](https://www.letta.com/blog/benchmarking-ai-agent-memory/)
+(2025-08-12).*
+
+**What it is.** MemGPT (2023) treated the LLM as an operating system for its own context: a small main context
+with editable memory blocks (persona, human), plus external *recall* storage (the conversation history) and
+*archival* storage (a vector store) that the agent pages in and out through function calls; it also introduced the
+DMR benchmark. Letta, the company behind it, has since turned it into **Letta Code**: a stateful agent harness
+(CLI, desktop app, browser, Slack / Telegram / Discord) whose agents keep memory, identity and skills across
+sessions and machines, rewrite their own context, and "dream" in the background. It runs against Letta Cloud by
+default or a local backend, with the user's own model keys.
+
+### How its memory works
+- **MemFS — memory as a git repository of Markdown files.** A root `MEMORY.md` index; *core* files at the root,
+  always in the system prompt (each with `name` and `description` frontmatter); *deferred* memory in child
+  directories, which the agent sees only as a tree with descriptions and reads on demand; `skills/` as procedural
+  memory; `ARCHIVE.md` for retired context with dated entries. The repository can sync to GitHub. A pre-commit
+  validator enforces caps per file and for all core memory, a maximum depth, and read-only files.
+- **Writes.** The primary agent edits its memory files directly. A background *memory* subagent applies requested
+  updates in a private git worktree whose commits the harness merges (conflicts resolved by reading both sides).
+  The *reflection* subagent — "dreaming", the successor of sleep-time agents — runs every N steps or at context
+  compaction (off by default on native Windows). It reads recent transcripts (or several, with already-reflected
+  "replay" slices for cross-session patterns) and ranks learnings: **mistakes and corrections first**, then
+  preferences, new facts, contradictions, reusable procedures. It filters out ephemeral details, converts relative
+  dates to absolute ones, **fixes a contradicted entry at its source** instead of appending the new version,
+  archives retired context, maintains skills (update / extend / deprecate / split / create, preferring "none"),
+  and commits with a structured message. Its changes apply automatically, or wait for the agent's review.
+- **Retrieval.** No vector recall of facts: core memory is always in context; deferred files and skills are opened
+  by the agent from their names and descriptions; a message search covers all conversations, including other
+  agents'.
+- **Time.** Git history is the record of every memory change; facts themselves carry no validity intervals.
+- **Hygiene.** The prompts forbid persisting secrets and ephemeral logs; read-only files protect what must not
+  change; a Secrets feature (cloud) hides secret values from the context.
+- **Evaluation.** A gpt-4o-mini agent given the raw LoCoMo conversations as files, with `grep`, semantic file
+  search, `open` and `close`, searching iteratively, scored **74.0 %** — above Mem0's 68.5 % — from which Letta
+  concludes that memory "is more about how agents manage context than the exact retrieval mechanism". The
+  sleep-time compute paper reports ~5× less test-time compute at equal accuracy and up to +13 % / +18 % accuracy on
+  stateful math benchmarks when a model works through a context before the questions arrive.
+
+### Side by side
+
+| | Letta Code | OpenWiki (Path B) |
+|---|---|---|
+| Purpose | a stateful agent harness (a coding agent and always-on assistant) whose agent owns its memory | the memory under someone else's coding agent, next to a document wiki |
+| Models | the user's models (frontier by default), Letta Cloud or local backend | local only (a 30B chat model + bge-m3) |
+| Store | Markdown files in git (core, deferred, skills, archive) | Kuzu: subject–predicate–object assertions under sessions, themes |
+| Who curates | the agent itself + a dreaming subagent with shell and edit tools | a capture prompt + deterministic merge and hygiene rules |
+| Capture trigger | every N steps or at compaction (+ on request) | session end / compaction (+ backfill, `wiki_remember`) |
+| Contradictions | the stale entry is edited at its source; git keeps the old version | the old fact is closed (valid-time interval); the graph keeps it |
+| History | git log (who, when, why) | bi-temporal: valid + transaction time, as-of / known-at |
+| Retrieval | core always in context; the agent opens deferred files; message search | similarity recall, 16 facts + themes injected per prompt |
+| Raw conversations | searchable (recall memory) | not kept in the memory tier |
+| Procedural memory | skills maintained by reflection | out of scope |
+| Limits | caps enforced by a pre-commit hook | a char budget at context assembly |
+| Evaluation | DMR (MemGPT); LoCoMo 74.0 % with an iterative filesystem agent (gpt-4o-mini) | cross-session sets; LoCoMo 60.7 % J (local 30B, audited ≈ 7 points generous) |
+
+### What we learn
+1. **Git as the history and export layer.** Letta keeps all memory as Markdown in git: readable, diffable,
+   portable, every change a commit with its reason — so a contradiction can be fixed in place, because git keeps
+   the old version. For us that is the natural shape of the memory export that risk R10 calls for: render the
+   current facts (per theme or subject, with their validity) as Markdown into a git repository at every `sleep`,
+   so history and portability stop depending on Kuzu, and a person can review, diff or revert. (waku's
+   `MEMORY.md` mirror, §1 lesson 3, is the same idea.)
+2. **An index instead of a fixed dose.** Letta's agent always sees a small curated core plus a tree of what else
+   exists, and opens the rest itself. That is a fourth answer to the per-prompt cost, after waku's model gate, the
+   score threshold that failed us and Mem0's first-prompt injection: inject the identity and the **theme labels as
+   a table of contents**, and let the agent call `wiki_memory` for details. Our themes already form that index;
+   today their summaries are injected only when recalled facts hit them.
+3. **Iterative search beat extracted memory on LoCoMo.** Letta's 74.0 % came from an agent searching the raw
+   conversations again and again, not from extracted memories. Two consequences: (a) keep the raw sessions
+   searchable, as MemGPT's recall memory and Graphiti's episodes do — a session search tool would let an agent find
+   what capture dropped; (b) an *agentic* answer condition in our LoCoMo harness — the local 30B with recall and
+   transcript search as tools, a few iterations — would test whether iteration helps a 30B as it helps gpt-4o-mini.
+   Our multi-hop and temporal losses are where it should show.
+4. **Corrections first.** Letta's reflection ranks mistakes and corrections — user feedback, frustration, failed
+   retries — above everything else. Our capture is tuned for durable project facts and decisions, yet corrections
+   ("that was wrong because…", "don't do X here") are what a coding agent most needs so as not to repeat a mistake.
+   A capture-rule change, measured on the cross-session sets — and checked against P0, so that corrections of the
+   assistant's behavior stay distinguishable from injected instructions.
+5. **Limits as code.** A pre-commit validator caps core memory and protects read-only files: size and identity
+   integrity enforced mechanically, not by prompt. Our context budget is enforced at assembly; that `wiki_remember`
+   cannot touch the identity tier is worth keeping that way.
+6. **Reviewable memory updates.** Dreaming can stage its changes for review before applying them. Our agent writes
+   already wait in the journal until the next fold — a natural review point we don't expose (a command that lists
+   pending operations and lets a person drop one).
+
+### What we would not adopt
+- **An agent as the curator.** Letta's reflection is a capable agent with shell and edit tools rewriting files;
+  it presumes a strong model. With a local 30B we measured four times that model judgments of memory hurt (path-b
+  §13), which is why our curation is deterministic.
+- **Free-form Markdown as the only store.** No machine-readable validity, no as-of queries, no per-fact
+  confidence — we want the export, not a replacement.
+- **Cloud by default.** Letta Cloud holds memory, identity and conversations unless the user opts for local; and
+  automatic dreaming is off on native Windows, our platform.
+
+**In short.** Letta has moved furthest from "memory as a database": memory is the agent's own context, kept as
+files in git, curated by the agent and a dreaming subagent, with git as the history and the agent's own search as
+retrieval. OpenWiki sits at the database end — structured facts, validity intervals, an assembled context — built
+for a local model that cannot be trusted to curate. The two meet at three cheap ideas: a git-tracked Markdown
+export (which also mitigates R10), a context that is an index plus a pull, and raw sessions kept searchable.

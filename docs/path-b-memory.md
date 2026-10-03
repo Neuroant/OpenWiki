@@ -1,26 +1,9 @@
 # Path B — Agent Memory (design)
 
-> **Status: COMPLETE (B0–B6).** The full staged plan has landed: the remembered tier
-> (`remember`/`recall`, v0.46) + the cross-session eval that validated it (v0.47); **B0** (v0.48) the
-> authoritative-graph reframe — memory **survives document rebuilds**, gated by a per-project **Wiki
-> vs Second Brain mode** (`[memory] enabled`) and fed by a **session source type**; **B1** (v0.49)
-> **read-path reinforcement** via an append-only usage log a writer folds in; **B4** (v0.50)
-> **contradiction / time-versioning** — a newer fact **supersedes** an older via `SUPERSEDES`, so
-> recall returns the *current* fact while history stays queryable (the belief-revision layer no
-> off-the-shelf system ships); **B5** (v0.51) **sleep consolidation** — `consolidate` clusters facts
-> into LLM-summarized `MemoryConcept` themes (bounded, global-searchable); and **B6** (v0.52) the
-> **three-tier context assembly** — `context_for` = identity + activation + attractors, exposed as
-> `context` / MCP `wiki_memory`, scored by the cross-session eval (assembled 100% > raw-log 87.5% >
-> cold 0%). **Host-lifecycle auto-injection** then landed (v0.53): `claude-code --hooks` wires memory
-> into the Claude Code session lifecycle (`UserPromptSubmit`→inject, `SessionEnd`/`PreCompact`→capture),
-> so memory flows automatically; **per-fact confidence** (v0.54): re-affirming a fact reinforces its
-> confidence, a gentle log-scaled tie-breaker on recall; and a **fixed-token context budgeter** (v0.55):
-> the assembly fits the three tiers to a char budget (identity → facts → themes, graceful truncation).
-> B5 (v0.56) then gained **incremental, stable consolidation** (warm-start Louvain — the §8 k-core
-> decision, resolved); and **B1's concurrent reader-and-writer model** landed (v0.57): Kuzu is
-> **reader-XOR-writer** (measured — no simultaneous read+write), so `serve`/`chat` now open **read-only**
-> (concurrent readers) and *all* memory writes queue to a **lock-free write-ahead journal** a writer folds
-> in — concurrent reads + never-blocked writes, the reachable maximum under Kuzu (see B1).
+> **Status: built and in daily use (through v0.96).** The staged plan (B0–B6) landed in v0.46–v0.57, the
+> Second-Brain refinements (B7 bi-temporal, B9 fact identity) in v0.81–v0.85, and memory hygiene, implicit recall
+> and the LoCoMo benchmark (§13) in v0.86–v0.96. A summary of everything built follows; the sections after it keep
+> the design and the per-release measurements.
 > This remains the living design base for Path B — turning OpenWiki's knowledge graph from a document
 > **mirror** into agent **memory**.
 > The roadmap-level overview lives in [`docs/roadmap.md`](roadmap.md#path-b--the-second-brain-memory-model);
@@ -28,7 +11,73 @@
 > evaluation → open decisions). It re-opens arc42 **ADR-3** and **ADR-8** and addresses debts
 > **D1/D2/D6** (see [`docs/arc42/`](arc42/)).
 
+## Status — Path B as built (through v0.96)
+
+**What it is.** Path B turns OpenWiki's graph from a rebuildable *mirror* of documents into an agent's **living
+memory**. Sessions (conversations, Claude Code transcripts) are captured into subject–predicate–object facts,
+merged against what is already known, consolidated into themes, kept clean by policy, and assembled into a small
+context for the next session. Everything runs locally (Ollama + Kuzu) and is opt-in per project: `[memory] enabled`
+switches a project from *Wiki* mode (documents only) to *Second Brain* mode.
+
+**The memory pipeline**
+
+| Stage | What happens | Code · design |
+|---|---|---|
+| Capture | One chat call turns a transcript into S-P-O facts, each with `valid_from` (a stated or relative date, resolved against the session date — D13), `cardinality` and `source` (user / assistant / material); a source-independent policy drops instructions to AI assistants, security weakening and standing authorizations (P0) | `memory.capture_session_detailed` · B2, §13.1, §13.8 |
+| Merge | Re-affirming a fact raises its confidence; paraphrased attributes join one key (B9); a coexistence check decides whether a new value replaces the old; the bi-temporal plan closes, retracts or files it into history by valid time (B7) | `GraphStore.remember`, `temporal.plan_merge` · B3, B4, §12.1, §12.3 |
+| Store | Reified `Assertion`s under `Session`s with `SUPERSEDES` provenance; memory survives document rebuilds (B0); read-only processes queue writes to a journal that the next writer folds in (B1) | `builder` snapshot/restore, `journal.py` · B0, B1 |
+| Recall | cosine × confidence × bounded recency (floor 0.9) × 0.75 for facts from discussed material; current, `as_of`, `known_at` or full timeline; optional constraint probes for implicit circumstances | `recall`, `recall_probed`, `timeline` · B6, §12.1, §13.2, §13.7 |
+| Consolidate | Warm-start Louvain over the current facts → LLM-summarized themes; unchanged themes reuse their summary; `--budget` spreads a large first run | `consolidate` · B5, §13.3 |
+| Maintain | `sleep`: fold the journal → forget by policy (one-off session events, unsafe facts — archived, not deleted) → re-consolidate → decay | `sleep` · §13.3 |
+| Assemble | Identity + the top facts + their themes within a char budget — 16 facts in 3,000 chars, ≈ 710 tokens per prompt | `context_for` · B6, §13.12 |
+| Correct | The coding agent records a new state and the facts it replaces (opt-in `wiki_remember`) | `mcp_server._remember` · §13.6 |
+
+**Where it surfaces.** CLI `remember`, `recall`, `context`, `consolidate`, `sleep`, `backfill`, `analyze memory`,
+`eval --cross-session`, `eval --locomo`. Claude Code host hooks inject memory into every prompt and capture in a
+detached worker at session end / compaction, installable into any repo (`claude-code --hooks --into`). MCP
+`wiki_memory`, plus the opt-in write tool `wiki_remember`. Web UI: the Gedächtnis tab (facts, history, themes,
+*Stand am* / *Wissensstand vom* pickers) and Analyse → Dynamik. Dogfooded: the `openwiki-dev` project remembers
+OpenWiki's own development (~1,190 current facts, 118 themes).
+
+**Releases**
+
+| Layer | Versions | What |
+|---|---|---|
+| Core (B0–B6) | v0.46–v0.57 | `remember`/`recall`, the cross-session eval, the authoritative graph + Wiki/Second Brain modes, read-path reinforcement, supersession, consolidation, three-tier assembly, host hooks, per-fact confidence, the context budgeter, incremental consolidation, journal-based concurrency |
+| Refinements (B+) | v0.81–v0.85 | B7 bi-temporal facts, the coexistence check + temporal eval, dogfooding (backfill, detached capture, `--into`), B9 fact identity |
+| Hygiene, implicit recall, benchmark (B++) | v0.86–v0.96 | P0 provenance + scrubbing, P1 cue-trigger probes, `sleep` + forgetting, `consolidate --budget`, `wiki_remember`, LoCoMo (+ relative event dates, the answer prompt, a judge audit, 20-fact benchmark recall), a 16-fact live context |
+
+**Measured.** The hand-written sets are direction checks; LoCoMo is the external benchmark.
+
+| What | Result |
+|---|---|
+| Cross-session task success (B6) | assembled 100 % vs raw log 87.5 % vs cold 0 % (8 scenarios) |
+| Temporal reasoning (B7) | 7/13 → 13/13 |
+| Fact identity (B9, real memory) | version facts still "current" 23 → 11; retractions 43 → 0; closed history 15 → 251 |
+| Poisoning (P0) | leaks 2/5 → 0/5; legitimate facts 8/8 kept; 0 of 1,446 real facts scrubbed |
+| Implicit constraints (P1, then v0.96) | with probes: cue in context 2/8 → 7/8, applied 1/8 → 6/8; without probes at 16 facts: cue 8/16 → 16/16, applied 7/16 → 12/16 |
+| Junk in injected memory (`sleep`) | 31 % → 5 % of slots; 0 of 232 hand-labeled keep-facts lost |
+| Stale state (`wiki_remember`) | 14/14 stale facts replaced; stale facts in topic contexts 12 → 0 |
+| LoCoMo (1,986 questions, local 30B) | overall J 50.0 → 60.7 % — a hand audit puts the local judge ≈ 7 points generous |
+| Live context (v0.96) | ≈ 470 → 710 tokens per prompt; helpful facts per prompt 2.5 → 3.9 |
+
+**Measured, not adopted.** Letting the local model *judge* memory failed every time it was tried — an LLM
+poisoning audit (§13.1), an LLM forgetting review (§13.3), re-resolution and a wiki-grounded staleness check
+(§13.4), update-aware capture (§13.5) — so policy rules and agent-recorded state took its place. An episodic
+capture style (D14, §13.10) gained +2.8 points on 4 LoCoMo conversations, not significant, at twice the cost.
+
+**Open.**
+- A2 hierarchical communities and B8 spreading-activation priming (§12).
+- Indexed (ANN) recall: every recall still loads all fact embeddings, and the dev memory grows ~50 facts a day.
+- Negation capture (D9).
+- LoCoMo: a stricter judge for dates, and an analysis of the temporal failures (45.8 %).
+- Capture that keeps the user in facts about their own routine, pets or plans: a candidate rule took the
+  cue-trigger set from 12/16 to 14/16 constraints applied, but also attributed company and team facts to the user
+  ("user travels business class…"). Its regression runs and side-effect check are pending; not adopted.
+
+
 ## Contents
+- [Status — Path B as built (through v0.96)](#status--path-b-as-built-through-v096)
 1. [Motivation & main idea](#1-motivation--main-idea)
 2. [Conceptual model](#2-conceptual-model)
 3. [Target architecture](#3-target-architecture)
@@ -40,8 +89,8 @@
 9. [Relationship to the current code](#9-relationship-to-the-current-code)
 10. [Recommended first slice](#10-recommended-first-slice)
 11. [Prior art & learnings — "Cognitive Substrate"](#11-prior-art--learnings--cognitive-substrate)
-12. [Second-Brain refinements (B7 / A2 / B8) — next](#12-second-brain-refinements-b7--a2--b8--next)
-13. [Memory hygiene & implicit recall (B10+) — next](#13-memory-hygiene--implicit-recall-b10--next-from-the-cognitive-agent-report)
+12. [Second-Brain refinements (B7 / B9 built; A2 / B8 open)](#12-second-brain-refinements-b7--b9-built-a2--b8-open)
+13. [Memory hygiene, implicit recall and the LoCoMo benchmark (built v0.86 to v0.96)](#13-memory-hygiene-implicit-recall-and-the-locomo-benchmark-built-v086-to-v096)
 
 ---
 
@@ -623,7 +672,7 @@ unfinished part*, which is exactly why our plan front-loads a measurable thin ve
 
 *Source: `G:\Claude\Cognitive Substrate\docs\ARCHITECTURE.md` + `ROADMAP.md` (v3), read 2026-09.*
 
-## 12. Second-Brain refinements (B7 / A2 / B8) — next
+## 12. Second-Brain refinements (B7 / B9 built; A2 / B8 open)
 
 A second external survey (*"Evolution of Cognitive Memory Substrates: From Cellular Self-Organization
 to the Artificial Second Brain and GraphRAG"* — Kauffman attractors → CLS → CoALA → Graphiti bi-temporal
@@ -640,12 +689,12 @@ concrete refinements, adopted the OpenWiki way (measured against our own `eval`,
   `SUPERSEDES`, and `recall --as-of DATE` answers point-in-time + provenance ("what was true then / when did
   it change / when did we learn it"). Additive Kuzu columns; B0 snapshots them across rebuild; the existing
   `recall` (current-only) is `valid_to IS NULL`.
-- **A2 — Hierarchical communities.** Distinct from the *stability* question §11/§8 already resolved
+- **A2 — Hierarchical communities (open).** Distinct from the *stability* question §11/§8 already resolved
   (warm-start Louvain, v0.56): A2 adds **levels** — a bottom-up tree of communities → meta-summaries (the
   GraphRAG/Leiden pattern), so `ask --global` can answer at the right granularity on large corpora
   (informatik is now 119 pages). Recursive `detect_communities` (or Leiden) + a `level` on
   `Community`/`MemoryConcept`.
-- **B8 — Spreading-activation priming (measure-first).** The report's "epigenetic" priming: on retrieval,
+- **B8 — Spreading-activation priming (measure-first; open).** The report's "epigenetic" priming: on retrieval,
   transiently boost a node's graph neighbors (then decay) so a within-session follow-up resolves to the
   primed subgraph. Close to `REINFORCES`+`decay` but intra-session and query-facing; **A/B it against plain
   `recall`** before adopting (the RAG-vs-GraphRAG result is the cautionary precedent).
@@ -821,7 +870,9 @@ errs toward "different thing" (safe: fragmentation over a wrong merge); descript
 extra coexistence calls; subject identity is only inferred inside a resolved group (no general
 subject resolution).
 
-## 13. Memory hygiene & implicit recall (B10+) — next, from the cognitive-agent report
+## 13. Memory hygiene, implicit recall and the LoCoMo benchmark (built v0.86 to v0.96)
+
+*Planned from the cognitive-agent report (B10+); every item below was built or measured — see §13.1–13.12.*
 
 A second external report (*"Architecture and Implementation of a Cognitive AI Agent: Simulating Human
 Intelligence through LLMs, CoALA, and Sleep Phase Consolidation"* — a virtual-secretary blueprint: CoALA,
@@ -838,7 +889,7 @@ S-P-O capture (a ~500-token budget vs Memori's reported ~721); Zep/Graphiti temp
 
 **Gaps, in order** (each measured before adopted):
 
-1. **Provenance + scrubbing (P0).** Since v0.84 the hooks inject memory into *every* prompt, so memory is a
+1. **Provenance + scrubbing (P0) — built in v0.86, §13.1.** Since v0.84 the hooks inject memory into *every* prompt, so memory is a
    persistence path for injected instructions (the report's "agentic memory poisoning"). Today a fact has no
    origin: a user decision and a claim from pasted material (this report's own "O(log n)" numbers) are equal.
    → capture tags each fact's **source** (user decision / assistant proposal / discussed material);
@@ -855,7 +906,7 @@ S-P-O capture (a ~500-token budget vs Memori's reported ~721); Zep/Graphiti temp
    re-resolution of recent facts → scrub → **forget** (prune facts that are low-importance, never recalled and
    old; decay today only re-ranks, and the dogfooding memory grows ~50 facts/day) → `decay`. The report's
    "biological rhythm" at the cost of a Task-Scheduler / cron entry.
-4. **LoCoMo (P2).** Convert the public long-conversation QA benchmark (snap-research) into the cross-session
+4. **LoCoMo (P2) — built in v0.91, §13.7–13.12.** Convert the public long-conversation QA benchmark (snap-research) into the cross-session
    format — the first number comparable to other memory systems (single-hop / multi-hop / temporal /
    open-domain / adversarial categories).
 5. **Agent-initiated writes (P2) — built in v0.90 as `wiki_remember`, §13.6.** CoALA's learning action by the agent (Letta's `memory_replace`):

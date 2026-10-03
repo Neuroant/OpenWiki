@@ -9,6 +9,9 @@ code and docs, not its marketing, and measured against the same yardstick.
 path) · time and contradictions · consolidation · forgetting and hygiene · identity and procedural memory ·
 agent writes · surfaces and sharing · evaluation.
 
+**The summary** of the series — all twelve at a glance, what separates them, where they agree, where OpenWiki
+stands, and the plan — is in [`agent-memory-summary.md`](agent-memory-summary.md).
+
 ## Contents
 1. [waku-agent](#1-waku-agent) (reviewed 2026-10-03)
 2. [Zep / Graphiti](#2-zep--graphiti) (reviewed 2026-10-03)
@@ -1364,11 +1367,8 @@ shows how large the distance can be (83.6 % on LongMemEval with a 20B open model
 | Learning from use | the transfer-entropy report (§13: directed, decaying edges from activity), Hermes (skill usage counts drive the curator) | `REINFORCES` edges from GraphRAG expansion — none in the coding workflow, which never calls `wiki_ask` | a use signal the workflow produces — git co-changes for code corpora, facts an answer uses — before any learning-from-use method | small to measure |
 | Memory writes documents | Hindsight (five knowledge pages per repository), Letta (memory as Markdown) | the wiki is built from documents only; memory writes no pages | "Decisions" / "Conventions" pages regenerated from facts at `sleep`; git history as a capture source | medium |
 
-**Suggested order:** credential redaction first, with Hermes' Unicode hardening of the policy (full capture coverage, the other mechanical
-gap, landed in v0.97); then writes that land during a session (the in-session fold); then the COGX + Markdown
-export together with the LadybugDB spike (R10); then the measurable LoCoMo experiments — BM25 in recall, the add-only
-ablation, the question's time window — each a paired re-answer on graphs we already have; the injection policy and
-idle capture after that, judged in real sessions.
+**The order** in which we take these up — deterministic fixes, then paired LoCoMo experiments, then changes judged in
+real sessions — is in the summary: [`agent-memory-summary.md` → What we will do](agent-memory-summary.md#what-we-will-do--in-order).
 
 
 ---

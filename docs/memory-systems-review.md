@@ -12,6 +12,7 @@ agent writes · surfaces and sharing · evaluation.
 ## Contents
 1. [waku-agent](#1-waku-agent) (reviewed 2026-10-03)
 2. [Zep / Graphiti](#2-zep--graphiti) (reviewed 2026-10-03)
+3. [Mem0](#3-mem0) (reviewed 2026-10-03)
 
 ---
 
@@ -244,3 +245,123 @@ summaries, on hybrid retrieval with graph search and rerankers, on prescribed on
 raw episodes, and on production scale. OpenWiki is further along on cost per session with a local model, on
 forgetting and hygiene against poisoning, on bounded context assembly, and on audited measurement. And its README
 surfaced the most urgent finding of this review series so far: Kuzu, our graph database, is archived.
+
+
+---
+
+## 3. Mem0
+
+*Sources: [github.com/mem0ai/mem0](https://github.com/mem0ai/mem0) at `abb81c8` (2026-10-01), `mem0ai` 2.2.1,
+Apache-2.0, Python ≥ 3.10; the paper "Mem0: Building Production-Ready AI Agents with Scalable Long-Term Memory"
+(Chhikara et al., [arXiv 2504.19413](https://arxiv.org/abs/2504.19413), April 2025); the
+[research page](https://mem0.ai/research) and the [benchmark repository](https://github.com/mem0ai/memory-benchmarks)
+for the April 2026 algorithm. Mem0 ships as an open-source library, a self-hosted server and a hosted platform; this
+review reads the library and its Claude Code plugin.*
+
+**What it is.** A memory layer for assistants and agents — user, session and agent memories behind `add` and
+`search` — with some twenty vector-store backends, a CLI and plugins for Claude Code, Codex, Cursor, OpenCode and
+others. It defaults to OpenAI models (`gpt-5-mini`, `text-embedding-3-small`). In April 2026 it replaced its
+best-known design — an LLM deciding ADD / UPDATE / DELETE / NONE for each new fact against similar old ones — with
+**single-pass, add-only extraction**: "memories accumulate; nothing is overwritten".
+
+### How its memory works
+- **Write path, one LLM call:** the new messages, the last 10 messages of the session, the 10 most similar
+  existing memories (for deduplication and links) and an *observation date* go into one extraction call. Out come
+  **self-contained, contextually rich memories of 15–80 words**: motivations, feelings and who was present kept in;
+  relative dates resolved to absolute ones ("the week of May 15, 2023"); numbers exact; facts mentioned in passing
+  inside a request extracted too; recommendations the assistant gave; photo descriptions. A change is one memory
+  with both states: "User switched from almond milk to oat milk lattes after developing an almond sensitivity". Then
+  an MD5 hash drops exact duplicates, each memory is embedded and lemmatized for BM25, a history table logs the ADD,
+  and spaCy named entities are linked across memories through an entity store (exact or ≥ 0.95 similar names).
+  The pipeline never updates or deletes; an explicit `update` / `delete` API and a per-memory `expiration_date`
+  exist.
+- **Retrieval:** semantic search over-fetches (max(4 × limit, 60)), BM25 over the lemmatized texts (sigmoid-
+  normalized, adapted to query length), and an entity boost for memories linked to entities named in the query
+  (≤ 0.5, smaller for entities linked to many memories); the three signals add up, after a threshold on the semantic
+  score.
+- **Time:** in the open-source library a memory carries only `created_at`. Event time on `add` (`timestamp`), a
+  reference date on `search` and search-time decay are **platform-only** — the library raises an error for the
+  first two and points to the hosted platform. There are no validity intervals and no supersession: a change lives
+  in the wording of a transition memory, and the answering model sorts it out.
+- **Procedural memory:** a verbatim summary of an agent's execution history, for long-running agents.
+- **Claude Code plugin:** hooks record prompts, answers, changed file paths and failed commands locally without a
+  model call; a detached worker sends a batch every 5 exchanges (sooner for large ones, after 5 idle minutes, and
+  at session end) to the hosted platform. Extraction sorts memories into **shared project memory** (per repository:
+  conventions, decisions, constraints, working commands, failed commands with their fixes) and **personal memory**
+  (preferences), with categories (`project_knowledge`, `decisions_and_constraints`, `workflows`,
+  `problems_and_fixes`, `results`). **Recall is automatic only on a session's first prompt** (≥ 20 characters, up to
+  5 memories); after that Claude searches through an MCP tool (3 results by default, ≤ 4,000 characters).
+  Credential-shaped values (bearer tokens, `sk-…` keys, AWS and GitHub tokens, private keys, JSON secrets) are
+  redacted before anything is sent. Telemetry goes out under the account's email address.
+- **Evaluation:** the 2025 paper reports LoCoMo J 66.88 % (68.44 % with graph memory), a 26 % relative gain over
+  OpenAI's memory, and 91 % lower p95 latency and > 90 % fewer tokens than full context. The April 2026 algorithm
+  reports **LoCoMo 92.5** (single-hop 94.6, multi-hop 95.4, open-domain 82.3, temporal 92.5; 1,540 questions, i.e.
+  categories 1–4) at a top-200 retrieval budget of ~6,900 tokens, LongMemEval 94.4 and BEAM 64.1 (1 M tokens) /
+  48.6 (10 M) — with gpt-4o answering and judging and gpt-4o-mini extracting, on the hosted platform, which the
+  README says "includes proprietary optimizations not available in the open-source SDK". The benchmark repository
+  reports each score at top 10 / 20 / 50 / 200.
+
+### Side by side
+
+| | Mem0 | OpenWiki (Path B) |
+|---|---|---|
+| Purpose | a memory layer for assistants and agents (library, server, platform), plugins for many coding agents | the memory under a coding agent, next to a document wiki, per project |
+| Models | OpenAI by default, any provider | local only (a 30B chat model + bge-m3) |
+| Store | any of ~20 vector stores + SQLite history + an entity store | Kuzu: reified subject–predicate–object assertions under sessions, themes |
+| Unit of memory | a contextually rich sentence (15–80 words) | an atomic fact with validity interval, cardinality, source |
+| Capture | one add-only call per batch of messages, with similar memories as context | one call per session, then a valid-time merge with lazy checks |
+| Time | `created_at` only in the library; event time, reference dates and decay are platform features | bi-temporal: valid + transaction time, supersession, as-of / known-at |
+| Contradictions | none — transitions are written into the memory text; the reader resolves | an older value is closed when a newer one replaces it (history kept) |
+| Retrieval | semantic + BM25 + entity boost, additive | cosine × confidence × recency (dense only) |
+| Live injection (Claude Code) | up to 5 memories on a session's first prompt, then agent-driven search | 16 facts (≈ 710 tokens) on every prompt |
+| Hygiene | credential redaction in the plugin; no poisoning or forgetting policy in the library | an unsafe-instruction policy, policy-based forgetting, source tags; no credential redaction |
+| Scope | shared project memory vs personal memory, categories | one memory per project |
+| Evaluation | LoCoMo, LongMemEval, BEAM (open harness, platform numbers, gpt-4o) | cross-session sets; LoCoMo 60.7 % J (local 30B, audited ≈ 7 points generous) |
+
+### What we learn
+1. **Inject once per session, then let the agent pull.** Mem0's Claude Code plugin gives up to 5 memories on the
+   first prompt and leaves the rest to an on-demand search tool; our hook injects ≈ 710 tokens into every prompt.
+   That is a third answer to the same cost, after waku's model-judged gate and the score threshold that failed us
+   (§1) — a structural one that needs no judgment. Cheap to offer as a project setting (inject on every prompt, or
+   on the first prompt and after compaction, with `wiki_memory` for the rest). The token saving is certain; whether
+   the agent pulls memory when it needs it can only be observed in real sessions.
+2. **Redact credentials before capture.** The plugin strips credential-shaped values before anything leaves the
+   machine. Our capture is local, but a key pasted into a session could become a fact that is injected into every
+   later prompt and listed in the Gedächtnis tab: the P0 policy blocks instructions to *send* secrets, not secret
+   values themselves. Pure, deterministic and cheap — the same patterns applied to the transcript before capture
+   and to facts in `remember()` as the last line of defense. A clear gap.
+3. **Add-only extraction, reasoning at read time.** Mem0 dropped its model's UPDATE / DELETE decisions; the README
+   credits the new algorithm with +21 points on LoCoMo (alongside other changes). It matches our experience that
+   model judgments of memory hurt, yet we still make two at write time (attribute resolution, the coexistence
+   check). Testable as an ablation: replay the captured LoCoMo facts we already saved into fresh graphs with every
+   fact kept current, re-answer, paired — does our write-time temporal logic help or hurt there?
+4. **Rich memories, one transition per memory.** The old state, the new state and the reason in one sentence.
+   Our triples are atomic and drop motivations, feelings and who was present — what open-domain questions ask
+   (45.8 %). This is *richer* facts, not more of them (more, D14, did not pay off): a capture probe on gold-answer
+   coverage, then a paired LoCoMo run.
+5. **Hybrid recall.** BM25 and entity matches next to the embedding catch names, titles and exact terms that dense
+   recall blurs. Our own wiki search showed it (hybrid wins on identifier-heavy text, `RAG-vs-GraphRAG.md`
+   Finding 4), yet memory recall is dense-only. Cheap: `lexical.BM25` over the fact texts fused with the dense ranking;
+   testable by re-answering LoCoMo, paired.
+6. **Bigger retrieval budgets on the benchmark.** Mem0 reports scores at top 10 / 20 / 50 / 200 and headlines
+   top-200. Our k 10 → 20 gave +5.7 points; k 40–50 is a cheap re-answer on LoCoMo (the live path keeps its budget).
+7. **Project and personal scope, and categories.** Shared repository memory (conventions, decisions, failed commands
+   with their fixes) apart from personal preferences, each memory tagged with a category. "Problems and fixes" is a
+   kind of memory our capture may underweight, and categories would let the context put decisions and constraints
+   first.
+8. **Incremental capture.** A batch every 5 exchanges or after an idle spell, so memory lands during a long session
+   and survives a crash; ours waits for session end or compaction.
+
+### What we would not adopt
+- **The platform split.** Event time, reference dates, decay and the headline numbers belong to the hosted platform;
+  the open library has none of them. Telemetry under the account's email.
+- **No validity model at all.** With gpt-4o reading, transition sentences may suffice; with a local 30B and memory
+  injected into every prompt, keeping stale states out matters more — but lesson 3 is how to find out.
+- **spaCy as a dependency** for entity matching — BM25 over the fact texts first.
+
+**In short.** Mem0 is the most benchmark-driven of the projects reviewed so far: its open-source library is a
+deliberately simple add-only vector memory with hybrid retrieval, while its temporal features and headline numbers
+live in the hosted platform. Its numbers (gpt-4o answering and judging) are not comparable with ours. What it
+teaches is concrete and cheap to test: inject once and let the agent pull, redact credentials, fuse BM25 into
+recall, try larger benchmark budgets, write richer facts, and check whether our write-time temporal logic earns its
+place.

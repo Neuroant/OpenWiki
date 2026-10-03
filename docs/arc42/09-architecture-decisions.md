@@ -718,8 +718,9 @@
   order nor their reasons; injecting the whole `HANDOFF.md` — too long for every session start.
 - **Consequences:** + a new session starts oriented before its first prompt (a ~3,000-char brief once per session;
   `resume` 1.4 s, `prepare` 3.4 s on the dev project); + the derived parts can't go stale; + its first run surfaced two
-  real states nobody had noticed — 137 facts queued for a week (the session never ended, so no writable pass ran) and
-  a wiki index 34 commits behind the repository. − a new injection path, hence the P0 screen (same accepted cost: a
+  real states nobody had noticed — 137 facts waiting in the journal (a running session's MCP server holds the graph
+  read-only, so nothing written during the session lands before it ends) and a wiki index 34 commits behind the
+  repository. − a new injection path, hence the P0 screen (same accepted cost: a
   genuine "we skip the review for docs-only changes" line is dropped); − one handoff per project — repositories bound
   to one memory project each see only their own (`same_repo`), the latest overwrites; − not measured: whether a
   session with the brief starts better than one without (no eval set yet).

@@ -940,8 +940,8 @@ The **genuine gaps**, measure-first as always:
   the memory project's `handoff/`; `resume` reads it back with what changed since. A `SessionStart` hook injects the
   brief into every new session; agents get the MCP tool `wiki_handoff` and the `/session-restart prepare | resume`
   skill. Modeled on a hand-written session-restart skill, with the state derived instead of maintained by hand; its
-  first run on the dev project surfaced 137 queued facts (the session had never ended) and a wiki index 34 commits
-  behind. ADR-36.
+  first run on the dev project surfaced 137 facts waiting in the journal (the running session's MCP server holds the
+  graph read-only, so nothing lands before the session ends) and a wiki index 34 commits behind. ADR-36.
 - **Incremental capture (v0.97): the hooks capture a whole session.** Found while reviewing Nemori, which segments the
   whole stream: the capture hook read only the transcript's **last 20,000 characters** per capture point, so the
   long dogfooding session — 1.5 M characters over 36 days, nine compactions — reached memory to at most ~13 %. Now

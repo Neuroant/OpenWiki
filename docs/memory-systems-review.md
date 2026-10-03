@@ -21,6 +21,7 @@ agent writes · surfaces and sharing · evaluation.
 9. [AriGraph](#9-arigraph) (reviewed 2026-10-03)
 10. [Nemori](#10-nemori) (reviewed 2026-10-03)
 11. [memory-champ](#11-memory-champ) (reviewed 2026-10-03)
+12. [Hermes Agent](#12-hermes-agent) (reviewed 2026-10-04)
 - [Across the series — what it suggests for OpenWiki](#across-the-series--what-it-suggests-for-openwiki)
 - [Candidates — world models and CoALA](#candidates--world-models-and-coala)
 
@@ -1122,38 +1123,158 @@ rechecks, and a server with no model of its own. Of all the systems in the serie
 Substrate's "server-enforced authority per tier". For OpenWiki its sharpest ideas are a volatility class per fact and a
 human gate for whatever memory becomes always-present.
 
+
+---
+
+## 12. Hermes Agent
+
+*Sources: [github.com/NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) at `d795726` (2026-10-03),
+release `v2026.9.24`, MIT, Python (about three quarters of a million lines in its main packages); its user guide on
+memory, skills, the curator and memory providers (`website/docs/user-guide/features/`). Reviewed on request, from a
+description that circulates with it — checked claim by claim below.*
+
+**What it is.** Nous Research's self-hosted agent, "the agent that grows with you": a CLI, TUI and desktop app plus
+messaging gateways (Telegram, Discord, Slack, WhatsApp, e-mail), cron jobs, subagents and sandboxed terminals. Memory
+is one part of a large harness, and the built-in part is small on purpose; deeper memory comes from provider plugins.
+
+### How its memory works
+- **Two curated files.** `MEMORY.md` (the agent's notes on its environment, 2,200 characters) and `USER.md` (the
+  user's profile, 1,375 characters), written by the agent itself through a `memory` tool — add, or replace / remove by
+  a unique substring. Both enter the system prompt as a **frozen snapshot** at session start, never mid-session, so
+  the prompt cache survives; a gauge shows the fill level ("67 % — 1,474/2,200 chars"). A full store refuses the
+  write and the agent must consolidate in the same turn — nothing is compacted automatically.
+- **Declarative, durable, narrow.** The system prompt asks for facts, not instructions ("User prefers concise
+  responses", not "Always respond concisely" — imperatives get re-read as directives later), sends everything
+  task-specific to skills — memory is "the narrow exception for facts that apply to every session" — and keeps
+  volatile state out: "a fact stale within a week belongs in session history".
+- **Session history.** Every message of every session sits in SQLite with FTS5; `session_search` finds sessions and
+  scrolls through them — no LLM, no summaries. Cron sessions are demoted so their repetitive vocabulary can't crowd out
+  the user's own ("recall blindness").
+- **The learning loop.** After a reply is delivered, a **background review** forks the agent — on the same prompt
+  cache, or on a cheaper model with a digest of the conversation — every 10 user turns for memory and after 10
+  tool-calling iterations without a skill write for skills. The skill prompt pushes for action ("a pass that does
+  nothing is a missed learning opportunity"), names the signals — the user corrected style or workflow, a fix was
+  found, a loaded skill was wrong — and what never to keep: environment-dependent failures, **negative claims about
+  tools** ("they harden into refusals the agent cites against itself for months"), and unresolved failures written up
+  as a working method. On a local GPU the review waits until the machine is idle.
+- **Skills as procedural memory.** A skill is Markdown in the agentskills.io format — `SKILL.md` plus `references/`,
+  `templates/`, `scripts/` — loaded on demand; written in a turn, by the review, or with `/learn` from documents and
+  URLs. The content rule is "lessons, not logs": a pitfall is a general rule plus one clause of why, with no incident
+  story, date or PR number. A patch needs a fresh read of the skill (enforced).
+- **The curator** keeps agent-made skills in check: usage counts; an unused skill turns stale after 14 days and is
+  archived after 30 — never deleted, pinned skills exempt; an LLM pass that merges skills into class-level ones is
+  opt-in (50–100 calls per run). Every change lands in a ledger with content-addressed before/after copies, so one
+  change can be rolled back.
+- **Hygiene.** Writes to memory and skills pass a threat-pattern scan — prompt injection, promptware / C2 vocabulary,
+  exfiltration, SSH backdoors, hardcoded secrets — on Unicode-NFKC-folded text, plus a check for invisible
+  characters. An optional **write approval** stages every write (`/memory pending`, `approve`, `reject`); a staged
+  replace is pinned to the exact entry it was reviewed against.
+- **Providers.** Five bundled memory plugins (Mem0, Holographic, OpenViking, RetainDB, ByteRover) and more in a catalog
+  (Honcho, Hindsight, Supermemory) run alongside the files, through hooks that mirror ours: prefetch before a turn,
+  sync after it, extract before compression and at session end. Recall is skipped for trivial prompts ("ok",
+  "thanks", "continue").
+
+### The description, against the code
+| Claim | In the code |
+|---|---|
+| a semantic knowledge graph of facts and preferences | two Markdown files of 3,575 characters; graphs only through optional plugins (Hindsight, Holographic) |
+| episodic memory of past tasks, successes and errors | every message in SQLite, searchable by full text; no separate record of outcomes |
+| skills compiled into a Python tool library | Markdown procedures (with optional scripts), loaded into the prompt on demand |
+| one timeline across CLI, Telegram and Discord | one session store and one memory per profile; chats stay separate sessions |
+| zero amnesia, no "hallucination dip" | long sessions are compressed; the docs warn that a session run for weeks grows expensive and its learning loop "almost never gets to fire", and recommend `/new` at natural boundaries |
+
+### Side by side
+
+| | Hermes Agent | OpenWiki (Path B) |
+|---|---|---|
+| Purpose | a self-hosted agent harness (CLI, desktop, messaging gateways, cron) with a memory slot | the memory under a coding agent, next to a document wiki |
+| Built-in memory | two agent-curated Markdown files, 3,575 characters, in the system prompt | ~1,200 current facts; 16 recalled per prompt within 3,000 characters |
+| Who writes | the agent (`memory` tool) and a background review every 10 turns | a local 30B captures each session; the agent via `wiki_remember` |
+| History | every message in SQLite + FTS5, searched by the agent | transcripts outside memory; `backfill` turns them into facts |
+| Time and contradictions | none — a replace overwrites the entry | bi-temporal facts merged by valid time; as-of / known-at |
+| Procedural memory | skills written by the agent and the review, kept by a curator | none (Claude Code skills are written by hand) |
+| Injection | once per session (frozen, cache-friendly) + provider recall per turn | facts on every prompt + the handoff brief at session start (v0.98) |
+| Hygiene | threat-pattern scan (NFKC, invisible characters, secrets); optional write approval | P0 policy on facts and the handoff note; one-off events forgotten by `sleep` |
+| Store | files + SQLite; provider plugins alongside | Kuzu (archived upstream, R10) |
+| Evaluation | behavior probes; no memory benchmark in the repository | cross-session sets; LoCoMo 60.7 % J |
+
+### What we learn
+1. **Writes must land during a session, not only after it.** Hermes' docs say it plainly: memory "needs session
+   boundaries". Our new handoff showed the same on its first run (v0.98): 144 facts were waiting in the journal — 126
+   from the evening's compaction capture, 18 from the agent's own `wiki_remember` — because the MCP server holds the
+   graph read-only for as long as a session lives, so nothing written during a session lands before it ends; the
+   longer the session, the larger the backlog. Hermes writes plain files and never meets a lock. For us: let the MCP
+   server fold the journal itself when it is idle — release its read connection, fold writable, reopen.
+2. **Skip memory for prompts that don't need it.** Hermes skips recall for "ok" and "continue". Its list matches 1 of
+   the 465 prompts of our dogfooding session — but release chores ("push", "push and tag …", "sync arc42 docs") are
+   75 of them (16 %), and each received 16 facts. The idea transfers; the trivial set is project-specific.
+3. **Harden the policy against evasion.** NFKC folding before matching (full-width "ｃａｔ" → "cat"), a check for
+   invisible and bidirectional characters, and a hardcoded-secret pattern — three small additions to `is_unsafe_text`;
+   the last is the credential redaction already first on our list.
+4. **Inject once, search on demand.** Hermes loads its memory once per session, keeps the prompt cache intact and leaves
+   the rest to search — the pattern our SessionStart brief now follows for the handoff. The per-prompt facts remain
+   the open "when to inject" question.
+5. **Guardrails for procedural memory, should we add it.** Hermes' do-not-capture list is the most concrete in the
+   series: no environment-dependent failures, no negative tool claims, no unresolved failure presented as a method.
+   Checked against our current facts, the durable capture already avoids both risks we can measure — imperative
+   phrasing (5 of 1,187 facts contain imperative words, mostly descriptive: "always exits 0") and negative tool claims
+   (3, none a stale refusal) — so the list matters for the "procedural memory from errors" candidate, not for today's
+   capture.
+6. **Approval through the journal.** `write_approval` stages writes for a person to approve. Our journal already holds
+   the agent's writes until the next fold; a `pending` / `approve` step before folding would give `wiki_remember` the
+   same gate — and the always-present core, if it comes.
+
+### What we would not adopt
+- **A few kilobytes as the whole memory.** 3,575 characters suit a personal assistant's profile; a project memory of
+  ~1,200 facts with history does not fit, and a substring `replace` keeps no history.
+- **A review biased toward writing** ("Be ACTIVE"): Hermes needs a curator to clean up after it, and our measurements
+  found local-model judgments of memory unreliable (`path-b-memory.md` §13.1, §13.3–13.5).
+- **Replaying the conversation for every review.** About 30,000 tokens per event is cheap with a cloud prompt cache and
+  slow on a local 30B — Hermes itself defers reviews on local GPUs.
+
+**In short.** Hermes Agent is a large, carefully engineered agent harness whose built-in memory is small on purpose: two
+curated files injected once per session, full-text search over every message, and a background review that turns
+corrections and fixes into skills — procedural memory with a curator, a ledger and rollback. The description that
+circulates with it promises a knowledge graph and zero amnesia that the code does not contain; its own docs say memory
+needs session boundaries. That observation, confirmed on our memory by the new handoff, is its sharpest lesson for
+OpenWiki: writes should land while a session is still running.
+
 ---
 
 ## Across the series — what it suggests for OpenWiki
 
-Eleven systems — six in a first round, then Hindsight, MIRIX, AriGraph, Nemori and memory-champ from the world-model
-shortlist — read from their source in October 2026. Where OpenWiki stands out: a real time model (only Graphiti matches it; Hindsight has event and
+Twelve systems — six in a first round, then Hindsight, MIRIX, AriGraph, Nemori and memory-champ from the world-model
+shortlist, and Hermes Agent on request — read from their source in October 2026. Where OpenWiki stands out: a real time model (only Graphiti matches it; Hindsight has event and
 mention time; Mem0 keeps time-aware retrieval on its hosted platform; Cognee has a query-time window),
-deterministic hygiene against poisoning (none of the eleven has a comparable policy), policy-based forgetting,
+deterministic hygiene against poisoning (of the twelve, only Hermes Agent has a comparable policy — a threat-pattern
+scan on memory writes), policy-based forgetting,
 local-first operation on a 30B model, and audited measurement. Where it lags, the same gaps recur — and Hindsight
 shows how large the distance can be (83.6 % on LongMemEval with a 20B open model):
 
 | Theme | Seen in | OpenWiki today | Candidate | Cost |
 |---|---|---|---|---|
-| Credentials in memory | Mem0, Cognee, Hindsight (redaction before storage); MIRIX stores them on purpose | no redaction — a pasted key can become an injected fact | regex redaction of transcripts before capture and of facts in `remember()` | small, deterministic |
+| Credentials in memory | Mem0, Cognee, Hindsight (redaction before storage), Hermes (a hardcoded-secret pattern blocks the write); MIRIX stores them on purpose | no redaction — a pasted key can become an injected fact | regex redaction of transcripts before capture and of facts in `remember()` | small, deterministic |
 | Readable, portable memory | waku (`MEMORY.md`), Letta (git), Cognee (COGX) | memory lives only in a Kuzu file — archived upstream (R10) | a COGX export + a git-tracked Markdown view, written at `sleep` | small–medium; mitigates R10 |
-| When to inject | waku (model gate), Mem0 (first prompt + pull), Letta (core + index + pull), Cognee (per file read), Hindsight (every prompt + one reflect per session; page count, not titles) | 16 facts on every prompt; a score gate failed (§1) | inject on the first prompt and after compaction, an index of themes, facts on file reads; `wiki_memory` for the rest | small; judged by real sessions |
+| When to inject | waku (model gate), Mem0 (first prompt + pull), Letta (core + index + pull), Cognee (per file read), Hindsight (every prompt + one reflect per session; page count, not titles), Hermes (once per session, frozen for the prompt cache; recall skipped for trivial prompts) | 16 facts on every prompt — including release chores, 16 % of our prompts; a score gate failed (§1) | skip chore prompts; inject on the first prompt and after compaction, an index of themes, facts on file reads; `wiki_memory` for the rest | small; judged by real sessions |
 | BM25 next to embeddings | waku, Graphiti, Mem0, Cognee, Hindsight (+ graph, time range, cross-encoder) | memory recall is dense-only | BM25 + rank fusion in `recall` | small; a paired LoCoMo re-answer |
-| Capture during a session | Mem0, Letta, Cognee, LangMem, Hindsight (write-back every turn) | at session end / compaction | debounced idle capture through the detached worker | small–medium |
+| Capture during a session | Mem0, Letta, Cognee, LangMem, Hindsight (write-back every turn), Hermes (a background review every 10 turns) | at session end / compaction | debounced idle capture through the detached worker | small–medium |
+| Writes land during a session | Hermes and Letta (plain writes, immediate) | queued in the journal while the MCP server holds the graph read-only — nothing lands before the session ends (144 facts waiting at the first v0.98 handoff) | the MCP server folds the journal itself when idle: release the read connection, fold writable, reopen | small–medium |
 | Capture coverage | Nemori (segments the whole stream), Cognee (a watermark per session), Mem0 (every batch) | **fixed in v0.97** — before, the hook read only the last 20,000 characters per capture (~13 % of a long session) | every turn since a per-session watermark, in bounded windows — done | — |
-| Raw sessions searchable | Graphiti, Letta, Mem0, Cognee, Hindsight, AriGraph (episodes ranked by overlap with retrieved facts) | transcripts stay outside the memory tier | a session search tool for agents | medium |
-| A curated always-present core | waku, Letta, LangMem, Hindsight (mental models) | a hand-written identity string | user-sourced conventions in the identity tier, entering only by human approval (memory-champ's gate) | small; must pass the poisoning set |
+| Raw sessions searchable | Graphiti, Letta, Mem0, Cognee, Hindsight, AriGraph (episodes ranked by overlap with retrieved facts), Hermes (FTS5 over every message, no LLM; automation demoted) | transcripts stay outside the memory tier | a session search tool for agents | medium |
+| A curated always-present core | waku, Letta, LangMem, Hindsight (mental models), Hermes (two files, 3,575 characters) | a hand-written identity string | user-sourced conventions in the identity tier, entering only by human approval (memory-champ's gate; Hermes stages writes for approval — our journal could too) | small; must pass the poisoning set |
 | Richer context than atomic facts | waku (episodes), Graphiti (sagas), Mem0 (rich memories), Cognee (lessons with reasons), Hindsight (5W facts), Nemori (dated narrative episodes) | atomic subject–predicate–object facts | episode summaries or a detail sentence per fact | medium; a paired LoCoMo run |
 | Write-time model judgments | Mem0 dropped them; Letta and LangMem rely on strong curators; Hindsight confines them to a derived layer over immutable facts | two LLM checks in the merge (attribute resolution, coexistence) | an add-only ablation on LoCoMo — do they earn their place? | small; replay saved captures |
 | Time in the question | Cognee (query-time window), Mem0 platform, Hindsight and MIRIX (rule-based date parsers) | recall ignores times in the query | boost facts whose validity overlaps a window extracted from the question | small; LoCoMo temporal |
 | Multi-hop recall by expansion | AriGraph (semantic BFS over triplets), Graphiti (BFS from entities), Hindsight (graph links), Cognee (graph completion) | memory recall is single-hop similarity (the wiki side has GraphRAG expansion) | expand from the recalled facts through shared subjects / objects, thresholded, depth 2 | small; LoCoMo multi-hop |
 | Typed memory | waku (facts / episodes / skills / persona), Letta (core / deferred / skills), Hindsight (world / experience), MIRIX (six purpose types), memory-champ (episodic / semantic / procedural, per-type write gates) | one untyped fact store (`source` tags only) | a type tag at capture, per-type recall budgets | small–medium |
-| Procedural memory from errors | Mem0 plugin (failed commands with fixes), MIRIX (tool errors → skills) | tool output stripped from capture | capture bounded failure → fix pairs | medium |
+| Procedural memory from errors | Mem0 plugin (failed commands with fixes), MIRIX (tool errors → skills), Hermes (skills from corrections and fixes — never negative tool claims or unresolved failures) | tool output stripped from capture | capture bounded failure → fix pairs | medium |
 | Staleness by volatility | memory-champ (stable / slow / volatile facts, rechecked after 365 / 90 / 14 days) | stale "current" facts persist until restated or corrected via `wiki_remember` (D12) | a volatility tag at capture; volatile facts flagged "possibly outdated" after a few weeks | small |
+| Unicode evasion of the policy | Hermes (NFKC folding, invisible and bidirectional characters) | P0 regexes match the raw text | NFKC + an invisible-character check in `is_unsafe_text` | small |
 | Unresolved conflicts shown | MIRIX (keep both, note the discrepancy), memory-champ (surfaced, never resolved) | the merge closes or keeps silently | a "disputed" mark in the context | small |
 | Memory writes documents | Hindsight (five knowledge pages per repository), Letta (memory as Markdown) | the wiki is built from documents only; memory writes no pages | "Decisions" / "Conventions" pages regenerated from facts at `sleep`; git history as a capture source | medium |
 
-**Suggested order:** credential redaction first (full capture coverage, the other mechanical gap, landed in v0.97); then the COGX + Markdown
+**Suggested order:** credential redaction first, with Hermes' Unicode hardening of the policy (full capture coverage, the other mechanical
+gap, landed in v0.97); then writes that land during a session (the in-session fold); then the COGX + Markdown
 export together with the LadybugDB spike (R10); then the measurable LoCoMo experiments — BM25 in recall, the add-only
 ablation, the question's time window — each a paired re-answer on graphs we already have; the injection policy and
 idle capture after that, judged in real sessions.

@@ -672,6 +672,9 @@ unfinished part*, which is exactly why our plan front-loads a measurable thin ve
 
 *Source: `G:\Claude\Cognitive Substrate\docs\ARCHITECTURE.md` + `ROADMAP.md` (v3), read 2026-09.*
 
+**Other agent-memory projects** are compared one at a time, on one yardstick, in
+[`memory-systems-review.md`](memory-systems-review.md) — so far waku-agent (2026-10).
+
 ## 12. Second-Brain refinements (B7 / B9 built; A2 / B8 open)
 
 A second external survey (*"Evolution of Cognitive Memory Substrates: From Cellular Self-Organization

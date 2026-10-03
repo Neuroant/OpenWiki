@@ -19,6 +19,7 @@ agent writes · surfaces and sharing · evaluation.
 7. [Hindsight](#7-hindsight) (reviewed 2026-10-03 — first of the world-model shortlist)
 8. [MIRIX](#8-mirix) (reviewed 2026-10-03)
 9. [AriGraph](#9-arigraph) (reviewed 2026-10-03)
+10. [Nemori](#10-nemori) (reviewed 2026-10-03)
 - [Across the series — what it suggests for OpenWiki](#across-the-series--what-it-suggests-for-openwiki)
 - [Candidates — world models and CoALA](#candidates--world-models-and-coala)
 
@@ -954,14 +955,89 @@ Substrate (semantic + episodic, current state vs. history), and research-grade. 
 ideas — semantic expansion through shared entities, and episodes ranked by overlap with the retrieved facts — are
 cheap to test on LoCoMo's multi-hop questions.
 
+
+---
+
+## 10. Nemori
+
+*Sources: [github.com/nemori-ai/nemori](https://github.com/nemori-ai/nemori) at `d2a6dff` (2026-04-16), `nemori` 0.2.0,
+MIT, Python ≥ 3.10 (a rewrite aligned with the paper; the earlier MVP lives on a branch); the paper, now titled
+"What Deserves Memory: Adaptive Memory Distillation for LLM Agents" (Ma et al.,
+[arXiv 2508.03341](https://arxiv.org/abs/2508.03341), v4 April 2026).*
+
+**What it is.** A long-term memory substrate for conversational agents built on two ideas from cognitive science:
+*event segmentation* — memory is organized in episodes whose boundaries fall where the topic shifts — and
+*predictive processing* — what deserves to be learned is what the current model of the world failed to predict.
+PostgreSQL for metadata and text search, Qdrant for vectors; hosted models through OpenRouter or OpenAI.
+
+### How its memory works
+- **Segmentation.** Messages are buffered per user (1–20 at a time) and a model detects topic boundaries, so each
+  episode is one coherent stretch of conversation.
+- **Episodes.** Each segment becomes an episodic memory: a 10–20-word title, a third-person narrative with "who, at
+  what time, what was discussed, what was decided, what emotions, what plans", and a timestamp precise to the hour;
+  relative dates are converted to absolute ones in the text ("on the upcoming weekend (March 16, 2024)"). A
+  new episode that continues an existing one (same event, less than an hour apart) is merged into it.
+- **Predict–calibrate.** For each new episode the system retrieves the semantic statements relevant to its title
+  — "your current world model" — and asks a model to *predict* what happened in the episode from those alone. A
+  second call compares the prediction with the real conversation and extracts **only what the original contains
+  that the prediction missed or got wrong**, filtered by four tests: still true in six months, specific, useful for
+  predicting future needs, understandable on its own. Semantic memory therefore grows only by what was surprising.
+- **Retrieval:** hybrid vector and text search over episodes and semantic statements; the LoCoMo setup puts the top
+  10 episodes and the top 20 statements into the answer context (optionally the original messages of the best
+  episodes).
+- **Evaluation:** the README reports **LoCoMo 0.83** (LLM judge) with gpt-4.1-mini — single-hop 0.89, multi-hop 0.79,
+  **temporal 0.79**, open-domain 0.59.
+
+### Side by side
+
+| | Nemori | OpenWiki (Path B) |
+|---|---|---|
+| Unit of memory | dated narrative episodes + atomic semantic statements | atomic facts with validity intervals |
+| Segmentation | topic boundaries detected by a model | capture per session (hooks) or per fixed window (backfill) |
+| What gets stored | only what the existing knowledge failed to predict | every durable fact; re-stating one raises its confidence |
+| Time | absolute dates written into each episode; hour-precise timestamps | valid-from per fact; bi-temporal merge |
+| Answer context | top 10 episodes + top 20 statements | top 16 facts + themes |
+| Calls per unit | segmentation + episode + prediction + extraction | one capture call per session (+ lazy merge checks) |
+| Evaluation | LoCoMo 0.83 (gpt-4.1-mini); temporal 0.79 | LoCoMo 60.7 % J (local 30B); temporal 45.8 % |
+
+### What we learn
+1. **Narrative episodes in the answer context.** The widest category gap between Nemori and us is temporal (0.79 vs
+   45.8 %), and temporal questions are exactly where a dated narrative helps: the event and its absolute date sit
+   in one sentence, where our atomic facts scatter them. With waku's episodes, Graphiti's sagas, Mem0's rich
+   memories and Hindsight's 5W facts, this is the fifth system pointing the same way — the strongest case yet for
+   the episode experiment: one narrative per LoCoMo session with absolute dates, retrieved next to the facts,
+   re-answered paired.
+2. **Our own capture misses most of a long session.** Nemori segments the *whole* stream; checking our hook capture
+   against that showed it reads only the **last 20,000 characters** of the transcript at each compaction and at
+   session end (`parse_claude_transcript`'s default). For the long dogfooding session that wrote this review —
+   1.5 million characters of conversation over 36 days, nine compactions — that is at most ~13 % of the
+   conversation; the rest never reaches memory through the hooks (`backfill` covered older history once). The fix
+   is mechanical: remember a per-session capture watermark and capture everything since it, cut into bounded windows
+   (the windowing `backfill` already uses), in the detached worker.
+3. **Store what was surprising.** Predict–calibrate is a principled novelty filter: semantic memory grows only by
+   prediction error, so it stays free of what is already known. Our design takes the opposite view of repetition —
+   re-stating a fact raises its confidence — and keeps redundancy in check by deduplication instead. Both are
+   defensible; the filter costs two extra model calls per episode, which is the deciding factor on a local 30B.
+4. **A recall budget split by memory type.** Ten episodes plus twenty statements is a deliberate mix; with typed
+   memory (§8) we could budget facts, episodes and themes separately instead of one ranked list.
+
+### What we would not adopt
+- **Four model calls per segment** (segmentation, episode, prediction, extraction) on the write path.
+- **PostgreSQL + Qdrant** as infrastructure, and hosted models as the default.
+
+**In short.** Nemori gives a principled answer to "what deserves memory": cut the stream where the topic changes,
+keep each segment as a dated narrative, and distill into semantic memory only what the existing knowledge could not
+predict. Its LoCoMo profile is strongest where we are weakest — temporal questions — which points at narrative
+episodes; and its insistence on segmenting the whole stream exposed a real gap in our own capture.
+
 ---
 
 ## Across the series — what it suggests for OpenWiki
 
-Nine systems — six in a first round, then Hindsight, MIRIX and AriGraph from the world-model shortlist — read from
-their source in October 2026. Where OpenWiki stands out: a real time model (only Graphiti matches it; Hindsight has event and
+Ten systems — six in a first round, then Hindsight, MIRIX, AriGraph and Nemori from the world-model shortlist —
+read from their source in October 2026. Where OpenWiki stands out: a real time model (only Graphiti matches it; Hindsight has event and
 mention time; Mem0 keeps time-aware retrieval on its hosted platform; Cognee has a query-time window),
-deterministic hygiene against poisoning (none of the nine has a comparable policy), policy-based forgetting,
+deterministic hygiene against poisoning (none of the ten has a comparable policy), policy-based forgetting,
 local-first operation on a 30B model, and audited measurement. Where it lags, the same gaps recur — and Hindsight
 shows how large the distance can be (83.6 % on LongMemEval with a 20B open model):
 
@@ -972,9 +1048,10 @@ shows how large the distance can be (83.6 % on LongMemEval with a 20B open model
 | When to inject | waku (model gate), Mem0 (first prompt + pull), Letta (core + index + pull), Cognee (per file read), Hindsight (every prompt + one reflect per session; page count, not titles) | 16 facts on every prompt; a score gate failed (§1) | inject on the first prompt and after compaction, an index of themes, facts on file reads; `wiki_memory` for the rest | small; judged by real sessions |
 | BM25 next to embeddings | waku, Graphiti, Mem0, Cognee, Hindsight (+ graph, time range, cross-encoder) | memory recall is dense-only | BM25 + rank fusion in `recall` | small; a paired LoCoMo re-answer |
 | Capture during a session | Mem0, Letta, Cognee, LangMem, Hindsight (write-back every turn) | at session end / compaction | debounced idle capture through the detached worker | small–medium |
+| Capture coverage | Nemori (segments the whole stream), Cognee (a watermark per session), Mem0 (every batch) | the hook reads only the last 20,000 characters per capture — ~13 % of a long session | capture everything since a per-session watermark, in bounded windows | small; mechanical |
 | Raw sessions searchable | Graphiti, Letta, Mem0, Cognee, Hindsight, AriGraph (episodes ranked by overlap with retrieved facts) | transcripts stay outside the memory tier | a session search tool for agents | medium |
 | A curated always-present core | waku, Letta, LangMem, Hindsight (mental models) | a hand-written identity string | user-sourced conventions in the identity tier | small; must pass the poisoning set |
-| Richer context than atomic facts | waku (episodes), Graphiti (sagas), Mem0 (rich memories), Cognee (lessons with reasons), Hindsight (5W facts) | atomic subject–predicate–object facts | episode summaries or a detail sentence per fact | medium; a paired LoCoMo run |
+| Richer context than atomic facts | waku (episodes), Graphiti (sagas), Mem0 (rich memories), Cognee (lessons with reasons), Hindsight (5W facts), Nemori (dated narrative episodes) | atomic subject–predicate–object facts | episode summaries or a detail sentence per fact | medium; a paired LoCoMo run |
 | Write-time model judgments | Mem0 dropped them; Letta and LangMem rely on strong curators; Hindsight confines them to a derived layer over immutable facts | two LLM checks in the merge (attribute resolution, coexistence) | an add-only ablation on LoCoMo — do they earn their place? | small; replay saved captures |
 | Time in the question | Cognee (query-time window), Mem0 platform, Hindsight and MIRIX (rule-based date parsers) | recall ignores times in the query | boost facts whose validity overlaps a window extracted from the question | small; LoCoMo temporal |
 | Multi-hop recall by expansion | AriGraph (semantic BFS over triplets), Graphiti (BFS from entities), Hindsight (graph links), Cognee (graph completion) | memory recall is single-hop similarity (the wiki side has GraphRAG expansion) | expand from the recalled facts through shared subjects / objects, thresholded, depth 2 | small; LoCoMo multi-hop |
@@ -982,7 +1059,7 @@ shows how large the distance can be (83.6 % on LongMemEval with a 20B open model
 | Procedural memory from errors | Mem0 plugin (failed commands with fixes), MIRIX (tool errors → skills) | tool output stripped from capture | capture bounded failure → fix pairs | medium |
 | Memory writes documents | Hindsight (five knowledge pages per repository), Letta (memory as Markdown) | the wiki is built from documents only; memory writes no pages | "Decisions" / "Conventions" pages regenerated from facts at `sleep`; git history as a capture source | medium |
 
-**Suggested order:** credential redaction first (a clear gap, deterministic, cheap); then the COGX + Markdown
+**Suggested order:** credential redaction and full capture coverage first (two clear gaps, both mechanical); then the COGX + Markdown
 export together with the LadybugDB spike (R10); then the measurable LoCoMo experiments — BM25 in recall, the add-only
 ablation, the question's time window — each a paired re-answer on graphs we already have; the injection policy and
 idle capture after that, judged in real sessions.
@@ -1003,9 +1080,8 @@ ground-truth tier, consolidation as a sleep cycle, perception from many sources)
    its own agent, fed by continuous screen observation. → [§8](#8-mirix)
 3. **AriGraph** — the most literal world model from observations: a semantic knowledge graph of the current state plus
    episodic nodes linking each observation to its triples. → [§9](#9-arigraph)
-4. **[Nemori](https://github.com/nemori-ai/nemori)** ([paper](https://arxiv.org/abs/2508.03341)) — event segmentation of
-   the stream into episodes, semantic memory learned by *predict-calibrate* (store what existing memory failed to
-   predict; after the free-energy principle).
+4. **Nemori** — topic-segmented narrative episodes, semantic memory learned by *predict–calibrate* (store only what
+   existing memory failed to predict). → [§10](#10-nemori)
 5. **[memory-champ](https://github.com/mikeleewoodai/memory-champ)** — CoALA as an MCP service (episodic, semantic,
    procedural in SQLite + sqlite-vec; FTS5 + vector fusion weighted by recency and importance); the agent can only
    *queue* procedures — approval needs an Ed25519 signature from a key it doesn't have.

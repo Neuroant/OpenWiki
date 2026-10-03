@@ -17,6 +17,7 @@ agent writes · surfaces and sharing · evaluation.
 5. [Cognee](#5-cognee) (reviewed 2026-10-03)
 6. [LangMem](#6-langmem) (reviewed 2026-10-03)
 7. [Hindsight](#7-hindsight) (reviewed 2026-10-03 — first of the world-model shortlist)
+8. [MIRIX](#8-mirix) (reviewed 2026-10-03)
 - [Across the series — what it suggests for OpenWiki](#across-the-series--what-it-suggests-for-openwiki)
 - [Candidates — world models and CoALA](#candidates--world-models-and-coala)
 
@@ -795,20 +796,99 @@ agent's own experiences, evidence-backed beliefs in a derived layer, wiki-like k
 with an open 20B model. It is also the most direct challenge to our own numbers: the distance between our 60.7 % and
 what it reports with a model of our size is architecture, and much of it is retrieval.
 
+
+---
+
+## 8. MIRIX
+
+*Sources: [github.com/Mirix-AI/MIRIX](https://github.com/Mirix-AI/MIRIX) at `8cb06a6` (2026-08-20), `mirix` 0.1.0
+(client `mirix-client` on PyPI), Apache-2.0, Python ≥ 3.10; the paper "MIRIX: Multi-Agent Memory System for LLM-Based
+Agents" (Wang & Chen, [arXiv 2507.07957](https://arxiv.org/abs/2507.07957), July 2025).*
+
+**What it is.** A personal assistant whose memory is built from **screen observation**, voice, files and
+conversation — a perception-driven world model of a user's digital life. A Docker backend (Postgres with pgvector
+and native BM25) and a dashboard; clients for Python; defaults to Gemini models for both language and embeddings.
+Long-term data stays on the user's machine.
+
+### How its memory works
+- **Six memory types, defined by purpose.** *Core* — who the user is and how to interact with them (persona and
+  human blocks); *episodic* — what happened when, each entry with a timestamp; *semantic* — concepts, people,
+  places and organizations in the user's world; *procedural* — reusable skills with triggers and instructions;
+  *resource* — documents, files and screenshots the user shared or referenced; *knowledge vault* — static reference
+  data: contacts, IDs, addresses and, deliberately, credentials (`secret_value`, labeled with a sensitivity level;
+  no encryption found in the code).
+- **One manager agent per type.** Incoming messages accumulate; a *meta memory manager* reads each batch and routes
+  it to the managers of the affected types, which update their memory through tools. A chat agent answers from all
+  of them.
+- **Procedural memory from the work process.** Tool calls, tool errors, retries and the fix that finally worked are
+  passed in with the conversation — "the distiller's strongest signals" for learning a skill.
+- **Consolidation.** A *reflexion* agent runs per query or daily to deduplicate and repair every memory type; an
+  *auto-dream* endpoint reviews one memory component at a time, merges duplicates and resolves conflicts
+  conservatively — the more recent or more detailed item wins, and **if uncertain, both are kept and the
+  discrepancy is recorded**.
+- **Retrieval:** topic-based search across the memory types with BM25 and vectors; a rule-based parser turns "today",
+  "yesterday", "last week" into a date range.
+- **Evaluation:** the paper reports **85.4 % on LoCoMo** and, on its own ScreenshotVQA benchmark (sequences of ~20,000
+  screenshots), 35 % higher accuracy than a RAG baseline with 99.9 % less storage.
+
+### Side by side
+
+| | MIRIX | OpenWiki (Path B) |
+|---|---|---|
+| Purpose | a personal assistant that remembers what happens on the user's screen | the memory under a coding agent, next to a document wiki |
+| Perception | screenshots, voice, files, chat | conversation transcripts (+ the documents of the wiki) |
+| Models | Gemini by default (any provider) | local only (a 30B chat model + bge-m3) |
+| Store | Postgres + pgvector + BM25 | Kuzu (archived upstream, R10) |
+| Memory types | six, by purpose, each with its own manager agent | one fact store; `source` tags only |
+| Write path | a router agent + six manager agents per batch | one capture call per session + a deterministic merge |
+| Conflicts | the newer / more detailed wins; if unsure, keep both and note the discrepancy | valid-time supersession; a coexistence check keeps compatible values |
+| Secrets | stored on purpose in the knowledge vault | never stored (P0 blocks instructions; redaction still missing) |
+| Procedural memory | skills distilled from tool errors and fixes | out of scope; tool output is stripped from capture |
+| Evaluation | LoCoMo 85.4 %; ScreenshotVQA | LoCoMo 60.7 % J (local 30B, audited ≈ 7 points generous) |
+
+### What we learn
+1. **Typed memory with purpose definitions.** MIRIX makes CoALA's taxonomy concrete — core, episodic, semantic,
+   procedural, resource, plus a vault for lookups — each with a "key question" that decides where a fact belongs.
+   Our facts carry no type. A type tag at capture (a cheap field in the existing call) would allow per-type recall
+   budgets — the user's core preferences always present, episodes for time questions, resources when a document is
+   referenced — and connects to the always-present core and Hindsight's world/experience split.
+2. **Errors and fixes are the strongest procedural signal.** MIRIX feeds tool errors, retries and the final fix to
+   its skill distiller; Mem0's coding plugin records failed commands with their fixes. Our capture strips tool
+   output from the transcript, so a coding session's most reusable lesson — what failed, and what finally worked —
+   never reaches memory. Capturing bounded failure → fix pairs as facts is a capture change worth measuring.
+3. **Record uncertainty instead of forcing a winner.** When auto-dream is unsure which of two conflicting entries is
+   right, it keeps both and writes the discrepancy down. Our coexistence check keeps compatible values, but an
+   unresolved conflict is either closed or kept silently — a "disputed" mark would let the context say so.
+4. **A counter-example on secrets.** Storing credentials by design, with only a sensitivity label, is the opposite of
+   what Mem0, Cognee and Hindsight do. For a memory injected into every prompt we keep the opposite rule — and it
+   underlines that our missing redaction is a gap, not a choice.
+
+### What we would not adopt
+- **Seven LLM agents on the write path** — a router plus one manager per memory type, per batch: far beyond a local
+  30B on one GPU.
+- **Secrets in memory**, and screen capture as a perception source — outside our scope, and a privacy load.
+- **Cloud models by default** for processing screenshots of a user's desktop.
+
+**In short.** MIRIX takes CoALA's taxonomy furthest: six purpose-typed memories, each with its own manager agent, fed
+by what happens on a user's screen. Compared with Cognitive Substrate it shares the perception-first idea but has no
+ground-truth tier and no per-tier write authority — every type is written by its own LLM manager. For OpenWiki its
+value is the taxonomy (typed facts with per-type budgets), procedural memory distilled from errors and fixes, and a
+rule for disagreements: keep both and say so.
+
 ---
 
 ## Across the series — what it suggests for OpenWiki
 
-Seven systems — six in a first round, then Hindsight from the world-model shortlist — read from their source in
-October 2026. Where OpenWiki stands out: a real time model (only Graphiti matches it; Hindsight has event and
+Eight systems — six in a first round, then Hindsight and MIRIX from the world-model shortlist — read from their
+source in October 2026. Where OpenWiki stands out: a real time model (only Graphiti matches it; Hindsight has event and
 mention time; Mem0 keeps time-aware retrieval on its hosted platform; Cognee has a query-time window),
-deterministic hygiene against poisoning (none of the seven has a comparable policy), policy-based forgetting,
+deterministic hygiene against poisoning (none of the eight has a comparable policy), policy-based forgetting,
 local-first operation on a 30B model, and audited measurement. Where it lags, the same gaps recur — and Hindsight
 shows how large the distance can be (83.6 % on LongMemEval with a 20B open model):
 
 | Theme | Seen in | OpenWiki today | Candidate | Cost |
 |---|---|---|---|---|
-| Credentials in memory | Mem0, Cognee, Hindsight (redaction before storage) | no redaction — a pasted key can become an injected fact | regex redaction of transcripts before capture and of facts in `remember()` | small, deterministic |
+| Credentials in memory | Mem0, Cognee, Hindsight (redaction before storage); MIRIX stores them on purpose | no redaction — a pasted key can become an injected fact | regex redaction of transcripts before capture and of facts in `remember()` | small, deterministic |
 | Readable, portable memory | waku (`MEMORY.md`), Letta (git), Cognee (COGX) | memory lives only in a Kuzu file — archived upstream (R10) | a COGX export + a git-tracked Markdown view, written at `sleep` | small–medium; mitigates R10 |
 | When to inject | waku (model gate), Mem0 (first prompt + pull), Letta (core + index + pull), Cognee (per file read), Hindsight (every prompt + one reflect per session; page count, not titles) | 16 facts on every prompt; a score gate failed (§1) | inject on the first prompt and after compaction, an index of themes, facts on file reads; `wiki_memory` for the rest | small; judged by real sessions |
 | BM25 next to embeddings | waku, Graphiti, Mem0, Cognee, Hindsight (+ graph, time range, cross-encoder) | memory recall is dense-only | BM25 + rank fusion in `recall` | small; a paired LoCoMo re-answer |
@@ -817,7 +897,9 @@ shows how large the distance can be (83.6 % on LongMemEval with a 20B open model
 | A curated always-present core | waku, Letta, LangMem, Hindsight (mental models) | a hand-written identity string | user-sourced conventions in the identity tier | small; must pass the poisoning set |
 | Richer context than atomic facts | waku (episodes), Graphiti (sagas), Mem0 (rich memories), Cognee (lessons with reasons), Hindsight (5W facts) | atomic subject–predicate–object facts | episode summaries or a detail sentence per fact | medium; a paired LoCoMo run |
 | Write-time model judgments | Mem0 dropped them; Letta and LangMem rely on strong curators; Hindsight confines them to a derived layer over immutable facts | two LLM checks in the merge (attribute resolution, coexistence) | an add-only ablation on LoCoMo — do they earn their place? | small; replay saved captures |
-| Time in the question | Cognee (query-time window), Mem0 platform, Hindsight (rule-based date parser) | recall ignores times in the query | boost facts whose validity overlaps a window extracted from the question | small; LoCoMo temporal |
+| Time in the question | Cognee (query-time window), Mem0 platform, Hindsight and MIRIX (rule-based date parsers) | recall ignores times in the query | boost facts whose validity overlaps a window extracted from the question | small; LoCoMo temporal |
+| Typed memory | waku (facts / episodes / skills / persona), Letta (core / deferred / skills), Hindsight (world / experience), MIRIX (six purpose types) | one untyped fact store (`source` tags only) | a type tag at capture, per-type recall budgets | small–medium |
+| Procedural memory from errors | Mem0 plugin (failed commands with fixes), MIRIX (tool errors → skills) | tool output stripped from capture | capture bounded failure → fix pairs | medium |
 | Memory writes documents | Hindsight (five knowledge pages per repository), Letta (memory as Markdown) | the wiki is built from documents only; memory writes no pages | "Decisions" / "Conventions" pages regenerated from facts at `sleep`; git history as a capture source | medium |
 
 **Suggested order:** credential redaction first (a clear gap, deterministic, cheap); then the COGX + Markdown
@@ -837,9 +919,8 @@ ground-truth tier, consolidation as a sleep cycle, perception from many sources)
 **Closest matches — for full reviews**
 1. **Hindsight** — world facts apart from the agent's experiences, evidence-backed beliefs, mental models; per-repo
    memory for coding agents from git history and sessions. → [§7](#7-hindsight)
-2. **[MIRIX](https://github.com/Mirix-AI/MIRIX)** ([paper](https://arxiv.org/abs/2507.07957)) — six memory types (core,
-   episodic, semantic, procedural, resource, knowledge vault), each managed by its own agent, fed by continuous
-   screen observation: a perception-driven world model of a user's digital life, stored locally.
+2. **MIRIX** — six memory types (core, episodic, semantic, procedural, resource, knowledge vault), each managed by
+   its own agent, fed by continuous screen observation. → [§8](#8-mirix)
 3. **[AriGraph](https://github.com/airi-institute/arigraph)** (IJCAI 2025, [paper](https://arxiv.org/abs/2407.04363)) —
    the most literal world model from observations: an agent exploring text-game environments builds a semantic
    knowledge graph plus episodic nodes linking each observation to its triples, replacing outdated triples as the

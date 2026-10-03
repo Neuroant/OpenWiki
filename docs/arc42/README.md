@@ -25,6 +25,9 @@ quality, and risks.
 > relative event dates, an inference answer prompt and a 20-fact recall budget; it set recall recency to a
 > tie-breaker, ADR-34), whose more-facts finding was then measured on the live path and carried into the hook
 > context (16 facts in 3,000 chars, ≈ 710 tokens per prompt; ADR-35, QS-21). Deep detail: `docs/path-b-memory.md`, `docs/RAG-vs-GraphRAG.md`.
+>
+> **Open risk:** Kuzu, the embedded graph store, was archived upstream in 2025-10 — tracked as §11 **R10**
+> (pinned to 0.11; a memory export and a LadybugDB spike are the planned mitigations).
 
 ## Audience & relationship to the other docs
 

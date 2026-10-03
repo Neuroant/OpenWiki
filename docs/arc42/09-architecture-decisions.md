@@ -108,6 +108,9 @@
   single-file/local). Use NetworkX — rejected (no persistence/vector index). Run 3.14 without
   the graph — rejected (graph is core).
 - **Consequences:** + Graph layer works on Windows. − Can't adopt 3.14 features until Kuzu ships a wheel.
+- **Update (2026-10):** Kuzu was archived upstream on 2025-10-10, so it will not ship one. The way past 3.13 is
+  a store change — the LadybugDB fork of Kuzu, or another embedded engine — behind the two modules that import
+  `kuzu` (TC5). Tracked as §11 **R10**.
 
 ### ADR-6
 **Borrow GraphRAG's *ideas*, not the library (community / global search).**

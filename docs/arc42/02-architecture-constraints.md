@@ -8,7 +8,7 @@
 | # | Constraint | Background / consequence |
 |---|---|---|
 | TC1 | **Local inference only (Ollama)** | No cloud LLM/embedding APIs, no API keys. All embeddings + chat go through a local Ollama HTTP server (`http://localhost:11434`). Enables Q1 (privacy). |
-| TC2 | **Python 3.10–3.13** (`requires-python = ">=3.10,<3.14"`) | Kuzu has **no Windows wheel for 3.14**, so the ceiling is 3.13; 3.13 is used in practice. Code targets 3.10+ (`from __future__ import annotations`; `tomli` backport for <3.11). |
+| TC2 | **Python 3.10–3.13** (`requires-python = ">=3.10,<3.14"`) | Kuzu has **no Windows wheel for 3.14** — and none is coming: Kuzu was archived upstream in 2025-10 (§11 R10) — so the ceiling is 3.13; 3.13 is used in practice. Code targets 3.10+ (`from __future__ import annotations`; `tomli` backport for <3.11). |
 | TC3 | **Windows-primary** | Primary dev/runtime is Windows 11 + a `.venv`. Paths, stdout UTF-8 reconfiguration, and the pipx installer target Windows first; cross-platform is an aim, not yet CI-verified. |
 | TC4 | **Minimal dependencies** | Runtime deps are essentially **NumPy, PyMuPDF, Kuzu** (+ pytest for dev). Everything else is Python stdlib (`http.server`, `urllib`, `html.parser`, `argparse`, `tomllib`, `json`). |
 | TC5 | **Heavy deps isolated behind boundaries** | `fitz` (PyMuPDF) lives only in `pdf_parser.py`; `kuzu` only in `graph/builder.py` + `graph/store.py`. Non-PDF, non-graph use paths import neither (lazy imports). |

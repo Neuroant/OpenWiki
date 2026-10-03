@@ -22,6 +22,8 @@ agent writes · surfaces and sharing · evaluation.
 10. [Nemori](#10-nemori) (reviewed 2026-10-03)
 11. [memory-champ](#11-memory-champ) (reviewed 2026-10-03)
 12. [Hermes Agent](#12-hermes-agent) (reviewed 2026-10-04)
+13. [A design report: predictive world models through transfer entropy](#13-a-design-report-predictive-world-models-through-transfer-entropy)
+    (reviewed 2026-10-04 — a proposal, not a system)
 - [Across the series — what it suggests for OpenWiki](#across-the-series--what-it-suggests-for-openwiki)
 - [Candidates — world models and CoALA](#candidates--world-models-and-coala)
 
@@ -1239,12 +1241,100 @@ circulates with it promises a knowledge graph and zero amnesia that the code doe
 needs session boundaries. That observation, confirmed on our memory by the new handoff, is its sharpest lesson for
 OpenWiki: writes should land while a session is still running.
 
+
+---
+
+## 13. A design report: predictive world models through transfer entropy
+
+*Source: "Building a Predictive World Model in Digital Knowledge Management: Integrating Dynamic Experience Networks
+through Transfer Entropy" — a report without author or date, shared on 2026-10-04, with 40 references; checked against
+those references and against OpenWiki's own data. A design proposal, not a system: there is no code to read.*
+
+**What it proposes.** A Second Brain stores knowledge as a static graph that only grows; to become a *predictive world
+model* it should learn which new experiences change which established concepts. The report separates a stable
+**world-model graph** — concepts joined by directed, weighted causal edges — from temporary **experience subgraphs**
+(a debugging session, a project, a book), and merges the second into the first only where **transfer entropy**
+(Schreiber 2000) shows directed information flow over time: how much the past of X reduces the uncertainty about Y's
+future beyond Y's own past.
+
+### The pipeline
+1. **Time series.** Local telemetry turns every note into an activity series — reads, edit bursts, timestamps —
+   collected by Obsidian plugins (TSDB, Effort Index, Activity Atlas, Patina).
+2. **Transfer entropy** between an experience node and an established concept, estimated with the KSG
+   nearest-neighbour estimator (JIDT) or a learned estimator (AGM-TE), to cope with short series.
+3. **Merge.** Above a threshold, add a directed edge weighted by the TE value (case A); on an existing edge, strengthen
+   or weaken it — forgetting as "synaptic depression" (case B); near zero, keep the experience out, however similar it
+   looks (case C).
+4. **Denoise** with conditional transfer entropy or PCMCI (Runge 2019), so that A → B → C does not also leave a direct
+   A → C.
+
+Beyond that it sketches TE-steered message passing in graph neural networks and warnings from learned fault cascades
+("error X has preceded failure Y before").
+
+### The claims, checked
+- **The mathematics and the attributions hold.** Transfer entropy (Schreiber 2000), its equivalence with Granger
+  causality for Gaussian processes, the KSG estimator, conditional TE, PCMCI and JIDT are real and described correctly
+  in outline.
+- **The cited sources exist — and say less than the report.** The four Obsidian plugins are real and record what it
+  says (a local time-series database, edit bursts, 10-minute activity bursts, a decay score with a half-life). The GCN
+  paper (Moldovan et al. 2024) finds that TE-based node selection "enhances accuracy", not that it "drastically
+  reduces" errors. The Max Planck / Ontic Labs article is about world models for robots trained on video, not about
+  knowledge management. AGM-TE (Kornai et al., CLeaR 2025) is demonstrated on 250-dimensional neural spike data — long,
+  dense series — and opens by defining causation through interventions.
+- **"Causal" means predictive.** TE measures directed predictive information. Edit and read telemetry records the
+  *user's* attention, so a high TE from X to Y says that working on X tends to be followed by working on Y — a
+  regularity of the workflow, with the task as a hidden common cause that no conditioning on observed notes removes.
+  The report reads it as X causally driving Y.
+- **Significance is assumed.** A fixed threshold (`THRESHOLD = 0.15  # Defined significance level`) stands in for
+  surrogate tests, and n concepts mean n² directed tests without a correction for multiple comparisons; "mathematically
+  proven" and "guarantees … a strictly minimal, causal network" overstate what estimates under PCMCI's assumptions (no
+  hidden confounders, stationarity) can deliver.
+- **The code is a sketch.** `get_node_activity_history` and `create_te_calculator` are undefined, and NetworkX has no
+  `add_directed_edge`. Nothing is evaluated: no data set, no comparison with plain co-occurrence, no effect on retrieval
+  or answers.
+
+### Against OpenWiki's data
+TE needs long activity series per concept. Measured on the dogfooding project (read-only):
+- **Memory:** 1,486 facts about 304 distinct subjects; the facts about a subject were said on a median of **1 day**
+  (90th percentile 2, maximum 7 — "project"). No subject is active on 10 days, so no pair of subjects has series to
+  estimate from.
+- **Usage memory:** **0** `REINFORCES` edges and 0 pending usage records. The one directed, decaying signal we built —
+  seed page → page pulled in by GraphRAG — comes from `wiki_ask`, and the dogfooding session (465 prompts) called it 0
+  times: it read memory through the hook and wrote it through `wiki_remember` (9 calls).
+- **Git history:** the densest signal — 173 commits, 12 files changed in at least 30 of them — but its strongest
+  couplings are release mechanics (`openwiki/__init__.py` with `pyproject.toml` in 114 commits), and they are
+  simultaneous — the same commit — where TE looks for a lag.
+
+### What we learn
+1. **Check the data before the method.** A learning-from-use mechanism needs a use signal, and we lacked one without
+   knowing it: the usage memory has been empty in the workflow it was meant for. Before any TE-like idea, the coding
+   workflow needs a signal it actually produces — which recalled facts an answer uses, which files change together.
+2. **Change coupling is the cheap, testable variant for code.** Files that change together in git history (release
+   mechanics excluded) are a deterministic edge type for a code-corpus wiki — "when `cli.py` changes, `CLAUDE.md` and the
+   tests usually do too" — and the baseline any directed measure would have to beat.
+3. **Experience versus world model is the right split, and we have it.** Sessions and their facts on one side,
+   consolidated themes and the wiki on the other, with consolidation as the merge. The report's filter — admit only what
+   adds predictive information — has a form that works on sparse data: Nemori's predict–calibrate (§10), which asks a
+   model what it failed to predict instead of estimating entropies from activity.
+
+### What we would not adopt
+- **Transfer entropy on interaction telemetry** for a personal or project memory: the series are far too short (above),
+  the signal is the workflow, and n² pairs need significance control.
+- **Rejecting links by TE** (case C): it would drop true references and typed relations that are rarely co-edited.
+- **Keystroke and reading-time telemetry** — privacy-heavy, editor-specific, and absent from a coding agent's setting.
+
+**In short.** A well-written synthesis of real methods — transfer entropy, KSG, conditional TE, PCMCI — applied where
+their preconditions fail: personal-knowledge telemetry is sparse, confounded by the user's own attention, and tested n²
+times. No implementation, no evaluation, and "causal" throughout where the measure is predictive. Its lasting value for
+OpenWiki was the check it prompted: our one learning-from-use signal turned out to be empty, and git co-changes are the
+denser, testable substitute.
+
 ---
 
 ## Across the series — what it suggests for OpenWiki
 
 Twelve systems — six in a first round, then Hindsight, MIRIX, AriGraph, Nemori and memory-champ from the world-model
-shortlist, and Hermes Agent on request — read from their source in October 2026. Where OpenWiki stands out: a real time model (only Graphiti matches it; Hindsight has event and
+shortlist, and Hermes Agent on request — read from their source in October 2026, plus one design report (§13). Where OpenWiki stands out: a real time model (only Graphiti matches it; Hindsight has event and
 mention time; Mem0 keeps time-aware retrieval on its hosted platform; Cognee has a query-time window),
 deterministic hygiene against poisoning (of the twelve, only Hermes Agent has a comparable policy — a threat-pattern
 scan on memory writes), policy-based forgetting,
@@ -1271,6 +1361,7 @@ shows how large the distance can be (83.6 % on LongMemEval with a 20B open model
 | Staleness by volatility | memory-champ (stable / slow / volatile facts, rechecked after 365 / 90 / 14 days) | stale "current" facts persist until restated or corrected via `wiki_remember` (D12) | a volatility tag at capture; volatile facts flagged "possibly outdated" after a few weeks | small |
 | Unicode evasion of the policy | Hermes (NFKC folding, invisible and bidirectional characters) | P0 regexes match the raw text | NFKC + an invisible-character check in `is_unsafe_text` | small |
 | Unresolved conflicts shown | MIRIX (keep both, note the discrepancy), memory-champ (surfaced, never resolved) | the merge closes or keeps silently | a "disputed" mark in the context | small |
+| Learning from use | the transfer-entropy report (§13: directed, decaying edges from activity), Hermes (skill usage counts drive the curator) | `REINFORCES` edges from GraphRAG expansion — none in the coding workflow, which never calls `wiki_ask` | a use signal the workflow produces — git co-changes for code corpora, facts an answer uses — before any learning-from-use method | small to measure |
 | Memory writes documents | Hindsight (five knowledge pages per repository), Letta (memory as Markdown) | the wiki is built from documents only; memory writes no pages | "Decisions" / "Conventions" pages regenerated from facts at `sleep`; git history as a capture source | medium |
 
 **Suggested order:** credential redaction first, with Hermes' Unicode hardening of the policy (full capture coverage, the other mechanical

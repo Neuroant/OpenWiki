@@ -51,6 +51,10 @@
 | [33](#adr-33) | Stale state fixed by the writer that makes the change (`wiki_remember`, journaled, exact `replaces`) | Accepted (Path B++ / P2) | correctness, security |
 | [34](#adr-34) | Recency in recall is a tie-breaker (floor 0.9), set by the LoCoMo benchmark | Accepted (Path B++ / P2) | correctness, Q5 |
 | [35](#adr-35) | The live memory context recalls 16 facts within 3,000 chars — sized by measurement on the live path | Accepted (Path B++) | efficiency, correctness, Q5 |
+| [36](#adr-36) | A session hands over to the next through a handoff OpenWiki derives and the agent annotates | Accepted (Path B++) | usability (continuity) |
+| [37](#adr-37) | Credentials are redacted wherever text enters memory; the instruction policy matches normalized text | Accepted (Path B++) | security |
+| [38](#adr-38) | Readers hold the graph only per call; writers plan read-only and hold the write lock only to apply | Accepted (Path B++) | availability, Q5 |
+| [39](#adr-39) | The remembered tier is portable — a COGX archive and a Markdown view; LadybugDB is the migration target after three changes | Accepted (Path B++) | portability (R10) |
 
 ---
 
@@ -768,6 +772,38 @@ refines [ADR-19](#adr-19))*
   lock readers out while they run — readers wait 15 s, then degrade (the inject hook injects nothing for that
   prompt).
 
+### ADR-39
+**The remembered tier is portable — a COGX archive and a Markdown view; LadybugDB is the migration target after three
+changes.** *(v0.102; builds on [ADR-16](#adr-16); mitigates R10)*
+- **Context:** since B0 the graph is the only store of remembered content ([ADR-16](#adr-16)), and Kuzu is archived
+  upstream (R10). The document tier is a rebuildable mirror ([ADR-3](#adr-3)); the memory tier can survive an engine
+  change only by leaving the engine. The reviewed memory systems show two forms: an exchange format (Cognee's COGX,
+  with importers from Mem0, Zep / Graphiti, Letta and LangMem) and a readable mirror (waku's `MEMORY.md`, Letta's
+  git-backed memory).
+- **Decision:** `owiki memory export` writes COGX v0.1 — each assertion a `fact` (valid time as `valid_at` /
+  `invalid_at`; transaction time, cardinality, attribute key, source, forgotten marks, `SUPERSEDES` and optionally the
+  embedding under `metadata.openwiki`), sessions as turn-less `episode`s, themes as `memory` records with their
+  members, the identity as a `memory_block`. The default holds what OpenWiki believes (current, past, planned) — COGX
+  has no notion of a retraction or of forgetting, and a consumer would revive such facts; `--full` is the lossless
+  backup. `memory import` restores an OpenWiki archive losslessly into an empty memory — themes included, so the next
+  `sleep` reuses their summaries — and remembers another system's facts through the normal merge, tagged `material`,
+  under the P0 policy and credential redaction. `sleep` rewrites a deterministic Markdown view (`[memory]
+  markdown_dir`, default `memory/`). Kuzu 0.11 stays; LadybugDB is the migration target once three gaps are closed.
+- **Alternatives:** a bespoke JSON dump — readable by nothing else, where COGX reaches five systems; current facts
+  only — loses the history B7 exists for; one Markdown file per fact (waku) — 1,486 files, where one per subject stays
+  stable; restoring through `remember` — re-runs the merge and its model checks and cannot reproduce retracted,
+  forgotten or same-instant records; moving to LadybugDB now — it runs OpenWiki, but its unenforced reader/writer
+  exclusion would undermine [ADR-19](#adr-19) / [ADR-38](#adr-38) silently.
+- **Consequences:** + a round trip on the dogfooding memory kept all 1,486 facts identical in every field (embeddings
+  and 118 themes included), and both archives pass Cognee's own reader; the memory can move to any engine — the spike
+  moved the dev graph to LadybugDB by `EXPORT` / `IMPORT DATABASE` and by rebuilding the documents + `memory import`,
+  identical apart from approximate vector search. + The view makes memory greppable and diffable in git. − Another
+  system's text records (memories, episodes, documents) are reported, not captured; a `--full` archive carries the
+  embeddings (14 MB for 1,486 facts), so `init` gitignores `*.cogx.tar.gz`. − Before a LadybugDB move: load the vector
+  extension (installed once from extension.ladybugdb.com — a network step for a local-first tool), a fresh statement
+  cache after every DDL statement (ladybug's Python connection never invalidates cached statements, and OpenWiki
+  migrates in place), and an OpenWiki-level reader/writer lock; plus Cognee's OpenSSL workaround for its Windows wheels.
+
 ---
 *Chapter complete. The Path-B agent-memory direction landed via ADR-14/15/16/17/18/19; the graph then
 deepened (ADR-22 typed relations + relation-aware GraphRAG, ADR-23 entity resolution), gained
@@ -781,6 +817,6 @@ poisoning (ADR-30, P0), **cue-trigger recall** for implicit constraints (ADR-31,
 recency as a tie-breaker set by the **LoCoMo** benchmark (ADR-34), a live context sized by measurement on its own
 path (ADR-35), a **session handoff** of derived state + the agent's note (ADR-36), **credential redaction** with
 a normalized instruction policy (ADR-37), and **writes that land during a session** — per-call readers, two-phase
-writers (ADR-38). §11
+writers (ADR-38), and **portable memory** — a COGX export / import, a Markdown view and a LadybugDB spike (ADR-39). §11
 debts D1/D2/D6 are resolved. Deep designs in `docs/path-b-memory.md` and `docs/RAG-vs-GraphRAG.md`. New significant
 decisions should be appended here with the next id.*

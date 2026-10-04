@@ -134,7 +134,12 @@ already have, then changes that only real sessions can judge. Each names where i
    (`path-b-memory.md` §13.16).
 4. **Portable memory.** A COGX export and a git-tracked Markdown view written at `sleep`, together with the LadybugDB
    spike (Cognee, Letta; R10). Check: an export → import round trip keeps every fact and its validity, and the graph
-   opens under LadybugDB.
+   opens under LadybugDB. **Done in v0.102:** `owiki memory export` / `import` (COGX) and the view at `sleep`; on the
+   dogfooding memory a `--full` round trip kept all 1,486 facts identical in every field, embeddings and 118 themes
+   included, and both archives pass Cognee's own reader. LadybugDB 0.19 runs 643 of 645 tests through a `kuzu` shim
+   and the dev graph migrates with identical results apart from approximate vector search; before a move: the vector
+   extension, a fresh statement cache after DDL, and a lock of our own — LadybugDB doesn't keep a writer out while a
+   reader is open (`path-b-memory.md` §13.17, R10).
 
 **Experiments — paired LoCoMo re-answers on existing graphs**
 

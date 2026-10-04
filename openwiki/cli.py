@@ -49,6 +49,10 @@ from .graph.temporal import session_date as session_date_of
 from .handoff import CAPTURE_STATE_FILE, capture_watermark
 from .llm import OllamaChat
 from .mcp_server import build_server
+from .memory_export import (
+    TAR_SUFFIX, believed_only, current_facts, foreign_facts, from_cogx, read_cogx, render_markdown, to_cogx,
+    write_cogx, write_markdown,
+)
 from .merge import combine_documents
 from .models import ParsedDocument
 from .ontology import format_entity_types, propose_ontology, sample_corpus
@@ -459,6 +463,37 @@ def _build_argparser() -> argparse.ArgumentParser:
     sleep_p.add_argument("--model", default=None, help="Chat model (default: manifest models.chat).")
     sleep_p.add_argument("--host", default=None, help="Ollama host URL.")
 
+    mem_p = sub.add_parser("memory", help="Portable memory: export the remembered tier as a COGX archive or a "
+                                          "readable Markdown view, or import a COGX archive.")
+    msub = mem_p.add_subparsers(dest="memory_cmd", required=True)
+    m_exp = msub.add_parser("export", parents=[common],
+                            help="Export the remembered tier (COGX — the Cognee exchange format — or Markdown).")
+    m_exp.add_argument("--format", choices=("cogx", "markdown"), default="cogx",
+                       help="cogx (default): manifest + JSONL records; markdown: README.md + one file per subject.")
+    m_exp.add_argument("--out", type=Path, default=None,
+                       help="cogx: a directory or a .cogx.tar.gz (default: memory.cogx.tar.gz in the project); "
+                            "markdown: a directory (default: the project's [memory] markdown_dir).")
+    m_exp.add_argument("--full", action="store_true",
+                       help="cogx: a lossless backup — retracted and forgotten facts and the embeddings too "
+                            "(default: the facts OpenWiki believes, current and past, which other systems can import).")
+    m_exp.add_argument("--graph", type=Path, default=None,
+                       help="Graph database dir (default: project's graph, else ./output/graph).")
+    m_exp.add_argument("-i", "--index", type=Path, default=None,
+                       help="Index dir (names the embedding model in the manifest; default: project's).")
+    m_imp = msub.add_parser("import", parents=[common],
+                            help="Import a COGX archive: an OpenWiki export restores losslessly into an empty "
+                                 "memory; facts from other systems are remembered as current facts.")
+    m_imp.add_argument("path", type=Path, help="A COGX directory or .cogx.tar.gz.")
+    m_imp.add_argument("--merge", action="store_true",
+                       help="Memory not empty: remember the archive's current facts through the normal merge "
+                            "(history and retracted facts are skipped).")
+    m_imp.add_argument("--graph", type=Path, default=None,
+                       help="Graph database dir (default: project's graph, else ./output/graph).")
+    m_imp.add_argument("-i", "--index", type=Path, default=None,
+                       help="Index dir (the embedder for facts without a usable embedding; default: project's).")
+    m_imp.add_argument("--model", default=None, help="Chat model for the merge checks (default: manifest models.chat).")
+    m_imp.add_argument("--host", default=None, help="Ollama host URL.")
+
     cons_p = sub.add_parser("consolidate", parents=[common],
                             help="Path B 'sleep' pass: cluster remembered facts into themes + summaries, then fold usage + decay.")
     cons_p.add_argument("--graph", type=Path, default=None,
@@ -762,8 +797,8 @@ def _cmd_init(args: argparse.Namespace) -> int:
                         encoding="utf-8")
 
     gitignore = root / ".gitignore"
-    if not gitignore.exists():
-        gitignore.write_text("output/\n.openwiki/\n", encoding="utf-8")
+    if not gitignore.exists():     # memory/ (the Markdown view sleep writes) stays tracked; archives don't
+        gitignore.write_text("output/\n.openwiki/\n*.cogx.tar.gz\n", encoding="utf-8")
 
     print(f"Initialized OpenWiki project '{name}' at {root}")
     print(f"  manifest -> {manifest}")
@@ -1536,6 +1571,11 @@ def _apply_project(args: argparse.Namespace, project: Optional[Project],
         path("graph", p.graph_path if p else None, Path("output") / "graph")
     elif cmd == "consolidate":
         path("graph", p.graph_path if p else None, Path("output") / "graph")
+        val("model", "models", "chat", DEFAULT_CHAT)
+        val("host", "models", "host", DEFAULT_HOST)
+    elif cmd == "memory":
+        path("graph", p.graph_path if p else None, Path("output") / "graph")
+        path("index", p.index_dir if p else None, Path("output") / "index")
         val("model", "models", "chat", DEFAULT_CHAT)
         val("host", "models", "host", DEFAULT_HOST)
     elif cmd == "sleep":
@@ -2613,6 +2653,7 @@ def _cmd_sleep(args: argparse.Namespace) -> int:
             except Exception as exc:
                 note = f"  consolidation skipped: {exc}"
         decayed = graph.decay(half_life_days=args.half_life, floor=args.floor)
+        view = _write_memory_view(graph, project)
     finally:
         graph.close()
     print(f"Slept → {args.graph}")
@@ -2630,6 +2671,153 @@ def _cmd_sleep(args: argparse.Namespace) -> int:
     elif note:
         print(note)
     print(f"  decayed {decayed['edges']} usage edge(s) ({decayed['pruned']} pruned)")
+    if view:
+        print(f"  {view}")
+    return 0
+
+
+def _write_memory_view(graph, project: Optional[Project]) -> str:
+    """``sleep``'s last step: rewrite the readable Markdown view of the memory into the project's
+    ``[memory] markdown_dir`` (``memory_export``). Fail-soft — a write error costs only the view."""
+    out = project.memory_markdown_dir if project is not None else None
+    if out is None:
+        return ""
+    try:
+        files = render_markdown(graph.memory_snapshot(with_emb=False), graph.memory_concepts(),
+                                project.identity)
+        written, removed = write_markdown(files, out)
+    except Exception as exc:
+        return f"memory view not written: {exc}"
+    return (f"memory view → {out} ({len(files) - 1} subject(s); {written} file(s) changed"
+            f"{f', {removed} removed' if removed else ''})")
+
+
+def _index_model(index_dir: Optional[Path]) -> Optional[str]:
+    """The embedding model an index was built with (``index.json``), without loading its vectors."""
+    try:
+        return json.loads((Path(index_dir) / "index.json").read_text(encoding="utf-8")).get("model")
+    except (OSError, TypeError, ValueError):
+        return None
+
+
+def _cmd_memory(args: argparse.Namespace) -> int:
+    """Portable memory (R10): ``export`` the remembered tier — a COGX archive (``--full``: a lossless
+    backup) or the Markdown view — and ``import`` a COGX archive."""
+    if args.memory_cmd == "export":
+        return _memory_export(args)
+    return _memory_import(args)
+
+
+def _memory_export(args: argparse.Namespace) -> int:
+    project = getattr(args, "project_obj", None)
+    graph = _open_reader(args.graph, wait=READ_WAIT)
+    if graph is None:
+        print(f"error: no readable graph at {args.graph}.", file=sys.stderr)
+        return 2
+    try:
+        snap = graph.memory_snapshot(with_emb=args.full)
+        themes = graph.memory_concepts(include_pending=args.full)      # a backup keeps the whole partition
+        members = graph.concept_members()
+    finally:
+        graph.close()
+    identity = project.identity if project is not None else ""
+    root = project.root if project is not None else Path(".")
+    if args.format == "markdown":
+        out = args.out or (project.memory_markdown_dir if project is not None else None) or root / "memory"
+        files = render_markdown(snap, themes, identity)
+        written, removed = write_markdown(files, out)
+        print(f"Memory view → {out}: {len(files) - 1} subject(s), {written} file(s) changed"
+              f"{f', {removed} removed' if removed else ''}")
+        return 0
+    if not args.full:
+        snap = believed_only(snap)
+    out = args.out or root / f"memory{TAR_SUFFIX}"
+    records = to_cogx(snap, themes, members, identity, with_embeddings=args.full)
+    notes = [f"OpenWiki memory export ({'full backup' if args.full else 'believed facts'})"]
+    if not args.full:
+        notes.append("retracted and forgotten facts are left out; `owiki memory export --full` keeps them")
+    write_cogx(records, out, embedding_model=_index_model(args.index) if args.full else None, notes=notes)
+    kinds: dict = {}
+    for r in records:
+        kinds[r["kind"]] = kinds.get(r["kind"], 0) + 1
+    print(f"Exported → {out}: {kinds.get('fact', 0)} fact(s), {kinds.get('episode', 0)} session(s), "
+          f"{kinds.get('memory', 0)} theme(s){', identity' if identity else ''}"
+          f"{' — full backup (with embeddings)' if args.full else ''}")
+    return 0
+
+
+def _memory_import(args: argparse.Namespace) -> int:
+    project = getattr(args, "project_obj", None)
+    if project is not None and not project.memory_enabled:
+        print("(memory is disabled — Wiki mode; set [memory] enabled = true to import)")
+        return 0
+    try:
+        manifest, records = read_cogx(args.path)
+    except (OSError, ValueError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    snap, foreign = from_cogx(records)
+    if snap["assertions"] and manifest.get("embedding_model") != _index_model(args.index):
+        for row in snap["assertions"]:          # another embedding model's vectors: embed afresh
+            row[6] = None
+    embedder = None
+    if (args.index / "index.json").is_file():
+        index = SemanticIndex.load(args.index)
+        if isinstance(index.embedder, OllamaEmbedder):
+            index.embedder.host = args.host.rstrip("/")
+        embedder = index.embedder
+    if embedder is None and (foreign or any(row[6] is None for row in snap["assertions"])):
+        print(f"error: no index at {args.index} — facts without a usable embedding (and facts from other "
+              f"systems) need its embedder.", file=sys.stderr)
+        return 2
+    graph = _open_writer(args.graph, wait=WRITE_WAIT)
+    if graph is None:
+        print(f"error: no writable graph at {args.graph} (build it first, or stop the writer holding it).",
+              file=sys.stderr)
+        return 2
+    restored, merged, skipped = 0, [], 0
+    try:
+        if snap["assertions"] and not graph.has_memory():
+            restored = graph.restore_memory(snap, embedder)
+        elif snap["assertions"]:
+            if not args.merge:
+                print("error: the memory is not empty — `--merge` remembers the archive's current facts "
+                      "through the normal merge instead of a restore.", file=sys.stderr)
+                return 2
+            current, skipped = current_facts(snap)
+            foreign = current + foreign
+        if foreign:
+            if embedder is None:
+                print(f"error: no index at {args.index} — facts from the archive need its embedder.",
+                      file=sys.stderr)
+                return 2
+            groups, closed = foreign_facts(foreign)
+            skipped += closed
+            coexist, resolve = _coexist_check(args.model, args.host), _attribute_resolver(args.model, args.host)
+            for sid, facts in groups.items():
+                merged.append(graph.remember(sid, facts, embedder, coexist=coexist, resolve=resolve))
+    finally:
+        graph.close()
+    origin = manifest.get("source_system") or "unknown"
+    print(f"Imported {args.path} (from {origin}) → {args.graph}")
+    if restored:
+        themes = len(snap.get("themes") or [])
+        print(f"  restored {restored} fact(s) losslessly"
+              + (f" and {themes} theme(s)" if themes else " (the next `sleep` consolidates them into themes)"))
+    if merged:
+        added = sum(m["added"] for m in merged)
+        dup = sum(m["duplicates"] for m in merged)
+        sup = sum(m["superseded"] for m in merged)
+        scrubbed = sum(m["scrubbed"] for m in merged)
+        print(f"  remembered {added} new fact(s), {dup} already known, {sup} superseded"
+              f"{f', {scrubbed} refused by the memory policy' if scrubbed else ''}")
+    if skipped:
+        print(f"  skipped {skipped} fact(s) that no longer hold (history / retracted)")
+    if origin != "openwiki":
+        other = {k: sum(1 for r in records if r.get("kind") == k) for k in ("episode", "memory", "document")}
+        texts = [f"{n} {k}(s)" for k, n in other.items() if n]
+        if texts:
+            print(f"  not imported: {', '.join(texts)} — text, not facts (capture text with `owiki remember`)")
     return 0
 
 
@@ -3953,6 +4141,7 @@ _DISPATCH = {
     "decay": _cmd_decay,
     "consolidate": _cmd_consolidate,
     "sleep": _cmd_sleep,
+    "memory": _cmd_memory,
     "remember": _cmd_remember,
     "recall": _cmd_recall,
     "context": _cmd_context,

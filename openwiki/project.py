@@ -176,6 +176,17 @@ class Project:
         return [str(v) for v in value] if isinstance(value, list) else [str(value)]
 
     @property
+    def memory_markdown_dir(self) -> Optional[Path]:
+        """Where ``sleep`` writes the readable Markdown view of the memory — ``[memory]
+        markdown_dir``, relative to the project root (default ``memory``; ``""`` turns it off).
+        Deterministic files, so a git repo around the project shows what the memory learned."""
+        value = self.setting("memory", "markdown_dir", "memory")
+        if not value:
+            return None
+        p = Path(str(value))
+        return p if p.is_absolute() else self.root / p
+
+    @property
     def memory_enabled(self) -> bool:
         """Second Brain mode — whether the remembered tier (Path B) is active for this
         project. **Off by default** (Wiki mode, §3.1 / ADR-14); turn it on with
@@ -308,6 +319,7 @@ enabled = {str(memory).lower()}
 # agent_writes = false    # let a coding agent record facts / new states via MCP wiki_remember
 # skip_chores = true      # no memory for chore prompts (push / tag / commit, slash commands, a later "ok")
 # skip_prompts = []       # more chore prompts for this project, as regexes, e.g. ["sync arc42 docs"]
+# markdown_dir = "memory" # sleep writes a readable Markdown view of the memory here ("" = off)
 
 [serve]
 port = {port}

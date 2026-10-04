@@ -290,7 +290,8 @@ no false negatives, 5 lenient false positives (dates off by days) → treat J as
 **Sleep — nightly memory maintenance + forgetting** (Path B++): one schedulable writable pass — fold what
 read-only processes queued (usage + journal) → redact credentials in facts stored before v0.99 → **forget** what the
 memory policy says not to keep → re-consolidate
-the themes over what's left → decay the usage edges. Forgetting is **policy-based archiving**, not decay: one-off
+the themes over what's left → decay the usage edges → rewrite the readable Markdown view (v0.102, below). Forgetting
+is **policy-based archiving**, not decay: one-off
 session events ("vX | was pushed and tagged | yes", commit hashes, "server | is serving | v0.78.0", tautologies —
 `memory.is_ephemeral`, pure rules) plus the P0 policy re-applied to facts captured before it. A forgotten fact
 leaves recall, context, consolidation and counts but stays in the graph (`forgotten_at` + reason):
@@ -304,6 +305,39 @@ queued ops), `--graph`, `--model`, `--host`. Gated by `[memory] enabled`. **Meas
 of the facts injected for 40 real prompts were such junk (vs ~3 % of all facts — it clusters on frequent actions) →
 **5 %** after forgetting 27 facts, 0 of 232 hand-labeled keep-facts dropped; an LLM review dropped 11–81 keep-facts
 depending on batch order (`docs/path-b-memory.md` §13.3, arc42 ADR-32).
+
+**Portable memory — export / import (v0.102, R10)** — since B0 the graph is the only store of remembered content and
+Kuzu is archived upstream, so the memory can leave the engine in two forms. A **COGX** archive (Cognee's exchange
+format v0.1 — a directory or `.cogx.tar.gz` of `manifest.json` + one JSONL file per record kind): each assertion → a
+`fact` (`subject_ref` / `predicate` / `object_ref`, `valid_at` / `invalid_at` = B7 valid time, `confidence`, the
+session as provenance; transaction times, cardinality, `attr`, `source`, forgotten marks, `SUPERSEDES` and — with
+`--full` — the embedding under `metadata.openwiki`), each session → an `episode` without turns, each theme → a
+`memory` (member ids kept), the identity → a `memory_block`. And a **Markdown view** — `README.md` + one
+`subjects/<slug>.md` per subject (current facts + history), deterministic so a git diff shows what the memory learned
+— which `sleep` rewrites into `[memory] markdown_dir` (default `memory/` in the project; `""` = off; `init`'s
+`.gitignore` keeps `*.cogx.tar.gz` out and the view in):
+```
+.venv\Scripts\python -m openwiki memory export                     # believed facts → memory.cogx.tar.gz
+.venv\Scripts\python -m openwiki memory export --full --out backup.cogx.tar.gz   # lossless backup
+.venv\Scripts\python -m openwiki memory export --format markdown   # the view, on demand
+.venv\Scripts\python -m openwiki memory import backup.cogx.tar.gz  # into an empty memory: lossless restore
+```
+The default export holds what OpenWiki **believes** (current, past and planned facts, no embeddings) — COGX has no
+notion of a retraction or of forgetting, and a consumer would revive such facts; `--full` adds retracted and forgotten
+facts, the embeddings and pending themes. `import`: an OpenWiki archive restores **losslessly** into an empty memory
+(`GraphStore.restore_memory` — ids, intervals, transaction times, confidence, sources, forgotten marks, provenance
+edges and the theme layer, so the next `sleep` reuses its summaries; embeddings that are missing or of another model
+are recomputed with the index's embedder); a non-empty memory needs `--merge` (the archive's current facts through
+`remember`); facts from **other systems** go through `remember` as current facts tagged `material` — P0 and credential
+redaction apply, closed facts are skipped, their memories / episodes / documents are reported, not imported. Archives
+are redacted per field on the way out and unpacked member by member on the way in (absolute / `..` / link members
+refused, Cognee's size limits). Options: `export --format cogx|markdown`, `--out PATH`, `--full`, `--graph`,
+`-i/--index` (names the embedding model); `import PATH`, `--merge`, `--graph`, `-i/--index`, `--model`, `--host`
+(import is gated by `[memory] enabled`). **Measured** on a copy of the dogfooding memory (1,486 facts — 272 past,
+27 forgotten — and 118 themes): `--full` (14.3 MB, 5 s) → an emptied graph: every field identical, embeddings and
+themes included, recall identical for 20/20 queries; the believed export (0.14 MB) restores with fresh embeddings
+(cosine 1.0000); both archives pass Cognee's own unpacker + Pydantic models with 0 errors; the view: 293 subject files,
+218 KB (`docs/path-b-memory.md` §13.17, arc42 ADR-39).
 
 **Backfill memory from Claude Code history** — turn existing Claude Code transcripts (JSONL) into the
 memory tier, **one dated session per UTC day** (`claude-YYYY-MM-DD`), each day cut into bounded capture
@@ -1078,6 +1112,18 @@ http — count, p50/p95, total time, token in/out) + a live recent-events table,
   the existing `GraphStore` memory methods (`list_assertions`/`memory_overview`/`memory_concepts`/
   `concept_assignment`) with `decay` imported lazily; wired as `owiki analyze memory` (graph-only). Analysis
   is to *structure* what `eval.py` is to *retrieval*. Direction I (world-model analysis) is complete (P1–P4).
+- **`openwiki/memory_export.py`** — **portable memory** (v0.102, ADR-39): pure apart from file I/O, no Kuzu import.
+  `to_cogx(snapshot, themes, members, identity, with_embeddings)` → COGX records; `write_cogx(records, out)` (a
+  directory — owned, earlier record files replaced — or a `.cogx.tar.gz`; every string redacted, per field);
+  `read_cogx(path)` (`_unpack`: member by member, absolute / `..` / link members refused, `MAX_MEMBERS` /
+  `MAX_MEMBER_BYTES` / `MAX_TOTAL_BYTES` as in Cognee; a newer major version refused); `from_cogx(records) ->
+  (snapshot, foreign)`; `believed_only` (the default export), `current_facts` (`--merge`), `foreign_facts` (other
+  systems → `MemoryFact`s, closed ones counted); `render_markdown(snapshot, themes, identity)` / `write_markdown(files,
+  out)` (the view: spellings differing only in case or separators share a subject file; slugs fold umlauts and Latin
+  accents, keep other scripts, avoid Windows device names, hash-suffix collisions; only changed files are rewritten,
+  stale ones removed). Works on `GraphStore.memory_snapshot(with_emb)` (the B0 snapshot shape, every schema generation
+  read as B7) and feeds `GraphStore.restore_memory(snapshot, embedder)` (empty tier only; shares
+  `builder.restore_memory_snapshot` with the B0 rebuild; restores the theme layer too).
 - **`openwiki/merge.py`** — `combine_documents(docs, names)` merges several
   `ParsedDocument`s into one corpus (concatenate pages with a running offset, shift
   table/image page numbers, wrap each source under a synthetic level-1 outline node
@@ -1155,7 +1201,8 @@ http — count, p50/p95, total time, token in/out) + a live recent-events table,
   (`list`/`use`/`add`/`remove`/`add-source`), `opencode`, `claude-code`, `ontology`, `ingest`,
   `build-wiki`, `index`, `search`, `eval`, `ask` (`--global` = global search),
   `chat`, `graph-build`, `references`, `communities`, `decay`, `remember`, `backfill`, `recall`,
-  `consolidate`, `sleep` (nightly maintenance + forgetting), `context`,
+  `consolidate`, `sleep` (nightly maintenance + forgetting), `memory` (`export` / `import` — portable
+  memory), `context`,
   `analyze` (world-model analysis — `coupling` | `gaps` | `memory`, offline), `hook` (host-lifecycle
   memory hook — `inject` / `capture` / `resume`, plus `fold`, the detached worker the MCP server
   spawns after `wiki_remember`; reads the event JSON on stdin), `handoff` (`prepare` /
@@ -1229,6 +1276,18 @@ http — count, p50/p95, total time, token in/out) + a live recent-events table,
   extension is statically linked — no `INSTALL`/`LOAD`). No Windows 3.14 wheel, so
   the project runs on 3.13. The Graph tab (`app.js` `drawGraph`) is hand-rolled
   SVG; graph tests use a `FakeEmbedder` and `pytest.importorskip("kuzu")`.
+- **LadybugDB spike (v0.102, R10):** the maintained Kuzu fork runs OpenWiki behind a `kuzu` compatibility shim
+  (ladybug 0.19.0, Windows, Python 3.13, a scratch venv): **643 of 645** tests pass. The shim needed Cognee's
+  workaround for the Windows wheels (they no longer bundle OpenSSL); `INSTALL VECTOR` once (downloaded from
+  extension.ladybugdb.com into `~/.lbdb/extension/`) + `LOAD EXTENSION VECTOR` per database — the vector extension is
+  no longer linked in; and a cleared statement cache after every DDL statement — ladybug's Python `Connection` caches
+  prepared statements of parameterized queries by text and never invalidates them, so after an in-place `ALTER` a
+  cached statement sees the old schema. The 2 failures: a read-only open does **not** keep a later writer out
+  (in-process or across processes) although LadybugDB's docs forbid it — the reader keeps a stale view; ADR-19/38
+  rely on that exclusion, so a move needs an OpenWiki lock. A Kuzu 0.11 file doesn't open ("not a valid Lbug database
+  file"); Kuzu's `EXPORT DATABASE` (0.5 s) → LadybugDB's `IMPORT DATABASE` (2.8 s, file 87 → 23 MB), or `graph-build`
+  + `memory import`, gives identical counts, memory, recall, contexts, neighbourhoods and paths; only approximate HNSW
+  search differs (top-1 20/20, top-5 overlap 99/100). Not adopted yet (`docs/path-b-memory.md` §13.17, arc42 R10).
 - `find_path` uses Kuzu's shortest-path syntax:
   `p = (a)-[:CHILD_OF|NEXT|SIMILAR_TO|REFERENCES* SHORTEST 1..N]-(b)` (restricted to
   Page↔Page rels so it never routes through `Chunk`), and reads results with

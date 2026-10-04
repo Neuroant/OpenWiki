@@ -85,6 +85,7 @@ my-project/
 ├─ output/                  # artifacts — gitignored, regenerable
 │   ├─ parsed/  wiki/  index/  graph
 ├─ handoff/                 # session handoff (HANDOFF.md, handoff.json, archive/) — `owiki handoff`
+├─ memory/                  # readable Markdown view of the memory (Second Brain) — `sleep` rewrites it; commit it
 └─ .openwiki/state.json     # build provenance / staleness — gitignored
 ```
 
@@ -96,6 +97,7 @@ openwiki build [--only ingest,wiki,index,graph] [--force]   # (Phase 2) run the 
 openwiki status                                # (Phase 2) name · sources · counts · staleness
 openwiki project list | use NAME | add NAME PATH   # (Phase 3) registry
 openwiki search|ask|chat|serve|mcp|ingest|build-wiki|index|graph-build   # project-aware; flags override
+openwiki memory export [--full] | import PATH   # portable memory: a COGX archive (gitignored) / the Markdown view
 # global: --project PATH  (+ $OPENWIKI_PROJECT)
 ```
 

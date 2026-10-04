@@ -297,6 +297,12 @@ Datum; **vergessen** = vom nächtlichen Schlaf-Durchlauf (`openwiki sleep`) arch
 einmaliges Sitzungsereignis wie „v0.74.0 wurde gepusht und getaggt" (nicht gelöscht, nur nicht
 mehr abgerufen).
 
+**Mitnehmen und nachlesen.** `openwiki memory export` schreibt das Gedächtnis als COGX-Archiv —
+das Austauschformat von Cognee, das auch andere Gedächtnis-Systeme lesen (`--full` = verlustfreie
+Sicherung samt Embeddings) —, `openwiki memory import` stellt es wieder her. Der Schlaf-Durchlauf
+schreibt außerdem eine lesbare Markdown-Ansicht nach `memory/` im Projekt (eine Datei pro Subjekt
+mit aktuellem Stand und Verlauf), die sich mit git verfolgen lässt.
+
 Nur lesend; ohne Sitzungen (oder im Wiki-Modus) zeigt der Reiter einen Hinweis.
 
 ## Evaluation (Reiter „Evaluation")

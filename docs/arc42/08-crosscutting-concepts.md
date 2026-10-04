@@ -246,6 +246,13 @@ preserves the remembered tier; consolidation touches memory, never documents. Th
 assembled memory make the next session better?* — is the cross-session eval (`eval --cross-session`,
 §10). Full design + the staged B0–B6 plan: `docs/path-b-memory.md`.
 
+**Portable memory (ADR-39).** Authoritative for remembered content (ADR-16) on an engine archived upstream (R10), the
+remembered tier can leave the graph: as a **COGX** archive (`owiki memory export` — Cognee's exchange format: facts
+with their valid time, sessions, themes, the identity; `--full` = a lossless backup that `memory import` restores
+into an empty memory, themes included) and as a **Markdown view** (`memory/`, one file per subject, rewritten
+deterministically by `sleep` for git). Another system's facts enter through `remember`, like any capture — under the
+P0 policy and credential redaction.
+
 ## 8.16 Observability (ADR-20)
 
 Every Ollama call already returns latency + prompt/eval token counts; historically they were thrown

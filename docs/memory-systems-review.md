@@ -555,7 +555,7 @@ for Claude Code, Codex and OpenClaw, and an MCP server for other clients.
 | Retrieval | ~20 strategies + routing | similarity recall + themes, 16 facts per prompt |
 | Live injection | every prompt (≤ 12,000 chars) + facts about each file Claude reads | every prompt (≤ 3,000 chars) |
 | Hygiene | credential redaction, denied paths, an assistant-claim grounding rule | the unsafe-instruction policy, forgetting, source tags |
-| Portability | COGX export / import, importers from four other systems | none yet (planned export, R10) |
+| Portability | COGX export / import, importers from four other systems | COGX export / import and a Markdown view since v0.102 (R10) |
 | Evaluation | BEAM 0.79 (100 K, held out) / 0.67 (10 M, exploratory) | cross-session sets; LoCoMo 60.7 % J (local 30B) |
 
 ### What we learn
@@ -1398,7 +1398,7 @@ shows how large the distance can be (83.6 % on LongMemEval with a 20B open model
 | Theme | Seen in | OpenWiki today | Candidate | Cost |
 |---|---|---|---|---|
 | Credentials in memory | Mem0, Cognee, Hindsight (redaction before storage), Hermes (a hardcoded-secret pattern blocks the write); MIRIX stores them on purpose | **fixed in v0.99** — before, a pasted key could become an injected fact | redaction before capture and in `remember()`, the journal, `wiki_remember` and the handoff — done | — |
-| Readable, portable memory | waku (`MEMORY.md`), Letta (git), Cognee (COGX) | memory lives only in a Kuzu file — archived upstream (R10) | a COGX export + a git-tracked Markdown view, written at `sleep` | small–medium; mitigates R10 |
+| Readable, portable memory | waku (`MEMORY.md`), Letta (git), Cognee (COGX) | **fixed in v0.102** — before, memory lived only in a Kuzu file, archived upstream (R10) | a COGX export / import + a git-tracked Markdown view, written at `sleep` — done; a LadybugDB spike found three changes before a move | — |
 | When to inject | waku (model gate), Mem0 (first prompt + pull), Letta (core + index + pull), Cognee (per file read), Hindsight (every prompt + one reflect per session; page count, not titles), Hermes (once per session, frozen for the prompt cache; recall skipped for trivial prompts) | 16 facts on every prompt — chore prompts skipped since v0.101 (18.4 % of ours); a score gate failed (§1) | inject on the first prompt and after compaction, an index of themes, facts on file reads; `wiki_memory` for the rest | small; judged by real sessions |
 | BM25 next to embeddings | waku, Graphiti, Mem0, Cognee, Hindsight (+ graph, time range, cross-encoder) | memory recall is dense-only | BM25 + rank fusion in `recall` | small; a paired LoCoMo re-answer |
 | Capture during a session | Mem0, Letta, Cognee, LangMem, Hindsight (write-back every turn), Hermes (a background review every 10 turns) | at session end / compaction | debounced idle capture through the detached worker | small–medium |

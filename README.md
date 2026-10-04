@@ -352,6 +352,8 @@ openwiki recall "which chat model did we standardize on?"   # decay-weighted, cu
 openwiki consolidate                                 # "sleep": cluster facts into LLM-summarized themes
 openwiki sleep                                       # nightly: forget one-off events, re-consolidate, decay
 openwiki context "which models do we use?"           # assemble the 3-tier session context
+openwiki memory export --full                        # portable: a COGX archive (Cognee's exchange format)
+openwiki memory import memory.cogx.tar.gz            # restore it — or remember another system's facts
 ```
 
 Facts are stored as reified `Assertion`s under a `Session`; a newer fact that contradicts an
@@ -363,7 +365,9 @@ on each prompt, capture on session end). With `[memory] probes = true` (or `cont
 context read also reaches **implicit constraints** — "book a venue" recalls "can't stand noisy
 offices" although they share no words (cue-trigger recall). `openwiki sleep` (schedule it nightly) **forgets** one-off
 session events ("vX was pushed and tagged") that would otherwise crowd the injected context — archived, not
-deleted. Design: **[docs/path-b-memory.md](docs/path-b-memory.md)**.
+deleted. The memory is **portable**: `openwiki memory export` writes a COGX archive that other memory systems
+read, `memory import` restores one losslessly, and `sleep` keeps a readable Markdown view (`memory/`, one file per
+subject) to track in git. Design: **[docs/path-b-memory.md](docs/path-b-memory.md)**.
 
 ### Web UI
 

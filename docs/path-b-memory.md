@@ -873,7 +873,7 @@ errs toward "different thing" (safe: fragmentation over a wrong merge); descript
 extra coexistence calls; subject identity is only inferred inside a resolved group (no general
 subject resolution).
 
-## 13. Memory hygiene, implicit recall and the LoCoMo benchmark (built v0.86 to v0.96)
+## 13. Memory hygiene, implicit recall and the LoCoMo benchmark (built v0.86 to v0.102)
 
 *Planned from the cognitive-agent report (B10+); every item below was built or measured — see §13.1–13.12.*
 
@@ -1369,6 +1369,66 @@ The largest single step so far ("Not mentioned" on single-hop 219 → 178). **Ad
 the live context — the hooks assemble k = 8 within a 2,000-character budget, a per-prompt token cost; the finding
 suggests trying a larger k there, measured on that path (→ §13.12). LoCoMo now: **overall J 60.7 %** with a local
 30B (Mem0 reports ≈ 67 % with GPT-4o-mini — and both are generous-judge numbers).
+
+### 13.17 Portable memory and the LadybugDB spike (v0.102)
+
+Since B0 the graph is the only store of remembered content, and Kuzu is archived upstream (arc42 R10). The document
+tier is a rebuildable mirror; the memory tier can only survive an engine change by leaving the engine. Two exports
+let it. **COGX** — the exchange format Cognee migrates memory with (a manifest plus one JSONL file per record kind;
+Cognee's importers connect it to Mem0, Zep / Graphiti, Letta and LangMem) — carries each assertion as a `fact` whose
+`valid_at` / `invalid_at` are B7's valid time; what COGX has no field for (transaction time, cardinality, the
+attribute key, source, forgotten marks, `SUPERSEDES`, optionally the embedding) goes into `metadata.openwiki`.
+Sessions become `episode`s without turns (transcripts stay out of memory), themes `memory` records with their member
+ids, the identity a `memory_block`. The default export holds what OpenWiki believes — current, past and planned
+facts — because a consumer would read a retracted or forgotten fact as live; `--full` is the lossless backup. **A
+Markdown view** — `README.md` and one file per subject with its current facts and history — is rendered
+deterministically (no export time, stable order, unchanged files untouched), so a git repository around the project
+shows what the memory learned; `sleep` rewrites it into `[memory] markdown_dir` (default `memory/`).
+
+`memory import` restores an OpenWiki archive into an empty memory **losslessly** (`GraphStore.restore_memory`, which
+shares B0's restore code), the theme layer included — the next `sleep` then reuses 118 summaries instead of spending
+≈ 6 minutes of LLM calls re-summarizing them. Facts from other systems go through `remember` like any capture, tagged
+`material`: the P0 policy and credential redaction apply (in a test archive an injected instruction and a key were
+refused), closed facts are skipped, text records (memories, episodes, documents) are reported, not imported.
+
+**Measured** on a scratch copy of the dogfooding memory — 1,486 facts (1,187 open, 272 past, 27 forgotten) in 28
+sessions, 258 `SUPERSEDES` edges, 118 themes:
+
+| check | result |
+|---|---|
+| `--full` export | 14.3 MB, 5.2 s (the embeddings are nearly all of it) |
+| restore into an emptied copy | 1,486 / 1,486 facts, **every field identical**, embeddings included; sessions, `ASSERTS`, `SUPERSEDES`, themes and their members identical |
+| default export (0.14 MB) → restore with fresh embeddings | 1,459 believed facts, identical apart from the embeddings; bge-m3 re-embeds at cosine 1.0000 |
+| recall after a restore | top-8 identical for 20 / 20 queries; the assembled context identical |
+| Cognee's own unpacker + Pydantic models | 0 errors on both archives |
+| Markdown view | 293 subject files, 218 KB, 0.12 s; rewriting an unchanged memory touches no file |
+
+**The LadybugDB spike** (0.19.0, Windows, Python 3.13, a scratch venv; OpenWiki unchanged behind a `kuzu`
+compatibility shim): the test suite passes **643 of 645**. The shim needed three things: Cognee's workaround for the
+Windows wheels, which no longer bundle OpenSSL (without it ladybug falls back to a C-API backend no wheel ships);
+`INSTALL VECTOR` (once — a 14 MB download from extension.ladybugdb.com) and `LOAD EXTENSION VECTOR` per database,
+since the vector extension is no longer linked in; and a cleared statement cache after every DDL statement —
+ladybug's Python connection caches the prepared statements of parameterized queries by their text and never
+invalidates them, so after an in-place `ALTER` (OpenWiki migrates older graphs that way) a cached statement still saw
+the old schema and `citations` failed. The 2 failures are a **locking difference**: a read-only open does not keep a
+writer out — in-process or across processes — although LadybugDB's documentation forbids exactly that, since a
+reader's stale cache can corrupt data; in the probe the reader went on seeing the old state after the writer had
+committed. A reader under a writer and two writers are refused, as in Kuzu. OpenWiki's concurrency design (ADR-19,
+ADR-38) relies on that exclusion, so a move needs a lock of its own.
+
+The dev graph itself: a Kuzu 0.11 file does not open in LadybugDB ("not a valid Lbug database file"). Kuzu's
+`EXPORT DATABASE` (Parquet, 0.5 s, 12 MB) followed by LadybugDB's `IMPORT DATABASE` (2.8 s; the HNSW index is rebuilt;
+the file shrinks from 87 to 23 MB) gives a graph whose behavioural fingerprint matches — table counts, all 1,486
+facts, themes, recall for 20 queries, assembled contexts, neighbourhoods, shortest paths, health, the page graph —
+except approximate vector search over the rebuilt index (top-1 identical 20 / 20, top-5 overlap 99 / 100). The second
+route needs nothing from the old engine: `graph-build` under LadybugDB (17 s — the documents are a mirror) plus
+`memory import` of the `--full` archive (15 s) gives the same fingerprint. That route is what portable memory buys:
+only the remembered tier cannot be rebuilt from sources, and COGX carries it to any engine.
+
+**Decision:** stay on Kuzu 0.11 (pinned, works); the memory no longer depends on its file format. A move to LadybugDB
+is mechanical, after three changes: install and load the vector extension (shipped or installed at setup — `INSTALL`
+needs the network), a fresh statement cache after DDL, and an OpenWiki lock that restores the reader/writer exclusion
+(arc42 R10, ADR-39).
 
 ### 13.16 No memory for chore prompts (v0.101)
 

@@ -163,55 +163,8 @@ class GraphBuilder:
         return snap if any(snap.values()) else None
 
     def _restore_memory(self, conn, snap: Optional[dict], dim: int) -> tuple:
-        """Re-insert a snapshot into the fresh schema. Assertions whose embedding dim no
-        longer matches (the embedding model changed) are dropped with a warning;
-        reinforced edges are kept only where both endpoint pages still exist."""
-        if not snap:
-            return 0, 0
-        for sid, created, sdate in snap.get("sessions", []):
-            conn.execute("MERGE (s:Session {id:$id}) ON CREATE SET s.created_at=$t, s.session_date=$d;",
-                         parameters={"id": sid, "t": created, "d": sdate})
-        kept, skipped = set(), 0
-        for (aid, subj, pred, obj, sid, created, emb, conf, seen,
-             vfrom, vto, expired, card, attr, source, gone_at, gone) in snap.get("assertions", []):
-            if emb is None or len(emb) != dim:
-                skipped += 1
-                continue
-            conn.execute(
-                "CREATE (:Assertion {id:$id, subject:$s, predicate:$p, object:$o, "
-                "session_id:$sid, created_at:$t, confidence:$c, last_seen:$ls, "
-                "valid_from:$vf, valid_to:$vt, expired_at:$x, cardinality:$card, attr:$attr, "
-                "source:$src, forgotten_at:$ga, forgotten:$g, emb:$e});",
-                parameters={"id": aid, "s": subj, "p": pred, "o": obj, "sid": sid, "t": created,
-                            "c": float(conf if conf is not None else 1.0), "ls": int(seen or 0),
-                            "vf": vfrom, "vt": vto, "x": expired, "card": card, "attr": attr,
-                            "src": source, "ga": gone_at, "g": gone,
-                            "e": [float(x) for x in emb]})
-            kept.add(aid)
-        for sid, aid in snap.get("asserts", []):
-            if aid in kept:
-                conn.execute("MATCH (s:Session {id:$sid}),(a:Assertion {id:$aid}) "
-                             "CREATE (s)-[:ASSERTS]->(a);", parameters={"sid": sid, "aid": aid})
-        for new_id, old_id in snap.get("supersedes", []):
-            if new_id in kept and old_id in kept:
-                conn.execute("MATCH (n:Assertion {id:$n}),(o:Assertion {id:$o}) "
-                             "CREATE (n)-[:SUPERSEDES]->(o);", parameters={"n": new_id, "o": old_id})
-        page_slugs = self._existing_page_slugs(conn)
-        n_reinf = 0
-        for a_slug, b_slug, weight, last_seen in snap.get("reinforces", []):
-            if a_slug in page_slugs and b_slug in page_slugs:
-                conn.execute(
-                    "MATCH (a:Page {slug:$a}),(b:Page {slug:$b}) "
-                    "CREATE (a)-[:REINFORCES {weight:$w, last_seen:$t}]->(b);",
-                    parameters={"a": a_slug, "b": b_slug, "w": weight, "t": last_seen})
-                n_reinf += 1
-        if skipped:
-            logger.warning("dropped %d preserved assertion(s) whose embedding dim changed "
-                           "(embedding model differs); re-run `remember` to re-embed them.", skipped)
-        if kept or n_reinf:
-            logger.info("preserved remembered tier: %d assertion(s), %d reinforced edge(s)",
-                        len(kept), n_reinf)
-        return len(kept), n_reinf
+        """Re-insert a snapshot into the fresh schema (``restore_memory_snapshot``)."""
+        return restore_memory_snapshot(conn, snap, dim, self._existing_page_slugs(conn))
 
     @staticmethod
     def _read_rows(conn, query: str) -> list:
@@ -448,3 +401,57 @@ def build_graph(wiki: Wiki, index: SemanticIndex, db_path,
                 similar_k: int = 6, references=None, entities=None, relations=None) -> dict:
     return GraphBuilder(db_path, similar_k=similar_k).build(
         wiki, index, references=references, entities=entities, relations=relations)
+
+
+def restore_memory_snapshot(conn, snap: Optional[dict], dim: int, page_slugs=None) -> tuple:
+    """Insert a remembered-tier snapshot (``GraphBuilder._snapshot_memory`` /
+    ``GraphStore.memory_snapshot``: sessions, assertions, ASSERTS, SUPERSEDES, REINFORCES) through
+    ``conn``. Assertions whose embedding dim no longer matches (the embedding model changed) are
+    dropped with a warning; reinforced edges are kept only where both endpoint pages are in
+    ``page_slugs``. Shared by the doc rebuild (B0) and ``owiki memory import``."""
+    page_slugs = set(page_slugs or ())
+    if not snap:
+        return 0, 0
+    for sid, created, sdate in snap.get("sessions", []):
+        conn.execute("MERGE (s:Session {id:$id}) ON CREATE SET s.created_at=$t, s.session_date=$d;",
+                     parameters={"id": sid, "t": created, "d": sdate})
+    kept, skipped = set(), 0
+    for (aid, subj, pred, obj, sid, created, emb, conf, seen,
+         vfrom, vto, expired, card, attr, source, gone_at, gone) in snap.get("assertions", []):
+        if emb is None or len(emb) != dim:
+            skipped += 1
+            continue
+        conn.execute(
+            "CREATE (:Assertion {id:$id, subject:$s, predicate:$p, object:$o, "
+            "session_id:$sid, created_at:$t, confidence:$c, last_seen:$ls, "
+            "valid_from:$vf, valid_to:$vt, expired_at:$x, cardinality:$card, attr:$attr, "
+            "source:$src, forgotten_at:$ga, forgotten:$g, emb:$e});",
+            parameters={"id": aid, "s": subj, "p": pred, "o": obj, "sid": sid, "t": created,
+                        "c": float(conf if conf is not None else 1.0), "ls": int(seen or 0),
+                        "vf": vfrom, "vt": vto, "x": expired, "card": card, "attr": attr,
+                        "src": source, "ga": gone_at, "g": gone,
+                        "e": [float(x) for x in emb]})
+        kept.add(aid)
+    for sid, aid in snap.get("asserts", []):
+        if aid in kept:
+            conn.execute("MATCH (s:Session {id:$sid}),(a:Assertion {id:$aid}) "
+                         "CREATE (s)-[:ASSERTS]->(a);", parameters={"sid": sid, "aid": aid})
+    for new_id, old_id in snap.get("supersedes", []):
+        if new_id in kept and old_id in kept:
+            conn.execute("MATCH (n:Assertion {id:$n}),(o:Assertion {id:$o}) "
+                         "CREATE (n)-[:SUPERSEDES]->(o);", parameters={"n": new_id, "o": old_id})
+    n_reinf = 0
+    for a_slug, b_slug, weight, last_seen in snap.get("reinforces", []):
+        if a_slug in page_slugs and b_slug in page_slugs:
+            conn.execute(
+                "MATCH (a:Page {slug:$a}),(b:Page {slug:$b}) "
+                "CREATE (a)-[:REINFORCES {weight:$w, last_seen:$t}]->(b);",
+                parameters={"a": a_slug, "b": b_slug, "w": weight, "t": last_seen})
+            n_reinf += 1
+    if skipped:
+        logger.warning("dropped %d preserved assertion(s) whose embedding dim changed "
+                       "(embedding model differs); re-run `remember` to re-embed them.", skipped)
+    if kept or n_reinf:
+        logger.info("preserved remembered tier: %d assertion(s), %d reinforced edge(s)",
+                    len(kept), n_reinf)
+    return len(kept), n_reinf

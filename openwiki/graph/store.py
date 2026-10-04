@@ -1615,6 +1615,87 @@ class GraphStore:
                 n += len(rows)
         return n
 
+    def memory_snapshot(self, with_emb: bool = True) -> dict:
+        """The remembered tier as a snapshot — the shape ``GraphBuilder._snapshot_memory`` keeps
+        across a rebuild: ``sessions`` ``[id, created_at, session_date]``, ``assertions`` (17-field
+        rows, every schema generation read as B7 — see ``_load_assertions``), ``asserts`` and
+        ``supersedes`` edges. ``with_emb`` includes the embeddings. Read-only; the portable export
+        (``openwiki.memory_export``) builds on it."""
+        recs = self._load_assertions(with_emb=with_emb)
+        sessions = self._read_or_empty("MATCH (s:Session) RETURN s.id, s.created_at, s.session_date;")
+        if not sessions:
+            sessions = [list(r) + [None] for r in self._read_or_empty(
+                "MATCH (s:Session) RETURN s.id, s.created_at;")]
+        return {
+            "sessions": [list(r) for r in sessions],
+            "assertions": [[r["id"], r["subject"], r["predicate"], r["object"], r["session_id"],
+                            r["created_at"], r.get("emb"), r["confidence"], r["last_seen"],
+                            r["valid_from"], r["valid_to"], r["expired_at"], r["cardinality"],
+                            r.get("attr"), r.get("source"), r.get("forgotten_at"), r.get("forgotten")]
+                           for r in recs],
+            "asserts": [list(r) for r in self._read_or_empty(
+                "MATCH (s:Session)-[:ASSERTS]->(a:Assertion) RETURN s.id, a.id;")],
+            "supersedes": [list(r) for r in self._supersedes_edges()],
+        }
+
+    def restore_memory(self, snap: dict, embedder=None) -> int:
+        """Restore a snapshot (``memory_snapshot``, or an imported COGX archive) into an **empty**
+        remembered tier — losslessly: ids, validity, transaction times, confidence, sources,
+        forgotten marks and the provenance edges; plus the theme layer when the snapshot carries
+        ``themes`` (label, summary, members). Assertions without an embedding — or with one of
+        another dimension (another model) — are embedded with ``embedder``. Writable; returns how
+        many assertions were restored."""
+        from .builder import restore_memory_snapshot
+        if not self.writable:
+            raise RuntimeError("GraphStore is read-only; open it writable to restore memory.")
+        if self.has_memory():
+            raise ValueError("the remembered tier is not empty — restore needs an empty one "
+                             "(merge imports go through remember instead)")
+        rows = [list(a) for a in snap.get("assertions", [])]
+        if not rows:
+            return 0
+        dim = self._assertion_dim()
+        # no embedding, or one of another model (another dimension) → embed with this graph's embedder
+        missing = [a for a in rows if a[6] is None or (dim and len(a[6]) != dim)]
+        if missing:
+            if embedder is None:
+                raise ValueError(f"{len(missing)} assertion(s) carry no usable embedding — restore needs an embedder")
+            vecs = np.asarray(embedder.embed_documents([f"{a[1]} {a[2]} {a[3]}".strip() for a in missing]),
+                              dtype=np.float32)
+            norms = np.linalg.norm(vecs, axis=1, keepdims=True)
+            vecs = vecs / np.where(norms == 0, 1.0, norms)
+            for a, v in zip(missing, vecs):
+                a[6] = v.astype(float).tolist()
+        dim = dim or len(rows[0][6])
+        self._ensure_memory_schema(dim)
+        with self._lock:
+            kept, _ = restore_memory_snapshot(self._conn, dict(snap, assertions=rows, reinforces=[]), dim)
+        themes = snap.get("themes") or []
+        if themes:      # the derived theme layer, so the next sleep reuses its summaries instead of redoing them
+            ids = {a[0] for a in rows}
+            assignment = {aid: t["id"] for t in themes for aid in t.get("members", []) if aid in ids}
+            self.upsert_memory_concepts(assignment, {t["id"]: t.get("summary") or "" for t in themes},
+                                        {t["id"]: t.get("label") or "" for t in themes})
+        return kept
+
+    def _assertion_dim(self) -> Optional[int]:
+        """The embedding dimension the Assertion table was created with (``None`` if unknown)."""
+        try:
+            for row in self._rows("CALL table_info('Assertion') RETURN *;"):
+                if "emb" in [str(x) for x in row]:
+                    m = re.search(r"\[(\d+)\]", " ".join(str(x) for x in row))
+                    if m:
+                        return int(m.group(1))
+        except Exception:
+            return None
+        return None
+
+    def _read_or_empty(self, query: str) -> list:
+        try:
+            return self._rows(query)
+        except Exception:          # a table an older graph lacks
+            return []
+
     def forget_all(self) -> None:
         """Reset the remembered tier — delete every Session + Assertion (and their edges).
         Writable-only; used to isolate scenarios in the cross-session eval."""

@@ -931,6 +931,16 @@ The **genuine gaps**, measure-first as always:
   set (paired, 2 captures, no probes) the cue reached the context 8/16 → 16/16 and the constraint was applied
   7/16 → 12/16 (+5 / −0). Adopted: `[memory] context_k` (default 16) + `context_budget` 2,000 → 3,000; facts may
   use theme budget the themes don't need. `path-b-memory.md` §13.12.
+- **Portable memory + the LadybugDB spike (v0.102).** Fix 4 of the review series' plan, for R10. `owiki memory
+  export` writes the remembered tier as a COGX archive (Cognee's exchange format: facts with their valid time,
+  sessions, themes, identity; `--full` adds retracted and forgotten facts and the embeddings), `memory import`
+  restores one losslessly into an empty memory or remembers another system's facts through the normal merge, and
+  `sleep` keeps a deterministic Markdown view (`memory/`, one file per subject) for git. On the dogfooding memory a
+  full round trip kept all 1,486 facts identical in every field, embeddings and 118 themes included; both archives
+  pass Cognee's own reader. The spike: LadybugDB 0.19 runs 643 of 645 tests through a `kuzu` shim, and the dev graph
+  migrates by `EXPORT` / `IMPORT DATABASE` or by a rebuild + `memory import`, identical apart from approximate vector
+  search; three changes stand before a move (the vector extension, the statement cache after DDL, a lock of our own —
+  LadybugDB doesn't keep a writer out while a reader is open). ADR-39, R10, `docs/path-b-memory.md` §13.17.
 - **No memory for chore prompts (v0.101).** Fix 3 of the review series' plan: the inject hook skips git chores ("push",
   "commit and push", "push and tag v1.2.3"), slash commands and — once the session has answered — bare
   acknowledgements; a prompt that carries a task keeps its memory. `[memory] skip_chores` / `skip_prompts`. 87 of 474

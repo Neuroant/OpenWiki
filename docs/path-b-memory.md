@@ -1370,6 +1370,37 @@ the live context — the hooks assemble k = 8 within a 2,000-character budget, a
 suggests trying a larger k there, measured on that path (→ §13.12). LoCoMo now: **overall J 60.7 %** with a local
 30B (Mem0 reports ≈ 67 % with GPT-4o-mini — and both are generous-judge numbers).
 
+### 13.20 Multi-hop expansion — measured, not adopted
+
+The review series' seventh item (AriGraph, Graphiti, Hindsight): after recall, follow the facts linked to the
+recalled ones — through a shared subject or object — and bring in the most query-relevant of those neighbours,
+thresholded, up to two hops; multi-hop is a LoCoMo category, and "what do Melanie's kids like?" needs several facts.
+
+**A first look** at the multi-hop questions production recall (hybrid + time window) answers wrong: often the needed
+fact is not in memory at all ("single", "dinosaurs", "3"); where it is, it sits deep in the dense ranking (median rank
+78) and is linked to the question by meaning or inference, not by a shared name — "Where did Caroline move from?"
+needs "Caroline | received necklace from grandmother | Sweden" (rank 113), and no recalled fact says "Sweden".
+
+**Offline**, gold-answer coverage in the top 20 (categories 1–4; production 0.456, multi-hop 0.501), three kinds of
+link from the top 10 recalled facts — a shared subject / object string (entities in at most 5 % of the facts, so not
+the speakers), a shared distinctive word (in at most 2 %), a semantic neighbour (fact-to-fact cosine ≥ 0.85 / 0.8) —
+at depth 1 and 2, 3 or 6 facts:
+
+| linked facts … | best variant | coverage | multi-hop |
+|---|---|---|---|
+| swapped into the tail of the top 20 | shared entity, depth 1, 3 facts | 0.431 (14 up / 86 down) | 0.474 |
+| added: 20 + 3 facts | shared word | 0.462 | 0.508 |
+| — the next 3 facts by production's own ranking | — | **0.469** | 0.513 |
+| added: 20 + 6 facts | shared word | 0.468 | 0.514 |
+| — the next 6 facts by production's own ranking | — | **0.480** | 0.526 |
+
+Every variant is dominated twice: swapped in, linked facts push out better ones (depth 2 changes nothing — the second
+hop rarely finds a candidate the first missed); added, they lose to the ranking's own next candidates at the same
+context size. The ranking already orders this memory better than its links do. **Not adopted**; no re-answer run (it
+would re-ask all 1,540 questions to confirm what the offline check shows in both modes), no code kept. What the check
+does show: more recalled facts still help — the next 6 add 2.4 coverage points — so a larger recall budget, not
+expansion, is the lever there (a per-prompt token cost on the live path, ADR-35).
+
 ### 13.19 The question's time window (v0.104)
 
 "What did Mel and her kids paint in their latest project in July 2023?" — the date is the point of the question, and

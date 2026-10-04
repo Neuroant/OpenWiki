@@ -153,6 +153,10 @@ already have, then changes that only real sessions can judge. Each names where i
    −3), overall J 61.6 → 62.9 % (p ≈ 5·10⁻⁵), the first significant gain of these experiments (`path-b-memory.md`
    §13.19).
 7. **Multi-hop expansion** through shared subjects and objects, thresholded, depth 2 (AriGraph, Graphiti, Hindsight).
+   **Measured, not adopted:** offline, linked facts (shared entity, distinctive word or semantic neighbour) pushed out
+   better ones when swapped in (coverage 0.456 → 0.431) and lost to the ranking's own next candidates when added
+   (+6 facts: 0.468 vs 0.480) — the needed facts are linked by meaning or inference, not names (`path-b-memory.md`
+   §13.20).
 8. **An add-only ablation** — do the two LLM checks in the merge earn their place? (Mem0).
 9. **Episodes next to facts** — one dated narrative per session, retrieved with the facts (Nemori, Hindsight, waku);
    aimed at the temporal category.

@@ -931,6 +931,11 @@ The **genuine gaps**, measure-first as always:
   set (paired, 2 captures, no probes) the cue reached the context 8/16 → 16/16 and the constraint was applied
   7/16 → 12/16 (+5 / −0). Adopted: `[memory] context_k` (default 16) + `context_budget` 2,000 → 3,000; facts may
   use theme budget the themes don't need. `path-b-memory.md` §13.12.
+- **Multi-hop expansion — measured, not adopted.** Experiment 7 of the review series' plan: facts linked to the
+  recalled ones through a shared subject or object, a distinctive word or semantic similarity, thresholded, depth 1–2.
+  Offline it lost both ways — swapped into the top 20 it pushed out better facts (coverage 0.456 → 0.431), added it
+  lost to the ranking's own next candidates at the same size (+6 facts: 0.468 vs 0.480). No re-answer run, no code.
+  `docs/path-b-memory.md` §13.20.
 - **The question's time window (v0.104).** Experiment 6 of the review series' plan: a date in the question becomes a
   window (`temporal.question_window` — days, parts of months, months, seasons, years, "the week before", relative
   expressions against `now`), and within the dense top 4k facts whose valid time falls in it gain a bonus (0.1),

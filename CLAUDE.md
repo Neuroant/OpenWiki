@@ -732,6 +732,9 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   next to the lexical boost — dense order again, each hit carries `in_window`. On by default (`[memory]
   temporal_weight`, `Project.temporal_weight`, `temporal.WINDOW_WEIGHT` = 0.1) wherever memory is recalled: LoCoMo's
   dated questions 46.2 → 56.2 % (+24 / −3); a question without a date recalls exactly as before (§13.19).
+  **Multi-hop expansion** (facts linked to the recalled ones by a shared subject / object, word or embedding, depth
+  1–2) was measured offline and not adopted: swapped in it pushed out better facts, added it lost to the ranking's
+  own next candidates (§13.20).
   `has_memory()` gates both. `_ensure_memory_schema`
   lazily creates the tables + `ALTER`s in `confidence`/`last_seen` on pre-0.54 graphs; B0's
   `_snapshot_memory`/`_restore_memory` preserve `SUPERSEDES` + confidence across a rebuild. Exposed as

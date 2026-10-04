@@ -1370,6 +1370,24 @@ the live context — the hooks assemble k = 8 within a 2,000-character budget, a
 suggests trying a larger k there, measured on that path (→ §13.12). LoCoMo now: **overall J 60.7 %** with a local
 30B (Mem0 reports ≈ 67 % with GPT-4o-mini — and both are generous-judge numbers).
 
+### 13.16 No memory for chore prompts (v0.101)
+
+The inject hook put 16 facts (≈ 710 tokens) into every prompt — including "push", "commit and push" and
+"push and tag v0.98.0", which need none. Hermes skips recall for trivial prompts; on the dogfooding session its
+greeting list matched 1 of 465 prompts, while release chores were 16 % of them (`memory-systems-review.md` §12) — the
+trivial set is project-specific. Now `cli.chore_kind` classifies the whole prompt: **git chores** (push / pull /
+commit / tag, alone or combined), **slash commands**, and **bare acknowledgements** ("ok", "continue", "danke") — the
+last only once the session has answered before (`_session_has_turns`, an assistant turn in the transcript's tail):
+"continue" as a session's first prompt is exactly when memory helps. A prompt that carries a task — "push and proceed
+with X", "yes, run it in the foreground" — keeps its memory. `[memory] skip_chores` (default on) switches the gate
+off; `[memory] skip_prompts` adds project chores as whole-prompt regexes (e.g. `["sync arc42 docs"]` — not a default:
+syncing docs is work the memory can help with).
+
+**Measured** on the dogfooding session: **87 of 474 prompts (18.4 %)** skip their memory — 86 git chores ("commit and
+push", "push it", "push and tag v0.x"), one slash command; none of them asked for anything memory could answer —
+saving ≈ 62 K injected tokens over the session (87 × ≈ 710). No question of any eval set (poisoning, cue-trigger,
+temporal, code) is a chore, so their results are unchanged by construction.
+
 ### 13.15 Writes land during a session (v0.100)
 
 Kuzu is reader-XOR-writer across processes, and three long-running processes held the graph read-only for their

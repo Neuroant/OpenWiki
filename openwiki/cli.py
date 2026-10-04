@@ -3303,10 +3303,72 @@ def _hook_embedder(project: Project):
     return index.embedder
 
 
+# Chore prompts need no memory (v0.101): a git operation, a slash command, a bare acknowledgement. Matched against the
+# whole prompt — "push and proceed with X" is a task and keeps its memory. Hermes skips recall for its trivial prompts;
+# on the dogfooding session its greeting list matched 1 of 465 prompts, release chores 75 (memory-systems-review §12).
+_CHORE_GIT = re.compile(
+    r"(?:git\s+)?(?:push|pull|fetch|commit)(?:\s+(?:it|this|that|them|now|please|everything|the\s+changes))?"
+    r"(?:\s+and\s+(?:push|pull|tag(?:\s+it)?(?:\s+as)?\s+v?\d+(?:\.\d+)*))?(?:\s+(?:now|please))?"
+    r"|tag(?:\s+it)?(?:\s+as)?\s+v?\d+(?:\.\d+)*(?:\s+and\s+push)?")
+_CHORE_ACK = re.compile(
+    r"yes|no|ok|okay|sure|thanks|thank you|y|n|yep|nope|yeah|nah|k|continue|go ahead|go on|do it|proceed|got it"
+    r"|cool|nice|great|done|next|lgtm|ja|nein|danke|weiter|mach weiter|passt")
+
+
+def chore_kind(prompt: str, extra=()) -> Optional[str]:
+    """Is ``prompt`` a chore that needs no memory? → ``"command"`` (a slash command), ``"git"``
+    (push / pull / commit / tag, alone or combined: "push and tag v0.98.0"), ``"ack"`` (a bare
+    acknowledgement: "ok", "continue"), ``"custom"`` (one of ``extra``, regexes matched against the
+    whole prompt) — or ``None``. Case-insensitive; surrounding whitespace and trailing punctuation
+    are ignored."""
+    text = re.sub(r"\s+", " ", str(prompt or "").strip()).lower().rstrip(" .!?,;:")
+    if not text:
+        return None
+    if text.startswith("/"):
+        return "command"
+    if _CHORE_GIT.fullmatch(text):
+        return "git"
+    if _CHORE_ACK.fullmatch(text):
+        return "ack"
+    for pattern in extra or ():
+        try:
+            if re.fullmatch(pattern, text, re.IGNORECASE):
+                return "custom"
+        except re.error:
+            continue
+    return None
+
+
+def _session_has_turns(transcript_path) -> bool:
+    """Has this session answered before? (An assistant turn in the transcript's last 64 KB.)"""
+    try:
+        path = Path(transcript_path)
+        with path.open("rb") as fh:
+            fh.seek(max(0, path.stat().st_size - 65536))
+            tail = fh.read().decode("utf-8", errors="ignore")
+    except (OSError, TypeError, ValueError):
+        return False
+    return re.search(r'"type"\s*:\s*"assistant"', tail) is not None
+
+
+def _skip_memory(project: Project, payload: dict) -> bool:
+    """No memory for a chore prompt — except a bare acknowledgement that opens a session ("continue"
+    after a restart is exactly when memory helps)."""
+    if not project.skip_chores:
+        return False
+    kind = chore_kind(payload.get("prompt") or "", project.skip_prompts)
+    if kind is None:
+        return False
+    return kind != "ack" or _session_has_turns(payload.get("transcript_path"))
+
+
 def _hook_inject(project: Project, payload: dict) -> None:
     """UserPromptSubmit → assemble the three-tier memory context for the prompt and print
-    it (Claude Code adds a hook's stdout to the prompt context)."""
+    it (Claude Code adds a hook's stdout to the prompt context). Chore prompts get none
+    (``_skip_memory``)."""
     prompt = str(payload.get("prompt") or "").strip()
+    if _skip_memory(project, payload):
+        return
     embedder = _hook_embedder(project) if prompt else None
     if not embedder or not project.graph_path.exists():
         return

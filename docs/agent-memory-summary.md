@@ -129,7 +129,9 @@ already have, then changes that only real sessions can judge. Each names where i
    apply (two phases) — the write lock on the real queue fell from 276 s to 7.2 s with an identical result, and an
    agent write landed 7.6 s after the call in a live session (`path-b-memory.md` §13.15).
 3. **No memory for chore prompts.** Skip the injection for "push", "push and tag …" and slash commands (Hermes). Check:
-   16 % fewer injections on the dogfooding prompts, the cue-trigger set unchanged.
+   16 % fewer injections on the dogfooding prompts, the cue-trigger set unchanged. **Done in v0.101:** 87 of 474
+   prompts (18.4 %) skipped — git chores, a slash command, later acknowledgements — and no eval question affected
+   (`path-b-memory.md` §13.16).
 4. **Portable memory.** A COGX export and a git-tracked Markdown view written at `sleep`, together with the LadybugDB
    spike (Cognee, Letta; R10). Check: an export → import round trip keeps every fact and its validity, and the graph
    opens under LadybugDB.

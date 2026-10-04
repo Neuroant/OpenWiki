@@ -160,6 +160,22 @@ class Project:
         return bool(self.setting("memory", "probes", False))
 
     @property
+    def skip_chores(self) -> bool:
+        """No memory injection for chore prompts — git operations ("push and tag v1.2"), slash
+        commands, and bare acknowledgements once a session is under way (``cli.chore_kind``).
+        ``[memory] skip_chores``, on by default (v0.101): 16 % of the dogfooding prompts were such
+        chores, each receiving ~710 tokens of memory it didn't need."""
+        return bool(self.setting("memory", "skip_chores", True))
+
+    @property
+    def skip_prompts(self) -> list:
+        """Project-specific chore prompts that get no memory either — regular expressions matched
+        against the whole prompt, case-insensitive (``[memory] skip_prompts``, e.g.
+        ``["sync arc42 docs"]``)."""
+        value = self.setting("memory", "skip_prompts", [])
+        return [str(v) for v in value] if isinstance(value, list) else [str(value)]
+
+    @property
     def memory_enabled(self) -> bool:
         """Second Brain mode — whether the remembered tier (Path B) is active for this
         project. **Off by default** (Wiki mode, §3.1 / ADR-14); turn it on with
@@ -290,6 +306,8 @@ enabled = {str(memory).lower()}
 # context_k = 16          # facts recalled into that context
 # probes = false          # cue-trigger recall: +1 chat call per context read to surface the user's implicit constraints
 # agent_writes = false    # let a coding agent record facts / new states via MCP wiki_remember
+# skip_chores = true      # no memory for chore prompts (push / tag / commit, slash commands, a later "ok")
+# skip_prompts = []       # more chore prompts for this project, as regexes, e.g. ["sync arc42 docs"]
 
 [serve]
 port = {port}

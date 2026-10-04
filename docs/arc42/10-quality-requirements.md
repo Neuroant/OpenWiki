@@ -74,7 +74,8 @@ Scenarios are written as *stimulus → expected response* so they can be checked
   on 1,486 real facts and 1.57 M characters of session text (ADR-37); QS-17 by the constraint probes — cue in the
   context **2/8 → 7/8**, constraint respected **1/8 → 6/8**, hand-audited (ADR-31) — and, without probes, by the
   16-fact live context (v0.96, paired over two captures: cue **8/16 → 16/16**, constraint **7/16 → 12/16**, ADR-35);
-  QS-21 by the live-path measurement behind those defaults (≈ 471 → 710 tokens per prompt, ADR-35); QS-18 by `sleep` — on 40 real
+  QS-21 by the live-path measurement behind those defaults (≈ 471 → 710 tokens per prompt, ADR-35), and no memory at
+  all for chore prompts — 18.4 % of real prompts (v0.101); QS-18 by `sleep` — on 40 real
   prompts the injected junk fell **31 % → 5 %**, 0 of 232 labeled keep-facts dropped (ADR-32); QS-19 by
   `wiki_remember` — the 14 labeled stale facts of the dogfooding memory closed, stale facts in 10 topic contexts
   **12 → 0** (ADR-33); QS-22 by the handoff tests and the dev project (`resume` 1.4 s; the effect on a session's

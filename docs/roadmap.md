@@ -931,6 +931,11 @@ The **genuine gaps**, measure-first as always:
   set (paired, 2 captures, no probes) the cue reached the context 8/16 → 16/16 and the constraint was applied
   7/16 → 12/16 (+5 / −0). Adopted: `[memory] context_k` (default 16) + `context_budget` 2,000 → 3,000; facts may
   use theme budget the themes don't need. `path-b-memory.md` §13.12.
+- **No memory for chore prompts (v0.101).** Fix 3 of the review series' plan: the inject hook skips git chores ("push",
+  "commit and push", "push and tag v1.2.3"), slash commands and — once the session has answered — bare
+  acknowledgements; a prompt that carries a task keeps its memory. `[memory] skip_chores` / `skip_prompts`. 87 of 474
+  dogfooding prompts (18.4 %) skipped, ≈ 62 K injected tokens saved; no eval question affected. `docs/path-b-memory.md`
+  §13.16.
 - **Writes land during a session (v0.100).** Fix 2 of the review series' plan. Long-running readers — the MCP server,
   `serve`, `chat`, `ask` — hold the graph only per call (`LazyGraph`, ≈ 70 ms an open), and memory writes run in two
   phases: plan read-only with memoized model checks and cached embeddings (`remember` / `fold_journal` gained

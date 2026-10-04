@@ -820,6 +820,12 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   the live path: ~710 tokens/prompt; the cue-trigger set's cue reached the context 8/16 → 16/16, path-b-memory.md
   §13.12); facts may use theme budget the themes don't need. Exposed as the `context` CLI (`--max-chars`) and the MCP `wiki_memory` tool
   (both budgeted); the cross-session eval's "assembled" condition is this assembler. Design in `docs/path-b-memory.md`.
+  **No memory for chore prompts (v0.101):** the inject hook skips prompts that need none — `cli.chore_kind`, matched
+  against the whole prompt: git chores ("push", "commit and push", "push and tag v1.2.3"), slash commands, and bare
+  acknowledgements ("ok", "continue") once the session has answered before (`_session_has_turns`; an opening
+  "continue" keeps its memory); "push and proceed with X" is a task and keeps it. `[memory] skip_chores` (default on)
+  and `[memory] skip_prompts` (more whole-prompt regexes, e.g. `["sync arc42 docs"]`). Measured: 87 of 474 dogfooding
+  prompts (18.4 %) skipped, ≈ 62 K injected tokens saved; no eval question matches (path-b-memory.md §13.16).
   `usage.py` + `journal.py` are the **lock-free deferred-write log** (**B1 concurrency**): Kuzu is
   reader-XOR-writer (no simultaneous read+write), so a read-only process queues its intended writes to a
   JSONL sidecar instead of failing — `usage.py` holds reinforce pairs (`fold_usage`), `journal.py` holds
@@ -1116,7 +1122,8 @@ http — count, p50/p95, total time, token in/out) + a live recent-events table,
   write (not the LLM call, which would otherwise block every reader, incl. the next prompt's inject).
   The hooks run `cli._cmd_hook`
   (reads the event JSON on stdin, **always exits 0** — fail-soft — else exit 2 would reject the
-  prompt): `inject` = `GraphStore.context_for(prompt)` → stdout (Claude Code injects it), `capture`
+  prompt): `inject` = `GraphStore.context_for(prompt)` → stdout (Claude Code injects it; chore prompts get none —
+  v0.101), `capture`
   = **every turn since the session's watermark** → `capture_session` per window → `remember` (queued if the
   graph is write-locked). Gated by the project's `[memory] enabled`. Design: Path B / B6 host-hook refinement.
   **Incremental capture (v0.97):** `claude_code_template.capture_windows(text, after_ts, max_chars)` cuts the turns

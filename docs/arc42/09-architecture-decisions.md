@@ -698,6 +698,8 @@
   prompt, which accumulate in a long session's history (`context_k = 8` / `context_budget = 2000` restore the old
   size); − the cue set places its cues near the k = 8 boundary by design, so it shows the mechanism, not how often it
   matters. Sizes the B6 assembly of [ADR-14](#adr-14); carries the [ADR-34](#adr-34) finding into production.
+  *Addendum (v0.101):* chore prompts — git chores, slash commands, a later bare acknowledgement — get no memory at
+  all (`[memory] skip_chores`): 18.4 % of the dogfooding prompts, ≈ 62 K tokens over the session.
 
 ### ADR-36
 **A session hands over to the next through a handoff that OpenWiki derives and the agent annotates.** *(v0.98)*

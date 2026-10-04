@@ -169,8 +169,9 @@ blocks a prompt):
 
 - **`UserPromptSubmit` → `owiki hook inject`** — assembles the three-tier memory context
   (identity + recalled facts + relevant themes) for your prompt and injects it, so the agent starts
-  each turn already oriented. Also available on demand as `owiki context "<query>"` and the
-  `wiki_memory` MCP tool.
+  each turn already oriented. Chore prompts get none — "push", "commit and push", "push and tag v1.2", slash commands,
+  and a bare "ok" / "continue" once the session is under way (`[memory] skip_prompts` adds your own, `skip_chores =
+  false` turns the gate off). Also available on demand as `owiki context "<query>"` and the `wiki_memory` MCP tool.
 - **`SessionEnd` / `PreCompact` → `owiki hook capture`** — captures the conversation transcript into
   memory (`remember`), so what you discussed persists into the next session.
 - **`SessionStart` → `owiki hook resume`** — on a new session (and after `/clear`) injects the brief of

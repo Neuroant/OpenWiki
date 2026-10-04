@@ -931,6 +931,13 @@ The **genuine gaps**, measure-first as always:
   set (paired, 2 captures, no probes) the cue reached the context 8/16 → 16/16 and the constraint was applied
   7/16 → 12/16 (+5 / −0). Adopted: `[memory] context_k` (default 16) + `context_budget` 2,000 → 3,000; facts may
   use theme budget the themes don't need. `path-b-memory.md` §13.12.
+- **Credential redaction and a hardened policy (v0.99).** The first fix of the plan from the agent-memory review
+  series: credentials are redacted wherever text enters memory — in the transcript before capture, in `remember()`,
+  in the journal file, in `wiki_remember` and in the handoff note — and `sleep` rewrites facts stored before.
+  `policy.redact_secrets` knows the common provider formats, private keys, JWTs, URL passwords, bearer tokens and
+  credential assignments; the P0 instruction policy now matches NFKC-normalized text without zero-width characters and
+  refuses bidirectional overrides. 0 false positives on 1,486 real facts and 1.57 M characters of real session text;
+  the eval sets are untouched. ADR-37, `docs/path-b-memory.md` §13.14.
 - **Session handoff (v0.98): share context between sessions.** `owiki handoff prepare` writes what the next session
   needs — the agent's note (Next, Summary, Decisions, Open threads, Ready-to-use prompts; screened by the P0 policy,
   now its own module `openwiki/policy.py`) plus the state OpenWiki derives itself: the repository (branch, HEAD, tag,

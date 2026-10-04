@@ -124,7 +124,7 @@ def _remember(graph, index, a: dict) -> str:
     believed facts *now* (exact lines only — near misses come back with suggestions), and
     queue one journal op; the next writable pass folds it (remember + close the replaced)."""
     import time as _time
-    from .graph.memory import MemoryFact, is_ephemeral, is_unsafe_instruction
+    from .graph.memory import MemoryFact, is_ephemeral, is_secret_only, is_unsafe_instruction, redact_fact
     from .graph.temporal import parse_date
 
     now = int(_time.time())
@@ -137,12 +137,17 @@ def _remember(graph, index, a: dict) -> str:
             notes.append("skipped a fact without subject, predicate and object")
             continue
         vf = parse_date(f.get("valid_from")) if f.get("valid_from") else None
-        fact = MemoryFact(s, p, o, valid_from=vf if vf is not None else now, source=source)
-        if is_unsafe_instruction(fact):
-            notes.append(f"not stored — security-sensitive (restate it in the session instead): {s} {p} {o}")
+        fact, kinds = redact_fact(MemoryFact(s, p, o, valid_from=vf if vf is not None else now, source=source))
+        text = f"{fact.subject} {fact.predicate} {fact.object}"
+        if kinds and is_secret_only(fact):
+            notes.append(f"not stored — a credential, which memory never keeps: {text}")
+        elif is_unsafe_instruction(fact):
+            notes.append(f"not stored — security-sensitive (restate it in the session instead): {text}")
         elif is_ephemeral(fact):
-            notes.append(f"not stored — a one-off event; record the resulting state instead: {s} {p} {o}")
+            notes.append(f"not stored — a one-off event; record the resulting state instead: {text}")
         else:
+            if kinds:
+                notes.append(f"a credential was redacted before storing: {text}")
             facts.append(fact)
     matched, unmatched = graph.match_facts(a.get("replaces") or [])
     retire = [i for ids in matched.values() for i in ids]

@@ -1342,10 +1342,15 @@ def _cmd_build(args: argparse.Namespace) -> int:
                       file=sys.stderr)
                 for spath in session_paths:
                     sid = Path(spath).stem
+                    rep: dict = {}
                     facts, dropped = capture_session_detailed(
-                        chat, Path(spath).read_text(encoding="utf-8"), session_date=session_date_of(sid))
+                        chat, Path(spath).read_text(encoding="utf-8"), session_date=session_date_of(sid),
+                        report=rep)
                     if dropped:
                         print(f"    · '{sid}': {len(dropped)} instruction-like fact(s) scrubbed",
+                              file=sys.stderr)
+                    if rep.get("redacted"):
+                        print(f"    · '{sid}': {rep['redacted']} credential(s) redacted before capture",
                               file=sys.stderr)
                     res = graph.remember(sid, facts, index.embedder, coexist=coexist, resolve=resolve)
                     total += res["added"]
@@ -2486,8 +2491,11 @@ def _cmd_sleep(args: argparse.Namespace) -> int:
             return 2
         try:
             cands = graph.forget_candidates()
+            secrets = graph.redact_credentials(dry_run=True)
         finally:
             graph.close()
+        if secrets:
+            print(f"Would redact credentials in {secrets} stored fact(s).")
         print(f"Would forget {len(cands)} fact(s) (dry run — nothing written):")
         for c in sorted(cands, key=lambda c: (c["reason"], c["subject"].lower())):
             print(f"  [{c['reason']}] {c['subject']} | {c['predicate']} | {c['object']}  ({c['session_id']})")
@@ -2501,7 +2509,7 @@ def _cmd_sleep(args: argparse.Namespace) -> int:
               file=sys.stderr)
         graph.close()
         return 2
-    ops, forgotten, consolidated, note = {"records": 0}, {}, None, ""
+    ops, forgotten, consolidated, note, secrets = {"records": 0}, {}, None, "", 0
     try:
         if not graph.has_memory():
             print("(no remembered facts yet — capture sessions with `openwiki remember` first)")
@@ -2511,6 +2519,7 @@ def _cmd_sleep(args: argparse.Namespace) -> int:
         if embedder is not None and graph.pending_ops():
             ops = graph.fold_journal(embedder, coexist=_coexist_check(args.model, args.host),
                                      resolve=_attribute_resolver(args.model, args.host))
+        secrets = graph.redact_credentials()   # P0 for facts stored before redaction existed
         cands = graph.forget_candidates()
         for reason in ("unsafe", "ephemeral"):
             ids = [c["id"] for c in cands if c["reason"] == reason]
@@ -2526,6 +2535,8 @@ def _cmd_sleep(args: argparse.Namespace) -> int:
     print(f"Slept → {args.graph}")
     if folded["records"] or ops.get("records"):
         print(f"  folded {folded['records']} usage record(s), {ops.get('records', 0)} queued op(s)")
+    if secrets:
+        print(f"  redacted credentials in {secrets} stored fact(s)")
     print(f"  forgot {sum(forgotten.values())} fact(s): {forgotten.get('ephemeral', 0)} one-off event(s), "
           f"{forgotten.get('unsafe', 0)} unsafe (archived, not deleted)")
     if consolidated is not None:
@@ -2659,8 +2670,12 @@ def _cmd_remember(args: argparse.Namespace) -> int:
     try:
         chat = OllamaChat(model=args.model, host=args.host, temperature=0.2)
         print(f"Capturing session '{session_id}' with {chat.name} …", file=sys.stderr)
+        rep: dict = {}
         facts, dropped = capture_session_detailed(chat, args.transcript.read_text(encoding="utf-8"),
-                                                  session_date=sdate)
+                                                  session_date=sdate, report=rep)
+        if rep.get("redacted"):         # P0: credentials never reach the capture model
+            print(f"  ✗ redacted {rep['redacted']} credential(s) from the transcript before capture",
+                  file=sys.stderr)
         for f in facts:
             since = f"  (since {format_date(f.valid_from)})" if f.valid_from is not None else ""
             many = "  [many]" if f.cardinality == "many" else ""
@@ -2752,7 +2767,7 @@ def _cmd_backfill(args: argparse.Namespace) -> int:
     coexist = _coexist_check(args.model, args.host)
     resolve = _attribute_resolver(args.model, args.host)
     totals = {"facts": 0, "added": 0, "duplicates": 0, "superseded": 0, "retracted": 0,
-              "historical": 0, "resolved": 0, "scrubbed": 0}
+              "historical": 0, "resolved": 0, "scrubbed": 0, "redacted": 0}
     failed: list = []
     skipped = 0
     started = time.time()
@@ -2768,8 +2783,10 @@ def _cmd_backfill(args: argparse.Namespace) -> int:
                 # valid from the window's first turn (intra-day order), else the day
                 wdate = parse_date(start[:19]) or sdate
                 try:                            # one bad window (timeout, garbage) never aborts the run
-                    facts, dropped = capture_session_detailed(chat, window, session_date=wdate)
+                    rep: dict = {}
+                    facts, dropped = capture_session_detailed(chat, window, session_date=wdate, report=rep)
                     totals["scrubbed"] += len(dropped)
+                    totals["redacted"] += rep.get("redacted", 0)
                     res = graph.remember(sid, facts, index.embedder, session_date=wdate,
                                          coexist=coexist, resolve=resolve)
                 except Exception as exc:
@@ -2787,7 +2804,7 @@ def _cmd_backfill(args: argparse.Namespace) -> int:
     note = f", {skipped} day(s) already in memory skipped" if skipped else ""
     print(f"Backfilled {len(days) - skipped} day(s): {totals['added']} new fact(s), {totals['duplicates']} "
           f"re-affirmed, {totals['resolved']} matched to an existing attribute, "
-          f"{totals['scrubbed']} instruction-like scrubbed, "
+          f"{totals['scrubbed']} instruction-like scrubbed, {totals['redacted']} credential(s) redacted, "
           f"{totals['superseded']} superseded ({totals['retracted']} retracted), "
           f"{totals['facts']} captured{note} → {args.graph}")
     if failed:
@@ -3427,8 +3444,9 @@ def _hook_capture(project: Project, payload: dict) -> None:
                 windows = windows[-CAPTURE_FIRST_WINDOWS:]
             for first, last, window in windows:
                 wdate = parse_date(first[:19]) or int(time.time())
+                rep: dict = {}
                 try:
-                    facts, dropped = capture_session_detailed(chat, window, session_date=wdate)
+                    facts, dropped = capture_session_detailed(chat, window, session_date=wdate, report=rep)
                 except Exception as exc:           # one bad window must not block the session
                     print(f"openwiki hook: capture of session {sid} window from {first} failed "
                           f"({exc}); skipped", file=sys.stderr)
@@ -3436,6 +3454,9 @@ def _hook_capture(project: Project, payload: dict) -> None:
                 for f in dropped:                  # logged to .openwiki/hook.log by the worker
                     print(f"openwiki hook: scrubbed instruction-like fact: {f.subject} | "
                           f"{f.predicate} | {f.object}", file=sys.stderr)
+                if rep.get("redacted"):
+                    print(f"openwiki hook: redacted {rep['redacted']} credential(s) from session {sid} "
+                          f"window from {first} before capture", file=sys.stderr)
                 if facts:
                     _write_captured(project, sid, facts, embedder, wdate, model, host)
                     wrote = True
@@ -3547,6 +3568,8 @@ def _handoff_report(project: Project, data: dict, path: Path, capture: bool) -> 
     out.append(f"  next: {nxt}" if nxt else "  next: (the note names no next step)")
     if data.get("carried_from"):
         out.append("  note: none given — Next, Open threads and prompts carried over from the last handoff")
+    if data.get("redacted"):
+        out.append(f"  note: {data['redacted']} credential(s) redacted")
     for line in data.get("dropped") or []:
         out.append(f"  left out by the memory policy (security-sensitive): {line[:120]}")
     return out

@@ -16,12 +16,12 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Optional
 
 from .entities import _normalize  # reuse German-aware normalization for dedup keys
 from .temporal import ONE, coerce_cardinality, format_date, format_interval, parse_date
-from ..policy import UNSAFE_PATTERNS, is_unsafe_text
+from ..policy import REDACTED, UNSAFE_PATTERNS, is_unsafe_text, redact_secrets
 
 _THINK = re.compile(r"<think>.*?</think>", re.DOTALL)
 _ARRAY = re.compile(r"\[.*\]", re.DOTALL)
@@ -318,13 +318,40 @@ def constraint_probes(chat, request: str, n: int = 3) -> list:
     return probes[:n]
 
 
+def redact_fact(fact) -> tuple:
+    """P0: ``(fact, kinds)`` — the fact with credentials redacted and invisible characters removed in
+    its subject, predicate and object (``policy.redact_secrets``); ``kinds`` names what was redacted."""
+    fields, kinds = {}, []
+    for name in ("subject", "predicate", "object"):
+        fields[name], found = redact_secrets(getattr(fact, name))
+        kinds += found
+    if all(fields[n] == getattr(fact, n) for n in fields):
+        return fact, kinds
+    try:
+        return replace(fact, **fields), kinds
+    except TypeError:                     # not a dataclass — copy what a MemoryFact needs
+        return MemoryFact(fields["subject"], fields["predicate"], fields["object"],
+                          getattr(fact, "valid_from", None), getattr(fact, "cardinality", ONE),
+                          getattr(fact, "source", None)), kinds
+
+
+def is_secret_only(fact) -> bool:
+    """Was the fact nothing but a credential — its subject or object is the redaction marker alone?"""
+    return any(str(getattr(fact, n)).strip(" '\"`") == REDACTED for n in ("subject", "object"))
+
+
 def capture_session_detailed(chat, transcript: str, session_date: Optional[int] = None,
-                             audit: bool = False, style: str = "durable") -> tuple:
+                             audit: bool = False, style: str = "durable", report=None) -> tuple:
     """B2 capture + **P0 scrubbing** → ``(kept, dropped)``: the security-sensitive rule policy
     (free, source-independent) drops facts memory must never keep. ``audit`` adds the LLM audit
     (:func:`flag_injected`) — **off by default: measured harmful** on eval_poisoning (it caught none
     of the injections and dropped two legitimate facts, the user's own "answer me in German" and a
-    decision), kept only for experiments, like the re-rank add-on."""
+    decision), kept only for experiments, like the re-rank add-on. **Credentials are redacted from
+    the transcript before the model sees it** (v0.99) — a pasted key can't become a fact; ``report``
+    (a dict) receives ``"redacted"``, how many."""
+    transcript, redacted = redact_secrets(transcript)
+    if report is not None:
+        report["redacted"] = len(redacted)
     facts = parse_facts(chat.chat(build_capture_messages(transcript, session_date, style)))
     flagged = {i for i, f in enumerate(facts) if is_unsafe_instruction(f)}
     if audit and facts:

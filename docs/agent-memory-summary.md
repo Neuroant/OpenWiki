@@ -62,7 +62,7 @@ predictive world models built by transfer entropy — real methods, applied wher
 | When memory enters the context | every prompt (Hindsight, Cognee) · once per session + pull (Mem0, Hermes) · an always-present core + pull (Letta) · behind a gate (waku) | 16 facts on every prompt + the handoff brief at session start |
 | Consolidation | derived layers over immutable facts (Hindsight's observations, Graphiti's summaries and communities) · curators and dreaming agents (Letta, Hermes) · lessons with feedback (Cognee) | themes over current facts, warm-started and incremental |
 | Forgetting | none (Graphiti, Mem0's library) · archiving by disuse (Hermes, for skills) · volatility rechecks (memory-champ) | policy-based archiving of one-off events; decaying usage edges |
-| Hygiene | credential redaction (Mem0's plugin, Cognee, Hindsight) · threat scans (Hermes) · human gates (memory-champ, Hermes) · secrets stored on purpose (MIRIX) | a source-independent policy against instructions and security-sensitive facts; no credential redaction yet |
+| Hygiene | credential redaction (Mem0's plugin, Cognee, Hindsight) · threat scans (Hermes) · human gates (memory-champ, Hermes) · secrets stored on purpose (MIRIX) | a source-independent policy against instructions and security-sensitive facts; credentials redacted before capture and storage (v0.99) |
 | Procedural memory | skills (waku, Letta, Hermes; memory-champ behind approval) · procedures from errors and fixes (MIRIX, Mem0's plugin) · rewritten prompts (LangMem) | none — the host's skills are written by hand |
 | Evaluation | LoCoMo, LongMemEval, BEAM, DMR · behavior probes, fixtures or nothing (Hermes, memory-champ, LangMem) | own cross-session sets + LoCoMo, with an audited judge |
 
@@ -104,7 +104,6 @@ judgments of memory unreliable — a poisoning audit, a forgetting review, three
 - **retrieval** — dense-only, single-hop, no reranker, no time window: most of the distance to Hindsight is here;
 - **the unit of memory** — atomic facts lose the narrative and the dates that temporal questions need;
 - **writes during a session**;
-- **credential redaction**;
 - **procedural memory**;
 - **portability** — memory lives only in a Kuzu file, and Kuzu is archived upstream (R10).
 
@@ -123,6 +122,8 @@ already have, then changes that only real sessions can judge. Each names where i
 1. **Credential redaction and policy hardening.** Redact secrets from transcripts before capture and from facts in
    `remember()`; fold Unicode (NFKC) and reject invisible characters in `is_unsafe_text` (Mem0, Cognee, Hindsight,
    Hermes). Check: the poisoning set stays at 0 leaks with 8 of 8 legitimate facts kept, and no real fact is scrubbed.
+   **Done in v0.99:** 0 false positives on 1,486 real facts and 1.57 M characters of session text, the eval sets
+   untouched (`path-b-memory.md` §13.14).
 2. **Writes land during a session.** The MCP server folds the journal itself when idle: release the read connection,
    fold writable, reopen (Hermes, Letta). Check: in a live session the journal drains within minutes of idling, and no
    reader sees an error.

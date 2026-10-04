@@ -32,7 +32,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-from .policy import is_unsafe_text
+from .policy import is_unsafe_text, redact_secrets
 
 HANDOFF_DIR = "handoff"                     # in the OpenWiki project, next to its memory
 HANDOFF_MD = "HANDOFF.md"
@@ -462,19 +462,22 @@ def parse_note(text: str) -> dict:
 
 def screen_note(sections: dict) -> tuple:
     """Apply the P0 memory policy to the note line by line — it is injected into later sessions —
-    → ``(sections, dropped lines)``."""
-    out, dropped = {}, []
+    → ``(sections, dropped lines, credentials redacted)``: instruction-like and security-sensitive
+    lines are dropped, credentials redacted (in the dropped lines too, which are reported)."""
+    out, dropped, redacted = {}, [], 0
     for key, sec in sections.items():
         keep = []
         for line in sec["body"].splitlines():
+            clean, kinds = redact_secrets(line)
+            redacted += len(kinds)
             if is_unsafe_text(line):
-                dropped.append(line.strip())
+                dropped.append(clean.strip())
             else:
-                keep.append(line)
+                keep.append(clean)
         body = "\n".join(keep).strip()
         if body:
             out[key] = {"title": sec["title"], "body": body}
-    return out, dropped
+    return out, dropped, redacted
 
 
 _ITEM = re.compile(r"^\s*(?:[-*•]|\d+[.)])\s+(.*)$")
@@ -618,9 +621,9 @@ def prepare(env: HandoffEnv, note: Optional[str] = None, *, transcript=None,
 
     repo = git_state(env.repo)
     commits, total = git_commits(repo["root"], since=since) if repo else ([], 0)
-    sections, dropped, carried_from = {}, [], None
+    sections, dropped, redacted, carried_from = {}, [], 0, None
     if note and note.strip():
-        sections, dropped = screen_note(parse_note(note))
+        sections, dropped, redacted = screen_note(parse_note(note))
     elif prev and prev.get("note"):
         sections = {k: v for k, v in prev["note"].items() if k in _CARRY}
         carried_from = prev_at or None
@@ -643,7 +646,7 @@ def prepare(env: HandoffEnv, note: Optional[str] = None, *, transcript=None,
         "session": {"id": sid, "transcript": str(tpath) if tpath else "", **stats},
         "since": since, "since_label": since_label,
         "repo": repo, "commits": commits, "commits_total": total,
-        "note": sections, "dropped": dropped, "carried_from": carried_from,
+        "note": sections, "dropped": dropped, "redacted": redacted, "carried_from": carried_from,
         "memory": memory, "env": environment(env, log_offset, repo.get("root")),
         "next_query": query,
         "next_memory": next_memory(env.graph, env.embedder, query) if memory is not None else "",
@@ -852,6 +855,8 @@ def render_handoff(h: dict) -> str:
     if h.get("dropped"):
         lines += [f"*{len(h['dropped'])} line(s) of the note left out by the memory policy "
                   "(security-sensitive — restate them in the session).*", ""]
+    if h.get("redacted"):
+        lines += [f"*{h['redacted']} credential(s) redacted from the note.*", ""]
     lines += ["## Repository", ""] + _repo_lines(repo, h.get("commits") or [], h.get("commits_total", 0),
                                                  h.get("since_label", "")) + [""]
     if h.get("memory") is not None:
@@ -861,7 +866,7 @@ def render_handoff(h: dict) -> str:
         lines += ["## Memory for the next task", "", h["next_memory"], ""]
     if h.get("pages"):
         lines += ["## Relevant files / pages", ""] + [f"- {p}" for p in h["pages"]] + [""]
-    return "\n".join(lines).rstrip() + "\n"
+    return redact_secrets("\n".join(lines).rstrip() + "\n")[0]     # a last pass over the derived parts too
 
 
 def _since_lines(h: dict, state: dict) -> list:
@@ -955,4 +960,5 @@ def render_brief(h: dict, state: dict, others=(), path=None, max_chars: Optional
         blocks.append("Relevant files: " + " · ".join(state["pages"]))
     if state.get("next_memory"):
         blocks.append("Memory for the next task:\n" + state["next_memory"])
+    blocks = [redact_secrets(b)[0] for b in blocks]       # a last pass over the derived parts too
     return _fit(blocks, f"Full handoff: {path}" if path else "", max_chars)

@@ -725,6 +725,24 @@
   to one memory project each see only their own (`same_repo`), the latest overwrites; − not measured: whether a
   session with the brief starts better than one without (no eval set yet).
 
+### ADR-37
+**Credentials are redacted wherever text enters memory; the instruction policy matches normalized text.** *(v0.99)*
+- **Context:** the P0 policy ([ADR-30](#adr-30)) keeps instructions out of memory, not credentials: a pasted key
+  could become a fact injected into every later prompt and kept on disk (graph, journal, handoff). The review series
+  found redaction in Mem0's plugin, Cognee and Hindsight, and Hermes' threat scan showed two evasions our patterns
+  missed: full-width and zero-width characters.
+- **Decision:** `policy.redact_secrets` — provider formats, private keys, JWTs, URL passwords, bearer tokens and
+  credential assignments — runs on the transcript before capture, on facts in `remember()`, on journal records, in
+  `wiki_remember` and on the handoff note; `sleep` rewrites older facts. A fact that was only a credential is dropped.
+  `is_unsafe_text` matches NFKC-normalized text without zero-width characters and refuses bidirectional overrides.
+- **Alternatives:** drop any fact or session that holds a secret — loses the rest of the text; an entropy detector —
+  flags commit hashes and ids; an LLM check — model judgments of memory were measured unreliable ([ADR-30](#adr-30),
+  [ADR-32](#adr-32)); redaction at storage only — the capture model and the journal file would still see the secret.
+- **Consequences:** + 0 false positives on 1,486 real facts and 1.57 M characters of real session text, 0 changed
+  verdicts, the eval sets untouched (`docs/path-b-memory.md` §13.14); − only known formats and recognizable contexts
+  are caught — a bare secret without a known shape or a credential name is not; − embeddings of facts stored before
+  stay as computed.
+
 ---
 *Chapter complete. The Path-B agent-memory direction landed via ADR-14/15/16/17/18/19; the graph then
 deepened (ADR-22 typed relations + relation-aware GraphRAG, ADR-23 entity resolution), gained
@@ -736,6 +754,7 @@ deepened (ADR-22 typed relations + relation-aware GraphRAG, ADR-23 entity resolu
 poisoning (ADR-30, P0), **cue-trigger recall** for implicit constraints (ADR-31, P1) and policy-based
 **forgetting** in a nightly sleep pass (ADR-32), **agent-recorded state** against stale facts (ADR-33), recall
 recency as a tie-breaker set by the **LoCoMo** benchmark (ADR-34), a live context sized by measurement on its own
-path (ADR-35), and a **session handoff** of derived state + the agent's note (ADR-36). §11
+path (ADR-35), a **session handoff** of derived state + the agent's note (ADR-36), and **credential redaction** with
+a normalized instruction policy (ADR-37). §11
 debts D1/D2/D6 are resolved. Deep designs in `docs/path-b-memory.md` and `docs/RAG-vs-GraphRAG.md`. New significant
 decisions should be appended here with the next id.*

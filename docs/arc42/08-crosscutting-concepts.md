@@ -115,9 +115,11 @@ The system assumes a **trusted local host** (§3.3, §11 R1):
   exposed); the one write tool, `wiki_remember` (`[memory] agent_writes`), only queues memory facts to the journal.
 - **Memory hygiene** — memory is injected into every prompt, so it is a persistence path for injected
   instructions. A **source-independent** policy (ADR-30) drops security-sensitive facts on *every* write path
-  (capture, `remember`, the journal, `wiki_remember`), and `sleep` re-applies it to older facts (ADR-32).
+  (capture, `remember`, the journal, `wiki_remember`), and `sleep` re-applies it to older facts (ADR-32); it matches
+  NFKC-normalized text, so full-width or invisible characters can't slip an instruction past it (ADR-37).
 - **`--dry-run`** — edits can be previewed (no file write, no graph sync) before committing.
-- **No secrets** — no API keys anywhere (local Ollama, ADR-2); nothing to leak.
+- **No secrets** — OpenWiki needs no API keys (local Ollama, ADR-2), and a credential pasted into a session is
+  redacted before it reaches the capture model, the journal, the graph or a handoff (ADR-37).
 
 ## 8.13 Extensibility recipes
 

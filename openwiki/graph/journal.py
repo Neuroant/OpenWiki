@@ -24,6 +24,8 @@ import time
 from pathlib import Path
 from typing import Optional
 
+from ..policy import REDACTED, redact_secrets
+
 
 def journal_path(db_path) -> Path:
     """The op-journal sidecar for a graph DB file. Named off the DB file so it travels
@@ -71,6 +73,11 @@ def append_remember(path, session_id, facts, now: Optional[int] = None,
             vf, card = (f[3], f[4]) if len(f) >= 5 else (None, "one")
             src = f[5] if len(f) >= 6 else None
         s, p, o = str(s).strip(), str(p).strip(), str(o).strip()
+        # P0: a credential never reaches the journal file (it stays on disk until the next fold); a
+        # fact that was nothing but a credential is dropped
+        s, p, o = (redact_secrets(x)[0] for x in (s, p, o))
+        if REDACTED in (s, o):
+            continue
         if s and p and o:
             if src is not None:                   # P0 provenance travels with the fact
                 triples.append([s, p, o, None if vf is None else int(vf), card or "one", src])

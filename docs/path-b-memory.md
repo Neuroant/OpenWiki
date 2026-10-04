@@ -1364,6 +1364,36 @@ the live context — the hooks assemble k = 8 within a 2,000-character budget, a
 suggests trying a larger k there, measured on that path (→ §13.12). LoCoMo now: **overall J 60.7 %** with a local
 30B (Mem0 reports ≈ 67 % with GPT-4o-mini — and both are generous-judge numbers).
 
+### 13.14 Credential redaction and a hardened policy (v0.99)
+
+The P0 policy kept instructions out of memory, not credentials: a key pasted into a session could be captured ("the
+deploy token is …"), injected into every later prompt, and kept on disk in the graph, the journal and the handoff.
+Mem0's plugin, Cognee and Hindsight redact before storage, and Hermes blocks hardcoded secrets
+(`memory-systems-review.md`, the cross-series table; first fix of the plan in `agent-memory-summary.md`). Now
+`policy.redact_secrets` replaces credentials with `[REDACTED]`:
+- **provider formats**, whole: OpenAI, Anthropic, GitHub, GitLab, AWS access keys, Google API keys, Slack, Stripe,
+  Hugging Face, npm and PyPI tokens, private-key blocks, JWTs;
+- **credentials behind a context**, which is kept: a password in a URL, a bearer token, a `name = value` assignment
+  whose name says credential (`api_key`, `DB_PASSWORD`, `"secret":`) when the value looks like one — not an
+  environment-variable name (`OPENAI_API_KEY`), a reference (`os.environ.get`) or a placeholder ("your-key-here").
+
+It runs wherever text enters memory: on the transcript **before the capture model sees it**, on every fact in
+`remember()` (a fact that was nothing but a credential is dropped), on journal records before they reach the file, in
+`wiki_remember` (the agent is told what was redacted or refused) and on the handoff note. `sleep` rewrites facts
+stored before this version — history and forgotten facts included, since archiving would keep the secret on disk;
+their embeddings stay as computed.
+
+The instruction policy now matches **normalized** text — Unicode NFKC, zero-width characters removed — so full-width
+letters ("ｉｇｎｏｒｅ …") or invisible characters ("ig\u200bnore …") no longer slip an instruction past it, and text
+with bidirectional-override characters is refused outright (as Hermes' threat scan does).
+
+**Measured.** On the dogfooding memory (1,486 facts, history included) and on the dogfooding session as capture sees
+it (3,854 turns, 1.57 M characters of a coding conversation that discussed tokens, keys and this very policy):
+**0 redactions** — no false positives — and **0 changed P0 verdicts**; no fact contains an invisible character. The
+eval sets (poisoning, cue-trigger, temporal, code) are untouched — 0 redactions and 0 changed verdicts over 427 lines —
+so their results stand without a re-run. Recall is shown on the known formats in `tests/test_redaction.py`; the real
+data held no secret, so how often a real one would have been captured is not measured.
+
 ### 13.13 Capture coverage — the hooks capture a whole session (v0.97)
 
 The host hook captured `parse_claude_transcript(text)` — the transcript's **last 20,000 characters** — at each

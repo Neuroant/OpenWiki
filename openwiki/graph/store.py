@@ -1186,18 +1186,27 @@ class GraphStore:
             raise RuntimeError("GraphStore is read-only; open it writable to remember.")
         facts = list(facts)
         empty = {"facts": 0, "added": 0, "duplicates": 0, "superseded": 0,
-                 "retracted": 0, "historical": 0, "resolved": 0, "scrubbed": 0}
+                 "retracted": 0, "historical": 0, "resolved": 0, "scrubbed": 0, "redacted": 0}
         if not facts:
             return empty
         if embedder is None:
             raise ValueError("remember needs an embedder.")
         # P0: the rule scrubber is the last line of defense for facts arriving by any path (journal,
-        # a caller that skipped capture's audit) — an injected instruction never becomes memory
-        from .memory import is_unsafe_instruction
-        scrubbed = sum(1 for f in facts if is_unsafe_instruction(f))
-        facts = [f for f in facts if not is_unsafe_instruction(f)]
+        # a caller that skipped capture's audit) — an injected instruction never becomes memory, and a
+        # credential is redacted (a fact that was nothing but a credential is dropped)
+        from .memory import is_secret_only, is_unsafe_instruction, redact_fact
+        kept, redacted, secret_only = [], 0, 0
+        for f in facts:
+            f, kinds = redact_fact(f)
+            if kinds and is_secret_only(f):
+                secret_only += 1
+                continue
+            redacted += bool(kinds)
+            kept.append(f)
+        scrubbed = secret_only + sum(1 for f in kept if is_unsafe_instruction(f))
+        facts = [f for f in kept if not is_unsafe_instruction(f)]
         if not facts:
-            return dict(empty, scrubbed=scrubbed)
+            return dict(empty, scrubbed=scrubbed, redacted=redacted)
         now = int(now if now is not None else time.time())
         sdate = int(session_date) if session_date is not None else session_date_of(session_id)
         # recency counts from when the fact was *said* (a backfilled session), not from when it was
@@ -1208,7 +1217,7 @@ class GraphStore:
         norms[norms == 0] = 1.0
         emb = emb / norms
         self._ensure_memory_schema(emb.shape[1])
-        n = dict(empty, facts=len(facts), scrubbed=scrubbed)
+        n = dict(empty, facts=len(facts), scrubbed=scrubbed, redacted=redacted)
         with self._lock:
             self._exec("MERGE (s:Session {id:$id}) ON CREATE SET s.created_at=$t, s.session_date=$d;",
                        {"id": session_id, "t": now, "d": sdate})
@@ -1515,6 +1524,37 @@ class GraphStore:
                 out.append({"id": r["id"], "subject": r["subject"], "predicate": r["predicate"],
                             "object": r["object"], "session_id": r["session_id"], "reason": why})
         return out
+
+    def redact_credentials(self, dry_run: bool = False) -> int:
+        """P0 for facts stored before credentials were redacted (v0.99): rewrite every assertion whose
+        subject, predicate or object holds a credential — history and forgotten facts included, since
+        archiving would keep the secret on disk — with the credential replaced by "[REDACTED]" (the
+        attribute key follows a changed subject or predicate; embeddings are left as they are). Returns
+        how many; ``dry_run`` only counts (read-only is enough then)."""
+        from .memory import MemoryFact, redact_fact
+        hits = []
+        for r in self._load_assertions():
+            fact = MemoryFact(r["subject"], r["predicate"], r["object"])
+            red, kinds = redact_fact(fact)
+            if kinds or red != fact:
+                hits.append((r, red))
+        if dry_run or not hits:
+            return len(hits)
+        if not self.writable:
+            raise RuntimeError("GraphStore is read-only; open it writable to redact.")
+        with self._lock:
+            for r, f in hits:
+                attr = r.get("attr")             # None on graphs older than the B9 column — left alone
+                if attr is not None and (f.subject, f.predicate) != (r["subject"], r["predicate"]):
+                    attr = attr_key(f.subject, f.predicate)
+                params = {"id": r["id"], "s": f.subject, "p": f.predicate, "o": f.object}
+                if attr is not None:
+                    self._exec("MATCH (a:Assertion {id:$id}) SET a.subject=$s, a.predicate=$p, a.object=$o, "
+                               "a.attr=$k;", dict(params, k=attr))
+                else:
+                    self._exec("MATCH (a:Assertion {id:$id}) SET a.subject=$s, a.predicate=$p, a.object=$o;",
+                               params)
+        return len(hits)
 
     def forget(self, ids, reason: str, now: Optional[int] = None) -> int:
         """Archive assertions (sleep): stamp ``forgotten_at`` + ``forgotten`` (the reason). Nothing is

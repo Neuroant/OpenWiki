@@ -287,7 +287,8 @@ multi-hop +8.8, single-hop +6.2 (paired, p ≈ 6·10⁻¹³). A hand audit of 60
 no false negatives, 5 lenient false positives (dates off by days) → treat J as generous (≈ −7 points) (§13.11).
 
 **Sleep — nightly memory maintenance + forgetting** (Path B++): one schedulable writable pass — fold what
-read-only processes queued (usage + journal) → **forget** what the memory policy says not to keep → re-consolidate
+read-only processes queued (usage + journal) → redact credentials in facts stored before v0.99 → **forget** what the
+memory policy says not to keep → re-consolidate
 the themes over what's left → decay the usage edges. Forgetting is **policy-based archiving**, not decay: one-off
 session events ("vX | was pushed and tagged | yes", commit hashes, "server | is serving | v0.78.0", tautologies —
 `memory.is_ephemeral`, pure rules) plus the P0 policy re-applied to facts captured before it. A forgotten fact
@@ -742,6 +743,18 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   `examples/eval_poisoning.jsonl` (5 injection scenarios with a payload that must not reach the assembled
   context + 3 legit user conventions/decisions that must survive): leaks 2/5 → **0/5**, legit 8/8 kept; 0 of
   1,446 real dogfooding facts would be scrubbed (`docs/path-b-memory.md` §13.1, arc42 ADR-30).
+  **Credential redaction + a hardened policy (v0.99):** `policy.redact_secrets` replaces credentials with
+  `[REDACTED]` — provider keys and tokens (OpenAI, Anthropic, GitHub, GitLab, AWS, Google, Slack, Stripe, Hugging Face,
+  npm, PyPI), private-key blocks, JWTs, passwords in URLs, bearer tokens and `name = value` credential assignments (a
+  value that is an env-var name, a reference or a placeholder is kept) — in the transcript **before capture**
+  (`capture_session_detailed(…, report=)` → `"redacted"`), in `remember()` (`memory.redact_fact`; a fact that was
+  nothing but a credential is dropped and counted `scrubbed`, others are counted `redacted`), in the journal file
+  (`append_remember`), in `wiki_remember` and in the handoff note; `sleep` rewrites facts stored before
+  (`GraphStore.redact_credentials`, history included). `is_unsafe_text` now matches **normalized** text (NFKC,
+  zero-width characters removed — full-width letters or "ig\u200bnore" no longer slip past) and refuses
+  bidirectional overrides. Measured: 0 redactions (no false positives) and 0 changed verdicts on the 1,486 real facts
+  and on the 1.57 M characters of the dogfooding session as capture sees it; the eval sets are untouched (0
+  redactions, 0 changed verdicts), so their results stand (`docs/path-b-memory.md` §13.14, arc42 ADR-37).
   **P1 cue-trigger recall (v0.87):** a constraint mentioned in passing ("can't stand noisy open-plan offices")
   shares no words with the later request it should shape ("book a venue"), so similarity recall misses it.
   `memory.constraint_probes(chat, request)` — one short deterministic call, fail-soft (any error → `[]`) —
@@ -1124,8 +1137,10 @@ http — count, p50/p95, total time, token in/out) + a live recent-events table,
   `_fit`). `HandoffEnv` carries the repo, the project and the opened graph / embedder / index — the CLI
   (`_handoff_env`), the MCP server (`_mcp_handoff`) and the SessionStart hook (`_hook_resume`) pass them in, so the
   module imports neither Kuzu nor NumPy.
-- **`openwiki/policy.py`** — the P0 security-sensitive memory policy (`UNSAFE_PATTERNS`, `is_unsafe_text`), pure and
-  shared by `graph.memory.is_unsafe_instruction` (capture, `remember`), `wiki_remember` and the handoff note.
+- **`openwiki/policy.py`** — the P0 security-sensitive memory policy (`UNSAFE_PATTERNS`, `is_unsafe_text` on
+  NFKC-normalized text without zero-width characters; bidirectional overrides refused) and credential redaction
+  (`redact_secrets` → `REDACTED`), pure and shared by `graph.memory.is_unsafe_instruction` / `redact_fact` (capture,
+  `remember`), the journal, `wiki_remember` and the handoff note.
 - **`openwiki/cli.py`** — argparse CLI with `init`, `build`, `status`, `project`
   (`list`/`use`/`add`/`remove`/`add-source`), `opencode`, `claude-code`, `ontology`, `ingest`,
   `build-wiki`, `index`, `search`, `eval`, `ask` (`--global` = global search),

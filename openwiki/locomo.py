@@ -232,7 +232,7 @@ def run_locomo(conversations, work_dir, open_graph: Callable, embedder, chat, ju
                categories=None, budget_s: Optional[float] = None, coexist=None, resolve=None,
                on_progress: Optional[Callable] = None, now_mode: str = "present",
                answer_style: str = "infer", capture_style: str = "durable", lexical: float = 0.0,
-               temporal: float = 0.0, reuse_base: bool = False, merge: str = "checks") -> dict:
+               temporal: float = 0.0, reuse_base: bool = False, merge: str = "checks", episodes: int = 0) -> dict:
     """Capture + remember each conversation (once — resumable per session), then answer + score its questions
     (resumable per question). ``open_graph(path)`` returns a **writable** memory graph at ``path`` (created if
     absent). Stops when ``budget_s`` seconds are spent (``complete: False``); the next call continues.
@@ -243,9 +243,11 @@ def run_locomo(conversations, work_dir, open_graph: Callable, embedder, chat, ju
     alone → dense), that variant's answer is copied (``"reused": true``) instead of asked again — the prompt would
     be identical, so a paired comparison gains no noise where nothing changed. ``merge``: ``checks`` (production —
     ``coexist`` / ``resolve`` as given), ``tags`` (neither LLM check) or ``add-only`` (every fact ``"many"``, no checks:
-    nothing superseded) — an ablation; use a separate ``work_dir`` per mode. Returns ``{"complete",
-    "records", "summary"}`` over every answered question in ``work_dir``."""
-    from .graph.memory import MemoryFact, assemble_context, capture_session
+    nothing superseded) — an ablation; use a separate ``work_dir`` per mode. ``episodes`` (v0.106): one dated
+    narrative per session (``memory.narrate_session``, kept in ``episodes.jsonl``, written once — resumable like the
+    capture) and the ``episodes`` most similar to each question shown next to its facts, in date order. Returns
+    ``{"complete", "records", "summary"}`` over every answered question in ``work_dir``."""
+    from .graph.memory import MemoryFact, assemble_context, capture_session, narrate_session
 
     t0 = time.time()
     work = Path(work_dir)
@@ -260,7 +262,7 @@ def run_locomo(conversations, work_dir, open_graph: Callable, embedder, chat, ju
         core = "".join(f"-{t}" for t in (now_mode if now_mode != "present" else "", answer_style,
                                          f"k{recall_k}" if recall_k != 10 else "") if t)
         lex_tag = f"-lex{lexical:g}" if lexical else ""
-        tag = core + lex_tag + (f"-tw{temporal:g}" if temporal else "")
+        tag = core + lex_tag + (f"-tw{temporal:g}" if temporal else "") + (f"-ep{episodes}" if episodes else "")
         ans_path = cdir / f"answers{tag}.jsonl"             # each variant keeps its own answers
         base_tag, base_kw = ((core + lex_tag, {"lexical": lexical}) if temporal else (core, {}))
         base_answers = ({r["i"]: r for r in _read_jsonl(cdir / f"answers{base_tag}.jsonl")}
@@ -280,6 +282,16 @@ def run_locomo(conversations, work_dir, open_graph: Callable, embedder, chat, ju
                 fh.write(json.dumps({"sid": s.sid, "facts": captured[s.sid]}, ensure_ascii=False) + "\n")
             if on_progress:
                 on_progress(f"{conv.sample_id}: captured {len(captured)}/{len(conv.sessions)} sessions")
+        ep_path = cdir / "episodes.jsonl"
+        narrated = {r["sid"]: r for r in _read_jsonl(ep_path)} if episodes else {}
+        for s in (conv.sessions if episodes and todo_q else []):          # 1b. episodes (chat only)
+            if s.sid in narrated or over():
+                continue
+            text = _retry(lambda: narrate_session(chat, s.text, session_date=s.date))
+            narrated[s.sid] = {"sid": s.sid, "date": s.date, "text": text}
+            with ep_path.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(narrated[s.sid], ensure_ascii=False) + "\n")
+        ep_list = [narrated[s.sid] for s in conv.sessions if s.sid in narrated] if episodes else []
         ready = []                                   # remember in order: the captured prefix only
         for s in todo_s:
             if s.sid not in captured:
@@ -303,8 +315,15 @@ def run_locomo(conversations, work_dir, open_graph: Callable, embedder, chat, ju
                     done_path.write_text(json.dumps(done), encoding="utf-8")
                     if on_progress:
                         on_progress(f"{conv.sample_id}: remembered {len(done)}/{len(conv.sessions)} sessions")
-                if len(done) == len(conv.sessions) and todo_q and not over():
+                if len(done) == len(conv.sessions) and todo_q and not over() and \
+                        (not episodes or len(ep_list) == len(conv.sessions)):
                     emb.warm(queries=[q.question for _, q in todo_q])                 # 4. one embed batch
+                    ep_vecs = None
+                    if ep_list:
+                        import numpy as np
+                        ep_vecs = np.asarray(emb.embed_documents([e["text"] for e in ep_list]), dtype=np.float32)
+                        ep_vecs /= np.where(np.linalg.norm(ep_vecs, axis=1, keepdims=True) == 0, 1.0,
+                                            np.linalg.norm(ep_vecs, axis=1, keepdims=True))
                     now = conv.present if now_mode == "present" else None
                     for i, q in todo_q:                                              # 5. answer + judge
                         if over():
@@ -316,7 +335,13 @@ def run_locomo(conversations, work_dir, open_graph: Callable, embedder, chat, ju
                                 [h["id"] for h in graph.recall(q.question, emb, k=recall_k, now=now, **base_kw)]:
                             rec = dict(base, reused=True)                # the same prompt: the same answer
                         else:
-                            ctx = assemble_context("", hits, [], max_facts=recall_k)
+                            shown = []
+                            if ep_vecs is not None:
+                                qv = np.asarray(emb.embed_query(q.question), dtype=np.float32)
+                                qv /= np.linalg.norm(qv) or 1.0
+                                best = sorted(np.argsort(-(ep_vecs @ qv))[:episodes])
+                                shown = sorted((ep_list[n] for n in best), key=lambda e: e.get("date") or 0)
+                            ctx = assemble_context("", hits, [], max_facts=recall_k, episodes=shown)
                             raw = _retry(lambda: chat.chat(build_answer_messages(q.question, ctx,
                                                                                  answer_style))) or ""
                             pred = re.sub(r"<think>.*?</think>", "", raw, flags=re.S).strip()

@@ -57,6 +57,7 @@
 | [39](#adr-39) | The remembered tier is portable — a COGX archive and a Markdown view; LadybugDB is the migration target after three changes | Accepted (Path B++) | portability (R10) |
 | [40](#adr-40) | Hybrid recall: BM25 as a recall aid within the dense pool, the dense order kept | Accepted (Path B++) | relevance, Q5 |
 | [41](#adr-41) | The question's time window: facts from the period a question names may enter recall | Accepted (Path B++) | relevance, Q5 |
+| [42](#adr-42) | Episodes next to facts — measured on LoCoMo, the live path measured before it gets them | Accepted (Path B++) | correctness, efficiency, Q5 |
 
 ---
 
@@ -849,6 +850,23 @@ changes.** *(v0.102; builds on [ADR-16](#adr-16); mitigates R10)*
   adversarial questions about a period for the wrong person got the other person's event from it (adversarial 84.5 →
   83.9 %, n.s.); on the coding memory it rarely fires (2 of 269 real prompts name a time).
 
+### ADR-42
+**Episodes next to facts — measured on LoCoMo; the live path is measured before it gets them.** *(v0.106; follows
+[ADR-35](#adr-35))*
+- **Context:** atomic facts lose order, participants, reasons and the dates of things mentioned in passing; temporal
+  questions were the weakest LoCoMo category. Nemori, Hindsight and waku keep episodes next to facts.
+- **Decision:** one dated narrative per session (`memory.narrate_session` — 3–6 sentences, relative dates resolved),
+  the most similar `m` shown after a query's facts in date order (`assemble_context(…, episodes=)`). Measured in the
+  harness (`eval --locomo --episodes M`); not yet in the live path, where it would cost a model call per capture window
+  and several hundred tokens per prompt for a single-user coding memory — that path gets its own measurement first.
+- **Alternatives:** a detail sentence per fact — no narrative order, and more calls; segmenting sessions into several
+  episodes (Nemori) — more calls for a first test; raw transcripts — far longer, and outside the memory tier by design
+  (credentials, instructions); episodes on by default everywhere at once — unmeasured where they would cost most.
+- **Consequences:** + with 3 episodes LoCoMo overall J 62.9 → 74.7 % (+226 / −45, p ≈ 3·10⁻³⁰), temporal 48.3 →
+  64.2 %, single-hop 68.6 → 81.6 % — the largest gain of the series. − Adversarial questions 83.9 → 71.5 %: a narrative
+  holds both speakers' days and the model attributes one's actions to the other (49 of 61 losses; 12 rejected the
+  premise instead of abstaining). − A model call per session at write time (≈ 7 s on LoCoMo).
+
 ---
 *Chapter complete. The Path-B agent-memory direction landed via ADR-14/15/16/17/18/19; the graph then
 deepened (ADR-22 typed relations + relation-aware GraphRAG, ADR-23 entity resolution), gained
@@ -863,6 +881,7 @@ recency as a tie-breaker set by the **LoCoMo** benchmark (ADR-34), a live contex
 path (ADR-35), a **session handoff** of derived state + the agent's note (ADR-36), **credential redaction** with
 a normalized instruction policy (ADR-37), and **writes that land during a session** — per-call readers, two-phase
 writers (ADR-38), **portable memory** — a COGX export / import, a Markdown view and a LadybugDB spike (ADR-39), and
-**hybrid recall** — BM25 as a recall aid within the dense pool (ADR-40), and **the question's time window** (ADR-41). §11
+**hybrid recall** — BM25 as a recall aid within the dense pool (ADR-40), **the question's time window** (ADR-41), and
+**episodes** next to facts, measured on the benchmark first (ADR-42). §11
 debts D1/D2/D6 are resolved. Deep designs in `docs/path-b-memory.md` and `docs/RAG-vs-GraphRAG.md`. New significant
 decisions should be appended here with the next id.*

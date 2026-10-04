@@ -274,6 +274,9 @@ def _build_argparser() -> argparse.ArgumentParser:
                              "(\"in July 2023\", \"last week\"; default: production's, 0.1; 0 = off). With --locomo "
                              "the answers go to their own -twW file, and unchanged recalls copy the answer of the run "
                              "without it.")
+    eval_p.add_argument("--episodes", type=int, default=0, metavar="M",
+                        help="--locomo: write one dated narrative per session (one chat call each, kept in "
+                             "episodes.jsonl) and show the M most similar to each question next to its facts.")
     eval_p.add_argument("--merge", choices=("checks", "tags", "add-only"), default="checks",
                         help="--locomo / --cross-session: the memory merge — checks (production: the coexistence "
                              "check and attribute resolution, two LLM calls), tags (the capture's cardinality tags "
@@ -1973,7 +1976,7 @@ def _locomo_eval(args: argparse.Namespace) -> int:
                      capture_style=args.capture_style,
                      lexical=RECALL_WEIGHT if args.recall_lexical is None else max(0.0, args.recall_lexical),
                      temporal=WINDOW_WEIGHT if args.recall_window is None else max(0.0, args.recall_window),
-                     reuse_base=True, merge=args.merge)
+                     reuse_base=True, merge=args.merge, episodes=max(0, args.episodes))
     s = res["summary"]
     state = "complete" if res["complete"] else "partial — re-run to continue"
     print(f"\nLoCoMo  [{len(res['records'])} answered question(s), {state}, {res['seconds']}s this run]")

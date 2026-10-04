@@ -300,7 +300,12 @@ recall +2.2 over the v0.95 baseline (66 / 32, p < 0.001) (§13.19). **The add-on
 checks | tags | add-only` (also for `--cross-session`; an experiment option — use a separate `--work` dir per mode)
 drops the merge's two LLM checks (`tags`) or all supersession (`add-only`); `run_locomo(merge=)`,
 `run_cross_session_eval(merge=)`, `eval.merge_facts`. LoCoMo hardly notices (add-only 63.8 % vs 62.9 %, n.s.); the
-temporal set does (checks 13 / 13, add-only 12 / 13, tags 10 / 13) → the checks stay (§13.21).
+temporal set does (checks 13 / 13, add-only 12 / 13, tags 10 / 13) → the checks stay (§13.21). **Episodes
+(v0.106):** `--episodes M` writes one dated narrative per session (`memory.narrate_session`, prompt `EPISODE_SYSTEM`:
+3–6 sentences, relative dates resolved; one chat call per session, kept in `episodes.jsonl`) and shows the M most
+similar to each question after its facts, in date order (`assemble_context(…, episodes=)`). With 3: overall J 62.9 →
+**74.7 %** (+226 / −45, p ≈ 3·10⁻³⁰; temporal 48.3 → 64.2 %, single-hop 68.6 → 81.6 %), adversarial 83.9 → 71.5 % (a
+narrative holds both speakers' days). Harness only — the live path is measured first (§13.22, ADR-42).
 
 **Sleep — nightly memory maintenance + forgetting** (Path B++): one schedulable writable pass — fold what
 read-only processes queued (usage + journal) → redact credentials in facts stored before v0.99 → **forget** what the

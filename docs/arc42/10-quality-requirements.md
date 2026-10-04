@@ -63,7 +63,7 @@ Scenarios are written as *stimulus → expected response* so they can be checked
 
 ## 10.3 Current evidence & gaps
 
-- **Met:** QS-2 (the suite — **675 tests** — runs offline, and in **CI** on every push across Python
+- **Met:** QS-2 (the suite — **680 tests** — runs offline, and in **CI** on every push across Python
   3.11–3.13 + a Docker build, ADR-24); QS-5 (four findings in `docs/RAG-vs-GraphRAG.md`, incl. hybrid
   winning on a code corpus); QS-11 by the metrics collector (ADR-20 — per-call latency/tokens in the CLI,
   System tab, and per-build-stage); QS-13 by the world-model analysis toolkit (ADR-25, §8.19 — `owiki
@@ -98,7 +98,8 @@ Scenarios are written as *stimulus → expected response* so they can be checked
   episodic capture style was measured and not adopted (v0.94: +2.8 on 4 conversations, p ≈ 0.26, at ~2× cost); a
   recall budget of 20 facts (v0.95) took overall J to **60.7 %** (+117 / −29 paired, p ≈ 6·10⁻¹³), hybrid recall (v0.103)
   to **61.6 %** (+47 / −34, p ≈ 0.18 — adopted for the live path, ADR-40), the question's time window (v0.104) to
-  **62.9 %** (+24 / −3, p ≈ 5·10⁻⁵, ADR-41). A hand audit of 60
+  **62.9 %** (+24 / −3, p ≈ 5·10⁻⁵, ADR-41); one dated episode per session next to the facts (v0.106, harness only)
+  to **74.7 %** (+226 / −45, p ≈ 3·10⁻³⁰; adversarial 83.9 → 71.5 %, ADR-42). A hand audit of 60
   judgments: the judge agrees 51/60, never rejects a right answer, accepts 8 % wrong ones (dates off by days) — J is
   generous by ~7 points, paired comparisons stand. QS-20 is met by the harness itself.
 - **Not formally measured (performance):** there is no latency/throughput *budget* yet — though the

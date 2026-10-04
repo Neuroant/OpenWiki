@@ -78,7 +78,8 @@ Patterns most of the twelve share — and OpenWiki does not, yet:
    after the session ended, because its MCP server held the graph read-only (found by the v0.98 handoff).
 4. **Richer units than atomic facts.** Six store more context per memory: waku's episodes, Graphiti's sagas, Mem0's
    rich memories, Cognee's lessons with reasons, Hindsight's 5W facts, Nemori's dated narratives. Our weakest LoCoMo
-   category, temporal questions (45.8 %), is where dated narratives help most.
+   category, temporal questions (45.8 %), is where dated narratives help most — measured in v0.106: 48.3 → 64.2 %
+   with one narrative per session next to the facts (§13.22 of `path-b-memory.md`).
 5. **Memory types, procedures among them.** Five keep memory types apart (waku, Letta, Hindsight, MIRIX, memory-champ);
    seven keep procedural memory (skills, error → fix pairs, rewritten prompts). We keep one fact store.
 6. **Interpretation derived over immutable facts.** Hindsight's observations, Graphiti's summaries and our themes keep
@@ -162,7 +163,10 @@ already have, then changes that only real sessions can judge. Each names where i
    they stay:** on LoCoMo the merge hardly matters (add-only 63.8 % vs 62.9 %, n.s.), on the temporal set it does
    (checks 13 / 13, add-only 12 / 13 — no retraction —, tags alone 10 / 13) (`path-b-memory.md` §13.21).
 9. **Episodes next to facts** — one dated narrative per session, retrieved with the facts (Nemori, Hindsight, waku);
-   aimed at the temporal category.
+   aimed at the temporal category. **Measured in v0.106 — the largest gain:** 3 episodes next to the facts took
+   LoCoMo overall J 62.9 → 74.7 % (+226 / −45; temporal 48.3 → 64.2 %, single-hop 68.6 → 81.6 %), adversarial 83.9 →
+   71.5 % (narratives hold both speakers' days). In the harness; the live path is next, measured there first
+   (`path-b-memory.md` §13.22).
 
 **Changes judged in real sessions**
 

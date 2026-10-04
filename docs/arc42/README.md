@@ -5,7 +5,7 @@ This is the architecture documentation for **OpenWiki**, structured after the
 into 12 sections, from goals and constraints down to building blocks, runtime, decisions,
 quality, and risks.
 
-> **Status: COMPLETE** (maintained through v0.105). All 12 chapters are complete; diagrams use Mermaid
+> **Status: COMPLETE** (maintained through v0.106). All 12 chapters are complete; diagrams use Mermaid
 > (rendered by GitHub) and have been validated. The **Path B agent-memory** direction is complete
 > (B0–B6; ADR-14–19). Since then the architecture has grown eight more decision clusters (§9), all
 > reflected here: the graph **deepened** — typed `Entity→Entity` relations + relation-aware GraphRAG
@@ -31,7 +31,8 @@ quality, and risks.
 > **writes that land during a session** — per-call readers and two-phase writers (ADR-38, QS-23) — and **portable
 > memory**: a COGX export / import and a Markdown view, with a LadybugDB spike for R10 (ADR-39, QS-24) — and **hybrid
 > recall**, BM25 as a recall aid within the dense pool (ADR-40, QS-25), and **the question's time window** favouring
-> facts from the period a question names (ADR-41, QS-26). Deep detail: `docs/path-b-memory.md`, `docs/RAG-vs-GraphRAG.md`.
+> facts from the period a question names (ADR-41, QS-26) — and dated **episodes**, measured on the benchmark first
+> (ADR-42). Deep detail: `docs/path-b-memory.md`, `docs/RAG-vs-GraphRAG.md`.
 >
 > **Open risk:** Kuzu, the embedded graph store, was archived upstream in 2025-10 — tracked as §11 **R10**
 > (pinned to 0.11; a memory export and a LadybugDB spike are the planned mitigations).

@@ -183,3 +183,32 @@ def test_the_merge_ablation_drops_the_checks(tmp_path):
     check = lambda *a: True                                             # noqa: E731
     lc.run_locomo(convs, tmp_path / "checks", _Graph, _Emb(), _Chat(), coexist=check, resolve=check)
     assert all(kw["coexist"] is check for kw in _Graph.remember_kw)       # production keeps both checks
+
+
+class _NarratingChat(_Chat):
+    """Also narrates sessions (episodes) and remembers the contexts it answered from."""
+    contexts: list = []
+
+    def chat(self, messages):
+        from openwiki.graph.memory import EPISODE_SYSTEM
+        system, user = messages[0]["content"], messages[-1]["content"]
+        if system == EPISODE_SYSTEM:
+            return ("On 19 May 2023, Bob ran a marathon." if "marathon" in user
+                    else "On 8 May 2023, Ann adopted a cat named Tom.")
+        if system in lc.ANSWER_STYLES.values():
+            type(self).contexts.append(user)
+        return super().chat(messages)
+
+
+def test_episodes_are_written_once_and_shown_next_to_the_facts(tmp_path):
+    convs = lc.load_locomo(_data(tmp_path))
+    _Graph.store, _NarratingChat.contexts = {}, []
+    res = lc.run_locomo(convs, tmp_path / "work", _Graph, _Emb(), _NarratingChat(), episodes=1)
+    cdir = tmp_path / "work" / "conv-x"
+    eps = [json.loads(x) for x in (cdir / "episodes.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert [e["sid"] for e in eps] == ["conv-x-s1", "conv-x-s2"] and eps[1]["text"].startswith("On 19 May 2023")
+    assert (cdir / "answers-infer-ep1.jsonl").is_file() and res["complete"]
+    marathon = next(c for c in _NarratingChat.contexts if "marathon" in c.split("Question:")[-1])
+    assert "## Episodes" in marathon and "On 19 May 2023, Bob ran a marathon." in marathon   # the closest one
+    lc.run_locomo(convs, tmp_path / "work", _Graph, _Emb(), _NarratingChat(), episodes=1)    # resumable
+    assert len((cdir / "episodes.jsonl").read_text(encoding="utf-8").splitlines()) == 2      # not written twice

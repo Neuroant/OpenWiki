@@ -424,8 +424,44 @@ def _fit_section(header: str, lines: list, budget) -> tuple:
     return ("\n".join(out), used) if len(out) > 1 else ("", 0)
 
 
+# -- episodes: one dated narrative per session (v0.106) -------------------------------------
+# Atomic facts lose what connects them — the order of events, who was there, why, and the dates of things mentioned in
+# passing. An episode keeps a session as a short narrative with every relative date resolved, retrieved next to the
+# facts (Nemori, Hindsight, waku keep such episodes).
+
+EPISODE_SYSTEM = (
+    "You write one dated episode for a long-term memory: a short narrative of one conversation session. "
+    "Write 3 to 6 sentences in English, third person, past tense, beginning with the session's date "
+    "(\"On 8 May 2023, ...\"). Say who did, felt, planned or shared what — keep names, places, numbers, objects "
+    "and reasons. Whenever someone mentions an event at another time, give that event's absolute date or period, "
+    "resolved from the session date (\"yesterday\" → \"on 7 May 2023\", \"last year\" → \"in 2022\", "
+    "\"last week\" → \"in the week before 8 May 2023\"). Leave out greetings and small talk. "
+    "Reply with the paragraph only.")
+_EPISODES_HEADER = "## Episodes — what happened in a session"
+
+
+def _day_words(epoch: int) -> str:
+    from datetime import datetime, timedelta, timezone
+    d = datetime(1970, 1, 1, tzinfo=timezone.utc) + timedelta(seconds=int(epoch))   # pre-1970 safe on Windows
+    return f"{d.day} {d.strftime('%B')} {d.year}"
+
+
+def build_episode_messages(transcript: str, session_date: Optional[int] = None) -> list:
+    """Messages asking the chat model for a session's dated narrative (``EPISODE_SYSTEM``)."""
+    head = f"Session date: {_day_words(session_date)}\n\n" if session_date is not None else ""
+    return [{"role": "system", "content": EPISODE_SYSTEM}, {"role": "user", "content": head + transcript}]
+
+
+def narrate_session(chat, transcript: str, session_date: Optional[int] = None) -> str:
+    """One dated episode for a session — a 3–6 sentence narrative, relative dates resolved (``EPISODE_SYSTEM``);
+    credentials are redacted before the model sees the transcript. ``""`` on an empty answer."""
+    transcript, _ = redact_secrets(transcript)
+    raw = chat.chat(build_episode_messages(transcript, session_date)) or ""
+    return " ".join(_THINK.sub("", raw).split())
+
+
 def assemble_context(identity: str, facts: list, themes: list, max_facts: int = 8,
-                     max_themes: int = 4, max_chars=None) -> str:
+                     max_themes: int = 4, max_chars=None, episodes=None) -> str:
     """B6: assemble a session's context from the **three memory tiers** — identity (DNA),
     the activated facts (``recall`` — the epigenetic tier), and the relevant consolidated
     themes (B5 ``MemoryConcept``s — the attractor tier). Pure + **fail-soft**: any tier may
@@ -434,7 +470,8 @@ def assemble_context(identity: str, facts: list, themes: list, max_facts: int = 
     With ``max_chars`` set, fit within an approximate budget (~4 chars/token): **identity**
     first (truncated if it alone overflows), then **facts** (the majority share — the primary
     signal), then **themes** (whatever remains). Graceful truncation, facts prioritized over
-    themes; ``max_chars=None`` keeps the prior count-only behavior."""
+    themes; ``max_chars=None`` keeps the prior count-only behavior. ``episodes`` (dicts with ``text``, v0.106) are
+    the dated session narratives retrieved for the query, shown after the facts, before the themes."""
     facts = list(facts)[:max_facts]
     themes = list(themes)[:max_themes]
     # P1 cue-trigger: facts a constraint probe surfaced get their own section, *before* the rest — a
@@ -476,6 +513,13 @@ def assemble_context(identity: str, facts: list, themes: list, max_facts: int = 
         blocks.append(fact_block)
         if remaining is not None:
             remaining = max(0, remaining - fact_used - 2)
+
+    episode_lines = [f"- {(e.get('text') or '').strip()}" for e in (episodes or []) if (e.get("text") or "").strip()]
+    episode_block, episode_used = _fit_section(_EPISODES_HEADER, episode_lines, remaining)
+    if episode_block:
+        blocks.append(episode_block)
+        if remaining is not None:
+            remaining = max(0, remaining - episode_used - 2)
 
     theme_block, _ = _fit_section(_THEMES_HEADER, theme_lines, remaining)
     if theme_block:

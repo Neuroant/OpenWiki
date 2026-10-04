@@ -873,7 +873,7 @@ errs toward "different thing" (safe: fragmentation over a wrong merge); descript
 extra coexistence calls; subject identity is only inferred inside a resolved group (no general
 subject resolution).
 
-## 13. Memory hygiene, implicit recall and the LoCoMo benchmark (built v0.86 to v0.105)
+## 13. Memory hygiene, implicit recall and the LoCoMo benchmark (built v0.86 to v0.106)
 
 *Planned from the cognitive-agent report (B10+); every item below was built or measured — see §13.1–13.12.*
 
@@ -1369,6 +1369,45 @@ The largest single step so far ("Not mentioned" on single-hop 219 → 178). **Ad
 the live context — the hooks assemble k = 8 within a 2,000-character budget, a per-prompt token cost; the finding
 suggests trying a larger k there, measured on that path (→ §13.12). LoCoMo now: **overall J 60.7 %** with a local
 30B (Mem0 reports ≈ 67 % with GPT-4o-mini — and both are generous-judge numbers).
+
+### 13.22 Episodes next to facts (v0.106) — the largest gain, measured on LoCoMo
+
+Atomic facts lose what connects them: the order of events, who was there, why, and the dates of things mentioned in
+passing ("I went to a support group yesterday" becomes "Caroline | attended | LGBTQ support group"). Nemori,
+Hindsight and waku keep an **episode** next to their facts. Plan item 9 tested the simplest form: one dated narrative
+per session, written by the local model (`memory.narrate_session`, prompt `EPISODE_SYSTEM`: 3–6 sentences, third
+person, past tense, starting with the session's date, names / places / numbers / reasons kept, every relative date
+resolved — "the previous day, on 7 May 2023", "a sunset painting she had completed in 2022"). One call per session —
+≈ 7 s each, the 272 LoCoMo sessions in ≈ 30 min. For each question the `m` episodes most similar to it are shown after
+its 20 facts, in date order (`assemble_context(…, episodes=)`; the harness: `eval --locomo --episodes M`, kept in
+`episodes.jsonl`, written once).
+
+**Offline** (gold-answer words in the context, categories 1–4; facts with their dates spelled out the way episodes write
+them): 0.565 → 0.646 / 0.680 / **0.698** with 1 / 2 / 3 episodes; a time-window bonus for episodes added nothing.
+Fixed before the answers: 3 episodes.
+
+**Answers**, paired against production recall (hybrid + time window) on the same graphs:
+
+| category (n) | facts | + 3 episodes | + / − |
+|---|---|---|---|
+| multi-hop (282) | 67.4 % | 72.3 % | 30 / 16 (p ≈ 0.054) |
+| temporal (321) | 48.3 % | **64.2 %** | 61 / 10 (p ≈ 5·10⁻¹⁰) |
+| open-domain (96) | 49.0 % | 56.2 % | 14 / 7 |
+| single-hop (841) | 68.6 % | **81.6 %** | 121 / 12 (p ≈ 8·10⁻²⁴) |
+| **overall 1–4** | **62.9 %** | **74.7 %** | **226 / 45 (p ≈ 3·10⁻³⁰)** |
+| adversarial (446) | 83.9 % | 71.5 % | 6 / 61 |
+
+By far the largest gain of the series — since v0.95 overall J 60.7 → 74.7 %, and temporal, the weakest category, 45.8 →
+64.2 %. The cost is in the adversarial questions, which ask about one speaker what the other did: of the 61 losses, 12
+reject the premise ("Oscar did not hide a bone; Oliver did" — right, but not the abstention the scorer counts), 49
+answer as if it were true — a narrative holds both speakers' days, and the model hands one's actions to the other.
+
+**Not in the live path yet.** In a coding session an episode would cost an extra model call per capture window (in the
+background worker) and several hundred tokens per prompt, while the coding memory has one user, no speaker swaps, and
+questions that rarely ask for a narrative — none of it measured. As with the context size (ADR-35), that is measured
+on the live path first: episodes stored in the graph next to their session, written by the capture worker, recalled
+within the context budget, and judged on real prompts against the facts they would displace (ADR-42). The harness keeps
+`--episodes` (default 0: the benchmark follows production).
 
 ### 13.21 The add-only ablation — the merge's LLM checks stay (v0.105)
 

@@ -74,8 +74,8 @@ Patterns most of the twelve share — and OpenWiki does not, yet:
 2. **The raw record stays searchable.** Seven keep raw sessions or episodes next to the extracted memory (Graphiti,
    Letta, Mem0, Cognee, Hindsight, AriGraph, Hermes). Our transcripts stay outside the memory tier.
 3. **Memory is written while the conversation runs.** Seven write during the session (waku, Mem0, Letta, Cognee,
-   LangMem, Hindsight, Hermes). We capture at compaction and session end — and those writes land only after the session
-   ends, because its MCP server holds the graph read-only (found by the v0.98 handoff).
+   LangMem, Hindsight, Hermes). We capture at compaction and session end — and until v0.100 those writes landed only
+   after the session ended, because its MCP server held the graph read-only (found by the v0.98 handoff).
 4. **Richer units than atomic facts.** Six store more context per memory: waku's episodes, Graphiti's sagas, Mem0's
    rich memories, Cognee's lessons with reasons, Hindsight's 5W facts, Nemori's dated narratives. Our weakest LoCoMo
    category, temporal questions (45.8 %), is where dated narratives help most.
@@ -103,7 +103,6 @@ judgments of memory unreliable — a poisoning audit, a forgetting review, three
 **Behind** — where the series converges and OpenWiki does not:
 - **retrieval** — dense-only, single-hop, no reranker, no time window: most of the distance to Hindsight is here;
 - **the unit of memory** — atomic facts lose the narrative and the dates that temporal questions need;
-- **writes during a session**;
 - **procedural memory**;
 - **portability** — memory lives only in a Kuzu file, and Kuzu is archived upstream (R10).
 
@@ -126,7 +125,9 @@ already have, then changes that only real sessions can judge. Each names where i
    untouched (`path-b-memory.md` §13.14).
 2. **Writes land during a session.** The MCP server folds the journal itself when idle: release the read connection,
    fold writable, reopen (Hermes, Letta). Check: in a live session the journal drains within minutes of idling, and no
-   reader sees an error.
+   reader sees an error. **Done in v0.100**, differently: readers hold the graph per call and writers lock only to
+   apply (two phases) — the write lock on the real queue fell from 276 s to 7.2 s with an identical result, and an
+   agent write landed 7.6 s after the call in a live session (`path-b-memory.md` §13.15).
 3. **No memory for chore prompts.** Skip the injection for "push", "push and tag …" and slash commands (Hermes). Check:
    16 % fewer injections on the dogfooding prompts, the cue-trigger set unchanged.
 4. **Portable memory.** A COGX export and a git-tracked Markdown view written at `sleep`, together with the LadybugDB

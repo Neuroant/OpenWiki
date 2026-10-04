@@ -36,6 +36,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Optional
 
+from .embeddings import CachingEmbedder  # noqa: F401  (re-exported: the harness's embed-ahead cache)
+
 CATEGORIES = {1: "multi-hop", 2: "temporal", 3: "open-domain", 4: "single-hop", 5: "adversarial"}
 NOT_MENTIONED = "Not mentioned"
 _MONTHS = {m: i for i, m in enumerate(
@@ -209,37 +211,6 @@ def summarize(records) -> dict:
 
 
 # -- the resumable runner ---------------------------------------------------------------
-
-class CachingEmbedder:
-    """Wraps an embedder and remembers every vector it produced, so embeddings can be computed **in one
-    batch** ahead of the calls that need them (``warm``) — the store's own ``embed_documents`` /
-    ``embed_query`` calls are then served without touching the model server."""
-
-    def __init__(self, inner) -> None:
-        self.inner = inner
-        self.name = getattr(inner, "name", "embedder")
-        self._docs: dict = {}
-        self._queries: dict = {}
-
-    def warm(self, docs=(), queries=()) -> None:
-        import numpy as np
-        todo = [t for t in dict.fromkeys(docs) if t not in self._docs]
-        if todo:
-            for t, v in zip(todo, np.asarray(self.inner.embed_documents(todo))):
-                self._docs[t] = v
-        for q in dict.fromkeys(queries):
-            if q not in self._queries:
-                self._queries[q] = np.asarray(self.inner.embed_query(q))
-
-    def embed_documents(self, texts):
-        import numpy as np
-        self.warm(docs=texts)
-        return np.vstack([self._docs[t] for t in texts]) if texts else np.zeros((0, 0), dtype=np.float32)
-
-    def embed_query(self, text):
-        self.warm(queries=[text])
-        return self._queries[text]
-
 
 def _retry(fn, pause: float = 20.0):
     """One retry after a pause: a long local run meets transient model-server failures (measured: an

@@ -931,6 +931,12 @@ The **genuine gaps**, measure-first as always:
   set (paired, 2 captures, no probes) the cue reached the context 8/16 → 16/16 and the constraint was applied
   7/16 → 12/16 (+5 / −0). Adopted: `[memory] context_k` (default 16) + `context_budget` 2,000 → 3,000; facts may
   use theme budget the themes don't need. `path-b-memory.md` §13.12.
+- **Writes land during a session (v0.100).** Fix 2 of the review series' plan. Long-running readers — the MCP server,
+  `serve`, `chat`, `ask` — hold the graph only per call (`LazyGraph`, ≈ 70 ms an open), and memory writes run in two
+  phases: plan read-only with memoized model checks and cached embeddings (`remember` / `fold_journal` gained
+  `dry_run`), then apply under the write lock from the cache. On the real queue the write lock fell from 276 s to
+  7.2 s with an identical result; `wiki_remember` now spawns a fold worker, and a write landed 7.6 s after the call
+  while the MCP server kept running. ADR-38, `docs/path-b-memory.md` §13.15.
 - **Credential redaction and a hardened policy (v0.99).** The first fix of the plan from the agent-memory review
   series: credentials are redacted wherever text enters memory — in the transcript before capture, in `remember()`,
   in the journal file, in `wiki_remember` and in the handoff note — and `sleep` rewrites facts stored before.

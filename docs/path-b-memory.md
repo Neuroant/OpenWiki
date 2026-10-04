@@ -1364,6 +1364,38 @@ the live context — the hooks assemble k = 8 within a 2,000-character budget, a
 suggests trying a larger k there, measured on that path (→ §13.12). LoCoMo now: **overall J 60.7 %** with a local
 30B (Mem0 reports ≈ 67 % with GPT-4o-mini — and both are generous-judge numbers).
 
+### 13.15 Writes land during a session (v0.100)
+
+Kuzu is reader-XOR-writer across processes, and three long-running processes held the graph read-only for their
+whole life: the MCP server (for an entire coding session), `serve` and `chat`. Every write meanwhile — the hook
+capture at a compaction, the agent's `wiki_remember`, a nightly `sleep` — could only queue to the journal and landed
+when the session ended; the first session handoff found 144 facts waiting (v0.98), and Hermes' docs name the pattern:
+memory "needs session boundaries" (`memory-systems-review.md` §12). Fixed on both sides of the lock:
+- **Readers hold the graph only per call.** `LazyGraph` (`openwiki/graph/lazy.py`) has the interface of a read-only
+  `GraphStore` but opens one per call (≈ 70 ms on the dogfooding graph) and closes it again; overlapping calls (the
+  web server's threads) share one connection. Used by the MCP server, `serve`, `chat` and `ask`; a call waits up to
+  15 s for a writer.
+- **Writers hold the write lock only to apply.** `remember` and `fold_journal` gained `dry_run`: the merge runs in
+  full — model checks included — without writing, on a read-only connection. A two-phase write (`cli._write_memory`)
+  plans that way with memoized checks (`store.memoized`) and a caching embedder, then opens writable and runs the same
+  merge, answered from the cache. Planning reads the current state each time, so the write pass is never stale —
+  whatever another writer changed in between is simply planned anew. Used by the capture worker, `remember`, the
+  `serve` / `chat` folds and the fold worker.
+- **Agent writes are folded at once.** After `wiki_remember` queues an op, the MCP server spawns a detached fold worker
+  (`owiki hook fold`); a 5 s debounce lets a burst of writes land in one fold.
+
+The journal stays the fallback when the graph remains locked for a minute — a build, `serve --sync`, `backfill` or a
+long `sleep`, the passes that still hold the write lock across model calls. The plan in `agent-memory-summary.md` had
+the MCP server fold the journal itself when idle; that would have kept the session-long lock (captures and `sleep`
+still blocked) and stalled the server's requests during its own fold, so both sides of the lock were changed instead.
+
+**Measured** on a copy of the dogfooding memory, folding its real queue (16 ops — 156 facts added, 4 closed — with the
+real model checks): the old single-phase fold held the write lock for **276 s**; two phases held it for **7.2 s**
+(254 s in total, 93 model calls instead of 91 — two checks between queued ops the plan could not foresee), and both
+produced **identical** memories (1,642 records, same content, status and validity). Live, on the copy: a
+`wiki_remember` write landed **7.6 s** after the call while the MCP server kept running (fold lock 0.14 s); the
+`wiki_memory` reads during the wait saw no error, and the running server served the new fact afterwards.
+
 ### 13.14 Credential redaction and a hardened policy (v0.99)
 
 The P0 policy kept instructions out of memory, not credentials: a key pasted into a session could be captured ("the

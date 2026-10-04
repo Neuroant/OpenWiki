@@ -40,8 +40,10 @@ from .graph import (
     detect_page_offset, extract_entities, extract_references, extract_references_multi,
     extract_relations, format_memory, resolve_entities, summarize_community, summarize_facts,
 )
-from .embeddings import OllamaEmbedder
-from .graph.journal import journal_path, pending_journal
+from .embeddings import CachingEmbedder, OllamaEmbedder
+from .graph.journal import append_remember, journal_path, pending_journal
+from .graph.lazy import LazyGraph
+from .graph.store import memoized
 from .graph.temporal import format_date, format_interval, parse_date
 from .graph.temporal import session_date as session_date_of
 from .handoff import CAPTURE_STATE_FILE, capture_watermark
@@ -562,10 +564,11 @@ def _build_argparser() -> argparse.ArgumentParser:
     hook_p = sub.add_parser("hook",
                             help="Host-lifecycle memory hook (reads the event JSON on stdin) — wired "
                                  "into Claude Code by `claude-code --hooks`, not run by hand.")
-    hook_p.add_argument("event", choices=["inject", "capture", "resume"],
+    hook_p.add_argument("event", choices=["inject", "capture", "resume", "fold"],
                         help="inject = UserPromptSubmit (recall → inject context); "
                              "capture = SessionEnd/PreCompact (remember the session); "
-                             "resume = SessionStart (inject the last session handoff).")
+                             "resume = SessionStart (inject the last session handoff); "
+                             "fold = fold queued memory writes now (spawned by the MCP server).")
     hook_p.add_argument("--project", default=None, metavar="DIR",
                         help="Bind the hook to this OpenWiki project (else: discovered from the "
                              "session's working directory — never the registry's active project).")
@@ -2049,14 +2052,11 @@ def _cmd_ask(args: argparse.Namespace) -> int:
 
     graph = None
     if not args.no_graph and args.graph.exists():
-        try:
-            graph = GraphStore(args.graph)
-            # B1: in Second Brain mode, a read-only ask records usage to the log for a
-            # later fold-in (serve/chat startup or `openwiki decay`) — reads teach the graph.
-            project = getattr(args, "project_obj", None)
-            graph.log_usage = bool(project is not None and project.memory_enabled)
-        except Exception as exc:
-            print(f"(graph not loaded: {exc})", file=sys.stderr)
+        # B1: in Second Brain mode, a read-only ask records usage to the log for a later fold-in
+        # (serve/chat startup or `openwiki decay`) — reads teach the graph. Opened per call, so the
+        # answer's generation holds no lock.
+        project = getattr(args, "project_obj", None)
+        graph = LazyGraph(args.graph, log_usage=bool(project is not None and project.memory_enabled))
 
     chat = OllamaChat(model=args.model, host=args.host, temperature=args.temperature)
     agent = RAGAgent(index, chat, top_k=args.top_k, graph=graph, expand_k=args.expand_k,
@@ -2142,10 +2142,12 @@ def _open_graph(path: Path, writable: bool, retries: int = 0, backoff: float = 0
     backoff — enough to ride out *transient* contention (two writers briefly racing,
     e.g. ``decay`` and a hook ``capture``). A writer blocked by a long-lived reader
     (a running read-only ``serve``) won't clear; those callers queue to the journal
-    instead. On a read-only open we don't retry (it only fails under a writer)."""
+    instead. A read-only open waits up to ``READ_WAIT`` seconds for a writer — writers hold the lock
+    only to apply (two-phase writes, ``_write_memory``), so that is seconds."""
     if not path.exists():
         return None
     attempt = 0
+    read_deadline = time.monotonic() + READ_WAIT
     while True:
         try:
             return GraphStore(path, writable=writable)
@@ -2161,8 +2163,97 @@ def _open_graph(path: Path, writable: bool, retries: int = 0, backoff: float = 0
                 except Exception as exc2:
                     print(f"(graph not loaded: {exc2})", file=sys.stderr)
                     return None
+            if time.monotonic() < read_deadline:
+                time.sleep(0.25)
+                continue
             print(f"(graph not loaded: {exc})", file=sys.stderr)
             return None
+
+
+WRITE_WAIT = 60.0    # s — a writer waits this long for readers to let go (they hold the graph per call only)
+READ_WAIT = 15.0     # s — a reader waits this long for a writer (writers hold the lock only to apply)
+
+
+def _open_writer(path: Path, wait: float = WRITE_WAIT):
+    """The graph opened **writable**, waiting up to ``wait`` seconds for readers to let go — the MCP
+    server, ``serve`` and ``chat`` hold it per call only (``LazyGraph``) — or ``None``."""
+    if path is None or not Path(path).exists():
+        return None
+    deadline, delay = time.monotonic() + wait, 0.2
+    while True:
+        try:
+            return GraphStore(path, writable=True)
+        except Exception:
+            if time.monotonic() >= deadline:
+                return None
+            time.sleep(delay)
+            delay = min(delay * 1.5, 2.0)
+
+
+def _open_reader(path: Path, wait: float = READ_WAIT):
+    """The graph opened read-only, waiting up to ``wait`` seconds for a writer to finish, or ``None``."""
+    if path is None or not Path(path).exists():
+        return None
+    deadline, delay = time.monotonic() + wait, 0.1
+    while True:
+        try:
+            return GraphStore(path)
+        except Exception:
+            if time.monotonic() >= deadline:
+                return None
+            time.sleep(delay)
+            delay = min(delay * 1.6, 1.0)
+
+
+def _write_memory(path: Path, embedder, session_id: Optional[str] = None, facts=None,
+                  session_date: Optional[int] = None, correct: bool = False, coexist=None,
+                  resolve=None, fold: bool = True, wait: float = WRITE_WAIT) -> Optional[dict]:
+    """Write to the remembered tier in **two phases**, so Kuzu's exclusive write lock is held for the
+    writes alone, not for the model calls: (1) plan on a read-only connection — ``remember`` /
+    ``fold_journal`` with ``dry_run``, the merge in full with its model checks memoized and its
+    embeddings cached; (2) open writable and run the same merge, its answers served from the cache
+    (``GraphStore.remember``). Folds queued usage and journal ops too (``fold``). Returns
+    ``{"remembered", "folded", "usage", "lock_s"}`` (``lock_s`` = how long the write lock was held), or
+    ``None`` when no writer could open the graph within ``wait`` — the facts are then queued to the
+    journal, nothing is lost."""
+    facts = list(facts or [])
+    cache = CachingEmbedder(embedder) if embedder is not None else None
+    coexist, resolve = memoized(coexist), memoized(resolve)
+    reader = _open_reader(path, wait=5.0)
+    if reader is not None:
+        try:     # the plan pass is an optimization: if it fails, the write pass asks the model itself
+            if facts and cache is not None:
+                reader.remember(session_id, facts, cache, session_date=session_date, correct=correct,
+                                coexist=coexist, resolve=resolve, dry_run=True)
+            if fold and cache is not None and reader.pending_ops():
+                reader.fold_journal(cache, coexist=coexist, resolve=resolve, dry_run=True)
+        except Exception:
+            pass
+        finally:
+            reader.close()
+    graph = _open_writer(path, wait=wait)
+    if graph is None:
+        if facts:
+            append_remember(journal_path(path), session_id, facts, session_date=session_date,
+                            correct=correct)
+        return None
+    out: dict = {"remembered": None, "folded": None, "usage": None}
+    started = time.monotonic()
+    try:
+        if facts:
+            out["remembered"] = graph.remember(session_id, facts, cache, session_date=session_date,
+                                               correct=correct, coexist=coexist, resolve=resolve)
+        if fold:
+            try:
+                out["usage"] = graph.fold_usage()
+                if cache is not None and graph.pending_ops():
+                    out["folded"] = graph.fold_journal(cache, coexist=coexist, resolve=resolve)
+            except Exception:
+                pass
+    finally:
+        graph.close()
+        out["lock_s"] = round(time.monotonic() - started, 2)
+    return out
 
 
 def _transient_fold(path: Path, embedder) -> None:
@@ -2173,22 +2264,15 @@ def _transient_fold(path: Path, embedder) -> None:
     writable pass. Needs an embedder to apply memory/reindex ops (usage folds regardless)."""
     if path is None or not Path(path).exists():
         return
-    graph = _open_graph(path, writable=True, retries=6)
-    if graph is None:
-        return
-    if not getattr(graph, "writable", False):
-        graph.close()
-        return
     try:
-        folded = graph.fold_usage()
-        ops = graph.fold_journal(embedder) if embedder is not None else {"records": 0}
-        if folded.get("records") or ops.get("records"):
-            print(f"(folded {folded.get('records', 0)} usage + {ops.get('records', 0)} "
-                  f"queued op(s) into the graph)", file=sys.stderr)
+        res = _write_memory(Path(path), embedder, fold=True, wait=5.0)
     except Exception:      # pragma: no cover - maintenance must never crash the command
-        pass
-    finally:
-        graph.close()
+        return
+    if res is not None:
+        usage = (res.get("usage") or {}).get("records", 0)
+        ops = (res.get("folded") or {}).get("records", 0)
+        if usage or ops:
+            print(f"(folded {usage} usage + {ops} queued op(s) into the graph)", file=sys.stderr)
 
 
 def _cmd_chat(args: argparse.Namespace) -> int:
@@ -2213,9 +2297,8 @@ def _cmd_chat(args: argparse.Namespace) -> int:
                 pass
     else:
         _transient_fold(args.graph, embedder)
-        graph = _open_graph(args.graph, writable=False)
-        if graph is not None and mem:
-            graph.log_usage = True
+        # opened per call (LazyGraph): a long chat no longer locks out writers
+        graph = LazyGraph(args.graph, log_usage=mem) if args.graph.exists() else None
     tools = WikiTools(args.wiki, index=index, graph=graph, embedder=embedder, dry_run=args.dry_run)
     chat = OllamaChat(model=args.model, host=args.host, temperature=args.temperature)
     agent = WikiAgent(chat, tools, wiki_summary=summarize_wiki(args.wiki))
@@ -2663,45 +2746,38 @@ def _cmd_remember(args: argparse.Namespace) -> int:
         index.embedder.host = args.host.rstrip("/")
     session_id = args.session or args.transcript.stem
     sdate = args.session_date if args.session_date is not None else session_date_of(session_id)
-    graph = _open_graph(args.graph, writable=True, retries=6)
-    if graph is None:
+    if not args.graph.exists():
         print(f"error: no graph at {args.graph} (run `openwiki graph-build` first).", file=sys.stderr)
         return 2
-    try:
-        chat = OllamaChat(model=args.model, host=args.host, temperature=0.2)
-        print(f"Capturing session '{session_id}' with {chat.name} …", file=sys.stderr)
-        rep: dict = {}
-        facts, dropped = capture_session_detailed(chat, args.transcript.read_text(encoding="utf-8"),
-                                                  session_date=sdate, report=rep)
-        if rep.get("redacted"):         # P0: credentials never reach the capture model
-            print(f"  ✗ redacted {rep['redacted']} credential(s) from the transcript before capture",
-                  file=sys.stderr)
-        for f in facts:
-            since = f"  (since {format_date(f.valid_from)})" if f.valid_from is not None else ""
-            many = "  [many]" if f.cardinality == "many" else ""
-            src = f"  <{f.source}>" if f.source else ""
-            print(f"  · {f.subject} {f.predicate} {f.object}{since}{many}{src}", file=sys.stderr)
-        for f in dropped:              # P0: injected instructions never become memory
-            print(f"  ✗ scrubbed (instruction-like): {f.subject} {f.predicate} {f.object}",
-                  file=sys.stderr)
-        if not getattr(graph, "writable", False):
-            # Locked by a running read-only serve/chat: queue to the journal instead of
-            # failing — the next writable pass (serve/chat restart, `openwiki decay`, or the
-            # next `remember`) folds it in. Writes are deferred, never lost.
-            n = graph.queue_remember(session_id, facts, session_date=sdate, correct=args.correct)
-            print(f"Graph busy (serve/chat running) — queued {n} fact(s) for '{session_id}' to the "
-                  f"journal; they'll be folded on the next writable pass → {args.graph}")
-            return 0
-        coexist = _coexist_check(args.model, args.host)
-        resolve = _attribute_resolver(args.model, args.host)
-        result = graph.remember(session_id, facts, index.embedder, session_date=sdate,
-                                correct=args.correct, coexist=coexist, resolve=resolve)
-        try:
-            graph.fold_journal(index.embedder, coexist=coexist, resolve=resolve)   # drain queued ops
-        except Exception:
-            pass
-    finally:
-        graph.close()
+    # capture first — the model call holds no graph lock
+    chat = OllamaChat(model=args.model, host=args.host, temperature=0.2)
+    print(f"Capturing session '{session_id}' with {chat.name} …", file=sys.stderr)
+    rep: dict = {}
+    facts, dropped = capture_session_detailed(chat, args.transcript.read_text(encoding="utf-8"),
+                                              session_date=sdate, report=rep)
+    if rep.get("redacted"):         # P0: credentials never reach the capture model
+        print(f"  ✗ redacted {rep['redacted']} credential(s) from the transcript before capture",
+              file=sys.stderr)
+    for f in facts:
+        since = f"  (since {format_date(f.valid_from)})" if f.valid_from is not None else ""
+        many = "  [many]" if f.cardinality == "many" else ""
+        src = f"  <{f.source}>" if f.source else ""
+        print(f"  · {f.subject} {f.predicate} {f.object}{since}{many}{src}", file=sys.stderr)
+    for f in dropped:              # P0: injected instructions never become memory
+        print(f"  ✗ scrubbed (instruction-like): {f.subject} {f.predicate} {f.object}",
+              file=sys.stderr)
+    # two phases: the model checks run on a read-only connection, the write lock is held to apply
+    res = _write_memory(args.graph, index.embedder, session_id=session_id, facts=facts,
+                        session_date=sdate, correct=args.correct,
+                        coexist=_coexist_check(args.model, args.host),
+                        resolve=_attribute_resolver(args.model, args.host))
+    if res is None:
+        # the graph stayed locked (a build, `serve --sync`, a long `sleep`): the facts are queued to the
+        # journal — the next writable pass folds them in. Writes are deferred, never lost.
+        print(f"Graph busy — queued {len(facts)} fact(s) for '{session_id}' to the journal; they'll be "
+              f"folded on the next writable pass → {args.graph}")
+        return 0
+    result = res["remembered"] or {"added": 0, "duplicates": 0, "facts": 0}
     sup = f", {result['superseded']} superseded" if result.get("superseded") else ""
     if result.get("retracted"):
         sup += f" ({result['retracted']} retracted)"
@@ -2713,7 +2789,7 @@ def _cmd_remember(args: argparse.Namespace) -> int:
         hist += f", {n_scrubbed} scrubbed"
     when = f" [session {format_date(sdate)}]" if sdate is not None else ""
     print(f"Remembered '{session_id}'{when}: {result['added']} new, {result['duplicates']} duplicate"
-          f"{sup}{hist} ({result['facts']} captured) → {args.graph}")
+          f"{sup}{hist} ({result['facts']} captured) → {args.graph}  (write lock {res['lock_s']} s)")
     print('  now try:  openwiki recall "<a question>"')
     return 0
 
@@ -3213,6 +3289,8 @@ def _run_hook(event: str, payload: dict, project_dir=None) -> None:
         _hook_inject(project, payload)
     elif event == "capture":
         _hook_capture(project, payload)
+    elif event == "fold":
+        _hook_fold(project, payload)
 
 
 def _hook_embedder(project: Project):
@@ -3236,7 +3314,9 @@ def _hook_inject(project: Project, payload: dict) -> None:
     if project.memory_probes:           # P1 cue-trigger: bounded so the 30 s hook still injects
         probes = _memory_probes(prompt, project.setting("models", "chat", DEFAULT_CHAT),
                                 project.setting("models", "host", DEFAULT_HOST))
-    graph = GraphStore(project.graph_path)   # read-only
+    graph = _open_reader(project.graph_path, wait=5.0)   # a writer applies in seconds
+    if graph is None:
+        return
     try:
         context = graph.context_for(prompt, embedder, identity=project.identity, k=project.context_k,
                                     max_chars=project.context_budget, probes=probes)
@@ -3299,14 +3379,21 @@ def _spawn_capture(project: Project, payload: dict) -> bool:
     ~1-min LLM call, longer than a host hook may run (SessionEnd/PreCompact are killed after their
     timeout). The event is parked under the project's ``.openwiki/``; the worker logs to
     ``.openwiki/hook.log``. Returns ``False`` if the spawn failed (→ capture inline instead)."""
+    return _spawn_worker(project, "capture", payload)
+
+
+def _spawn_worker(project: Project, event: str, payload: Optional[dict] = None) -> bool:
+    """Run ``owiki hook <event>`` as a **detached** worker for ``project`` (its payload parked under
+    ``.openwiki/``, its output in ``.openwiki/hook.log``) and return at once."""
     import subprocess
     try:
         state = project.state_dir
         state.mkdir(parents=True, exist_ok=True)
-        job = state / f"capture-{os.getpid()}-{int(time.time() * 1000)}.json"
-        job.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-        cmd = [sys.executable, "-m", "openwiki", "hook", "capture",
-               "--project", str(project.root), "--payload", str(job)]
+        cmd = [sys.executable, "-m", "openwiki", "hook", event, "--project", str(project.root)]
+        if payload is not None:
+            job = state / f"{event}-{os.getpid()}-{int(time.time() * 1000)}.json"
+            job.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+            cmd += ["--payload", str(job)]
         log = (state / "hook.log").open("a", encoding="utf-8")
         kw = {"stdin": subprocess.DEVNULL, "stdout": log, "stderr": log, "close_fds": True}
         if os.name == "nt":
@@ -3315,9 +3402,8 @@ def _spawn_capture(project: Project, payload: dict) -> bool:
             kw["start_new_session"] = True
         subprocess.Popen(cmd, **kw)
         return True
-    except Exception as exc:       # never let the hook fail — fall back to inline capture
-        print(f"openwiki hook: could not spawn capture worker ({exc}); capturing inline",
-              file=sys.stderr)
+    except Exception as exc:       # never let the hook fail — the caller falls back
+        print(f"openwiki hook: could not spawn the {event} worker ({exc})", file=sys.stderr)
         return False
 
 
@@ -3358,9 +3444,17 @@ def _acquire_capture_lock(project: Project, sid: str) -> Optional[Path]:
     """One capture worker per session at a time: a second worker would capture the same turns.
     Returns the lock file, or ``None`` when another live worker holds it (it picks up the new turns
     before it exits). A lock older than ``CAPTURE_LOCK_STALE_S`` is a crashed worker's and is taken over."""
-    lock = project.state_dir / f"capture-{_capture_lock_name(sid)}.lock"
+    return _acquire_worker_lock(project, f"capture-{_capture_lock_name(sid)}")
+
+
+def _acquire_worker_lock(project: Project, name: str, wait: float = 0.0) -> Optional[Path]:
+    """The worker lock ``.openwiki/<name>.lock`` (an exclusive create), waiting up to ``wait`` seconds
+    for a live holder to finish — or ``None``. A lock older than ``CAPTURE_LOCK_STALE_S`` is a crashed
+    worker's and is taken over."""
+    lock = project.state_dir / f"{name}.lock"
     lock.parent.mkdir(parents=True, exist_ok=True)
-    for _ in range(2):
+    deadline = time.monotonic() + wait
+    while True:
         try:
             fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
             os.write(fd, str(os.getpid()).encode())
@@ -3368,36 +3462,30 @@ def _acquire_capture_lock(project: Project, sid: str) -> Optional[Path]:
             return lock
         except FileExistsError:
             try:
-                if time.time() - lock.stat().st_mtime < CAPTURE_LOCK_STALE_S:
-                    return None
-                lock.unlink()
+                if time.time() - lock.stat().st_mtime >= CAPTURE_LOCK_STALE_S:
+                    lock.unlink()
+                    continue
             except OSError:
+                pass
+            if time.monotonic() >= deadline:
                 return None
-    return None
+            time.sleep(0.5)
 
 
 def _write_captured(project: Project, sid: str, facts, embedder, wdate: int,
                     model: str, host: str) -> None:
-    """Remember one window's facts — the graph is opened writable only for this short write — or
-    queue them to the journal when a serve/chat holds the lock; folds pending journal ops too."""
-    graph = _open_graph(project.graph_path, writable=True, retries=6)
-    if graph is None:
+    """Remember one window's facts in two phases (``_write_memory``) — the model checks run on a
+    read-only connection, the write lock is held only to apply — and fold pending journal ops; queued
+    to the journal when the graph stays locked."""
+    if not project.graph_path.exists():
         return
-    try:
-        if getattr(graph, "writable", False):
-            coexist = _coexist_check(model, host)
-            resolve = _attribute_resolver(model, host)
-            if facts:
-                graph.remember(sid, facts, embedder, session_date=wdate, coexist=coexist,
-                               resolve=resolve)
-            try:
-                graph.fold_journal(embedder, coexist=coexist, resolve=resolve)
-            except Exception:
-                pass
-        elif facts:
-            graph.queue_remember(sid, facts, session_date=wdate)   # locked → a later writer folds it
-    finally:
-        graph.close()
+    res = _write_memory(project.graph_path, embedder, session_id=sid, facts=facts, session_date=wdate,
+                        coexist=_coexist_check(model, host), resolve=_attribute_resolver(model, host))
+    if res is None:
+        print(f"openwiki hook: graph locked — {len(facts)} fact(s) of session {sid} queued to the journal",
+              file=sys.stderr)
+    else:
+        print(f"openwiki hook: wrote session {sid} (write lock held {res['lock_s']} s)", file=sys.stderr)
 
 
 def _hook_capture(project: Project, payload: dict) -> None:
@@ -3497,11 +3585,9 @@ def _handoff_env(project: Project, repo: Path, embed_timeout: Optional[float] = 
     host = model("host", DEFAULT_HOST).rstrip("/")
     graph, note = None, ""
     if project.graph_path.exists():
-        try:
-            graph = GraphStore(project.graph_path)
-        except Exception as exc:
-            note = ("locked by a writer (a capture worker, `serve --sync` or a build)"
-                    if "lock" in str(exc).lower() else str(exc)[:160])
+        graph = _open_reader(project.graph_path, wait=5.0)
+        if graph is None:
+            note = "locked by a writer (a build, `serve --sync` or a long `sleep`)"
     index = None
     if (project.index_dir / "index.json").is_file():
         try:
@@ -3637,6 +3723,47 @@ def _mcp_handoff(project: Project, graph, index, model: str, host: str, writes: 
     return run
 
 
+FOLD_DEBOUNCE_S = 5.0     # s — a burst of wiki_remember calls lands in one fold
+
+
+def _hook_fold(project: Project, payload: dict) -> None:
+    """Fold queued memory writes now — spawned by the MCP server after ``wiki_remember`` queues one,
+    so an agent's writes land within seconds instead of at session end. Two phases
+    (``_write_memory``): the model checks run on a read-only connection, the write lock is held only
+    to apply. One fold worker at a time (a second waits for the first, then folds what is left); a
+    short debounce lets a burst of writes land in one fold."""
+    lock = _acquire_worker_lock(project, "fold", wait=120.0)
+    if lock is None:
+        return
+    try:
+        time.sleep(FOLD_DEBOUNCE_S)
+        embedder = _hook_embedder(project)
+        if embedder is None or not project.graph_path.exists():
+            return
+        model = project.setting("models", "chat", DEFAULT_CHAT)
+        host = project.setting("models", "host", DEFAULT_HOST)
+        for _ in range(3):                          # writes may arrive while folding
+            queued = pending_journal(journal_path(project.graph_path))
+            if not queued:
+                break
+            res = _write_memory(project.graph_path, embedder, fold=True,
+                                coexist=_coexist_check(model, host),
+                                resolve=_attribute_resolver(model, host))
+            if res is None:
+                print(f"openwiki hook: graph locked — {queued} queued op(s) stay in the journal",
+                      file=sys.stderr)
+                break
+            folded = res.get("folded") or {}
+            print(f"openwiki hook: folded {folded.get('records', 0)} queued op(s) "
+                  f"({folded.get('remembered', 0)} fact(s) added, {folded.get('retired', 0)} closed) — "
+                  f"write lock held {res['lock_s']} s", file=sys.stderr)
+    finally:
+        try:
+            lock.unlink()
+        except OSError:
+            pass
+
+
 def _fold_pending_usage(graph) -> None:
     """B1: when a writable process starts, fold any read-path usage logged since the
     last writer into the graph (best-effort). No-op on a read-only/None graph or empty log."""
@@ -3677,9 +3804,9 @@ def _cmd_serve(args: argparse.Namespace) -> int:
                 pass
     else:
         _transient_fold(args.graph, embedder)      # absorb pending deferred writes first
-        graph = _open_graph(args.graph, writable=False)
-        if graph is not None and mem:
-            graph.log_usage = True                  # read-path reinforcement → journal
+        # opened per request (LazyGraph): a running server no longer locks out writers — captures,
+        # wiki_remember folds and `sleep` land while it serves
+        graph = LazyGraph(args.graph, log_usage=mem) if args.graph.exists() else None
 
     tools = WikiTools(args.wiki, index=index, graph=graph, embedder=embedder, dry_run=args.dry_run)
     chat = OllamaChat(model=args.model, host=args.host, temperature=args.temperature)
@@ -3710,14 +3837,12 @@ def _cmd_mcp(args: argparse.Namespace) -> int:
         if isinstance(index.embedder, OllamaEmbedder):
             index.embedder.host = args.host.rstrip("/")
     graph = None
+    project = getattr(args, "project_obj", None)
     if args.graph.exists():
-        try:
-            graph = GraphStore(args.graph)   # read-only: coding agents only read
-            # B1: log read-path usage in Second Brain mode (folded in on the next writer).
-            project = getattr(args, "project_obj", None)
-            graph.log_usage = bool(project is not None and project.memory_enabled)
-        except Exception as exc:
-            print(f"(graph not loaded: {exc})", file=sys.stderr)
+        # read-only and opened per call (LazyGraph): the server no longer holds the graph for the whole
+        # session, so hook captures, folds and `sleep` can write while it runs. B1: read-path usage is
+        # logged in Second Brain mode (folded in by the next writer).
+        graph = LazyGraph(args.graph, log_usage=bool(project is not None and project.memory_enabled))
 
     agent = None
     if index is not None and not args.no_ask:
@@ -3730,12 +3855,14 @@ def _cmd_mcp(args: argparse.Namespace) -> int:
     writes = bool(project is not None and project.memory_enabled and project.agent_writes)
     handoff = (_mcp_handoff(project, graph, index, args.model, args.host.rstrip("/"), writes)
                if project is not None else None)
+    # an agent's write lands within seconds: a detached worker folds the queue (two phases)
+    on_remember = (lambda: _spawn_worker(project, "fold")) if writes else None
     server = build_server(args.wiki, index=index, graph=graph, agent=agent,
                           version=__version__, identity=identity, context_budget=budget,
                           context_k=project.context_k if project is not None else 16,
                           memory_probes=bool(project is not None and project.memory_enabled
                                              and project.memory_probes),
-                          memory_writes=writes, handoff=handoff)
+                          memory_writes=writes, handoff=handoff, on_remember=on_remember)
     server.serve()   # blocks on stdio (JSON-RPC)
     return 0
 

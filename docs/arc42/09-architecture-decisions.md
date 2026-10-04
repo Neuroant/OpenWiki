@@ -743,6 +743,29 @@
   are caught — a bare secret without a known shape or a credential name is not; − embeddings of facts stored before
   stay as computed.
 
+### ADR-38
+**Readers hold the graph only per call; writers plan read-only and hold the write lock only to apply.** *(v0.100;
+refines [ADR-19](#adr-19))*
+- **Context:** [ADR-19](#adr-19) made writes queue instead of block under Kuzu's reader-XOR-writer lock — but the MCP
+  server, `serve` and `chat` held a read-only connection for their whole life, so writes during a coding session
+  landed only when it ended (the first handoff found 144 waiting; Hermes' docs say memory "needs session boundaries").
+  And a writer held the exclusive lock across its model checks — minutes for a real queue.
+- **Decision:** long-running readers use `LazyGraph` (open per call, ≈ 70 ms; overlapping calls share one connection;
+  a call waits up to 15 s for a writer). Memory writes run in two phases: plan with `remember` /
+  `fold_journal(dry_run=True)` on a read-only connection with memoized model checks and cached embeddings, then
+  apply under the write lock from the cache — re-planned from current state, so never stale. `wiki_remember` spawns
+  a fold worker. The journal stays the fallback.
+- **Alternatives:** the MCP server folds the journal itself when idle (the plan in `agent-memory-summary.md`) — keeps
+  the session-long lock, so captures and `sleep` still could not write, and its own fold would stall its requests;
+  recorded write statements replayed under the lock — stale when another writer intervenes, where re-planning with
+  cached answers never is; a store with real concurrent writes — R10's migration question, not this fix.
+- **Consequences:** + the write lock on the real queue fell from 276 s to 7.2 s with an identical result; an agent
+  write lands in ~8 s during a live session; captures and `sleep` no longer wait for the session to end. − ≈ 70 ms
+  per graph call for MCP / `serve` readers (several per `wiki_ask`), and per-connection caches are rebuilt per call;
+  − passes that still hold the write lock across model calls (`sleep`'s consolidation, `backfill`, `serve --sync`)
+  lock readers out while they run — readers wait 15 s, then degrade (the inject hook injects nothing for that
+  prompt).
+
 ---
 *Chapter complete. The Path-B agent-memory direction landed via ADR-14/15/16/17/18/19; the graph then
 deepened (ADR-22 typed relations + relation-aware GraphRAG, ADR-23 entity resolution), gained
@@ -754,7 +777,8 @@ deepened (ADR-22 typed relations + relation-aware GraphRAG, ADR-23 entity resolu
 poisoning (ADR-30, P0), **cue-trigger recall** for implicit constraints (ADR-31, P1) and policy-based
 **forgetting** in a nightly sleep pass (ADR-32), **agent-recorded state** against stale facts (ADR-33), recall
 recency as a tie-breaker set by the **LoCoMo** benchmark (ADR-34), a live context sized by measurement on its own
-path (ADR-35), a **session handoff** of derived state + the agent's note (ADR-36), and **credential redaction** with
-a normalized instruction policy (ADR-37). §11
+path (ADR-35), a **session handoff** of derived state + the agent's note (ADR-36), **credential redaction** with
+a normalized instruction policy (ADR-37), and **writes that land during a session** — per-call readers, two-phase
+writers (ADR-38). §11
 debts D1/D2/D6 are resolved. Deep designs in `docs/path-b-memory.md` and `docs/RAG-vs-GraphRAG.md`. New significant
 decisions should be appended here with the next id.*

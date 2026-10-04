@@ -63,8 +63,11 @@ sidecar rather than contend — reinforce pairs → `graph.usage.jsonl` (ADR-17)
 host-`capture` / a chat-edit's graph re-sync → `graph.journal.jsonl` (`queue_remember`/`queue_reindex`).
 A writer **folds** the journal (`fold_journal`) at `serve`/`chat` start+shutdown, in `decay`, or on the
 next `remember`; writable opens retry-with-backoff for transient contention. `--sync` opts back into a
-held-writable connection (live edit-sync, exclusive). This is the reachable ceiling under Kuzu —
-concurrent reads + never-blocked writes, not true simultaneity.
+held-writable connection (live edit-sync, exclusive). **Since v0.100 (ADR-38)** both sides hold the lock as
+briefly as possible: long-running readers (MCP server, `serve`, `chat`, `ask`) open the graph per call
+(`LazyGraph`), and memory writers plan on a read-only connection and take the write lock only to apply — so writes
+land during a session and the journal is the fallback, not the normal path. This is the reachable ceiling under
+Kuzu — concurrent reads + short, never-lost writes, not true simultaneity.
 
 ## 8.7 Configuration & settings resolution
 

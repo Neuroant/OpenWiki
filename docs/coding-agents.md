@@ -179,7 +179,8 @@ blocks a prompt):
 **Let the agent write memory (opt-in).** With `agent_writes = true` under `[memory]`, the MCP server also offers
 **`wiki_remember`**: the agent records facts — above all the **new state** when it changes something ("the web UI
 has ten tabs") — and lists in `replaces` the remembered facts that change makes outdated, copied as `wiki_memory`
-shows them. They are queued and land at the next write pass (session end, `owiki sleep`): the new facts are
+shows them. They are queued and land within seconds — the MCP server starts a background fold (at the latest at the
+next write pass, if the graph is busy): the new facts are
 remembered, the replaced ones closed (kept as history). This is how stale memory gets fixed — the local model can't
 reliably infer it afterwards (`docs/path-b-memory.md` §13.4–13.6). A line such as *"When you change something the
 memory describes, record the new state with wiki_remember and list the outdated facts in `replaces`"* in your

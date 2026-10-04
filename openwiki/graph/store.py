@@ -59,6 +59,25 @@ RESOLVE_THRESHOLD = 0.75              # min fact-embedding cosine for an attribu
 RESOLVE_K = 6                         # candidates shown to the attribute chooser
 
 
+def memoized(check):
+    """A model check (``coexist`` / ``resolve``) that keeps its answers, keyed by its arguments — so
+    the write pass of a two-phase write (see ``GraphStore.remember``'s ``dry_run``) asks the model
+    nothing the plan pass already asked. ``None`` stays ``None``."""
+    if check is None:
+        return None
+    answers: dict = {}
+
+    def frozen(value):
+        return tuple(frozen(v) for v in value) if isinstance(value, (list, tuple)) else value
+
+    def call(*args, **kwargs):
+        key = (frozen(args), tuple(sorted((k, frozen(v)) for k, v in kwargs.items())))
+        if key not in answers:
+            answers[key] = check(*args, **kwargs)
+        return answers[key]
+    return call
+
+
 def attr_key(subject: str, predicate: str) -> str:
     """The exact (pre-B9) attribute key of a fact: normalized subject ␟ lowercased predicate."""
     return f"{_normalize(subject)}{ATTR_SEP}{(predicate or '').strip().lower()}"
@@ -976,13 +995,17 @@ class GraphStore:
         return pending_journal(self._journal_path)
 
     def fold_journal(self, embedder, now: Optional[int] = None, coexist=None,
-                     resolve=None) -> dict:
+                     resolve=None, dry_run: bool = False) -> dict:
         """B1: drain the write-ahead journal (queued `remember` + `reindex` ops) into the
         graph and clear it. Writable-only; needs an ``embedder`` (facts + page chunks are
         embedded at fold time). A queued `remember` keeps the time it was *queued* as its
         record time (B7 — no drift to the fold time; ``now`` only fills in for records
-        without one). Best-effort per record — a bad op never aborts the batch."""
-        if not self.writable:
+        without one). Best-effort per record — a bad op never aborts the batch.
+
+        ``dry_run`` plans the fold on any store (read-only is enough): each queued `remember` runs
+        its merge — model checks included — without writing, nothing is retired or reindexed, and the
+        journal stays; with memoized checks it is the plan pass of a two-phase write (``remember``)."""
+        if not self.writable and not dry_run:
             raise RuntimeError("GraphStore is read-only; open it writable to fold the journal.")
         if embedder is None:
             raise ValueError("fold_journal needs an embedder.")
@@ -1009,18 +1032,20 @@ class GraphStore:
                                             # an agent write names what it replaces; the local
                                             # model's attribute matching grouped "web UI has ten
                                             # tabs" with "has project-aware UI" and closed it
-                                            resolve=None if rec.get("agent") else resolve)
+                                            resolve=None if rec.get("agent") else resolve,
+                                            dry_run=dry_run)
                         remembered += res.get("added", 0)
-                    if rec.get("retire"):             # wiki_remember's replaces → close them
+                    if rec.get("retire") and not dry_run:   # wiki_remember's replaces → close them
                         retired += self.retire(rec["retire"], at=int(rec.get("t") or now))
-                elif rec.get("op") == "reindex":
+                elif rec.get("op") == "reindex" and not dry_run:
                     slug = str(rec.get("slug") or "")
                     if slug:
                         self.upsert_page(slug, rec.get("text") or "", embedder=embedder)
                         reindexed += 1
             except Exception:      # pragma: no cover - one bad op never aborts the fold
                 continue
-        clear_journal(self._journal_path)
+        if not dry_run:
+            clear_journal(self._journal_path)
         return {"records": len(records), "remembered": remembered, "reindexed": reindexed,
                 "retired": retired}
 
@@ -1156,7 +1181,8 @@ class GraphStore:
 
     def remember(self, session_id: str, facts, embedder, now: Optional[int] = None,
                  session_date: Optional[int] = None, correct: bool = False,
-                 coexist=None, resolve=None, resolve_threshold: float = RESOLVE_THRESHOLD) -> dict:
+                 coexist=None, resolve=None, resolve_threshold: float = RESOLVE_THRESHOLD,
+                 dry_run: bool = False) -> dict:
         """B3 merge + B4 contradiction handling + **B7 bi-temporal validity**: embed each fact,
         persist Session + Assertion + ASSERTS, and slot each fact into the history of its
         (subject, predicate) by **valid time** (``temporal.plan_merge``), not processing order —
@@ -1181,8 +1207,16 @@ class GraphStore:
         members are nearest in embedding space (cosine ≥ ``resolve_threshold``, top
         ``RESOLVE_K``); if the chooser picks one, the fact joins that group (its ``attr``) — so
         "project | is versioned" and "project | has version" are merged by valid time instead of
-        both staying current. Counted as ``resolved``."""
-        if not self.writable:
+        both staying current. Counted as ``resolved``.
+
+        ``dry_run`` runs the whole merge — model checks included — without writing, on any store
+        (read-only is enough) and returns the counts it would produce. It is the plan pass of a
+        **two-phase write**: run it with :func:`memoized` checks (and a caching embedder) on a
+        read-only connection, then ``remember`` again on a writable one — the same merge, its model
+        answers served from the cache, so Kuzu's exclusive write lock is held for the writes alone
+        (seconds), not for the model calls. Planning reads the current state each time, so the write
+        pass is never stale: anything another writer changed in between is simply planned anew."""
+        if not self.writable and not dry_run:
             raise RuntimeError("GraphStore is read-only; open it writable to remember.")
         facts = list(facts)
         empty = {"facts": 0, "added": 0, "duplicates": 0, "superseded": 0,
@@ -1216,11 +1250,13 @@ class GraphStore:
         norms = np.linalg.norm(emb, axis=1, keepdims=True)
         norms[norms == 0] = 1.0
         emb = emb / norms
-        self._ensure_memory_schema(emb.shape[1])
+        run = (lambda query, params=None: None) if dry_run else self._exec   # dry run: plan, don't write
+        if not dry_run:
+            self._ensure_memory_schema(emb.shape[1])
         n = dict(empty, facts=len(facts), scrubbed=scrubbed, redacted=redacted)
         with self._lock:
-            self._exec("MERGE (s:Session {id:$id}) ON CREATE SET s.created_at=$t, s.session_date=$d;",
-                       {"id": session_id, "t": now, "d": sdate})
+            run("MERGE (s:Session {id:$id}) ON CREATE SET s.created_at=$t, s.session_date=$d;",
+                {"id": session_id, "t": now, "d": sdate})
             # Every record (current or not) grouped by attribute key (B9 ``attr``, else the exact
             # normalized subject+predicate): the merge needs the group's whole valid-time history.
             groups: dict = {}
@@ -1278,12 +1314,12 @@ class GraphStore:
                 # only; persisting it as "many" would exempt the records from supersession for good
                 card = fact.cardinality or ONE
                 for rid, vt in plan["close"]:              # the world changed at vf
-                    self._exec("MATCH (a:Assertion {id:$id}) SET a.valid_to=$vt;",
-                               {"id": rid, "vt": int(vt)})
+                    run("MATCH (a:Assertion {id:$id}) SET a.valid_to=$vt;",
+                        {"id": rid, "vt": int(vt)})
                     by_id[rid]["valid_to"] = int(vt)
                 for rid in plan["expire"]:                 # we were wrong: stop believing it
-                    self._exec("MATCH (a:Assertion {id:$id}) SET a.expired_at=$t;",
-                               {"id": rid, "t": now})
+                    run("MATCH (a:Assertion {id:$id}) SET a.expired_at=$t;",
+                        {"id": rid, "t": now})
                     by_id[rid]["expired_at"] = now
                 n["superseded"] += len(plan["close"]) + len(plan["expire"])
                 n["retracted"] += len(plan["expire"])
@@ -1291,9 +1327,9 @@ class GraphStore:
                     tgt = by_id[plan["target"]]
                     conf = reinforced_weight(tgt["confidence"], DEFAULT_BOOST)
                     seen = max(int(tgt.get("last_seen") or 0), said_at)
-                    self._exec("MATCH (a:Assertion {id:$id}) "
-                               "SET a.confidence=$c, a.last_seen=$t, a.valid_from=$vf;",
-                               {"id": tgt["id"], "c": conf, "t": seen, "vf": int(plan["valid_from"])})
+                    run("MATCH (a:Assertion {id:$id}) "
+                        "SET a.confidence=$c, a.last_seen=$t, a.valid_from=$vf;",
+                        {"id": tgt["id"], "c": conf, "t": seen, "vf": int(plan["valid_from"])})
                     tgt.update(confidence=conf, last_seen=seen, valid_from=int(plan["valid_from"]))
                     aid = tgt["id"]
                     n["duplicates"] += 1
@@ -1305,7 +1341,7 @@ class GraphStore:
                            "valid_from": int(plan["valid_from"]), "valid_to": plan["valid_to"],
                            "expired_at": None, "cardinality": card, "attr": key,
                            "source": getattr(fact, "source", None)}
-                    self._exec(
+                    run(
                         "CREATE (:Assertion {id:$id, subject:$s, predicate:$p, object:$o, "
                         "session_id:$sid, created_at:$t, confidence:1.0, last_seen:$ls, "
                         "valid_from:$vf, valid_to:$vt, cardinality:$card, attr:$attr, "
@@ -1316,20 +1352,20 @@ class GraphStore:
                          "e": vec.astype(float).tolist()})
                     if resolve is not None:
                         members.append((key, vec / (np.linalg.norm(vec) or 1.0)))
-                    self._exec("MATCH (s:Session {id:$sid}),(a:Assertion {id:$id}) "
-                               "CREATE (s)-[:ASSERTS]->(a);", {"sid": session_id, "id": aid})
+                    run("MATCH (s:Session {id:$sid}),(a:Assertion {id:$id}) "
+                        "CREATE (s)-[:ASSERTS]->(a);", {"sid": session_id, "id": aid})
                     group.append(rec)
                     batch_ids.add(aid)
                     n["added"] += 1
                     if rec["valid_to"] is not None and rec["valid_to"] <= now:
                         n["historical"] += 1               # a backfill landed in the past
                     if plan["superseded_by"]:              # a later record already ends it
-                        self._exec("MATCH (n:Assertion {id:$n}),(o:Assertion {id:$o}) "
-                                   "CREATE (n)-[:SUPERSEDES]->(o);",
-                                   {"n": plan["superseded_by"], "o": aid})
+                        run("MATCH (n:Assertion {id:$n}),(o:Assertion {id:$o}) "
+                            "CREATE (n)-[:SUPERSEDES]->(o);",
+                            {"n": plan["superseded_by"], "o": aid})
                 for rid in [c[0] for c in plan["close"]] + plan["expire"]:
-                    self._exec("MATCH (n:Assertion {id:$n}),(o:Assertion {id:$o}) "
-                               "CREATE (n)-[:SUPERSEDES]->(o);", {"n": aid, "o": rid})
+                    run("MATCH (n:Assertion {id:$n}),(o:Assertion {id:$o}) "
+                        "CREATE (n)-[:SUPERSEDES]->(o);", {"n": aid, "o": rid})
         return n
 
     @staticmethod

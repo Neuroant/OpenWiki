@@ -118,11 +118,12 @@ class MCPStdioServer:
 # Build the OpenWiki toolset over the existing library.
 # ---------------------------------------------------------------------------
 
-def _remember(graph, index, a: dict) -> str:
+def _remember(graph, index, a: dict, on_queued=None) -> str:
     """``wiki_remember``: screen the agent's facts (P0 security policy; one-off events are
     refused with a hint to record the resulting state), resolve ``replaces`` against the
     believed facts *now* (exact lines only — near misses come back with suggestions), and
-    queue one journal op; the next writable pass folds it (remember + close the replaced)."""
+    queue one journal op; ``on_queued`` (the CLI's fold worker) folds it within seconds —
+    remember + close the replaced — else the next writable pass does."""
     import time as _time
     from .graph.memory import MemoryFact, is_ephemeral, is_secret_only, is_unsafe_instruction, redact_fact
     from .graph.temporal import parse_date
@@ -155,9 +156,16 @@ def _remember(graph, index, a: dict) -> str:
     if facts or retire:
         session = "agent-" + _time.strftime("%Y-%m-%d", _time.gmtime(now))
         graph.queue_remember(session, facts, session_date=now, retire=retire, agent=True)
+        folding = False
+        if on_queued is not None:
+            try:
+                folding = on_queued() is not False
+            except Exception:
+                folding = False
         out.append(f"Queued {len(facts)} fact(s)"
                    + (f", closing {len(retire)} replaced fact(s)" if retire else "")
-                   + " — they land in memory at the next write pass (session end or `openwiki sleep`).")
+                   + (" — they land in memory within a minute (a background fold)." if folding else
+                      " — they land in memory at the next write pass (session end or `openwiki sleep`)."))
         out += [f"  + {f.subject} {f.predicate} {f.object}" for f in facts]
         out += [f"  − {line}" for line in matched]
     else:
@@ -184,7 +192,8 @@ def _tool(name, description, properties, required):
 def build_server(wiki_dir, index=None, graph=None, agent=None, name="openwiki",
                  version="0", identity="", context_budget=None, context_k: int = 16,
                  memory_probes: bool = False, memory_writes: bool = False,
-                 handoff: Optional[Callable] = None) -> MCPStdioServer:
+                 handoff: Optional[Callable] = None,
+                 on_remember: Optional[Callable] = None) -> MCPStdioServer:
     """Assemble the MCP server from already-loaded OpenWiki components.
 
     `index` (SemanticIndex) enables search/ask; `graph` (GraphStore) enables the
@@ -195,6 +204,8 @@ def build_server(wiki_dir, index=None, graph=None, agent=None, name="openwiki",
     `wiki_remember` — the agent records facts / new states, queued to the journal.
     `handoff` (``handoff(mode, note, repo) -> str``, from the CLI) adds `wiki_handoff` — the
     session handoff (resume / preview / prepare) for the project the server belongs to.
+    `on_remember` (from the CLI) is called after `wiki_remember` queued a write — it starts the
+    fold worker, so the write lands within seconds.
     """
     from .tools import WikiTools
 
@@ -286,8 +297,8 @@ def build_server(wiki_dir, index=None, graph=None, agent=None, name="openwiki",
                 "is a subject / predicate / object triple. Put the remembered facts your change makes "
                 "outdated in `replaces`, copied as wiki_memory shows them — they are closed (kept as "
                 "history), not deleted. Record the resulting state, not the event (\"v1.2 was "
-                "pushed\" is not kept). Facts land in memory at the next write pass (session end, "
-                "`openwiki sleep`).",
+                "pushed\" is not kept). Facts land in memory within a minute (a background fold), at the "
+                "latest at the next write pass.",
                 {"facts": {"type": "array", "description": "Facts to remember.", "items": {
                     "type": "object", "properties": {
                         "subject": {"type": "string"}, "predicate": {"type": "string"},
@@ -301,7 +312,7 @@ def build_server(wiki_dir, index=None, graph=None, agent=None, name="openwiki",
                  "source": {"type": "string", "enum": ["assistant", "user"],
                             "description": "Who established it: you (default) or the user's decision."}},
                 []))
-            handlers["wiki_remember"] = lambda a: _remember(graph, index, a)
+            handlers["wiki_remember"] = lambda a: _remember(graph, index, a, on_queued=on_remember)
 
         # Global search needs a chat model (from the agent) + community summaries.
         if agent is not None and _graph_has_communities(graph):

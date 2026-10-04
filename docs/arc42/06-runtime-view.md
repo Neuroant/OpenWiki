@@ -350,6 +350,12 @@ writes its page file live — only the *graph* re-sync is deferred. `--sync` opt
 a held-**writable** connection (live edit-sync + immediate reinforcement, exclusive lock — blocks other
 graph access); if that writable open is refused, `_open_graph` falls back to read-only (a note is printed).
 
+**Since v0.100 (ADR-38)** the long-running readers — the MCP server, `serve`, `chat`, `ask` — hold the graph only per
+call (`LazyGraph`), and memory writes run in two phases: plan on a read-only connection (`dry_run`, memoized model
+checks, cached embeddings), then apply under the write lock from the cache. So a hook capture, a `sleep` or the fold
+worker that `wiki_remember` spawns writes *during* a session, holding the lock for seconds (real queue: 276 s → 7.2 s);
+the journal is the fallback when the graph stays locked.
+
 - The web layer is a `ThreadingHTTPServer`: requests run on separate threads that share **one**
   `GraphStore` connection, serialized by the store's re-entrant `RLock` (an `upsert` holds it
   across a batch).

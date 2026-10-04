@@ -51,18 +51,18 @@ flowchart TB
 ## 7.2 Processes & lifecycle
 
 - **CLI commands** are one-shot processes that open artifacts, do work, and exit.
-- **`serve`** is long-running; since v0.57 it opens the graph **read-only by default** (ADR-19),
-  so other processes (`ask`/MCP/`recall`, a second reader) run concurrently — agent edits write
-  page files live and defer their graph re-sync to a lock-free journal a writer folds in (at
+- **`serve`** is long-running; since v0.57 it opens the graph **read-only by default** (ADR-19) and since v0.100
+  **per request** (`LazyGraph`, ADR-38), so other processes — readers and writers — run concurrently; agent edits
+  write page files live and defer their graph re-sync to a lock-free journal a writer folds in (at
   start/shutdown). `--sync` restores an exclusive **writable** connection (live edit-sync, blocks
   other graph access). `owiki decay`/`remember` open writable transiently with retry-backoff.
 - **`serve`** also streams: the Ask mode's answers are delivered token-by-token over a
   **Server-Sent-Events** response (`POST /api/ask/stream`) from the `ThreadingHTTPServer`, with the
   graph lock held only around retrieval so generation streams without blocking other readers (ADR-26).
-- **`mcp`** opens the graph **read-only** for the whole agent session; its one write tool (`wiki_remember`, opt-in)
-  queues to the journal. Because Kuzu is reader-XOR-writer, a writer during that session — a mid-session
-  `PreCompact` capture, a `sleep` — can't get the lock: the capture worker retries with backoff and then queues
-  its facts; the session-end capture normally succeeds once the agent has shut the MCP server down.
+- **`mcp`** opens the graph **read-only, per call** (`LazyGraph`, ADR-38 — until v0.100 for the whole agent session);
+  its one write tool (`wiki_remember`, opt-in) queues to the journal and spawns a detached fold worker that writes it
+  within seconds. A mid-session `PreCompact` capture or a `sleep` gets the lock between calls; writers plan read-only
+  and hold the lock only to apply.
 - **Host-hook capture** runs detached (a ~1-min LLM call outlives a hook's timeout) and captures *before* opening
   the graph writable, so the exclusive lock is held only for the short write.
 - **Upgrading** needs no rebuild for the memory tier: a graph from before B7 is read correctly as-is

@@ -101,3 +101,35 @@ class OllamaEmbedder:
 def get_embedder(model: str = "bge-m3", host: str = "http://localhost:11434") -> Embedder:
     """Factory for the configured embedding backend (currently Ollama)."""
     return OllamaEmbedder(model=model, host=host)
+
+
+class CachingEmbedder:
+    """Wraps an embedder and remembers every vector it produced, so embeddings can be computed **in one
+    batch** ahead of the calls that need them (``warm``) — the store's own ``embed_documents`` /
+    ``embed_query`` calls are then served without touching the model server. Used by the LoCoMo harness
+    (no GPU model swaps) and by two-phase memory writes (the write pass re-embeds nothing)."""
+
+    def __init__(self, inner) -> None:
+        self.inner = inner
+        self.name = getattr(inner, "name", "embedder")
+        self._docs: dict = {}
+        self._queries: dict = {}
+
+    def warm(self, docs=(), queries=()) -> None:
+        import numpy as np
+        todo = [t for t in dict.fromkeys(docs) if t not in self._docs]
+        if todo:
+            for t, v in zip(todo, np.asarray(self.inner.embed_documents(todo))):
+                self._docs[t] = v
+        for q in dict.fromkeys(queries):
+            if q not in self._queries:
+                self._queries[q] = np.asarray(self.inner.embed_query(q))
+
+    def embed_documents(self, texts):
+        import numpy as np
+        self.warm(docs=texts)
+        return np.vstack([self._docs[t] for t in texts]) if texts else np.zeros((0, 0), dtype=np.float32)
+
+    def embed_query(self, text):
+        self.warm(queries=[text])
+        return self._queries[text]

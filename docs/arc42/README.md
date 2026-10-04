@@ -5,7 +5,7 @@ This is the architecture documentation for **OpenWiki**, structured after the
 into 12 sections, from goals and constraints down to building blocks, runtime, decisions,
 quality, and risks.
 
-> **Status: COMPLETE** (maintained through v0.99). All 12 chapters are complete; diagrams use Mermaid
+> **Status: COMPLETE** (maintained through v0.100). All 12 chapters are complete; diagrams use Mermaid
 > (rendered by GitHub) and have been validated. The **Path B agent-memory** direction is complete
 > (B0–B6; ADR-14–19). Since then the architecture has grown eight more decision clusters (§9), all
 > reflected here: the graph **deepened** — typed `Entity→Entity` relations + relation-aware GraphRAG
@@ -26,7 +26,8 @@ quality, and risks.
 > tie-breaker, ADR-34), whose more-facts finding was then measured on the live path and carried into the hook
 > context (16 facts in 3,000 chars, ≈ 710 tokens per prompt; ADR-35, QS-21) — and a **session handoff** between
 > Claude Code sessions (derived state + the agent's note, injected at session start; ADR-36, §6.11, QS-22), and
-> **credential redaction** wherever text enters memory, with a Unicode-normalized instruction policy (ADR-37). Deep detail: `docs/path-b-memory.md`, `docs/RAG-vs-GraphRAG.md`.
+> **credential redaction** wherever text enters memory, with a Unicode-normalized instruction policy (ADR-37), and
+> **writes that land during a session** — per-call readers and two-phase writers (ADR-38, QS-23). Deep detail: `docs/path-b-memory.md`, `docs/RAG-vs-GraphRAG.md`.
 >
 > **Open risk:** Kuzu, the embedded graph store, was archived upstream in 2025-10 — tracked as §11 **R10**
 > (pinned to 0.11; a memory export and a LadybugDB spike are the planned mitigations).

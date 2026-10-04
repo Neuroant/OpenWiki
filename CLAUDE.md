@@ -143,8 +143,9 @@ Options: `-m/--message TEXT` (repeatable; omit for the REPL), `--wiki DIR`,
 `--dry-run` (preview edits without writing), `--show-tools`, `--model NAME`,
 `--host URL`, `-i DIR`, `--graph DIR` (enables the `graph_neighbors`/`find_path`
 tools when the graph exists), `--sync` (hold the graph **writable** for live
-edit-sync; **default is read-only** so other processes run concurrently — agent
-edits still write page files and re-sync via the journal at start/exit).
+edit-sync; **default is read-only and opened per call** (`LazyGraph`) so other processes —
+writers included — run concurrently; agent edits still write page files and re-sync via the
+journal at start/exit).
 
 **Build the knowledge graph** — writes a Kuzu DB to `output/graph/` from a source
 (PDF or `ingest` JSON) + the existing index (mirrors embeddings):
@@ -425,11 +426,12 @@ been overwritten), **consolidation** (fraction of facts folded into B5 themes + 
 Options: `--wiki DIR`, `-i/--index DIR`, `--graph DIR`, `--bind ADDR`, `--port N`,
 `--model NAME`, `--host URL`, `--temperature T`, `--dry-run`, `--sync`. The graph tab
 lights up automatically if `--graph` (default `output/graph`) exists. **By default the
-graph is opened read-only** so `ask`/MCP/`recall`/`context` (and a second reader) run
-**concurrently** while serving (Kuzu is reader-XOR-writer — see the concurrency note);
-agent edits write page files immediately and their graph re-sync is **deferred** to the
-write-ahead journal, folded at serve start & shutdown. `--sync` restores the old
-exclusive-writable mode (live graph sync, but blocks other graph access).
+graph is opened read-only, per request** (`LazyGraph`, v0.100), so `ask`/MCP/`recall`/`context`,
+a second reader — and writers (captures, folds, `sleep`) — run **concurrently** while serving
+(Kuzu is reader-XOR-writer — see the concurrency note); agent edits write page files immediately
+and their graph re-sync is **deferred** to the write-ahead journal, folded at serve start &
+shutdown. `--sync` restores the old exclusive-writable mode (live graph sync, but blocks other
+graph access).
 
 **MCP server (for coding agents)** — exposes RAG+GraphRAG as stdio MCP tools:
 ```
@@ -787,7 +789,8 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   (`build_server(memory_writes=)`, `Project.agent_writes`, `mcp_server._remember`) takes structured `facts` + `replaces`
   (lines as `wiki_memory` prints them → `GraphStore.match_facts`, exact via `store._line_key`; unmatched → the 3
   closest facts), screens with `is_unsafe_instruction` + `is_ephemeral`, and queues one journal op
-  (`queue_remember(…, retire=ids, agent=True)`; session `agent-YYYY-MM-DD`, valid from *now*). `fold_journal`
+  (`queue_remember(…, retire=ids, agent=True)`; session `agent-YYYY-MM-DD`, valid from *now*) — and, since v0.100,
+  the MCP server spawns a fold worker (`owiki hook fold`) so the op lands within seconds. `fold_journal`
   remembers the facts (**no B9 `resolve` for agent ops** — it once grouped "web UI | has | ten tabs" with "has
   project-aware UI" and closed that true fact) and `GraphStore.retire(ids, at)` closes the replaced ones (`valid_to`;
   B7 *past*). The capture worker now also folds when the session yields no facts. Measured on the dogfooding memory
@@ -1147,7 +1150,8 @@ http — count, p50/p95, total time, token in/out) + a live recent-events table,
   `chat`, `graph-build`, `references`, `communities`, `decay`, `remember`, `backfill`, `recall`,
   `consolidate`, `sleep` (nightly maintenance + forgetting), `context`,
   `analyze` (world-model analysis — `coupling` | `gaps` | `memory`, offline), `hook` (host-lifecycle
-  memory hook — `inject` / `capture` / `resume`, reads the event JSON on stdin), `handoff` (`prepare` /
+  memory hook — `inject` / `capture` / `resume`, plus `fold`, the detached worker the MCP server
+  spawns after `wiki_remember`; reads the event JSON on stdin), `handoff` (`prepare` /
   `resume` — the session handoff), `serve`, and `mcp` subcommands. A shared
   `--project` (parent parser) + `_apply_project(args, project)` fill unset
   path/model/host/split-level args from the active project before dispatch (flags
@@ -1241,19 +1245,26 @@ http — count, p50/p95, total time, token in/out) + a live recent-events table,
   the background; tests use a deterministic fake chat.
 - **Concurrency model (B1) — Kuzu is reader-XOR-writer:** a writable connection is
   exclusive (it blocks **all** readers, *and* readers block a writer — empirically
-  verified; there is **no** simultaneous read+write in Kuzu 0.11). So `serve`/`chat`
-  default to **read-only**: many readers (`ask`/MCP/`recall`/`context`, a second
-  `serve`) coexist, and would-be **writes never block or fail** — they append to a
-  lock-free **write-ahead journal** (`graph.usage.jsonl` reinforce pairs +
-  `graph.journal.jsonl` queued `remember`/`reindex` ops) that a later writable pass
-  folds in (`GraphStore.fold_journal`, needs an embedder). Folders: `serve`/`chat`
-  transiently at start **and** shutdown (`_transient_fold`), `openwiki decay` (when it
-  can load the project's embedder), and the next `remember`. `remember`/hook-`capture`
-  **queue** when the graph is locked instead of erroring; a chat-edit's graph re-sync
-  is queued as a `reindex` op (the page file is written regardless). Writable opens
-  use **retry-with-backoff** (`_open_graph(retries=)`) to ride out transient
-  contention. `--sync` opts `serve`/`chat` back into a held-writable connection (live
-  edit-sync, but exclusive — blocks other access). Design: `docs/path-b-memory.md` §B1.
+  verified, in-process too; there is **no** simultaneous read+write in Kuzu 0.11). Since
+  **v0.100** both sides hold the lock as briefly as possible, so writes land *during* a session:
+  **readers hold the graph only per call** — `LazyGraph` (`graph/lazy.py`, the read-only
+  `GraphStore` interface, open per call ≈ 70 ms, overlapping calls share one connection, a call
+  waits up to 15 s for a writer) is used by the MCP server, `serve`, `chat` and `ask` — and
+  **memory writes run in two phases** (`cli._write_memory`): plan with `remember` /
+  `fold_journal(dry_run=True)` on a read-only connection (the full merge, model checks
+  `store.memoized`, embeddings `embeddings.CachingEmbedder`), then open writable
+  (`_open_writer`, waits up to 60 s for readers) and run the same merge from the cache — never
+  stale, since the write pass re-plans from current state. Measured on the real queue: write
+  lock **276 s → 7.2 s**, identical result. `wiki_remember` makes the MCP server spawn a fold
+  worker (`owiki hook fold`, 5 s debounce) — an agent write lands in ~8 s. The **write-ahead
+  journal** (`graph.usage.jsonl` reinforce pairs + `graph.journal.jsonl` queued
+  `remember`/`reindex` ops) stays the fallback when the graph remains locked (a build,
+  `serve --sync`, `backfill`, a long `sleep` — the passes that still hold the write lock across
+  model calls); folders: the two-phase writers, `serve`/`chat` at start **and** shutdown
+  (`_transient_fold`), `openwiki decay`, `sleep`. A chat-edit's graph re-sync is queued as a
+  `reindex` op (the page file is written regardless). `--sync` opts `serve`/`chat` back into a
+  held-writable connection (live edit-sync, but exclusive — blocks other access). Design:
+  `docs/path-b-memory.md` §B1 + §13.15, arc42 ADR-38.
 - **Incremental updates (`--sync` / a writable pass):** a **writable** graph (index
   present, not `--dry-run`) passes `index.embedder` to `WikiTools`; edits upsert into
   the graph live. Only `SIMILAR_TO` is recomputed on upsert — CHILD_OF/NEXT, REFERENCES

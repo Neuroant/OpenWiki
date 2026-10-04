@@ -207,8 +207,16 @@ def _capture_fakes(monkeypatch, cli):
     class _Graph:
         writable = True
 
-        def remember(self, sid, facts, embedder, session_date=None, **kw):
-            seen["remembered"].append((sid, len(facts), session_date))
+        def remember(self, sid, facts, embedder, session_date=None, dry_run=False, **kw):
+            if not dry_run:                       # the plan pass of a two-phase write writes nothing
+                seen["remembered"].append((sid, len(facts), session_date))
+            return {"added": len(facts)}
+
+        def pending_ops(self):
+            return 0
+
+        def fold_usage(self):
+            return {"records": 0}
 
         def fold_journal(self, *a, **kw):
             return {}
@@ -220,6 +228,8 @@ def _capture_fakes(monkeypatch, cli):
     monkeypatch.setattr(cli, "_hook_embedder", lambda project: object())
     monkeypatch.setattr(cli, "_capture_chat", lambda model, host: None)
     monkeypatch.setattr(cli, "_open_graph", lambda *a, **kw: _Graph())
+    monkeypatch.setattr(cli, "_open_reader", lambda *a, **kw: _Graph())
+    monkeypatch.setattr(cli, "_open_writer", lambda *a, **kw: _Graph())
     monkeypatch.setattr(cli, "_coexist_check", lambda *a: None)
     monkeypatch.setattr(cli, "_attribute_resolver", lambda *a: None)
     return seen

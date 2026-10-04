@@ -274,6 +274,11 @@ def _build_argparser() -> argparse.ArgumentParser:
                              "(\"in July 2023\", \"last week\"; default: production's, 0.1; 0 = off). With --locomo "
                              "the answers go to their own -twW file, and unchanged recalls copy the answer of the run "
                              "without it.")
+    eval_p.add_argument("--merge", choices=("checks", "tags", "add-only"), default="checks",
+                        help="--locomo / --cross-session: the memory merge — checks (production: the coexistence "
+                             "check and attribute resolution, two LLM calls), tags (the capture's cardinality tags "
+                             "alone) or add-only (nothing superseded). An ablation; with --locomo use a separate --work "
+                             "dir.")
     eval_p.add_argument("--time-budget", type=float, default=None, metavar="SECONDS",
                         help="--locomo: stop cleanly after this many seconds; re-run to continue.")
     eval_p.add_argument("--cross-session", dest="cross_session", action="store_true",
@@ -1968,7 +1973,7 @@ def _locomo_eval(args: argparse.Namespace) -> int:
                      capture_style=args.capture_style,
                      lexical=RECALL_WEIGHT if args.recall_lexical is None else max(0.0, args.recall_lexical),
                      temporal=WINDOW_WEIGHT if args.recall_window is None else max(0.0, args.recall_window),
-                     reuse_base=True)
+                     reuse_base=True, merge=args.merge)
     s = res["summary"]
     state = "complete" if res["complete"] else "partial — re-run to continue"
     print(f"\nLoCoMo  [{len(res['records'])} answered question(s), {state}, {res['seconds']}s this run]")
@@ -2042,7 +2047,8 @@ def _cross_session_eval(args: argparse.Namespace, project) -> int:
                 on_progress=lambda done, total: print(f"  {done}/{total} done", file=sys.stderr),
                 probe=probe,
                 lexical=RECALL_WEIGHT if args.recall_lexical is None else max(0.0, args.recall_lexical),
-                temporal=WINDOW_WEIGHT if args.recall_window is None else max(0.0, args.recall_window))
+                temporal=WINDOW_WEIGHT if args.recall_window is None else max(0.0, args.recall_window),
+                merge=args.merge)
         finally:
             graph.close()
     finally:

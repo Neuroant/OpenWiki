@@ -931,6 +931,11 @@ The **genuine gaps**, measure-first as always:
   set (paired, 2 captures, no probes) the cue reached the context 8/16 → 16/16 and the constraint was applied
   7/16 → 12/16 (+5 / −0). Adopted: `[memory] context_k` (default 16) + `context_budget` 2,000 → 3,000; facts may
   use theme budget the themes don't need. `path-b-memory.md` §13.12.
+- **The add-only ablation — the merge's checks stay (v0.105).** Experiment 8 of the review series' plan: do the
+  coexistence check and attribute resolution earn their place? `eval --merge checks | tags | add-only` replays saved
+  LoCoMo captures under each mode. LoCoMo doesn't care (add-only 63.8 % vs 62.9 %, n.s. — its facts rarely change);
+  the temporal set does: checks 13 / 13, add-only 12 / 13 (cannot retract a correction), tags alone 10 / 13 (a noisy
+  tag closed a coexisting value, a correction never met its paraphrase). Kept. `docs/path-b-memory.md` §13.21.
 - **Multi-hop expansion — measured, not adopted.** Experiment 7 of the review series' plan: facts linked to the
   recalled ones through a shared subject or object, a distinctive word or semantic similarity, thresholded, depth 1–2.
   Offline it lost both ways — swapped into the top 20 it pushed out better facts (coverage 0.456 → 0.431), added it

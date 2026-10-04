@@ -87,7 +87,8 @@ Patterns most of the twelve share — and OpenWiki does not, yet:
 **Where nobody agrees:** whether a model should judge memory at write time. Mem0 dropped it, Letta and Hermes rely on
 strong models as curators, Hindsight confines judgments to a derived layer. Our own audits found a local model's
 judgments of memory unreliable — a poisoning audit, a forgetting review, three staleness checks (`path-b-memory.md`
-§13.1–13.5) — and kept the write path deterministic where it could be.
+§13.1–13.5) — and kept the write path deterministic where it could be. The two narrow checks that remain in the merge
+were then ablated: unnecessary where facts rarely change (LoCoMo), necessary where state changes (§13.21).
 
 ## Where OpenWiki stands
 
@@ -157,7 +158,9 @@ already have, then changes that only real sessions can judge. Each names where i
    better ones when swapped in (coverage 0.456 → 0.431) and lost to the ranking's own next candidates when added
    (+6 facts: 0.468 vs 0.480) — the needed facts are linked by meaning or inference, not names (`path-b-memory.md`
    §13.20).
-8. **An add-only ablation** — do the two LLM checks in the merge earn their place? (Mem0).
+8. **An add-only ablation** — do the two LLM checks in the merge earn their place? (Mem0). **Measured in v0.105 —
+   they stay:** on LoCoMo the merge hardly matters (add-only 63.8 % vs 62.9 %, n.s.), on the temporal set it does
+   (checks 13 / 13, add-only 12 / 13 — no retraction —, tags alone 10 / 13) (`path-b-memory.md` §13.21).
 9. **Episodes next to facts** — one dated narrative per session, retrieved with the facts (Nemori, Hindsight, waku);
    aimed at the temporal category.
 

@@ -232,7 +232,7 @@ def run_locomo(conversations, work_dir, open_graph: Callable, embedder, chat, ju
                categories=None, budget_s: Optional[float] = None, coexist=None, resolve=None,
                on_progress: Optional[Callable] = None, now_mode: str = "present",
                answer_style: str = "infer", capture_style: str = "durable", lexical: float = 0.0,
-               temporal: float = 0.0, reuse_base: bool = False) -> dict:
+               temporal: float = 0.0, reuse_base: bool = False, merge: str = "checks") -> dict:
     """Capture + remember each conversation (once — resumable per session), then answer + score its questions
     (resumable per question). ``open_graph(path)`` returns a **writable** memory graph at ``path`` (created if
     absent). Stops when ``budget_s`` seconds are spent (``complete: False``); the next call continues.
@@ -241,7 +241,9 @@ def run_locomo(conversations, work_dir, open_graph: Callable, embedder, chat, ju
     (``GraphStore.recall``; 0 = dense only); ``temporal``: the question's time-window weight. ``reuse_base``: where
     the variant recalls exactly the list of the variant one step back (``temporal`` → without it; ``lexical``
     alone → dense), that variant's answer is copied (``"reused": true``) instead of asked again — the prompt would
-    be identical, so a paired comparison gains no noise where nothing changed. Returns ``{"complete",
+    be identical, so a paired comparison gains no noise where nothing changed. ``merge``: ``checks`` (production —
+    ``coexist`` / ``resolve`` as given), ``tags`` (neither LLM check) or ``add-only`` (every fact ``"many"``, no checks:
+    nothing superseded) — an ablation; use a separate ``work_dir`` per mode. Returns ``{"complete",
     "records", "summary"}`` over every answered question in ``work_dir``."""
     from .graph.memory import MemoryFact, assemble_context, capture_session
 
@@ -286,8 +288,11 @@ def run_locomo(conversations, work_dir, open_graph: Callable, embedder, chat, ju
         if (ready or (todo_q and len(done) == len(conv.sessions))) and not over():
             graph = open_graph(cdir / "graph")
             try:
-                as_facts = {sid: [MemoryFact(t[0], t[1], t[2], valid_from=t[3], cardinality=t[4] or "one",
+                as_facts = {sid: [MemoryFact(t[0], t[1], t[2], valid_from=t[3],
+                                             cardinality="many" if merge == "add-only" else (t[4] or "one"),
                                              source=t[5]) for t in rows] for sid, rows in captured.items()}
+                if merge != "checks":                                   # the ablation: no LLM checks in the merge
+                    coexist = resolve = None
                 emb.warm(docs=[f.text() for s in ready for f in as_facts[s.sid]])      # 2. one embed batch
                 for s in ready:                                                   # 3. remember (chat only)
                     if over():

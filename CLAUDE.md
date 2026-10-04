@@ -296,7 +296,11 @@ where BM25 brought the gold answer into the context +24 / −2 (p ≈ 10⁻⁵) 
 (v0.104):** `--recall-window W` (default 0.1, as production; answers `…-lex0.2-tw0.1.jsonl`, unchanged recalls copy the
 run without it). Paired against hybrid recall: the questions that name a date 46.2 → **56.2 %** (+24 / −3), overall J
 61.6 → **62.9 %** (p ≈ 5·10⁻⁵; temporal +2.2, single-hop +1.2, open-domain +3.2; adversarial −0.6, n.s.) — with hybrid
-recall +2.2 over the v0.95 baseline (66 / 32, p < 0.001) (§13.19).
+recall +2.2 over the v0.95 baseline (66 / 32, p < 0.001) (§13.19). **The add-only ablation (v0.105):** `--merge
+checks | tags | add-only` (also for `--cross-session`; an experiment option — use a separate `--work` dir per mode)
+drops the merge's two LLM checks (`tags`) or all supersession (`add-only`); `run_locomo(merge=)`,
+`run_cross_session_eval(merge=)`, `eval.merge_facts`. LoCoMo hardly notices (add-only 63.8 % vs 62.9 %, n.s.); the
+temporal set does (checks 13 / 13, add-only 12 / 13, tags 10 / 13) → the checks stay (§13.21).
 
 **Sleep — nightly memory maintenance + forgetting** (Path B++): one schedulable writable pass — fold what
 read-only processes queued (usage + journal) → redact credentials in facts stored before v0.99 → **forget** what the

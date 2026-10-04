@@ -63,14 +63,15 @@ Scenarios are written as *stimulus → expected response* so they can be checked
 
 ## 10.3 Current evidence & gaps
 
-- **Met:** QS-2 (the suite — **674 tests** — runs offline, and in **CI** on every push across Python
+- **Met:** QS-2 (the suite — **675 tests** — runs offline, and in **CI** on every push across Python
   3.11–3.13 + a Docker build, ADR-24); QS-5 (four findings in `docs/RAG-vs-GraphRAG.md`, incl. hybrid
   winning on a code corpus); QS-11 by the metrics collector (ADR-20 — per-call latency/tokens in the CLI,
   System tab, and per-build-stage); QS-13 by the world-model analysis toolkit (ADR-25, §8.19 — `owiki
   analyze` coupling/gaps/compare/memory, offline + read-only); QS-14 by the capability-complete web UI
   (ADR-26, §8.20 — Direction J, U1–U11 incl. SSE streaming) + the reader overlays (ADR-28); QS-15 by B7
   (ADR-27) — the temporal eval took assembled-memory task success from **7/13 (v0.80.0, two runs) to 13/13**
-  (13 hand-written scenarios — a direction check, not a benchmark); QS-1 / QS-3 / QS-4 / QS-6 / QS-8 / QS-9 are
+  (13 hand-written scenarios — a direction check, not a benchmark), and an ablation confirmed the merge's two LLM checks
+  carry it (13/13 with them, 12/13 add-only, 10/13 without, v0.105); QS-1 / QS-3 / QS-4 / QS-6 / QS-8 / QS-9 are
   architectural (enforced by boundaries + tests); QS-7 by the fingerprint chain (ADR-11); QS-12 by the
   memory tests + the cross-session eval (Path B, §8.15); QS-16 by the P0 policy — poisoning leaks **2/5 → 0/5**,
   8/8 legitimate facts kept, 0 of 1,446 real facts scrubbed (ADR-30), and credential redaction with 0 false positives

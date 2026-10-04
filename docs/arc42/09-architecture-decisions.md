@@ -577,6 +577,10 @@
   temporal eval stays 13/13. − ~1 extra LLM call per 4 new facts + coexistence calls for grouped descriptions;
   − the chooser errs toward "different thing" (safe, but ~4 version paraphrases stay separate); − subject
   identity is only inferred within a resolved group. Refines [ADR-27](#adr-27); addresses debt D11.
+  *Addendum (v0.105, ablated):* replaying saved LoCoMo captures without the merge's LLM checks changed nothing there
+  (add-only 63.8 % vs 62.9 %, n.s. — its facts rarely change), but on the temporal set the checks are the difference:
+  13 / 13 with them, 12 / 13 add-only (no retraction), 10 / 13 with the capture's tags alone (a coexisting value
+  closed, a correction that never met its paraphrase). Both checks stay (`path-b-memory.md` §13.21).
 
 ### ADR-30
 **Memory hygiene: a source-independent security-sensitive policy, not provenance-trusting scrubbers.** *(v0.86, Path B++ / P0)*

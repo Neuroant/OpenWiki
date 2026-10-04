@@ -162,6 +162,7 @@ class _FakeMemGraph:
         self.calls.append({"session": session_id, "now": now, "session_date": session_date,
                            "correct": correct})
         self.coexist = coexist
+        self.resolve = resolve
         return {"facts": len(facts), "added": len(facts), "duplicates": 0}
 
     def recall(self, query, embedder, k=5, **kw):
@@ -264,6 +265,15 @@ def test_run_cross_session_eval_passes_temporal_context():
     assert callable(graph.coexist)                           # the LLM coexistence check is wired
     ev.run_cross_session_eval(items, graph, None, _XChat(), lexical=0.2, temporal=0.1)
     assert (graph.recall_kw["lexical"], graph.recall_kw["temporal"]) == (0.2, 0.1)   # both recall aids reach the store
+    assert callable(graph.resolve)
+    # the merge ablation: no LLM checks ("tags"), and nothing superseded ("add-only")
+    ev.run_cross_session_eval(items, graph, None, _XChat(), merge="tags")
+    assert graph.coexist is None and graph.resolve is None
+    ev.run_cross_session_eval(items, graph, None, _XChat(), merge="add-only")
+    assert graph.coexist is None and graph.resolve is None
+    assert graph.stored and all(f.cardinality == "many" for _, f in graph.stored)
+    from openwiki.graph.memory import MemoryFact
+    assert [f.cardinality for f in ev.merge_facts([MemoryFact("a", "b", "c")], "checks")] == ["one"]
     assert r["by_kind"]["point-in-time"]["n"] == 1
     assert r["details"][0]["kind"] == "point-in-time"
 

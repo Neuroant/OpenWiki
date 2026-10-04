@@ -486,8 +486,21 @@ def build_probe_messages(question: str, context: str) -> list:
             {"role": "user", "content": user}]
 
 
+MERGE_MODES = ("checks", "tags", "add-only")
+
+
+def merge_facts(facts, merge: str):
+    """The facts a merge mode remembers: ``add-only`` marks every fact ``"many"`` — values coexist, nothing is
+    superseded (Mem0's add-only pipeline); ``checks`` / ``tags`` keep the capture's tags."""
+    if merge == "add-only":
+        from dataclasses import replace
+        return [replace(f, cardinality="many") for f in facts]
+    return list(facts)
+
+
 def run_cross_session_eval(items, graph, embedder, chat, judge=None, recall_k: int = 10,
-                           on_progress=None, probe=None, lexical: float = 0.0, temporal: float = 0.0) -> dict:
+                           on_progress=None, probe=None, lexical: float = 0.0, temporal: float = 0.0,
+                           merge: str = "checks") -> dict:
     """The Path B headline metric — cross-session task success (path-b-memory.md §7).
 
     For each scenario: wipe memory, **remember** its setup sessions (capture → merge into
@@ -512,11 +525,13 @@ def run_cross_session_eval(items, graph, embedder, chat, judge=None, recall_k: i
             meta = item.sessions[j] if j < len(item.sessions) else {}
             sid = str(meta.get("session") or f"{item.name}-s{j + 1}")
             sdate = parse_date(meta.get("date")) if meta.get("date") is not None else session_date(sid)
-            facts = capture_session(chat, transcript, session_date=sdate)
+            facts = merge_facts(capture_session(chat, transcript, session_date=sdate), merge)
+            checks = merge == "checks"          # the two LLM checks of the merge (ablation: "tags" / "add-only")
             graph.remember(sid, facts, embedder, now=parse_date(meta.get("recorded")),
                            session_date=sdate, correct=bool(meta.get("correct")),
-                           coexist=lambda a, b, subjects=None: facts_coexist(chat, a, b, subjects),
-                           resolve=lambda f, c: choose_attribute(chat, f, c))
+                           coexist=((lambda a, b, subjects=None: facts_coexist(chat, a, b, subjects))
+                                    if checks else None),
+                           resolve=(lambda f, c: choose_attribute(chat, f, c)) if checks else None)
         when = {"as_of": parse_date(item.as_of), "known_at": parse_date(item.known_at)}
         if probe is not None:              # P1 cue-trigger: reserve slots for constraint probes
             recalled = graph.recall_probed(item.question, embedder, probe(item.question),

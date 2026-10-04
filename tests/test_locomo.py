@@ -101,9 +101,12 @@ class _Graph:
         self.path = str(path)
         _Graph.store.setdefault(self.path, [])
 
+    remember_kw: list = []
+
     def remember(self, sid, facts, embedder, **kw):
         embedder.embed_documents([f.text() for f in facts])
         _Graph.store[self.path] += [(sid, f) for f in facts]
+        _Graph.remember_kw.append(kw)
 
     recall_kw = None
 
@@ -167,3 +170,16 @@ def test_run_is_phased_resumable_and_scored(tmp_path):
     assert _Counting.calls == 0 and tw["records"][0]["reused"] is True
     assert lc.build_answer_messages("q", "ctx")[0]["content"] == lc.ANSWER_SYSTEM_INFER
     assert lc.build_answer_messages("q", "ctx", "strict")[0]["content"] == lc.ANSWER_SYSTEM
+
+
+def test_the_merge_ablation_drops_the_checks(tmp_path):
+    convs = lc.load_locomo(_data(tmp_path))
+    _Graph.store, _Graph.remember_kw = {}, []
+    lc.run_locomo(convs, tmp_path / "addonly", _Graph, _Emb(), _Chat(), coexist=lambda *a: True,
+                  resolve=lambda *a: None, merge="add-only")
+    assert _Graph.remember_kw and all(kw["coexist"] is None and kw["resolve"] is None for kw in _Graph.remember_kw)
+    assert all(f.cardinality == "many" for _, f in _Graph.store[str(tmp_path / "addonly" / "conv-x" / "graph")])
+    _Graph.remember_kw = []
+    check = lambda *a: True                                             # noqa: E731
+    lc.run_locomo(convs, tmp_path / "checks", _Graph, _Emb(), _Chat(), coexist=check, resolve=check)
+    assert all(kw["coexist"] is check for kw in _Graph.remember_kw)       # production keeps both checks

@@ -873,7 +873,7 @@ errs toward "different thing" (safe: fragmentation over a wrong merge); descript
 extra coexistence calls; subject identity is only inferred inside a resolved group (no general
 subject resolution).
 
-## 13. Memory hygiene, implicit recall and the LoCoMo benchmark (built v0.86 to v0.104)
+## 13. Memory hygiene, implicit recall and the LoCoMo benchmark (built v0.86 to v0.105)
 
 *Planned from the cognitive-agent report (B10+); every item below was built or measured — see §13.1–13.12.*
 
@@ -1369,6 +1369,36 @@ The largest single step so far ("Not mentioned" on single-hop 219 → 178). **Ad
 the live context — the hooks assemble k = 8 within a 2,000-character budget, a per-prompt token cost; the finding
 suggests trying a larger k there, measured on that path (→ §13.12). LoCoMo now: **overall J 60.7 %** with a local
 30B (Mem0 reports ≈ 67 % with GPT-4o-mini — and both are generous-judge numbers).
+
+### 13.21 The add-only ablation — the merge's LLM checks stay (v0.105)
+
+Two LLM checks run inside every memory merge: the **coexistence check** ("can both be true at the same moment?" —
+it vetoes closing an old value, ADR-27) and **attribute resolution** (B9: "is this the same property as an existing
+one?" — it groups paraphrases so they supersede each other, ADR-29). Mem0 dropped write-time model judgments
+altogether ("memories accumulate; nothing is overwritten"). Plan item 8 asked whether ours earn their place.
+
+Both harnesses gained `--merge checks | tags | add-only` (an experiment option, like the capture style): **checks** is
+production; **tags** drops both LLM checks and lets the capture's own cardinality tags decide rivalry; **add-only**
+marks every fact multi-valued — nothing is superseded, exact duplicates still merge. LoCoMo memories were rebuilt from
+the saved captures (no capture calls) and answered with production recall, paired. In production the checks had
+grouped 1,195 of 3,429 stored facts into resolved attributes and closed 150 (4 %); add-only stores 3,704, all current.
+
+| merge | LoCoMo overall J | temporal set (13 scenarios) |
+|---|---|---|
+| **checks (production)** | 62.9 % | **13 / 13** |
+| tags — no LLM checks | — | 10 / 13 |
+| add-only — nothing superseded | 63.8 % (+76 / −63, p ≈ 0.31) | 12 / 13 |
+
+On LoCoMo the merge hardly matters: its facts rarely change (4 % ever superseded), its questions ask *when* rather
+than *what is it now*, and the answering model reads the "since" dates in the context to pick the current value itself
+— add-only is as good, single-hop even slightly better (48 / 31, p ≈ 0.07). The temporal set is built from changing
+state, and there the checks are what make supersession safe. Without them (tags), a noisy tag closed a value that
+coexists ("OpenWiki uses Kuzu" closed by "OpenWiki uses Ollama" — the reason the coexistence check exists), a correction
+missed the wrong value it should retract (its paraphrase was never grouped — the reason for B9), and a change date came
+out wrong (possibly capture noise — every run re-captures). Add-only avoids wrong closures but cannot retract: "it was
+never port 9000" left 9000 valid. On the coding memory B9 is what kept stale values out of the injected context
+(OpenWiki-version facts still current 23 → 11, §12.3). **The checks stay**; their cost is background LLM time in the
+capture worker, not latency. `--merge` remains for future ablations.
 
 ### 13.20 Multi-hop expansion — measured, not adopted
 

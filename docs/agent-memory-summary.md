@@ -148,7 +148,10 @@ already have, then changes that only real sessions can judge. Each names where i
    answer in); on real coding prompts the facts it swapped in were judged helpful 21.9 % vs 12.0 % for those it
    displaced (26 / 9 prompts, p ≈ 0.006) → on by default. Plain fusion moved nothing (`path-b-memory.md` §13.18).
 6. **The question's time window** — boost facts whose validity overlaps a window parsed from the question (Cognee,
-   Hindsight, MIRIX).
+   Hindsight, MIRIX). **Done in v0.104:** rule-based windows (days, months, seasons, years, relative expressions), a
+   bonus for facts whose valid time starts inside, within the dense top 4k — the dated questions 46.2 → 56.2 % (+24 /
+   −3), overall J 61.6 → 62.9 % (p ≈ 5·10⁻⁵), the first significant gain of these experiments (`path-b-memory.md`
+   §13.19).
 7. **Multi-hop expansion** through shared subjects and objects, thresholded, depth 2 (AriGraph, Graphiti, Hindsight).
 8. **An add-only ablation** — do the two LLM checks in the merge earn their place? (Mem0).
 9. **Episodes next to facts** — one dated narrative per session, retrieved with the facts (Nemori, Hindsight, waku);

@@ -54,6 +54,7 @@ Scenarios are written as *stimulus → expected response* so they can be checked
 | QS-18 | Usefulness (memory noise) | should | After `openwiki sleep`, the facts injected for real prompts contain no one-off session events ("vX was pushed and tagged", commit hashes), and no fact a person would keep was removed — forgotten facts stay in the graph (ADR-32). |
 | QS-21 | Efficiency (prompt context) | should | Every prompt of a coding session gets the assembled memory injected → its size stays within `[memory] context_budget` (3,000 chars ≈ 750 tokens; measured mean ≈ 710 tokens over 335 real prompts) while recalling `[memory] context_k` facts (16), and both are project settings a user can lower; a change to either is measured on the live path — cost, usefulness of the facts, effect on answers — before it ships (ADR-35). |
 | QS-22 | Usability (continuity) | should | A new Claude Code session starts in a repository whose last session wrote a handoff → before the first prompt the agent has the next steps and what changed since (commits, memory, environment), within 6,000 chars; a stale handoff says so (new commits, "already resumed"); a handoff line that would weaken security or address AI assistants never reaches it (ADR-36). |
+| QS-26 | Relevance (time) | should | A request names a period ("in July 2023", "last week") → the facts whose valid time falls in it reach the memory context ahead of the same topic from other times; a request without a date recalls exactly as before; measured paired on LoCoMo's dated questions (ADR-41). |
 | QS-25 | Relevance (recall) | should | A request names an identifier, a version or a file → the facts that mention it reach the memory context, without keyword matches from deep in the ranking displacing relevant facts; measured on real prompts — the facts the lexical signal brings in are judged helpful more often than the ones they displace (ADR-40). |
 | QS-24 | Portability (memory) | should | The graph engine is archived upstream (R10) → `owiki memory export --full` and an `import` into an empty memory keep every fact with its valid and transaction time, confidence, source, forgotten mark and provenance, plus the themes; the default archive passes Cognee's COGX reader; the Markdown view changes only where the memory did (ADR-39). |
 | QS-23 | Availability (memory during a session) | should | During a running coding session, a memory write — a hook capture, the agent's `wiki_remember` — lands without waiting for the session to end (an agent write within a minute), with the same result as before, and no reader waits more than 15 s for it (ADR-38). |
@@ -62,7 +63,7 @@ Scenarios are written as *stimulus → expected response* so they can be checked
 
 ## 10.3 Current evidence & gaps
 
-- **Met:** QS-2 (the suite — **650 tests** — runs offline, and in **CI** on every push across Python
+- **Met:** QS-2 (the suite — **674 tests** — runs offline, and in **CI** on every push across Python
   3.11–3.13 + a Docker build, ADR-24); QS-5 (four findings in `docs/RAG-vs-GraphRAG.md`, incl. hybrid
   winning on a code corpus); QS-11 by the metrics collector (ADR-20 — per-call latency/tokens in the CLI,
   System tab, and per-build-stage); QS-13 by the world-model analysis toolkit (ADR-25, §8.19 — `owiki
@@ -85,7 +86,8 @@ Scenarios are written as *stimulus → expected response* so they can be checked
   and a live run: an agent write landed 7.6 s after the call, readers saw no error (ADR-38); QS-24 by the round trip on a copy of the dogfooding memory — 1,486 / 1,486 facts
   identical in every field, embeddings and 118 themes included — both archives passing Cognee's own reader, and the
   graph migrating to LadybugDB identical apart from approximate vector search (ADR-39); QS-25 by hybrid recall on 80
-  judged real prompts — swapped-in facts helpful 21.9 % vs 12.0 % for those displaced, 26 / 9 prompts (ADR-40). All on small, hand-labeled sets (one annotator) — direction checks, not benchmarks.
+  judged real prompts — swapped-in facts helpful 21.9 % vs 12.0 % for those displaced, 26 / 9 prompts (ADR-40); QS-26
+  by the time window — LoCoMo's dated questions 46.2 → 56.2 %, +24 / −3 paired (ADR-41). All on small, hand-labeled sets (one annotator) — direction checks, not benchmarks.
 - **Measured externally (memory):** LoCoMo (`owiki eval --locomo`, ADR-34) — all 10 conversations, 1,986 questions,
   a local 30B answering + judging: overall J **50.0 %** (multi-hop 54.3, temporal 34.0, open-domain 34.4, single-hop
   56.5; adversarial 89.2). Mem0 reports ≈ 67 % with GPT-4o-mini — a reference point, not a like-for-like comparison.
@@ -94,7 +96,8 @@ Scenarios are written as *stimulus → expected response* so they can be checked
   allows inference (v0.93, paired on the same memory) took overall J to **55.0 %** (adversarial 90.6 → 86.3 %); an
   episodic capture style was measured and not adopted (v0.94: +2.8 on 4 conversations, p ≈ 0.26, at ~2× cost); a
   recall budget of 20 facts (v0.95) took overall J to **60.7 %** (+117 / −29 paired, p ≈ 6·10⁻¹³), hybrid recall (v0.103)
-  to **61.6 %** (+47 / −34, p ≈ 0.18 — adopted for the live path, ADR-40). A hand audit of 60
+  to **61.6 %** (+47 / −34, p ≈ 0.18 — adopted for the live path, ADR-40), the question's time window (v0.104) to
+  **62.9 %** (+24 / −3, p ≈ 5·10⁻⁵, ADR-41). A hand audit of 60
   judgments: the judge agrees 51/60, never rejects a right answer, accepts 8 % wrong ones (dates off by days) — J is
   generous by ~7 points, paired comparisons stand. QS-20 is met by the harness itself.
 - **Not formally measured (performance):** there is no latency/throughput *budget* yet — though the

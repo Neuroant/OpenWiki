@@ -931,6 +931,12 @@ The **genuine gaps**, measure-first as always:
   set (paired, 2 captures, no probes) the cue reached the context 8/16 → 16/16 and the constraint was applied
   7/16 → 12/16 (+5 / −0). Adopted: `[memory] context_k` (default 16) + `context_budget` 2,000 → 3,000; facts may
   use theme budget the themes don't need. `path-b-memory.md` §13.12.
+- **The question's time window (v0.104).** Experiment 6 of the review series' plan: a date in the question becomes a
+  window (`temporal.question_window` — days, parts of months, months, seasons, years, "the week before", relative
+  expressions against `now`), and within the dense top 4k facts whose valid time falls in it gain a bonus (0.1),
+  the dense order kept. Paired against hybrid recall: the questions naming a date 46.2 → 56.2 % (+24 / −3), overall J
+  61.6 → 62.9 % (p ≈ 5·10⁻⁵); with hybrid recall +2.2 over v0.95. On by default (`[memory] temporal_weight`). ADR-41,
+  `docs/path-b-memory.md` §13.19.
 - **Hybrid recall (v0.103).** Experiment 5 of the review series' plan: BM25 over the remembered facts next to the
   embedding — as a recall aid, not a re-ranker: within the dense top 2k it may swap facts into the top k, which keep
   their dense order; stopwords out, light stemming, query terms in more than 5 % of the facts (a conversation's

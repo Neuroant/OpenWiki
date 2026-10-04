@@ -672,13 +672,18 @@ class WikiWebApp:
         from ..graph.temporal import parse_date
         facts = self.graph.recall(query, embedder, k=k, include_superseded=bool(include_superseded),
                                   as_of=parse_date(as_of), known_at=parse_date(known_at),
-                                  lexical=self._lexical_weight())
+                                  lexical=self._lexical_weight(), temporal=self._temporal_weight())
         return {"query": query, "k": k, "facts": facts}
 
     def _lexical_weight(self) -> float:
         """Hybrid recall's BM25 weight — the project's ``[memory] lexical_weight``, else the default."""
         from ..lexical import RECALL_WEIGHT
         return self.project.lexical_weight if self.project is not None else RECALL_WEIGHT
+
+    def _temporal_weight(self) -> float:
+        """The time-window bonus — the project's ``[memory] temporal_weight``, else the default."""
+        from ..graph.temporal import WINDOW_WEIGHT
+        return self.project.temporal_weight if self.project is not None else WINDOW_WEIGHT
 
     def memory_timeline(self, query: str, groups: int = 3) -> dict:
         """B7: the full history (every validity interval, when recorded, by which session) of
@@ -713,7 +718,7 @@ class WikiWebApp:
         k = self.project.context_k if self.project is not None else 16
         context = self.graph.context_for(query, embedder, identity=identity, k=k, max_chars=budget,
                                          as_of=parse_date(as_of), probes=probes,
-                                         lexical=self._lexical_weight())
+                                         lexical=self._lexical_weight(), temporal=self._temporal_weight())
         return {"query": query, "context": context, "identity": identity, "budget": budget}
 
     def chat(self, message: str) -> dict:

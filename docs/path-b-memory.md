@@ -873,7 +873,7 @@ errs toward "different thing" (safe: fragmentation over a wrong merge); descript
 extra coexistence calls; subject identity is only inferred inside a resolved group (no general
 subject resolution).
 
-## 13. Memory hygiene, implicit recall and the LoCoMo benchmark (built v0.86 to v0.103)
+## 13. Memory hygiene, implicit recall and the LoCoMo benchmark (built v0.86 to v0.104)
 
 *Planned from the cognitive-agent report (B10+); every item below was built or measured — see §13.1–13.12.*
 
@@ -1369,6 +1369,49 @@ The largest single step so far ("Not mentioned" on single-hop 219 → 178). **Ad
 the live context — the hooks assemble k = 8 within a 2,000-character budget, a per-prompt token cost; the finding
 suggests trying a larger k there, measured on that path (→ §13.12). LoCoMo now: **overall J 60.7 %** with a local
 30B (Mem0 reports ≈ 67 % with GPT-4o-mini — and both are generous-judge numbers).
+
+### 13.19 The question's time window (v0.104)
+
+"What did Mel and her kids paint in their latest project in July 2023?" — the date is the point of the question, and
+recall can't see it: a fact's time lives in its validity, not in its text, so the embedding finds paintings from any
+month. On LoCoMo the questions that name a date answered far worse than the rest (single-hop 52 % vs 71 %, temporal
+30 % vs 48 %, open-domain 11 % vs 49 %; 195 such questions in categories 1–4, 61 adversarial). Cognee has an LLM
+extract the question's window; Hindsight and MIRIX parse dates with rules. Plan item 6 tested the rule-based form.
+
+`temporal.question_window` turns the question's date into a window — a day ("on May 3, 2023"), part of a month
+("early July 2023", "the first half of September 2022"), a month, a season, a year; "the week before" / "before" /
+"after" shift it; relative expressions ("yesterday", "last month", "two weeks ago") resolve against recall's `now`
+(LoCoMo: the conversation's present). A fact matches when its `valid_from` falls inside, with a tolerance that grows
+with the window's coarseness (3 days for a day, 7 for a month, none for a year): an event is often recorded a day or
+two later, at the session's date. Recall then works as hybrid recall does — within the dense top 4k, `w ×
+window_match` joins the selection score, and the chosen facts keep their dense order. A question without a date
+recalls exactly as before.
+
+**Offline** (gold-answer coverage in the top 20, the 208 dated questions of categories 1–4, against production's
+hybrid recall): 0.555 → 0.626 with w = 0.1 in a 4k pool (coverage up 23 / down 4). The pool size is the lever —
+inside 2k (0.591) the weight barely matters, and larger weights mostly add losses (0.5: 22 / 8). Fixed before the
+answers: w = 0.1, pool 4k, relative windows on.
+
+**Answers** — paired against hybrid recall on the same graphs; 1,766 of 1,986 questions recall the same list and keep
+their answer:
+
+| category (n) | hybrid J | + time window | + / − |
+|---|---|---|---|
+| multi-hop (282) | 67.0 % | 67.4 % | 1 / 0 |
+| temporal (321) | 46.1 % | **48.3 %** | 7 / 0 (p ≈ 0.016) |
+| open-domain (96) | 45.8 % | 49.0 % | 3 / 0 |
+| single-hop (841) | 67.4 % | **68.6 %** | 13 / 3 (p ≈ 0.02) |
+| **overall 1–4** | **61.6 %** | **62.9 %** | **24 / 3 (p ≈ 5·10⁻⁵)** |
+| the questions naming a date (208) | 46.2 % | **56.2 %** | 24 / 3 |
+| adversarial (446) | 84.5 % | 83.9 % | 0 / 3 |
+
+The first significant gain of the retrieval experiments. The losses are understandable: two adversarial questions
+ask about a period for the wrong speaker ("What did Calvin open in May 2023?") and the window pulls in what the other
+one did then; one answer drew the window's other setback. With hybrid recall the two retrieval changes take overall J
+from the v0.95 baseline's 60.7 to 62.9 % (+66 / −32, p < 0.001). **Adopted:** on wherever memory is recalled
+(`[memory] temporal_weight`, default 0.1; `0` = off; `recall` / `context --temporal`, `--recall-window` in the eval
+harnesses). On the live path it rarely fires — 2 of 269 dogfooding prompts name a time ("…all features implemented
+today") — so nothing there could be measured; it costs nothing when the query names no time.
 
 ### 13.18 Hybrid recall — BM25 next to the embedding (v0.103)
 

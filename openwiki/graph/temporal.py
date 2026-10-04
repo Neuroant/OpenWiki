@@ -281,3 +281,171 @@ def plan_merge(records: Iterable[dict], okey: str, valid_from: int,
                      and new_vt == nxt["valid_from"] else None)
     return {"action": "add", "target": None, "valid_from": new_vf, "valid_to": new_vt,
             "close": close, "expire": expire, "superseded_by": superseded_by, "coexist": coexist}
+
+
+# -- the time window a question names (v0.104) ---------------------------------------------
+# "What did Melanie paint in July 2023?" — the embedding ignores the date (it lives in the facts' validity, not their
+# text), so recall finds the topic from any time. A question's explicit date becomes a window; recall can then favour
+# facts whose valid time starts inside it (``window_match``). Windows carry a tolerance that grows with their
+# coarseness — an event is often recorded a day or two after it happened, at the session's date.
+
+WINDOW_WEIGHT = 0.1     # recall's default bonus for facts in the question's window ([memory] temporal_weight)
+_DAY = 86_400
+_MONTHS = {m: i for i, m in enumerate(("january", "february", "march", "april", "may", "june", "july", "august",
+                                       "september", "october", "november", "december"), 1)}
+_MONTHS.update({m[:3]: i for m, i in list(_MONTHS.items())})
+_MONTHS["sept"] = 9
+_MON = (r"(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr"
+        r"|jun|jul|aug|sept|sep|oct|nov|dec)\.?")
+_ORD = r"(?:st|nd|rd|th)?"
+_W_DAY_FIRST = re.compile(r"\b(\d{1,2})" + _ORD + r"\s+(?:of\s+)?" + _MON + r",?\s+(\d{4})\b")
+_W_MONTH_FIRST = re.compile(r"\b" + _MON + r"\s+(\d{1,2})" + _ORD + r",?\s+(\d{4})\b")
+_W_PART = re.compile(r"\b(early|beginning of|the beginning of|mid|middle of|the middle of|late|end of|the end of"
+                     r"|first half of|the first half of|second half of|the second half of)[\s-]+" + _MON
+                     + r",?\s+(?:of\s+)?(\d{4})\b")
+_W_MONTH = re.compile(r"\b" + _MON + r",?\s+(?:of\s+)?(\d{4})\b")
+_W_SEASON = re.compile(r"\b(spring|summer|fall|autumn|winter)\s+(?:of\s+)?(\d{4})\b")
+_W_YEAR = re.compile(r"\b(19\d{2}|20\d{2})\b")
+_W_SHIFT = re.compile(r"\b(the\s+)?(day|week|weekend|month)\s+(before|after|of)\s*$"
+                      r"|\b(before|after|since|until|by)\s*$")
+_W_RELATIVE = re.compile(r"\b(yesterday|today|this (?:week|month|year)|last (?:week|weekend|month|year|summer|winter"
+                         r"|spring|fall|autumn)|(?:in )?the (?:last|past) (\d+ )?(day|week|month|year)s?"
+                         r"|(\d+|a|one|two|three|four|five|six) (day|week|month|year)s? ago)\b")
+_NUM = {"a": 1, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6}
+_SEASONS = {"spring": (3, 3), "summer": (6, 3), "fall": (9, 3), "autumn": (9, 3), "winter": (12, 3)}
+_UNIT_DAYS = {"day": 1, "week": 7, "month": 30, "year": 365}
+
+
+def _month_span(y: int, mo: int, months: int = 1) -> tuple:
+    end_y, end_mo = y + (mo - 1 + months) // 12, (mo - 1 + months) % 12 + 1
+    return _epoch(y, mo), _epoch(end_y, end_mo)
+
+
+def _shift(window: tuple, before: str) -> tuple:
+    """Apply a modifier just ahead of a date ("the week before", "after") to its window."""
+    start, end, tol = window
+    m = _W_SHIFT.search(before)
+    if not m:
+        return window
+    unit, rel, bare = m.group(2), m.group(3), m.group(4)
+    if bare in ("before", "until", "by"):
+        return start - 90 * _DAY, start, 0
+    if bare in ("after", "since"):
+        return end, end + 90 * _DAY, 0
+    span = {"day": 1, "week": 7, "weekend": 3, "month": 30}[unit] * _DAY
+    if rel == "before":
+        return start - span, start, 2 * _DAY
+    if rel == "after":
+        return end, end + span, 2 * _DAY
+    mid = (start + end) // 2                                       # "the week of 9 June"
+    return mid - span // 2, mid + span // 2 + _DAY, 2 * _DAY
+
+
+def _relative(m, now: int) -> Optional[tuple]:
+    text = m.group(0)
+    today = now - now % _DAY
+    dt = datetime.fromtimestamp(today, tz=timezone.utc)
+    if text == "yesterday":
+        return today - _DAY, today, _DAY
+    if text == "today":
+        return today, today + _DAY, _DAY
+    if text.startswith("this "):
+        unit = text.split()[1]
+        if unit == "week":
+            return today - 7 * _DAY, today + _DAY, _DAY
+        if unit == "month":
+            s, e = _month_span(dt.year, dt.month)
+            return s, e, 3 * _DAY
+        return _epoch(dt.year), _epoch(dt.year + 1), 0
+    if text.startswith("last "):
+        unit = text.split()[1]
+        if unit in ("week", "weekend"):
+            return today - (14 if unit == "week" else 9) * _DAY, today, 2 * _DAY
+        if unit == "month":
+            y, mo = (dt.year, dt.month - 1) if dt.month > 1 else (dt.year - 1, 12)
+            s, e = _month_span(y, mo)
+            return s, e, 7 * _DAY
+        if unit == "year":
+            return _epoch(dt.year - 1), _epoch(dt.year), 0
+        first, months = _SEASONS[unit]                         # the last such season that has ended
+        y = dt.year if dt.month >= first + months else dt.year - 1
+        s, e = _month_span(y, first, months)
+        return s, e, 14 * _DAY
+    if m.group(3):                                             # "in the last 3 weeks"
+        n = int((m.group(2) or "1").strip())
+        return now - _UNIT_DAYS[m.group(3)] * n * _DAY, now + _DAY, 0
+    n = int(m.group(4)) if m.group(4).isdigit() else _NUM[m.group(4)]   # "2 weeks ago"
+    center = today - _UNIT_DAYS[m.group(5)] * n * _DAY
+    pad = {"day": 1, "week": 4, "month": 15, "year": 182}[m.group(5)] * _DAY
+    return center - pad, center + pad + _DAY, 0
+
+
+def question_window(text: str, now: Optional[int] = None) -> Optional[tuple]:
+    """The time window a question names → ``(start, end, tolerance)`` (epoch seconds, ``[start, end)``), or ``None``.
+
+    Explicit dates: a day ("on May 3, 2023", "3 May 2023"), part of a month ("early July 2023", "the first half of
+    September 2022"), a month ("in July 2023"), a season ("summer 2021"), a year ("in 2022"); "the week before" /
+    "the week of" / "before" / "after" just ahead of a date shift it. Relative ones ("yesterday", "last month", "two
+    weeks ago", "in the past 3 days") only with ``now``. Several dates → one window spanning them. The tolerance lets
+    a fact recorded shortly after the window still match (``window_match``): 3 days for a day, 7 for a month, none
+    for a year."""
+    low = " ".join(str(text or "").lower().split())
+    windows, used = [], []
+
+    def free(m):
+        return all(m.end() <= a or m.start() >= b for a, b in used)
+
+    def take(m, window):
+        if window[0] is not None and window[1] is not None:
+            windows.append(_shift(window, low[max(0, m.start() - 30):m.start()]))
+            used.append((m.start(), m.end()))
+
+    for rx, day_first in ((_W_DAY_FIRST, True), (_W_MONTH_FIRST, False)):
+        for m in rx.finditer(low):
+            if free(m):
+                d, mon, y = (m.group(1), m.group(2), m.group(3)) if day_first else \
+                    (m.group(2), m.group(1), m.group(3))
+                start = _epoch(int(y), _MONTHS[mon], int(d))
+                take(m, (start, start + _DAY if start is not None else None, 3 * _DAY))
+    for m in _W_PART.finditer(low):
+        if free(m):
+            start, end = _month_span(int(m.group(3)), _MONTHS[m.group(2)])
+            if start is not None and end is not None:
+                lo, hi = {"early": (0, 10), "beginning": (0, 10), "mid": (10, 20), "middle": (10, 20),
+                          "late": (20, 31), "end": (20, 31), "first": (0, 15), "second": (15, 31)}[
+                    m.group(1).replace("the ", "").split()[0]]
+                take(m, (start + lo * _DAY, min(end, start + hi * _DAY), 5 * _DAY))
+    for m in _W_MONTH.finditer(low):
+        if free(m):
+            start, end = _month_span(int(m.group(2)), _MONTHS[m.group(1)])
+            take(m, (start, end, 7 * _DAY))
+    for m in _W_SEASON.finditer(low):
+        if free(m):
+            first, months = _SEASONS[m.group(1)]
+            start, end = _month_span(int(m.group(2)), first, months)
+            take(m, (start, end, 14 * _DAY))
+    for m in _W_YEAR.finditer(low):
+        if free(m):
+            take(m, (_epoch(int(m.group(1))), _epoch(int(m.group(1)) + 1), 0))
+    if now is not None:
+        for m in _W_RELATIVE.finditer(low):
+            if free(m):
+                w = _relative(m, int(now))
+                if w is not None:
+                    windows.append(w)
+                    used.append((m.start(), m.end()))
+    if not windows:
+        return None
+    return min(w[0] for w in windows), max(w[1] for w in windows), max(w[2] for w in windows)
+
+
+def window_match(t: Optional[int], window: Optional[tuple]) -> float:
+    """How well a fact's time ``t`` (its ``valid_from``) fits a ``question_window``: 1 inside, falling linearly to 0
+    across the tolerance before and after, 0 beyond (or without a time)."""
+    if t is None or window is None:
+        return 0.0
+    start, end, tol = window
+    if start <= t < end:
+        return 1.0
+    gap = start - t if t < start else t - end + 1
+    return max(0.0, 1.0 - gap / tol) if tol > 0 else 0.0

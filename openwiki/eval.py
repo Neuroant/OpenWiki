@@ -487,7 +487,7 @@ def build_probe_messages(question: str, context: str) -> list:
 
 
 def run_cross_session_eval(items, graph, embedder, chat, judge=None, recall_k: int = 10,
-                           on_progress=None, probe=None, lexical: float = 0.0) -> dict:
+                           on_progress=None, probe=None, lexical: float = 0.0, temporal: float = 0.0) -> dict:
     """The Path B headline metric — cross-session task success (path-b-memory.md §7).
 
     For each scenario: wipe memory, **remember** its setup sessions (capture → merge into
@@ -520,9 +520,10 @@ def run_cross_session_eval(items, graph, embedder, chat, judge=None, recall_k: i
         when = {"as_of": parse_date(item.as_of), "known_at": parse_date(item.known_at)}
         if probe is not None:              # P1 cue-trigger: reserve slots for constraint probes
             recalled = graph.recall_probed(item.question, embedder, probe(item.question),
-                                           k=recall_k, lexical=lexical, **when)
+                                           k=recall_k, lexical=lexical, temporal=temporal, **when)
         else:
-            recalled = graph.recall(item.question, embedder, k=recall_k, lexical=lexical, **when)
+            recalled = graph.recall(item.question, embedder, k=recall_k, lexical=lexical, temporal=temporal,
+                                    **when)
         # B6: the "assembled" condition is now the three-tier context_for assembler —
         # activation (recall) + attractors (themes the recalled facts belong to). Identity
         # is left empty here (scenarios are generic); themes appear once the graph is consolidated.

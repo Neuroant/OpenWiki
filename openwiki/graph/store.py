@@ -37,8 +37,8 @@ from .journal import (
     pending_journal, read_journal,
 )
 from .temporal import (
-    MANY, ONE, believed_at, close_times, derive_legacy_intervals, plan_merge, valid_at,
-    valid_to_known_at,
+    MANY, ONE, believed_at, close_times, derive_legacy_intervals, plan_merge, question_window, valid_at,
+    valid_to_known_at, window_match,
 )
 from .temporal import session_date as session_date_of
 from .temporal import status as temporal_status
@@ -56,6 +56,7 @@ MATERIAL_WEIGHT = 0.75                # P0: a claim from discussed material rank
 RECENCY_FLOOR = 0.9                   # recall: recency is a tie-breaker — a fact keeps ≥ 90% of its score (LoCoMo)
 LEXICAL_POOL = 2                      # hybrid recall: BM25 may only promote facts within the dense top (2 × k) …
 LEXICAL_MAX_DF = 0.05                 # … on terms in at most 5 % of the facts (not the speakers' names) — §13.18
+TEMPORAL_POOL = 4                     # the question's time window may promote from the dense top (4 × k), §13.19
 ATTR_SEP = "\x1f"                     # canonical attribute key = normalized subject ␟ predicate
 RESOLVE_THRESHOLD = 0.75              # min fact-embedding cosine for an attribute candidate (B9)
 RESOLVE_K = 6                         # candidates shown to the attribute chooser
@@ -1399,7 +1400,7 @@ class GraphStore:
     def recall(self, query: str, embedder, k: int = 5,
                half_life_days: float = DEFAULT_HALF_LIFE_DAYS, now: Optional[int] = None,
                include_superseded: bool = False, as_of: Optional[int] = None,
-               known_at: Optional[int] = None, lexical: float = 0.0) -> list:
+               known_at: Optional[int] = None, lexical: float = 0.0, temporal: float = 0.0) -> list:
         """B6 (activation tier) + **B7 point-in-time**: the remembered facts most relevant to
         ``query`` — cosine over assertion embeddings × decayed confidence. By default only the
         facts **valid now and still believed**; ``as_of`` = valid at that (valid) time,
@@ -1410,7 +1411,12 @@ class GraphStore:
         order — among the dense top ``LEXICAL_POOL × k`` the ``k`` with the highest ``score +
         lexical × BM25`` are kept (``lexical.fact_scores``: stopwords dropped, light stemming,
         query terms in more than ``LEXICAL_MAX_DF`` of the facts ignored), then shown in dense
-        order; each hit carries its normalized ``lexical`` match. Read-only."""
+        order; each hit carries its normalized ``lexical`` match. ``temporal`` (a weight, 0 = off)
+        favours facts from **the time window the query names** (``temporal.question_window``: "in
+        July 2023", "on May 3, 2023", "last week" — relative to ``now``): within the dense top
+        ``TEMPORAL_POOL × k`` a fact whose ``valid_from`` falls in the window gains ``temporal ×
+        window_match`` (tolerant at the edges), alongside the lexical boost; dense order again;
+        each hit carries ``in_window``. Read-only."""
         if embedder is None:
             raise ValueError("recall needs an embedder.")
         recs = self._load_assertions(with_emb=True)   # [] on graphs built before this layer
@@ -1443,20 +1449,28 @@ class GraphStore:
                            "created_at": r["created_at"], "expired_at": r["expired_at"],
                            "source": r.get("source")})
         scored.sort(key=lambda x: -x["_rank"])     # the unrounded score — rounding made ties
-        if lexical and scored:
-            # hybrid recall: BM25 is a recall aid, not a re-ranker — it may swap facts into the top k
-            # from the dense pool, never reorder it. Unpooled, normalized BM25 lifted keyword matches from
-            # dense rank 100+ ("Melanie | has pet | Bailey" for "What pet does Caroline have?") over the
-            # facts that answered — LoCoMo J did not move (§13.18).
-            from ..lexical import fact_scores
-            # term statistics (idf, the frequency cutoff, the normalization) over every candidate — a
-            # term's weight belongs to the memory, not to the pool
-            lex = fact_scores(query, [f"{x['subject']} {x['predicate']} {x['object']}" for x in scored],
-                              max_df=LEXICAL_MAX_DF)
-            pool = min(len(scored), max(k, LEXICAL_POOL * k))
-            for n in range(pool):
-                scored[n]["lexical"] = round(float(lex[n]), 3)
-            chosen = sorted(range(pool), key=lambda n: (-(scored[n]["_rank"] + lexical * float(lex[n])), n))[:k]
+        window = question_window(query, now) if temporal else None
+        if (lexical or window) and scored:
+            # recall aids, not re-rankers: they may swap facts into the top k from the dense pool, never
+            # reorder it. Unpooled, normalized BM25 lifted keyword matches from dense rank 100+ ("Melanie |
+            # has pet | Bailey" for "What pet does Caroline have?") over the facts that answered (§13.18).
+            pool = min(len(scored), max(k, (TEMPORAL_POOL if window else LEXICAL_POOL) * k))
+            boost = [0.0] * pool
+            if lexical:
+                from ..lexical import fact_scores
+                # term statistics (idf, the frequency cutoff, the normalization) over every candidate — a
+                # term's weight belongs to the memory, not to the pool
+                lex = fact_scores(query, [f"{x['subject']} {x['predicate']} {x['object']}" for x in scored],
+                                  max_df=LEXICAL_MAX_DF)
+                for n in range(min(pool, max(k, LEXICAL_POOL * k))):
+                    scored[n]["lexical"] = round(float(lex[n]), 3)
+                    boost[n] += lexical * float(lex[n])
+            if window:
+                for n in range(pool):
+                    match = window_match(scored[n]["valid_from"], window)
+                    scored[n]["in_window"] = round(match, 3)
+                    boost[n] += temporal * match
+            chosen = sorted(range(pool), key=lambda n: (-(scored[n]["_rank"] + boost[n]), n))[:k]
             scored = [scored[n] for n in sorted(chosen)]        # dense order among the chosen
         for x in scored:
             x.pop("_rank", None)
@@ -1866,7 +1880,8 @@ class GraphStore:
 
     def context_for(self, query: str, embedder, identity: str = "",
                     k: int = 16, max_themes: int = 4, max_chars=None,
-                    as_of: Optional[int] = None, probes=None, lexical: float = 0.0) -> str:
+                    as_of: Optional[int] = None, probes=None, lexical: float = 0.0,
+                    temporal: float = 0.0) -> str:
         """B6: assemble a session's context for ``query`` from the three memory tiers —
         identity + decay-weighted ``recall`` (activation) + the relevant consolidated themes
         (attractors), optionally fit within a ``max_chars`` budget. Facts carry their validity
@@ -1878,8 +1893,10 @@ class GraphStore:
         facts = []
         if embedder is not None:
             try:
-                facts = (self.recall_probed(query, embedder, probes, k=k, as_of=as_of, lexical=lexical)
-                         if probes else self.recall(query, embedder, k=k, as_of=as_of, lexical=lexical))
+                facts = (self.recall_probed(query, embedder, probes, k=k, as_of=as_of, lexical=lexical,
+                                            temporal=temporal)
+                         if probes else self.recall(query, embedder, k=k, as_of=as_of, lexical=lexical,
+                                                    temporal=temporal))
             except Exception:      # never let a memory read break the caller
                 facts = []
         themes = self.relevant_concepts([f["id"] for f in facts], limit=max_themes) if facts else []

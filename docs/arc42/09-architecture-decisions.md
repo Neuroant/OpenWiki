@@ -56,6 +56,7 @@
 | [38](#adr-38) | Readers hold the graph only per call; writers plan read-only and hold the write lock only to apply | Accepted (Path B++) | availability, Q5 |
 | [39](#adr-39) | The remembered tier is portable — a COGX archive and a Markdown view; LadybugDB is the migration target after three changes | Accepted (Path B++) | portability (R10) |
 | [40](#adr-40) | Hybrid recall: BM25 as a recall aid within the dense pool, the dense order kept | Accepted (Path B++) | relevance, Q5 |
+| [41](#adr-41) | The question's time window: facts from the period a question names may enter recall | Accepted (Path B++) | relevance, Q5 |
 
 ---
 
@@ -825,6 +826,25 @@ changes.** *(v0.102; builds on [ADR-16](#adr-16); mitigates R10)*
   in), no category worse. − ≈ 10–30 ms per recall; the gain on conversational memory is small — the churn of facts it
   swaps in without bringing the answer (+19 / −30 on LoCoMo) is the remaining cost.
 
+### ADR-41
+**The question's time window: facts from the period a question names may enter recall.** *(v0.104; builds on
+[ADR-27](#adr-27) and [ADR-40](#adr-40))*
+- **Context:** a fact's time lives in its valid time, not its text, so the embedding cannot see the date in "What did
+  Mel paint in July 2023?". On LoCoMo the questions naming a date answered far worse than the rest (single-hop 52 % vs
+  71 %, temporal 30 % vs 48 %).
+- **Decision:** `temporal.question_window` parses the window with rules (a day, part of a month, a month, a season, a
+  year, "the week before" / "before" / "after"; relative expressions against recall's `now`); within the dense top 4k,
+  facts whose `valid_from` falls inside gain `w × window_match` (tolerance 3 days for a day … none for a year) in the
+  same selection step as the lexical boost; dense order kept. On by default (`[memory] temporal_weight`, 0.1).
+- **Alternatives:** an LLM extracting the window (Cognee) — a model call per query on the hot path, for dates rules
+  read reliably; filtering to the window — a wrong capture date would remove the right fact; validity-interval overlap
+  instead of the start — most remembered facts have open intervals, so a window would match nearly everything before
+  it; the bonus inside the 2k lexical pool — it changed half as much (coverage 0.591 vs 0.626).
+- **Consequences:** + the questions naming a date: J 46.2 → 56.2 % (+24 / −3), overall 61.6 → 62.9 % (p ≈ 5·10⁻⁵), the
+  first significant gain of the retrieval experiments; a question without a date recalls exactly as before. − Two
+  adversarial questions about a period for the wrong person got the other person's event from it (adversarial 84.5 →
+  83.9 %, n.s.); on the coding memory it rarely fires (2 of 269 real prompts name a time).
+
 ---
 *Chapter complete. The Path-B agent-memory direction landed via ADR-14/15/16/17/18/19; the graph then
 deepened (ADR-22 typed relations + relation-aware GraphRAG, ADR-23 entity resolution), gained
@@ -839,6 +859,6 @@ recency as a tie-breaker set by the **LoCoMo** benchmark (ADR-34), a live contex
 path (ADR-35), a **session handoff** of derived state + the agent's note (ADR-36), **credential redaction** with
 a normalized instruction policy (ADR-37), and **writes that land during a session** — per-call readers, two-phase
 writers (ADR-38), **portable memory** — a COGX export / import, a Markdown view and a LadybugDB spike (ADR-39), and
-**hybrid recall** — BM25 as a recall aid within the dense pool (ADR-40). §11
+**hybrid recall** — BM25 as a recall aid within the dense pool (ADR-40), and **the question's time window** (ADR-41). §11
 debts D1/D2/D6 are resolved. Deep designs in `docs/path-b-memory.md` and `docs/RAG-vs-GraphRAG.md`. New significant
 decisions should be appended here with the next id.*

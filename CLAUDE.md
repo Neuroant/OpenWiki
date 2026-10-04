@@ -221,7 +221,8 @@ flagged:
 `--session ID`, `--session-date DATE`, `--correct`, `-i/--index DIR`, `--graph DIR`, `--model NAME`,
 `--host URL` (it reports `N new, M duplicate, K superseded (R retracted), H historical`). `recall` is
 read-only: `-k N`, `--all`, `--as-of DATE`, `--known-at DATE`, `--timeline`, `--lexical W` (hybrid recall's BM25
-weight — default the project's `[memory] lexical_weight`, 0.2; `0` = dense only), `-i/--index DIR`,
+weight — default the project's `[memory] lexical_weight`, 0.2; `0` = dense only), `--temporal W` (the bonus for facts
+from the time window the query names — default `[memory] temporal_weight`, 0.1; `0` = off), `-i/--index DIR`,
 `--graph DIR`, `--host URL`. **B7 bi-temporal (v0.81):** each fact has **valid time**
 (`valid_from`/`valid_to` — when it held in the world: a date the transcript *states*, else the session
 date — `--session-date` or a `YYYY-MM-DD` in the session id — else the record time) and **transaction
@@ -291,7 +292,11 @@ no false negatives, 5 lenient false positives (dates off by days) → treat J as
 `answers-…-lex0.2.jsonl`, and a question whose recalled list equals the dense recall's copies the dense answer
 (`run_locomo(reuse_base=True)`: an identical prompt adds no noise to a paired comparison). Paired on the D13 graphs:
 overall J 60.7 → **61.6 %** (+47 / −34, p ≈ 0.18, n.s.; multi-hop +1.8, single-hop +0.8, adversarial unchanged);
-where BM25 brought the gold answer into the context +24 / −2 (p ≈ 10⁻⁵) (§13.18).
+where BM25 brought the gold answer into the context +24 / −2 (p ≈ 10⁻⁵) (§13.18). **The question's time window
+(v0.104):** `--recall-window W` (default 0.1, as production; answers `…-lex0.2-tw0.1.jsonl`, unchanged recalls copy the
+run without it). Paired against hybrid recall: the questions that name a date 46.2 → **56.2 %** (+24 / −3), overall J
+61.6 → **62.9 %** (p ≈ 5·10⁻⁵; temporal +2.2, single-hop +1.2, open-domain +3.2; adversarial −0.6, n.s.) — with hybrid
+recall +2.2 over the v0.95 baseline (66 / 32, p < 0.001) (§13.19).
 
 **Sleep — nightly memory maintenance + forgetting** (Path B++): one schedulable writable pass — fold what
 read-only processes queued (usage + journal) → redact credentials in facts stored before v0.99 → **forget** what the
@@ -406,7 +411,7 @@ Options: `-k N` (activation facts; default the project's `[memory] context_k`, 1
 `--max-chars N` (fit within ~a char budget, ~4/token; default the project's `[memory] context_budget`, 3000; `0` =
 unbounded),
 `--identity TEXT` (override), `--probes/--no-probes` (P1 cue-trigger recall — default the project's
-`[memory] probes`, off) + `--model NAME` (the probe chat model), `--lexical W` (hybrid recall, as `recall`),
+`[memory] probes`, off) + `--model NAME` (the probe chat model), `--lexical W` / `--temporal W` (as `recall`),
 `-i/--index DIR` (embedder), `--graph DIR`, `--host URL`. Gated by `[memory] enabled`. Backed by `GraphStore.context_for` (→ `recall` + `relevant_concepts` + pure
 `memory.assemble_context`, which **budgets** the tiers: identity → facts (majority) → themes
 (remainder), graceful truncation); also exposed to coding agents as the MCP **`wiki_memory`** tool
@@ -719,7 +724,15 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   default 0.2 — the inject hook, `context`, `recall`, MCP `wiki_memory`, the web UI, the handoff, both eval
   harnesses). Unpooled, normalized BM25 lifted keyword matches from dense rank 100+ over the facts that answered
   (LoCoMo flat); pooled, the facts it swaps in on real prompts were judged helpful 21.9 % vs 12.0 % for those it
-  displaced (26 / 9 prompts, p ≈ 0.006; `docs/path-b-memory.md` §13.18). `has_memory()` gates both. `_ensure_memory_schema`
+  displaced (26 / 9 prompts, p ≈ 0.006; `docs/path-b-memory.md` §13.18). **The question's time window (v0.104):**
+  `recall(…, temporal=w)` parses the window the query names (`temporal.question_window`: a day, part of a month, a
+  month, a season, a year, "the week before", "before" / "after"; relative ones — "yesterday", "last month", "two
+  weeks ago" — against recall's `now`) and, within the dense top `TEMPORAL_POOL × k` (4k), adds `w × window_match`
+  (1 when `valid_from` falls inside, fading over a tolerance of 3 days for a day … 0 for a year) to the selection score
+  next to the lexical boost — dense order again, each hit carries `in_window`. On by default (`[memory]
+  temporal_weight`, `Project.temporal_weight`, `temporal.WINDOW_WEIGHT` = 0.1) wherever memory is recalled: LoCoMo's
+  dated questions 46.2 → 56.2 % (+24 / −3); a question without a date recalls exactly as before (§13.19).
+  `has_memory()` gates both. `_ensure_memory_schema`
   lazily creates the tables + `ALTER`s in `confidence`/`last_seen` on pre-0.54 graphs; B0's
   `_snapshot_memory`/`_restore_memory` preserve `SUPERSEDES` + confidence across a rebuild. Exposed as
   the `remember`/`recall` (+`--all`) CLI commands.

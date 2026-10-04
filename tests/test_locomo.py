@@ -160,5 +160,10 @@ def test_run_is_phased_resumable_and_scored(tmp_path):
                            reuse_base=True)
     assert _Counting.calls == 0 and reused["records"][0]["reused"] is True   # the fake graph ignores lexical
     assert reused["records"][0]["prediction"] == k20["records"][0]["prediction"]
+    # the time window is compared against the run without it (here: lexical 0.5)
+    tw = lc.run_locomo(convs, work, _Graph, _Emb(), _Counting(), recall_k=20, categories=[4], lexical=0.5,
+                       temporal=0.1, reuse_base=True)
+    assert (work / "conv-x" / "answers-infer-k20-lex0.5-tw0.1.jsonl").is_file()
+    assert _Counting.calls == 0 and tw["records"][0]["reused"] is True
     assert lc.build_answer_messages("q", "ctx")[0]["content"] == lc.ANSWER_SYSTEM_INFER
     assert lc.build_answer_messages("q", "ctx", "strict")[0]["content"] == lc.ANSWER_SYSTEM

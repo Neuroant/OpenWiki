@@ -305,7 +305,9 @@ mit aktuellem Stand und Verlauf), die sich mit git verfolgen lässt.
 
 **Hybrider Abruf.** Neben der Bedeutungsähnlichkeit (Embedding) holt ein Stichwortabgleich (BM25) Fakten mit genau
 den Namen, Versionen oder Dateinamen der Anfrage herein — er tauscht nur unter den ähnlichsten Fakten aus, die
-Reihenfolge bleibt die der Ähnlichkeit (`[memory] lexical_weight`, Standard 0.2; `0` schaltet ihn ab).
+Reihenfolge bleibt die der Ähnlichkeit (`[memory] lexical_weight`, Standard 0.2; `0` schaltet ihn ab). Nennt eine
+Frage einen Zeitraum („im Juli 2023", „letzte Woche"), werden Fakten aus diesem Zeitraum bevorzugt
+(`[memory] temporal_weight`, Standard 0.1).
 
 Nur lesend; ohne Sitzungen (oder im Wiki-Modus) zeigt der Reiter einen Hinweis.
 

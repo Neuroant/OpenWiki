@@ -173,6 +173,18 @@ class Project:
             return RECALL_WEIGHT
 
     @property
+    def temporal_weight(self) -> float:
+        """Time-window recall (v0.104): the bonus for facts whose valid time falls in the window a
+        query names ("in July 2023", "last week") — ``0`` = off. ``[memory] temporal_weight``, default
+        ``temporal.WINDOW_WEIGHT`` (0.1): on LoCoMo's dated questions J rose 46.2 → 56.2 % (+24 / −3)."""
+        from .graph.temporal import WINDOW_WEIGHT
+        value = self.setting("memory", "temporal_weight", WINDOW_WEIGHT)
+        try:
+            return max(0.0, float(value))
+        except (TypeError, ValueError):
+            return WINDOW_WEIGHT
+
+    @property
     def skip_chores(self) -> bool:
         """No memory injection for chore prompts — git operations ("push and tag v1.2"), slash
         commands, and bare acknowledgements once a session is under way (``cli.chore_kind``).
@@ -330,6 +342,7 @@ enabled = {str(memory).lower()}
 # context_k = 16          # facts recalled into that context
 # probes = false          # cue-trigger recall: +1 chat call per context read to surface the user's implicit constraints
 # lexical_weight = 0.2    # hybrid recall: BM25 over the facts next to the embedding (names, versions, files); 0 = off
+# temporal_weight = 0.1   # favour facts from the time window a request names ("in July", "last week"); 0 = off
 # agent_writes = false    # let a coding agent record facts / new states via MCP wiki_remember
 # skip_chores = true      # no memory for chore prompts (push / tag / commit, slash commands, a later "ok")
 # skip_prompts = []       # more chore prompts for this project, as regexes, e.g. ["sync arc42 docs"]

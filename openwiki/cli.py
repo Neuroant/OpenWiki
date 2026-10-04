@@ -45,7 +45,7 @@ from .graph.journal import append_remember, journal_path, pending_journal
 from .lexical import RECALL_WEIGHT
 from .graph.lazy import LazyGraph
 from .graph.store import memoized
-from .graph.temporal import format_date, format_interval, parse_date
+from .graph.temporal import WINDOW_WEIGHT, format_date, format_interval, parse_date
 from .graph.temporal import session_date as session_date_of
 from .handoff import CAPTURE_STATE_FILE, capture_watermark
 from .llm import OllamaChat
@@ -269,6 +269,11 @@ def _build_argparser() -> argparse.ArgumentParser:
                         help="--locomo / --cross-session: hybrid recall's BM25 weight (default: production's, "
                              "0.2; 0 = dense only). With --locomo the answers go to their own -lexW file, and a "
                              "question whose recalled facts equal the dense recall's copies the dense answer.")
+    eval_p.add_argument("--recall-window", type=float, default=None, metavar="W",
+                        help="--locomo / --cross-session: bonus for facts from the time window a question names "
+                             "(\"in July 2023\", \"last week\"; default: production's, 0.1; 0 = off). With --locomo "
+                             "the answers go to their own -twW file, and unchanged recalls copy the answer of the run "
+                             "without it.")
     eval_p.add_argument("--time-budget", type=float, default=None, metavar="SECONDS",
                         help="--locomo: stop cleanly after this many seconds; re-run to continue.")
     eval_p.add_argument("--cross-session", dest="cross_session", action="store_true",
@@ -558,6 +563,9 @@ def _build_argparser() -> argparse.ArgumentParser:
     rec_p.add_argument("--lexical", type=float, default=None, metavar="W",
                        help="Hybrid recall: BM25 weight next to the embedding (default: the project's [memory] "
                             "lexical_weight, 0.2; 0 = dense only).")
+    rec_p.add_argument("--temporal", type=float, default=None, metavar="W",
+                       help="Favour facts from the time window the query names (\"in July 2023\", \"last week\"): "
+                            "the bonus weight (default: the project's [memory] temporal_weight, 0.1; 0 = off).")
     rec_p.add_argument("-i", "--index", type=Path, default=None, help="Index dir (for the embedder; default: project's).")
     rec_p.add_argument("--graph", type=Path, default=None, help="Graph dir (default: project's graph).")
     rec_p.add_argument("--host", default=None, help="Ollama host URL.")
@@ -582,6 +590,9 @@ def _build_argparser() -> argparse.ArgumentParser:
     ctx_p.add_argument("--lexical", type=float, default=None, metavar="W",
                        help="Hybrid recall: BM25 weight next to the embedding (default: the project's [memory] "
                             "lexical_weight, 0.2; 0 = dense only).")
+    ctx_p.add_argument("--temporal", type=float, default=None, metavar="W",
+                       help="Favour facts from the time window the query names (default: the project's [memory] "
+                            "temporal_weight, 0.1; 0 = off).")
     ctx_p.add_argument("--model", default=None, help="Chat model for --probes (default: project's).")
     ctx_p.add_argument("-i", "--index", type=Path, default=None, help="Index dir (for the embedder; default: project's).")
     ctx_p.add_argument("--graph", type=Path, default=None, help="Graph dir (default: project's graph).")
@@ -1956,6 +1967,7 @@ def _locomo_eval(args: argparse.Namespace) -> int:
                      now_mode=args.recall_now, answer_style=args.answer_style,
                      capture_style=args.capture_style,
                      lexical=RECALL_WEIGHT if args.recall_lexical is None else max(0.0, args.recall_lexical),
+                     temporal=WINDOW_WEIGHT if args.recall_window is None else max(0.0, args.recall_window),
                      reuse_base=True)
     s = res["summary"]
     state = "complete" if res["complete"] else "partial — re-run to continue"
@@ -2029,7 +2041,8 @@ def _cross_session_eval(args: argparse.Namespace, project) -> int:
                 recall_k=args.recall_k if args.recall_k is not None else 10,
                 on_progress=lambda done, total: print(f"  {done}/{total} done", file=sys.stderr),
                 probe=probe,
-                lexical=RECALL_WEIGHT if args.recall_lexical is None else max(0.0, args.recall_lexical))
+                lexical=RECALL_WEIGHT if args.recall_lexical is None else max(0.0, args.recall_lexical),
+                temporal=WINDOW_WEIGHT if args.recall_window is None else max(0.0, args.recall_window))
         finally:
             graph.close()
     finally:
@@ -3099,6 +3112,14 @@ def _lexical_arg(args: argparse.Namespace) -> float:
     return project.lexical_weight if project is not None else RECALL_WEIGHT
 
 
+def _temporal_arg(args: argparse.Namespace) -> float:
+    """The time-window weight: ``--temporal``, else the project's ``[memory] temporal_weight``, else the default."""
+    if getattr(args, "temporal", None) is not None:
+        return max(0.0, args.temporal)
+    project = getattr(args, "project_obj", None)
+    return project.temporal_weight if project is not None else WINDOW_WEIGHT
+
+
 def _cmd_recall(args: argparse.Namespace) -> int:
     """Path B (B6): show the remembered facts most relevant to a query."""
     project = getattr(args, "project_obj", None)
@@ -3124,7 +3145,8 @@ def _cmd_recall(args: argparse.Namespace) -> int:
         else:
             hits = graph.recall(args.query, index.embedder, k=args.top_k,
                                 include_superseded=getattr(args, "include_superseded", False),
-                                as_of=as_of, known_at=known_at, lexical=_lexical_arg(args))
+                                as_of=as_of, known_at=known_at, lexical=_lexical_arg(args),
+                                temporal=_temporal_arg(args))
     finally:
         graph.close()
     if not hits:
@@ -3198,7 +3220,7 @@ def _cmd_context(args: argparse.Namespace) -> int:
         context = graph.context_for(args.query, index.embedder, identity=identity,
                                     k=top_k, max_themes=args.themes, max_chars=max_chars,
                                     as_of=getattr(args, "as_of", None), probes=probes,
-                                    lexical=_lexical_arg(args))
+                                    lexical=_lexical_arg(args), temporal=_temporal_arg(args))
     finally:
         graph.close()
     if not context.strip():
@@ -3593,7 +3615,7 @@ def _hook_inject(project: Project, payload: dict) -> None:
     try:
         context = graph.context_for(prompt, embedder, identity=project.identity, k=project.context_k,
                                     max_chars=project.context_budget, probes=probes,
-                                    lexical=project.lexical_weight)
+                                    lexical=project.lexical_weight, temporal=project.temporal_weight)
     finally:
         graph.close()
     if context.strip():
@@ -4137,6 +4159,7 @@ def _cmd_mcp(args: argparse.Namespace) -> int:
                           memory_probes=bool(project is not None and project.memory_enabled
                                              and project.memory_probes),
                           memory_lexical=project.lexical_weight if project is not None else RECALL_WEIGHT,
+                          memory_temporal=project.temporal_weight if project is not None else WINDOW_WEIGHT,
                           memory_writes=writes, handoff=handoff, on_remember=on_remember)
     server.serve()   # blocks on stdio (JSON-RPC)
     return 0

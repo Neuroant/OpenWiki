@@ -368,7 +368,8 @@ session events ("vX was pushed and tagged") that would otherwise crowd the injec
 deleted. The memory is **portable**: `openwiki memory export` writes a COGX archive that other memory systems
 read, `memory import` restores one losslessly, and `sleep` keeps a readable Markdown view (`memory/`, one file per
 subject) to track in git. Recall is **hybrid**: next to the embedding, BM25 over the facts lets an exact name, version
-or file name pull in the facts that mention it. Design: **[docs/path-b-memory.md](docs/path-b-memory.md)**.
+or file name pull in the facts that mention it, and a date in the question ("in July 2023", "last week") favours the
+facts from that time. Design: **[docs/path-b-memory.md](docs/path-b-memory.md)**.
 
 ### Web UI
 

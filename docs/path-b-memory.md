@@ -1124,6 +1124,12 @@ the third time the local 30B is unreliable as a judge *of* memory (after the P0 
 review, §13.3). The evidence for a change lives in the transcript of the session that made it, which is where the
 next attempt looks (§13.5).
 
+*Later check (2026-10-04, `memory-systems-review.md` §13):* would learned dependencies have flagged them? Co-change and
+lead-lag rules over the B7 histories were at chance — **all 14 stale facts belong to attributes stated exactly once**,
+so there is no history to learn from — while a volatile-phrasing rule (plans, running states, counts / versions,
+capability gaps) caught 12 of 14 at 10 % of memory flagged (written after seeing them, so optimistic): staleness
+follows the *kind* of fact, which argues for volatility classes at capture.
+
 ### 13.5 Update-aware capture — measured and not adopted
 
 **Idea (Mem0-style write-time update).** When a session is captured, show the model the older facts related to it

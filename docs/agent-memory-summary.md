@@ -150,7 +150,9 @@ already have, then changes that only real sessions can judge. Each names where i
     every prompt (Mem0, Letta, Hermes, Cognee).
 11. **Session search for agents** — raw sessions searchable, full text first (Hermes, Letta, Graphiti).
 12. **Typed facts with a volatility class** — volatile facts marked "possibly outdated" after some weeks (MIRIX,
-    memory-champ).
+    memory-champ). First evidence: a volatile-phrasing rule caught 12 of the 14 labeled stale facts while flagging
+    10 % of memory (written after seeing them — confirm on a fresh labeled set); co-change dependencies were at
+    chance, since every stale fact had been stated only once (`memory-systems-review.md` §13).
 13. **An approval step** — the journal as the staging area for agent writes and for an always-present core
     (memory-champ, Hermes).
 14. **Procedural memory from errors** — failure → fix pairs, with Hermes' guardrails: no negative tool claims, no

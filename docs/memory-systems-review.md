@@ -1326,6 +1326,57 @@ TE needs long activity series per concept. Measured on the dogfooding project (r
 - **Rejecting links by TE** (case C): it would drop true references and typed relations that are rarely co-edited.
 - **Keystroke and reading-time telemetry** — privacy-heavy, editor-specific, and absent from a coding agent's setting.
 
+### Thought experiment: a transfer-entropy estimator for very short data
+
+*Added 2026-10-04.* Suppose an estimator existed that recovers transfer entropy from a handful of events. It would
+remove the first obstacle above (series too short), not the other two: the signal would still be the workflow, with
+the task as a hidden common cause, and n² pairs would still need significance control. And a few events carry only a
+few bits — an estimator that works there must bring the rest from a **prior**, learned on other histories, so its edges
+would be hypotheses that the data confirms or weakens over time (which would make the report's "Bayesian update"
+meaningful). The data would be at hand: B7 keeps every attribute's history as validity intervals, a series of change
+points.
+
+**What it would change in consolidation.**
+- **An influence graph next to the similarity graph:** directed, lagged edges ("a change in X is followed by a change
+  in Y within a day"); themes could describe mechanisms — release → test count → docs — instead of topics.
+- **Staleness by dependency — the main payoff.** Our open problem (D12, §13.4–13.6 of `path-b-memory.md`): a "current"
+  fact goes stale when the world changes and nothing says so. With learned dependencies, consolidation would act like a
+  build system — when X changes, mark what depends on X "possibly outdated" and recheck it.
+- **Measured volatility:** the entropy rate of a fact's own series — memory-champ's stable / slow / volatile classes,
+  measured instead of guessed.
+- **Keep the causes, derive the rest:** conditional TE finds facts that others fully explain — a principled redundancy
+  criterion for forgetting, Nemori's predict–calibrate made quantitative.
+- **Surprise on write** (an unexpected change is the learning signal) and **directed recall** ("why did X change?"
+  follows edges backward — the temporal and multi-hop questions where our LoCoMo scores are lowest).
+
+**What would go wrong.** Stable knowledge is invisible to TE (a constant series has no entropy, so "OpenWiki uses Kuzu"
+looks inert — forgetting by low TE would delete the bedrock). Routines look like dependencies ("push and tag" moves
+version, docs and test-count facts together) — though a coding agent's confounder is partly observable (the user's
+prompts) and its own edits are interventions, which is what turns predictive edges into causal ones. Injected memory
+steers the agent, so TE would learn the memory's own influence unless it conditions on what was injected; an attacker
+who controls timing can plant edges; and over-eager propagation marks half the memory stale at every release.
+
+**Checked on our data.** Before building an influence graph for any estimator, the staleness idea can be tested with a
+crude dependency proxy. The dev memory was rewound to 2026-09-27 09:00, just before `wiki_remember` closed the 14
+labeled stale facts of §13.4 (1,191 current facts then; labels cover samples, so other stale facts go unlabeled). Rules
+flag a current fact "possibly outdated"; lift = recall / share of memory flagged (1 = chance):
+
+| Rule | Stale caught | Memory flagged | Lift |
+|---|---|---|---|
+| co-change on the same day, attribute level, k ≥ 2 | 0/14 | 2.7 % | 0 |
+| co-change, attribute level, k = 1 | 6/14 | 64.3 % | 0.67 |
+| lead-lag 1–2 days (the TE-like proxy), attribute level, k = 1 | 8/14 | 55.3 % | 1.03 |
+| co-change, subject level, k = 3 (the best lift) | 2/14 | 6.0 % | 2.36 |
+| lead-lag 1–2 days, subject level, k = 1 | 9/14 | 53.1 % | 1.21 |
+| age > 7 days | 10/14 | 88.2 % | 0.81 |
+| volatile phrasing — plans, running states, counts / versions, capability gaps (written after seeing the 14: optimistic) | 12/14 | 10.4 % | 8.23 |
+
+**All 14 stale facts belong to attributes stated exactly once** — there is no history from which any estimator, TE or
+co-change, could learn a dependency; at the subject level dependencies exist but follow the routine, at chance. What
+caught them is the *kind* of fact — a plan, a count, a running state — which is the prior a short-data estimator would
+have to supply anyway. So the evidence points away from an influence graph (for now) and toward **volatility classes
+at capture** (plan item 12 in `agent-memory-summary.md`), to be confirmed on a fresh labeled set.
+
 **In short.** A well-written synthesis of real methods — transfer entropy, KSG, conditional TE, PCMCI — applied where
 their preconditions fail: personal-knowledge telemetry is sparse, confounded by the user's own attention, and tested n²
 times. No implementation, no evaluation, and "causal" throughout where the measure is predictive. Its lasting value for
@@ -1361,7 +1412,7 @@ shows how large the distance can be (83.6 % on LongMemEval with a 20B open model
 | Multi-hop recall by expansion | AriGraph (semantic BFS over triplets), Graphiti (BFS from entities), Hindsight (graph links), Cognee (graph completion) | memory recall is single-hop similarity (the wiki side has GraphRAG expansion) | expand from the recalled facts through shared subjects / objects, thresholded, depth 2 | small; LoCoMo multi-hop |
 | Typed memory | waku (facts / episodes / skills / persona), Letta (core / deferred / skills), Hindsight (world / experience), MIRIX (six purpose types), memory-champ (episodic / semantic / procedural, per-type write gates) | one untyped fact store (`source` tags only) | a type tag at capture, per-type recall budgets | small–medium |
 | Procedural memory from errors | Mem0 plugin (failed commands with fixes), MIRIX (tool errors → skills), Hermes (skills from corrections and fixes — never negative tool claims or unresolved failures) | tool output stripped from capture | capture bounded failure → fix pairs | medium |
-| Staleness by volatility | memory-champ (stable / slow / volatile facts, rechecked after 365 / 90 / 14 days) | stale "current" facts persist until restated or corrected via `wiki_remember` (D12) | a volatility tag at capture; volatile facts flagged "possibly outdated" after a few weeks | small |
+| Staleness by volatility | memory-champ (stable / slow / volatile facts, rechecked after 365 / 90 / 14 days) | stale "current" facts persist until restated or corrected via `wiki_remember` (D12) | a volatility tag at capture; volatile facts flagged "possibly outdated" after a few weeks — a phrasing rule caught 12/14 labeled stale facts at 10 % of memory flagged, where co-change dependencies were at chance (§13, in-sample) | small |
 | Unicode evasion of the policy | Hermes (NFKC folding, invisible and bidirectional characters) | **fixed in v0.99** — before, the regexes matched the raw text | NFKC, zero-width characters removed, bidirectional overrides refused — done | — |
 | Unresolved conflicts shown | MIRIX (keep both, note the discrepancy), memory-champ (surfaced, never resolved) | the merge closes or keeps silently | a "disputed" mark in the context | small |
 | Learning from use | the transfer-entropy report (§13: directed, decaying edges from activity), Hermes (skill usage counts drive the curator) | `REINFORCES` edges from GraphRAG expansion — none in the coding workflow, which never calls `wiki_ask` | a use signal the workflow produces — git co-changes for code corpora, facts an answer uses — before any learning-from-use method | small to measure |

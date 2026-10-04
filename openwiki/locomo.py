@@ -231,12 +231,16 @@ def _read_jsonl(path: Path) -> list:
 def run_locomo(conversations, work_dir, open_graph: Callable, embedder, chat, judge=None, recall_k: int = 10,
                categories=None, budget_s: Optional[float] = None, coexist=None, resolve=None,
                on_progress: Optional[Callable] = None, now_mode: str = "present",
-               answer_style: str = "infer", capture_style: str = "durable") -> dict:
+               answer_style: str = "infer", capture_style: str = "durable", lexical: float = 0.0,
+               reuse_base: bool = False) -> dict:
     """Capture + remember each conversation (once — resumable per session), then answer + score its questions
     (resumable per question). ``open_graph(path)`` returns a **writable** memory graph at ``path`` (created if
     absent). Stops when ``budget_s`` seconds are spent (``complete: False``); the next call continues.
     ``now_mode``: recall's reference time — ``"present"`` (the day after the conversation's last session) or
-    ``"today"`` (the wall clock: every session equally old, recency neutral). Returns ``{"complete",
+    ``"today"`` (the wall clock: every session equally old, recency neutral). ``lexical``: recall's BM25 weight
+    (``GraphStore.recall``; 0 = dense only). ``reuse_base`` (with ``lexical``): where the hybrid recall returns exactly
+    the dense recall's list, the dense variant's answer is copied (``"reused": true``) instead of asked again — the
+    prompt would be identical, so a paired comparison gains no noise where nothing changed. Returns ``{"complete",
     "records", "summary"}`` over every answered question in ``work_dir``."""
     from .graph.memory import MemoryFact, assemble_context, capture_session
 
@@ -250,9 +254,12 @@ def run_locomo(conversations, work_dir, open_graph: Callable, embedder, chat, ju
         cdir = work / conv.sample_id
         cdir.mkdir(parents=True, exist_ok=True)
         done_path, cap_path = cdir / "sessions.json", cdir / "captured.jsonl"
-        tag = "".join(f"-{t}" for t in (now_mode if now_mode != "present" else "", answer_style,
-                                        f"k{recall_k}" if recall_k != 10 else "") if t)
+        base_tag = "".join(f"-{t}" for t in (now_mode if now_mode != "present" else "", answer_style,
+                                             f"k{recall_k}" if recall_k != 10 else "") if t)
+        tag = base_tag + (f"-lex{lexical:g}" if lexical else "")
         ans_path = cdir / f"answers{tag}.jsonl"             # each variant keeps its own answers
+        base_answers = ({r["i"]: r for r in _read_jsonl(cdir / f"answers{base_tag}.jsonl")}
+                        if reuse_base and lexical else {})
         done = json.loads(done_path.read_text(encoding="utf-8")) if done_path.is_file() else []
         captured = {r["sid"]: r["facts"] for r in _read_jsonl(cap_path)}
         answers = {r["i"]: r for r in _read_jsonl(ans_path)}
@@ -294,16 +301,21 @@ def run_locomo(conversations, work_dir, open_graph: Callable, embedder, chat, ju
                     for i, q in todo_q:                                              # 5. answer + judge
                         if over():
                             break
-                        hits = graph.recall(q.question, emb, k=recall_k, now=now)
-                        ctx = assemble_context("", hits, [], max_facts=recall_k)
-                        raw = _retry(lambda: chat.chat(build_answer_messages(q.question, ctx,
-                                                                             answer_style))) or ""
-                        pred = re.sub(r"<think>.*?</think>", "", raw, flags=re.S).strip()
-                        ok = (abstains(pred) if q.category == 5
-                              else _retry(lambda: judge_answer(judge or chat, q.question, q.answer, pred)))
-                        rec = {"i": i, "category": q.category, "question": q.question, "gold": q.answer,
-                               "prediction": pred, "f1": round(f1(pred, q.answer), 4), "j": bool(ok),
-                               "recalled": len(hits)}
+                        hits = graph.recall(q.question, emb, k=recall_k, now=now, lexical=lexical)
+                        base = base_answers.get(i)
+                        if base is not None and [h["id"] for h in hits] == \
+                                [h["id"] for h in graph.recall(q.question, emb, k=recall_k, now=now)]:
+                            rec = dict(base, reused=True)                # the same prompt: the same answer
+                        else:
+                            ctx = assemble_context("", hits, [], max_facts=recall_k)
+                            raw = _retry(lambda: chat.chat(build_answer_messages(q.question, ctx,
+                                                                                 answer_style))) or ""
+                            pred = re.sub(r"<think>.*?</think>", "", raw, flags=re.S).strip()
+                            ok = (abstains(pred) if q.category == 5
+                                  else _retry(lambda: judge_answer(judge or chat, q.question, q.answer, pred)))
+                            rec = {"i": i, "category": q.category, "question": q.question, "gold": q.answer,
+                                   "prediction": pred, "f1": round(f1(pred, q.answer), 4), "j": bool(ok),
+                                   "recalled": len(hits)}
                         answers[i] = rec
                         with ans_path.open("a", encoding="utf-8") as fh:
                             fh.write(json.dumps(rec, ensure_ascii=False) + "\n")

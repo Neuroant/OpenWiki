@@ -559,13 +559,21 @@ def queued_writes(graph_path, limit: int = 10) -> dict:
     return out
 
 
-def next_memory(graph, embedder, query: str, k: int = 8, max_chars: int = NEXT_MEMORY_CHARS) -> str:
+def _lexical(env: HandoffEnv) -> float:
+    """The project's hybrid-recall weight (``[memory] lexical_weight``), else the default."""
+    from .lexical import RECALL_WEIGHT
+    weight = getattr(env.project, "lexical_weight", None)
+    return weight if isinstance(weight, (int, float)) else RECALL_WEIGHT
+
+
+def next_memory(graph, embedder, query: str, k: int = 8, max_chars: int = NEXT_MEMORY_CHARS,
+                lexical: float = 0.0) -> str:
     """The remembered facts (+ themes) relevant to the next task — what ``wiki_memory`` would load
-    for it — without the identity block (fail-soft: ``""``)."""
+    for it — without the identity block (fail-soft: ``""``). ``lexical``: hybrid recall's weight."""
     if graph is None or embedder is None or not str(query).strip():
         return ""
     try:
-        ctx = graph.context_for(query, embedder, identity="", k=k, max_chars=max_chars) or ""
+        ctx = graph.context_for(query, embedder, identity="", k=k, max_chars=max_chars, lexical=lexical) or ""
     except Exception:
         return ""
     lines = []
@@ -649,7 +657,7 @@ def prepare(env: HandoffEnv, note: Optional[str] = None, *, transcript=None,
         "note": sections, "dropped": dropped, "redacted": redacted, "carried_from": carried_from,
         "memory": memory, "env": environment(env, log_offset, repo.get("root")),
         "next_query": query,
-        "next_memory": next_memory(env.graph, env.embedder, query) if memory is not None else "",
+        "next_memory": next_memory(env.graph, env.embedder, query, lexical=_lexical(env)) if memory is not None else "",
         "pages": relevant_pages(env.index, query),
         "resumed": [],
     }
@@ -689,7 +697,8 @@ def resume(env: HandoffEnv, *, out=None, now: Optional[int] = None, max_chars: O
              "memory": memory,
              "env": environment(env, ((h.get("env") or {}).get("hook_log") or {}).get("offset"),
                                 (repo or {}).get("root")),
-             "next_memory": next_memory(env.graph, env.embedder, query) if memory is not None else "",
+             "next_memory": (next_memory(env.graph, env.embedder, query, lexical=_lexical(env))
+                             if memory is not None else ""),
              "pages": relevant_pages(env.index, query)}
     others = [r for r in (h.get("resumed") or []) if r.get("session") and r.get("session") != record_session]
     brief = render_brief(h, state, others=others, path=folder / HANDOFF_MD, max_chars=max_chars)

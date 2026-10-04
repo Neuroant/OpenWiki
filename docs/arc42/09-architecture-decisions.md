@@ -55,6 +55,7 @@
 | [37](#adr-37) | Credentials are redacted wherever text enters memory; the instruction policy matches normalized text | Accepted (Path B++) | security |
 | [38](#adr-38) | Readers hold the graph only per call; writers plan read-only and hold the write lock only to apply | Accepted (Path B++) | availability, Q5 |
 | [39](#adr-39) | The remembered tier is portable — a COGX archive and a Markdown view; LadybugDB is the migration target after three changes | Accepted (Path B++) | portability (R10) |
+| [40](#adr-40) | Hybrid recall: BM25 as a recall aid within the dense pool, the dense order kept | Accepted (Path B++) | relevance, Q5 |
 
 ---
 
@@ -804,6 +805,26 @@ changes.** *(v0.102; builds on [ADR-16](#adr-16); mitigates R10)*
   cache after every DDL statement (ladybug's Python connection never invalidates cached statements, and OpenWiki
   migrates in place), and an OpenWiki-level reader/writer lock; plus Cognee's OpenSSL workaround for its Windows wheels.
 
+### ADR-40
+**Hybrid recall: BM25 is a recall aid within the dense pool, and the dense order is kept.** *(v0.103; extends
+[ADR-21](#adr-21) to memory)*
+- **Context:** recall was dense only. Six reviewed systems add a lexical signal, and BM25 won decisively on our code
+  corpus (ADR-21) — the live memory is full of identifiers, versions and file names. On LoCoMo the coverage of gold
+  answers in the top 20 has headroom (0.430 vs 0.688 over all facts).
+- **Decision:** `recall(…, lexical=w)` keeps, among the dense top 2k, the k facts with the highest dense score + w ×
+  normalized BM25 and shows them in dense order; BM25 uses its own terms (stopwords out, a light stemmer) and ignores
+  query terms found in more than 5 % of the facts. On by default wherever memory is recalled (`[memory]
+  lexical_weight`, 0.2); the LoCoMo harness follows production and copies the dense answer where the recalled list is
+  unchanged.
+- **Alternatives:** reciprocal rank fusion (as in wiki search) — moved coverage between categories, multi-hop lost;
+  additive fusion over all facts — a keyword match from dense rank 100+ got the full boost and displaced the answers,
+  LoCoMo J flat (+41 / −38 on 940 questions); reserved lexical slots at the end — cut first by the live context's
+  character budget; spaCy entity matching — a dependency for what distinctive-term BM25 already catches.
+- **Consequences:** + on real coding prompts the facts BM25 swaps in were judged helpful 21.9 % vs 12.0 % for those
+  displaced (26 / 9 prompts, p ≈ 0.006); LoCoMo overall J 60.7 → 61.6 % (n.s.; +24 / −2 where it brought the answer
+  in), no category worse. − ≈ 10–30 ms per recall; the gain on conversational memory is small — the churn of facts it
+  swaps in without bringing the answer (+19 / −30 on LoCoMo) is the remaining cost.
+
 ---
 *Chapter complete. The Path-B agent-memory direction landed via ADR-14/15/16/17/18/19; the graph then
 deepened (ADR-22 typed relations + relation-aware GraphRAG, ADR-23 entity resolution), gained
@@ -817,6 +838,7 @@ poisoning (ADR-30, P0), **cue-trigger recall** for implicit constraints (ADR-31,
 recency as a tie-breaker set by the **LoCoMo** benchmark (ADR-34), a live context sized by measurement on its own
 path (ADR-35), a **session handoff** of derived state + the agent's note (ADR-36), **credential redaction** with
 a normalized instruction policy (ADR-37), and **writes that land during a session** — per-call readers, two-phase
-writers (ADR-38), and **portable memory** — a COGX export / import, a Markdown view and a LadybugDB spike (ADR-39). §11
+writers (ADR-38), **portable memory** — a COGX export / import, a Markdown view and a LadybugDB spike (ADR-39), and
+**hybrid recall** — BM25 as a recall aid within the dense pool (ADR-40). §11
 debts D1/D2/D6 are resolved. Deep designs in `docs/path-b-memory.md` and `docs/RAG-vs-GraphRAG.md`. New significant
 decisions should be appended here with the next id.*

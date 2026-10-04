@@ -55,10 +55,14 @@ class BM25:
 
     def scores(self, query: str) -> np.ndarray:
         """BM25 score of ``query`` against every document (shape ``(n,)``, zeros if empty)."""
+        return self.score_terms(tokenize(query))
+
+    def score_terms(self, query_terms: Sequence[str]) -> np.ndarray:
+        """BM25 score of already-tokenized ``query_terms`` against every document."""
         scores = np.zeros(self.n, dtype=np.float32)
         if not self.n or self.avgdl == 0:
             return scores
-        for term in set(tokenize(query)):
+        for term in set(query_terms):
             idf = self.idf.get(term)
             if idf is None:
                 continue
@@ -66,6 +70,72 @@ class BM25:
                 denom = freq + self.k1 * (1 - self.b + self.b * self.doc_len[i] / self.avgdl)
                 scores[i] += idf * (freq * (self.k1 + 1)) / denom
         return scores
+
+
+# -- memory recall (remembered facts) -----------------------------------------------------
+RECALL_WEIGHT = 0.2      # hybrid recall's BM25 weight by default ([memory] lexical_weight; 0 = dense only), §13.18
+
+# Facts are short sentences about people and projects ("Caroline | attended | an LGBTQ support group"). Two things
+# differ from wiki search: a question's function words ("when did she …") would turn a weak match into the best one
+# once scores are normalized, and inflected forms ("painted" / "painting" / "paints") would miss each other. So recall
+# drops stopwords and strips a few English suffixes; wiki search keeps exact terms (identifiers, compounds). German
+# stopwords that are English words too (die, war, man, hat, den, des) stay in.
+
+STOPWORDS = frozenset("""
+a an the is are was were be been being do does did done to of in on at for with and or but what when where who whom
+whose which why how has have had having her hers his him he she they them their theirs it its that this these those
+from by as about into would could should will can may might must after before during there here any some not no yes
+more most such than then so if s t i me my we our you your up out over also just like get got go going went
+der das dem ein eine einen einem einer und oder aber ist sind waren wird werden haben hatte nicht mit von zu zur zum
+im auf für bei nach aus um am als auch noch nur es er sie wir ich du sich wie wer wo wann warum welche welcher welches
+""".split())
+def stem(token: str) -> str:
+    """A light English stemmer (in the spirit of Porter's first step) — the forms of one word meet: "painting" /
+    "painted" / "paints" → "paint", "hiking" / "hikes" / "hike" → "hik", "running" → "run", "activities" →
+    "activity", "glasses" → "glass". Plural "s" (not "ss" / "us" / "is"), then "ing" / "ed", then a doubled final
+    consonant, then a final "e" — the same function on query and facts, so only consistency matters. Words of three
+    letters or fewer pass through; other languages mostly do."""
+    t = token
+    if len(t) <= 3:
+        return t
+    if t.endswith("ies") and len(t) > 4:
+        t = t[:-3] + "y"
+    elif t.endswith("sses"):
+        t = t[:-2]
+    elif t.endswith("s") and not t.endswith(("ss", "us", "is")):
+        t = t[:-1]
+    for suf in ("ing", "ed"):
+        if t.endswith(suf) and len(t) - len(suf) >= 3:
+            t = t[: -len(suf)]
+            if t[-1] == t[-2] and t[-1] not in "aeiouylsz":
+                t = t[:-1]
+            break
+    if t.endswith("e") and len(t) > 3:
+        t = t[:-1]
+    return t
+
+
+def terms(text: str) -> list[str]:
+    """Recall's tokens: ``tokenize`` without stopwords, ``stem``med."""
+    return [stem(t) for t in tokenize(text) if t not in STOPWORDS]
+
+
+def fact_scores(query: str, texts: Sequence[str], max_df: Optional[float] = None) -> np.ndarray:
+    """BM25 of ``query`` against each fact text (``terms``), divided by the best score — in ``[0, 1]``, all zeros
+    when no fact shares a term with the query. The corpus is the facts being ranked, so idf reflects this memory.
+    ``max_df`` drops query terms found in more than that share of the facts: in a memory of conversations the speakers'
+    names are in nearly half of them, and a question naming both people would otherwise lift "Gina | supports | Jon"
+    over the fact that answers it (measured, ``docs/path-b-memory.md`` §13.18)."""
+    if not texts:
+        return np.zeros(0, dtype=np.float32)
+    bm = BM25([terms(t) for t in texts])
+    query_terms = terms(query)
+    if max_df is not None:
+        limit = max(1.0, max_df * bm.n)
+        query_terms = [t for t in query_terms if len(bm.postings.get(t, ())) <= limit]
+    raw = bm.score_terms(query_terms)
+    top = float(raw.max()) if raw.size else 0.0
+    return raw / top if top > 0 else raw
 
 
 def reciprocal_rank_fusion(rankings: Sequence[Sequence], k: int = 60,

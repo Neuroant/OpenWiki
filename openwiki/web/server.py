@@ -671,8 +671,14 @@ class WikiWebApp:
         k = max(1, min(int(k), 30))
         from ..graph.temporal import parse_date
         facts = self.graph.recall(query, embedder, k=k, include_superseded=bool(include_superseded),
-                                  as_of=parse_date(as_of), known_at=parse_date(known_at))
+                                  as_of=parse_date(as_of), known_at=parse_date(known_at),
+                                  lexical=self._lexical_weight())
         return {"query": query, "k": k, "facts": facts}
+
+    def _lexical_weight(self) -> float:
+        """Hybrid recall's BM25 weight — the project's ``[memory] lexical_weight``, else the default."""
+        from ..lexical import RECALL_WEIGHT
+        return self.project.lexical_weight if self.project is not None else RECALL_WEIGHT
 
     def memory_timeline(self, query: str, groups: int = 3) -> dict:
         """B7: the full history (every validity interval, when recorded, by which session) of
@@ -706,7 +712,8 @@ class WikiWebApp:
             probes = constraint_probes(chat, query)          # P1 cue-trigger; fail-soft → []
         k = self.project.context_k if self.project is not None else 16
         context = self.graph.context_for(query, embedder, identity=identity, k=k, max_chars=budget,
-                                         as_of=parse_date(as_of), probes=probes)
+                                         as_of=parse_date(as_of), probes=probes,
+                                         lexical=self._lexical_weight())
         return {"query": query, "context": context, "identity": identity, "budget": budget}
 
     def chat(self, message: str) -> dict:

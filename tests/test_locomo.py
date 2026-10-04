@@ -105,8 +105,12 @@ class _Graph:
         embedder.embed_documents([f.text() for f in facts])
         _Graph.store[self.path] += [(sid, f) for f in facts]
 
+    recall_kw = None
+
     def recall(self, query, embedder, k=10, now=None, **kw):
         embedder.embed_query(query)
+        if _Graph.recall_kw is not None:
+            _Graph.recall_kw.append(kw)
         return [{"id": str(i), "subject": f.subject, "predicate": f.predicate, "object": f.object,
                  "session_id": sid, "valid_from": None} for i, (sid, f) in enumerate(_Graph.store[self.path])][:k]
 
@@ -137,5 +141,24 @@ def test_run_is_phased_resumable_and_scored(tmp_path):
     assert (work / "conv-x" / "answers-strict.jsonl").is_file() and len(strict["records"]) == 1
     k20 = lc.run_locomo(convs, work, _Graph, _Emb(), _Chat(), recall_k=20, categories=[4])
     assert (work / "conv-x" / "answers-infer-k20.jsonl").is_file() and len(k20["records"]) == 1
+    seen = []
+    _Graph.recall_kw = seen
+    lex = lc.run_locomo(convs, work, _Graph, _Emb(), _Chat(), recall_k=20, categories=[4], lexical=0.2)
+    assert (work / "conv-x" / "answers-infer-k20-lex0.2.jsonl").is_file() and len(lex["records"]) == 1
+    assert seen and all(kw.get("lexical") == 0.2 for kw in seen)        # hybrid recall reached the store
+    _Graph.recall_kw = None
+    # a paired re-answer: where the hybrid list equals the dense one, the dense answer is copied, not asked again
+    (work / "conv-x" / "answers-infer-k20-lex0.5.jsonl").unlink(missing_ok=True)
+
+    class _Counting(_Chat):
+        calls = 0
+
+        def chat(self, messages):
+            type(self).calls += 1
+            return super().chat(messages)
+    reused = lc.run_locomo(convs, work, _Graph, _Emb(), _Counting(), recall_k=20, categories=[4], lexical=0.5,
+                           reuse_base=True)
+    assert _Counting.calls == 0 and reused["records"][0]["reused"] is True   # the fake graph ignores lexical
+    assert reused["records"][0]["prediction"] == k20["records"][0]["prediction"]
     assert lc.build_answer_messages("q", "ctx")[0]["content"] == lc.ANSWER_SYSTEM_INFER
     assert lc.build_answer_messages("q", "ctx", "strict")[0]["content"] == lc.ANSWER_SYSTEM

@@ -208,7 +208,8 @@ Alongside the document tier, a project in **Second Brain mode** (`[memory] enabl
   `owiki eval --locomo`, capturing and recalling exactly as production does. It set recall recency to a tie-breaker
   (0.6 → 0.9), located the remaining losses in capture, and moved overall J from 50.0 to **60.7 %** with a local 30B via
   paired, adopted changes (relative event dates in capture; an inference-allowing answer prompt and a 20-fact recall
-  budget in the harness); an episodic capture style (~2× facts) was measured and not adopted. A hand audit of 60
+  budget in the harness; hybrid recall, v0.103, 61.6 % — not significant on its own, ADR-40); an episodic capture style
+  (~2× facts) was measured and not adopted. A hand audit of 60
   judgments puts the local judge ≈ 7 points generous — paired comparisons stand, absolute numbers carry that caveat
   (`docs/path-b-memory.md` §13.7–13.11). Its more-facts finding reached production only after a measurement on
   the live path itself (ADR-35, §13.12).
@@ -252,6 +253,10 @@ with their valid time, sessions, themes, the identity; `--full` = a lossless bac
 into an empty memory, themes included) and as a **Markdown view** (`memory/`, one file per subject, rewritten
 deterministically by `sleep` for git). Another system's facts enter through `remember`, like any capture — under the
 P0 policy and credential redaction.
+
+**Hybrid recall (ADR-40).** Recall ranks by meaning (cosine × confidence × recency), and BM25 over the facts may swap
+facts into the top k from the dense top 2k — on distinctive terms only (not the words in more than 5 % of the facts),
+never reordering what stays. A recall aid, not a re-ranker: re-ranking by keywords displaced the facts that answered.
 
 ## 8.16 Observability (ADR-20)
 

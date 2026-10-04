@@ -303,6 +303,10 @@ Sicherung samt Embeddings) —, `openwiki memory import` stellt es wieder her. D
 schreibt außerdem eine lesbare Markdown-Ansicht nach `memory/` im Projekt (eine Datei pro Subjekt
 mit aktuellem Stand und Verlauf), die sich mit git verfolgen lässt.
 
+**Hybrider Abruf.** Neben der Bedeutungsähnlichkeit (Embedding) holt ein Stichwortabgleich (BM25) Fakten mit genau
+den Namen, Versionen oder Dateinamen der Anfrage herein — er tauscht nur unter den ähnlichsten Fakten aus, die
+Reihenfolge bleibt die der Ähnlichkeit (`[memory] lexical_weight`, Standard 0.2; `0` schaltet ihn ab).
+
 Nur lesend; ohne Sitzungen (oder im Wiki-Modus) zeigt der Reiter einen Hinweis.
 
 ## Evaluation (Reiter „Evaluation")

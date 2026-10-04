@@ -260,8 +260,10 @@ def test_run_cross_session_eval_passes_temporal_context():
                               "session_date": T("2025-08-01"), "correct": False}
     assert graph.calls[1] == {"session": "fix", "now": T("2025-09-18"),
                               "session_date": T("2025-09-18"), "correct": True}
-    assert graph.recall_kw == {"as_of": T("2025-08-15"), "known_at": None}
+    assert graph.recall_kw == {"as_of": T("2025-08-15"), "known_at": None, "lexical": 0.0}
     assert callable(graph.coexist)                           # the LLM coexistence check is wired
+    ev.run_cross_session_eval(items, graph, None, _XChat(), lexical=0.2)
+    assert graph.recall_kw["lexical"] == 0.2                 # hybrid recall reaches the store
     assert r["by_kind"]["point-in-time"]["n"] == 1
     assert r["details"][0]["kind"] == "point-in-time"
 

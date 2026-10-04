@@ -931,6 +931,13 @@ The **genuine gaps**, measure-first as always:
   set (paired, 2 captures, no probes) the cue reached the context 8/16 → 16/16 and the constraint was applied
   7/16 → 12/16 (+5 / −0). Adopted: `[memory] context_k` (default 16) + `context_budget` 2,000 → 3,000; facts may
   use theme budget the themes don't need. `path-b-memory.md` §13.12.
+- **Hybrid recall (v0.103).** Experiment 5 of the review series' plan: BM25 over the remembered facts next to the
+  embedding — as a recall aid, not a re-ranker: within the dense top 2k it may swap facts into the top k, which keep
+  their dense order; stopwords out, light stemming, query terms in more than 5 % of the facts (a conversation's
+  speakers' names) ignored. Plain fusion did nothing on LoCoMo (keyword matches from deep in the ranking displaced
+  the answers); the pooled form: overall J 60.7 → 61.6 % (+47 / −34, n.s.), +24 / −2 where it brought the answer in.
+  On real coding prompts the facts it swaps in were judged helpful 21.9 % vs 12.0 % for those displaced (26 / 9
+  prompts, p ≈ 0.006) → on by default (`[memory] lexical_weight` 0.2). ADR-40, `docs/path-b-memory.md` §13.18.
 - **Portable memory + the LadybugDB spike (v0.102).** Fix 4 of the review series' plan, for R10. `owiki memory
   export` writes the remembered tier as a COGX archive (Cognee's exchange format: facts with their valid time,
   sessions, themes, identity; `--full` adds retracted and forgotten facts and the embeddings), `memory import`

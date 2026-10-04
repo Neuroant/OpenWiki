@@ -367,7 +367,8 @@ offices" although they share no words (cue-trigger recall). `openwiki sleep` (sc
 session events ("vX was pushed and tagged") that would otherwise crowd the injected context — archived, not
 deleted. The memory is **portable**: `openwiki memory export` writes a COGX archive that other memory systems
 read, `memory import` restores one losslessly, and `sleep` keeps a readable Markdown view (`memory/`, one file per
-subject) to track in git. Design: **[docs/path-b-memory.md](docs/path-b-memory.md)**.
+subject) to track in git. Recall is **hybrid**: next to the embedding, BM25 over the facts lets an exact name, version
+or file name pull in the facts that mention it. Design: **[docs/path-b-memory.md](docs/path-b-memory.md)**.
 
 ### Web UI
 

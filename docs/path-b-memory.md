@@ -873,7 +873,7 @@ errs toward "different thing" (safe: fragmentation over a wrong merge); descript
 extra coexistence calls; subject identity is only inferred inside a resolved group (no general
 subject resolution).
 
-## 13. Memory hygiene, implicit recall and the LoCoMo benchmark (built v0.86 to v0.102)
+## 13. Memory hygiene, implicit recall and the LoCoMo benchmark (built v0.86 to v0.103)
 
 *Planned from the cognitive-agent report (B10+); every item below was built or measured — see §13.1–13.12.*
 
@@ -1369,6 +1369,64 @@ The largest single step so far ("Not mentioned" on single-hop 219 → 178). **Ad
 the live context — the hooks assemble k = 8 within a 2,000-character budget, a per-prompt token cost; the finding
 suggests trying a larger k there, measured on that path (→ §13.12). LoCoMo now: **overall J 60.7 %** with a local
 30B (Mem0 reports ≈ 67 % with GPT-4o-mini — and both are generous-judge numbers).
+
+### 13.18 Hybrid recall — BM25 next to the embedding (v0.103)
+
+Recall was dense only: cosine × confidence × recency. Six of the reviewed systems add a lexical signal, and our own
+wiki search showed why — BM25 catches the exact terms an embedding blurs (identifiers, names, versions;
+`RAG-vs-GraphRAG.md` Finding 4). Plan item 5 tested it on the D13 LoCoMo graphs, paired against the v0.95 answers
+(`answers-infer-k20`).
+
+**Offline first, without a model:** the share of the gold answer's content words found in the recalled facts (k = 20,
+categories 1–4). Dense recall reaches 0.430, everything in memory 0.688 — the answer is in memory far more often than
+in the top 20. Calibration: k 10 → 20 raised this coverage by 7.2 points and J by 5.7.
+
+| variant | coverage |
+|---|---|
+| dense, k = 20 | 0.430 |
+| reciprocal rank fusion, as in wiki search | 0.430 (multi-hop 0.482 → 0.439) |
+| dense + 0.2 × normalized BM25 (stopwords, light stemming) | 0.455 |
+| … BM25 only within the dense top 2k, terms in ≤ 5 % of the facts | 0.447 |
+| dense, k = 30 | 0.478 |
+
+**Answers.** The additive variant (0.455) was re-answered first: on 940 questions overall J 63.3 → 63.6 % (+41 / −38)
+— nothing. The split showed why: where BM25 brought gold words into the context, +12 / −1; where coverage didn't
+change, +9 / −23. Normalized to the best match, a keyword match from dense rank 100+ always got the full boost and
+displaced relevant facts at ranks 15–20 ("Melanie | has pet | Bailey" for "What pet does Caroline have?"), and a
+question naming both speakers lifted "Gina | supports | Jon" over the fact that answered it. Stopped there. The
+**pooled** variant makes BM25 a recall aid, not a re-ranker: among the dense top 2k the k with the highest dense
++ 0.2 × BM25 are kept, shown in dense order, and query terms found in more than 5 % of the facts (in a conversation:
+the speakers' names) are ignored. 853 of the 1,986 questions then recall exactly the dense list; the harness copies
+the dense answer there (`reuse_base` — the prompt is identical), so only real changes enter the comparison.
+
+| category (n) | dense J | hybrid J | + / − |
+|---|---|---|---|
+| multi-hop (282) | 65.2 % | 67.0 % | 8 / 3 |
+| temporal (321) | 45.8 % | 46.1 % | 6 / 5 |
+| open-domain (96) | 45.8 % | 45.8 % | 4 / 4 |
+| single-hop (841) | 66.6 % | 67.4 % | 29 / 22 |
+| **overall 1–4** | **60.7 %** | **61.6 %** | **47 / 34 (p ≈ 0.18)** |
+| adversarial (446) | 84.5 % | 84.5 % | 8 / 8 |
+
+Up in four categories, unchanged in adversarial, not significant overall; the mechanism is: where BM25 brought the
+answer in, +24 / −2 (p ≈ 10⁻⁵), where the list changed without bringing it, +19 / −30.
+
+**The live path** is where hybrid recall runs, and its memory is unlike LoCoMo's — identifiers, versions, file and
+function names. 267 non-chore prompts from the dogfooding sessions against a copy of the dev memory, k = 16 as the
+inject hook recalls: hybrid recall changes the set for 236, by 3.3 facts each. For 80 of them a judge saw the union of
+both lists, shuffled and unlabeled, and named the helpful facts:
+
+| facts | judged helpful |
+|---|---|
+| swapped in by BM25 | **21.9 %** (55 of 251) |
+| displaced by them | 12.0 % (30 of 251) |
+| kept | 29.8 % |
+
+Per prompt the swap helped 26 times and hurt 9 (p ≈ 0.006). A recall costs ≈ 10–30 ms more (≈ 120 → 130–150 ms).
+**Adopted:** hybrid recall is on wherever memory is recalled (`[memory] lexical_weight`, default 0.2; `0` = dense
+only), and the benchmark follows production (`--recall-lexical`, default 0.2) — LoCoMo overall J now **61.6 %**. The
+cross-session sets were not re-run (their scenarios hold few facts, mostly fewer than the pool); P0 is unaffected by
+construction — a scrubbed instruction never reaches the store, whatever the ranking.
 
 ### 13.17 Portable memory and the LadybugDB spike (v0.102)
 

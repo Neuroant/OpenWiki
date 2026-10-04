@@ -191,7 +191,7 @@ def _tool(name, description, properties, required):
 
 def build_server(wiki_dir, index=None, graph=None, agent=None, name="openwiki",
                  version="0", identity="", context_budget=None, context_k: int = 16,
-                 memory_probes: bool = False, memory_writes: bool = False,
+                 memory_probes: bool = False, memory_writes: bool = False, memory_lexical: float = 0.0,
                  handoff: Optional[Callable] = None,
                  on_remember: Optional[Callable] = None) -> MCPStdioServer:
     """Assemble the MCP server from already-loaded OpenWiki components.
@@ -280,6 +280,7 @@ def build_server(wiki_dir, index=None, graph=None, agent=None, name="openwiki",
                     from .graph.memory import constraint_probes
                     probes = constraint_probes(probe_chat, query)     # fail-soft → []
                 return (graph.context_for(query, index.embedder, identity=identity, k=context_k,
+                                          lexical=memory_lexical,
                                           max_chars=context_budget, as_of=parse_date(a.get("as_of")),
                                           probes=probes)
                         or "(no relevant memory yet)")

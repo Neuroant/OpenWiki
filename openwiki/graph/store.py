@@ -54,6 +54,8 @@ _A_P0 = ("source",)                                                       # P0 p
 _A_SLEEP = ("forgotten_at", "forgotten")                                  # sleep: archived (when, why)
 MATERIAL_WEIGHT = 0.75                # P0: a claim from discussed material ranks below decisions
 RECENCY_FLOOR = 0.9                   # recall: recency is a tie-breaker — a fact keeps ≥ 90% of its score (LoCoMo)
+LEXICAL_POOL = 2                      # hybrid recall: BM25 may only promote facts within the dense top (2 × k) …
+LEXICAL_MAX_DF = 0.05                 # … on terms in at most 5 % of the facts (not the speakers' names) — §13.18
 ATTR_SEP = "\x1f"                     # canonical attribute key = normalized subject ␟ predicate
 RESOLVE_THRESHOLD = 0.75              # min fact-embedding cosine for an attribute candidate (B9)
 RESOLVE_K = 6                         # candidates shown to the attribute chooser
@@ -1397,13 +1399,18 @@ class GraphStore:
     def recall(self, query: str, embedder, k: int = 5,
                half_life_days: float = DEFAULT_HALF_LIFE_DAYS, now: Optional[int] = None,
                include_superseded: bool = False, as_of: Optional[int] = None,
-               known_at: Optional[int] = None) -> list:
+               known_at: Optional[int] = None, lexical: float = 0.0) -> list:
         """B6 (activation tier) + **B7 point-in-time**: the remembered facts most relevant to
         ``query`` — cosine over assertion embeddings × decayed confidence. By default only the
         facts **valid now and still believed**; ``as_of`` = valid at that (valid) time,
         ``known_at`` = as OpenWiki believed at that (transaction) time (valid time then
         defaults to it too). ``include_superseded`` also returns everything outside the view,
-        each flagged (``superseded``, ``status``, ``in_view``). Read-only."""
+        each flagged (``superseded``, ``status``, ``in_view``). ``lexical`` (a weight, 0 = off) is
+        **hybrid recall**: BM25 decides *which* facts get in, the dense score still decides their
+        order — among the dense top ``LEXICAL_POOL × k`` the ``k`` with the highest ``score +
+        lexical × BM25`` are kept (``lexical.fact_scores``: stopwords dropped, light stemming,
+        query terms in more than ``LEXICAL_MAX_DF`` of the facts ignored), then shown in dense
+        order; each hit carries its normalized ``lexical`` match. Read-only."""
         if embedder is None:
             raise ValueError("recall needs an embedder.")
         recs = self._load_assertions(with_emb=True)   # [] on graphs built before this layer
@@ -1436,8 +1443,23 @@ class GraphStore:
                            "created_at": r["created_at"], "expired_at": r["expired_at"],
                            "source": r.get("source")})
         scored.sort(key=lambda x: -x["_rank"])     # the unrounded score — rounding made ties
+        if lexical and scored:
+            # hybrid recall: BM25 is a recall aid, not a re-ranker — it may swap facts into the top k
+            # from the dense pool, never reorder it. Unpooled, normalized BM25 lifted keyword matches from
+            # dense rank 100+ ("Melanie | has pet | Bailey" for "What pet does Caroline have?") over the
+            # facts that answered — LoCoMo J did not move (§13.18).
+            from ..lexical import fact_scores
+            # term statistics (idf, the frequency cutoff, the normalization) over every candidate — a
+            # term's weight belongs to the memory, not to the pool
+            lex = fact_scores(query, [f"{x['subject']} {x['predicate']} {x['object']}" for x in scored],
+                              max_df=LEXICAL_MAX_DF)
+            pool = min(len(scored), max(k, LEXICAL_POOL * k))
+            for n in range(pool):
+                scored[n]["lexical"] = round(float(lex[n]), 3)
+            chosen = sorted(range(pool), key=lambda n: (-(scored[n]["_rank"] + lexical * float(lex[n])), n))[:k]
+            scored = [scored[n] for n in sorted(chosen)]        # dense order among the chosen
         for x in scored:
-            x.pop("_rank")
+            x.pop("_rank", None)
         return scored[:k]
 
     def recall_probed(self, query: str, embedder, probes, k: int = 5, **kw) -> list:
@@ -1844,7 +1866,7 @@ class GraphStore:
 
     def context_for(self, query: str, embedder, identity: str = "",
                     k: int = 16, max_themes: int = 4, max_chars=None,
-                    as_of: Optional[int] = None, probes=None) -> str:
+                    as_of: Optional[int] = None, probes=None, lexical: float = 0.0) -> str:
         """B6: assemble a session's context for ``query`` from the three memory tiers —
         identity + decay-weighted ``recall`` (activation) + the relevant consolidated themes
         (attractors), optionally fit within a ``max_chars`` budget. Facts carry their validity
@@ -1856,8 +1878,8 @@ class GraphStore:
         facts = []
         if embedder is not None:
             try:
-                facts = (self.recall_probed(query, embedder, probes, k=k, as_of=as_of) if probes
-                         else self.recall(query, embedder, k=k, as_of=as_of))
+                facts = (self.recall_probed(query, embedder, probes, k=k, as_of=as_of, lexical=lexical)
+                         if probes else self.recall(query, embedder, k=k, as_of=as_of, lexical=lexical))
             except Exception:      # never let a memory read break the caller
                 facts = []
         themes = self.relevant_concepts([f["id"] for f in facts], limit=max_themes) if facts else []

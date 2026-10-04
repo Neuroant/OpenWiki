@@ -143,7 +143,10 @@ already have, then changes that only real sessions can judge. Each names where i
 
 **Experiments — paired LoCoMo re-answers on existing graphs**
 
-5. **BM25 fused into recall** (six systems).
+5. **BM25 fused into recall** (six systems). **Done in v0.103:** as a recall aid within the dense top 2k (distinctive
+   terms only, dense order kept) — LoCoMo overall J 60.7 → 61.6 % (+47 / −34, n.s.; +24 / −2 where it brought the
+   answer in); on real coding prompts the facts it swapped in were judged helpful 21.9 % vs 12.0 % for those it
+   displaced (26 / 9 prompts, p ≈ 0.006) → on by default. Plain fusion moved nothing (`path-b-memory.md` §13.18).
 6. **The question's time window** — boost facts whose validity overlaps a window parsed from the question (Cognee,
    Hindsight, MIRIX).
 7. **Multi-hop expansion** through shared subjects and objects, thresholded, depth 2 (AriGraph, Graphiti, Hindsight).

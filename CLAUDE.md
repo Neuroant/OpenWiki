@@ -220,7 +220,8 @@ flagged:
 `remember` needs an index (for the embedder) + a **writable** graph; options
 `--session ID`, `--session-date DATE`, `--correct`, `-i/--index DIR`, `--graph DIR`, `--model NAME`,
 `--host URL` (it reports `N new, M duplicate, K superseded (R retracted), H historical`). `recall` is
-read-only: `-k N`, `--all`, `--as-of DATE`, `--known-at DATE`, `--timeline`, `-i/--index DIR`,
+read-only: `-k N`, `--all`, `--as-of DATE`, `--known-at DATE`, `--timeline`, `--lexical W` (hybrid recall's BM25
+weight — default the project's `[memory] lexical_weight`, 0.2; `0` = dense only), `-i/--index DIR`,
 `--graph DIR`, `--host URL`. **B7 bi-temporal (v0.81):** each fact has **valid time**
 (`valid_from`/`valid_to` — when it held in the world: a date the transcript *states*, else the session
 date — `--session-date` or a `YYYY-MM-DD` in the session id — else the record time) and **transaction
@@ -286,6 +287,11 @@ inconsistent per conversation, adversarial −4 → experiment option only, no p
 `--locomo` (10 for `--cross-session`; answers files gain a `-k<N>` tag when ≠ 10): overall J 55.0 → **60.7 %**,
 multi-hop +8.8, single-hop +6.2 (paired, p ≈ 6·10⁻¹³). A hand audit of 60 judgments: the local judge agrees 51/60,
 no false negatives, 5 lenient false positives (dates off by days) → treat J as generous (≈ −7 points) (§13.11).
+**Hybrid recall (v0.103):** `--recall-lexical W` (default 0.2, as production; `0` = dense) — answers go to
+`answers-…-lex0.2.jsonl`, and a question whose recalled list equals the dense recall's copies the dense answer
+(`run_locomo(reuse_base=True)`: an identical prompt adds no noise to a paired comparison). Paired on the D13 graphs:
+overall J 60.7 → **61.6 %** (+47 / −34, p ≈ 0.18, n.s.; multi-hop +1.8, single-hop +0.8, adversarial unchanged);
+where BM25 brought the gold answer into the context +24 / −2 (p ≈ 10⁻⁵) (§13.18).
 
 **Sleep — nightly memory maintenance + forgetting** (Path B++): one schedulable writable pass — fold what
 read-only processes queued (usage + journal) → redact credentials in facts stored before v0.99 → **forget** what the
@@ -400,8 +406,8 @@ Options: `-k N` (activation facts; default the project's `[memory] context_k`, 1
 `--max-chars N` (fit within ~a char budget, ~4/token; default the project's `[memory] context_budget`, 3000; `0` =
 unbounded),
 `--identity TEXT` (override), `--probes/--no-probes` (P1 cue-trigger recall — default the project's
-`[memory] probes`, off) + `--model NAME` (the probe chat model), `-i/--index DIR` (embedder), `--graph DIR`,
-`--host URL`. Gated by `[memory] enabled`. Backed by `GraphStore.context_for` (→ `recall` + `relevant_concepts` + pure
+`[memory] probes`, off) + `--model NAME` (the probe chat model), `--lexical W` (hybrid recall, as `recall`),
+`-i/--index DIR` (embedder), `--graph DIR`, `--host URL`. Gated by `[memory] enabled`. Backed by `GraphStore.context_for` (→ `recall` + `relevant_concepts` + pure
 `memory.assemble_context`, which **budgets** the tiers: identity → facts (majority) → themes
 (remainder), graceful truncation); also exposed to coding agents as the MCP **`wiki_memory`** tool
 (bounded by the same budget). Scored by `eval --cross-session` (the "assembled" condition is this
@@ -577,6 +583,10 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   85.7%, MRR 0.74 → 0.91) — code is exact-identifier-heavy and a text embedder can't tell
   `search_hybrid` from `hybrid_search`; BM25 can. `owiki eval --hybrid` / `ask --hybrid`
   measure/use it; writeup in `docs/RAG-vs-GraphRAG.md` Finding 4, eval set `examples/code-eval.jsonl`.
+  **Memory recall (v0.103)** has its own term pipeline: `terms` (stopwords dropped — English plus the German ones
+  that aren't English words —, a light Porter-like `stem`: "painted" / "painting" / "paints" meet) and
+  `fact_scores(query, texts, max_df)` (BM25 normalized to the best match; query terms found in more than `max_df` of
+  the facts — a conversation's speakers' names — ignored); `RECALL_WEIGHT` = 0.2 is the default weight.
 - **`openwiki/llm.py`** — the `ChatModel` protocol + `OllamaChat` (`/api/chat`,
   stdlib urllib). Parallels `embeddings.py`. Both **capture per-call telemetry**
   (observability): `chat_raw`/`_embed` time the call and parse Ollama's returned
@@ -702,7 +712,14 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   facts, so a restated fact outranks a one-off, but relevance still dominates) and a **bounded** recency
   factor (`RECENCY_FLOOR` **0.9**: recency is a tie-breaker — an old relevant fact keeps ≥ 90 % of its score;
   unbounded decay once scored 2025-dated facts ≈0, and a 0.6 floor halved LoCoMo accuracy; it sorts on the
-  unrounded score); returns **current only** by default. `has_memory()` gates both. `_ensure_memory_schema`
+  unrounded score); returns **current only** by default. **Hybrid recall (v0.103):** `recall(…, lexical=w)` lets
+  BM25 decide *which* facts get in, never their order — among the dense top `LEXICAL_POOL × k` (2k) the k with the
+  highest `score + w × fact_scores(…, max_df=LEXICAL_MAX_DF)` (0.05) are kept and shown in dense order (each hit
+  carries its `lexical` match); on wherever memory is recalled (`[memory] lexical_weight`, `Project.lexical_weight`,
+  default 0.2 — the inject hook, `context`, `recall`, MCP `wiki_memory`, the web UI, the handoff, both eval
+  harnesses). Unpooled, normalized BM25 lifted keyword matches from dense rank 100+ over the facts that answered
+  (LoCoMo flat); pooled, the facts it swaps in on real prompts were judged helpful 21.9 % vs 12.0 % for those it
+  displaced (26 / 9 prompts, p ≈ 0.006; `docs/path-b-memory.md` §13.18). `has_memory()` gates both. `_ensure_memory_schema`
   lazily creates the tables + `ALTER`s in `confidence`/`last_seen` on pre-0.54 graphs; B0's
   `_snapshot_memory`/`_restore_memory` preserve `SUPERSEDES` + confidence across a rebuild. Exposed as
   the `remember`/`recall` (+`--all`) CLI commands.

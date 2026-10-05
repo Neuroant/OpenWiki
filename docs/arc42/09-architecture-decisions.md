@@ -866,6 +866,12 @@ changes.** *(v0.102; builds on [ADR-16](#adr-16); mitigates R10)*
   64.2 %, single-hop 68.6 → 81.6 % — the largest gain of the series. − Adversarial questions 83.9 → 71.5 %: a narrative
   holds both speakers' days and the model attributes one's actions to the other (49 of 61 losses; 12 rejected the
   premise instead of abstaining). − A model call per session at write time (≈ 7 s on LoCoMo).
+  *Addendum (live path, measured):* not adopted there. Narratives of the dogfooding transcript's capture windows held
+  specific terms absent from their source at ten times the rate of the facts captured from the same days (12 % vs
+  1 %); a stricter prompt (4 %) and a sentence-level grounding filter (0 % of what a rule sees) left invented framing no
+  rule detects. LoCoMo's narratives invent too — the misattributions behind adversarial losses. A memory injected into
+  every prompt must not be wrong one time in ten; verbatim session excerpts are the next candidate
+  (`path-b-memory.md` §13.23).
 
 ---
 *Chapter complete. The Path-B agent-memory direction landed via ADR-14/15/16/17/18/19; the graph then

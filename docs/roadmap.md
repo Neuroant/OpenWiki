@@ -931,6 +931,12 @@ The **genuine gaps**, measure-first as always:
   set (paired, 2 captures, no probes) the cue reached the context 8/16 → 16/16 and the constraint was applied
   7/16 → 12/16 (+5 / −0). Adopted: `[memory] context_k` (default 16) + `context_budget` 2,000 → 3,000; facts may
   use theme budget the themes don't need. `path-b-memory.md` §13.12.
+- **Episodes on the live path — measured, not adopted.** Before usefulness, faithfulness: narratives of the
+  dogfooding transcript's capture windows contained specific terms absent from their source at ten times the facts'
+  rate (12 % vs 1 %); a stricter prompt (4 %) and a grounding filter (0 % of what a rule can see) left invented
+  framing no rule detects. LoCoMo's narratives invent too ("Caroline … running had helped her mood"), which explains
+  adversarial losses there. Episodes stay a harness option; verbatim session excerpts are the next candidate.
+  `docs/path-b-memory.md` §13.23.
 - **Episodes next to facts (v0.106).** Experiment 9 of the review series' plan: one dated narrative per session
   (`memory.narrate_session` — relative dates resolved), the 3 most similar shown after a question's facts. On LoCoMo,
   paired: overall J 62.9 → 74.7 % (+226 / −45, p ≈ 3·10⁻³⁰; temporal 48.3 → 64.2 %, single-hop 68.6 → 81.6 %) — the

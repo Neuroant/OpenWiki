@@ -1370,6 +1370,39 @@ the live context — the hooks assemble k = 8 within a 2,000-character budget, a
 suggests trying a larger k there, measured on that path (→ §13.12). LoCoMo now: **overall J 60.7 %** with a local
 30B (Mem0 reports ≈ 67 % with GPT-4o-mini — and both are generous-judge numbers).
 
+### 13.23 Episodes on the live path — measured, not adopted: the narratives invent
+
+ADR-42 made the live path wait for its own measurement. Before asking whether episodes help a coding session, the
+first check was whether they are true. The dogfooding transcript was cut into the capture hook's own windows (97 of
+them, ≤ 20,000 characters, 38 days) and the first 47 narrated with `narrate_session`. Then a deterministic check: the
+**specific terms** of each narrative — identifiers, file names, numbers, versions, CamelCase / snake_case names,
+quoted strings — that do not occur in the text it narrates.
+
+| text | specific terms | not in the source |
+|---|---|---|
+| facts the capture model extracted from the same days | 1,013 | **1 %** |
+| narratives (`EPISODE_SYSTEM`) | 414 | **12 %** (10 % against the whole day) |
+| narratives, a stricter prompt ("use only what the text states; never invent identifiers, numbers, versions or hashes") | 253 | 4 % |
+| either, after dropping every sentence with an unsupported term | 241–321 | 0 % by construction |
+
+The narratives invent ten times as often as the facts: placeholder commit hashes ("a1b2c3d"), decay values, Cypher
+queries, file names — and for the project's first hour, a whole story ("SentenceTransformer's all-MiniLM-L6-v2 …
+384-dimensional embeddings … a FAISS index") where the window held no code at all. The stricter prompt and the
+grounding filter remove what a rule can see, but not what it cannot: with the filter, that first narrative still opens
+"the task was to add semantic search over the wiki pages … a vector database was initialized" — invented, with no
+term to flag. A coding window shows the talk about the work, not the work (tool calls and their output are stripped
+before capture), and asked for a narrative, the local 30B fills the gaps with plausible detail; asked for atomic
+facts, it stays with what is said.
+
+LoCoMo's narratives invent too — fewer specifics to check there (25 in 272 narratives), but the same pattern: "Caroline
+… noting that running had similarly helped her mood" where Caroline only asked "What got you into running?", and that
+sentence is exactly one of the adversarial losses of §13.22 ("What is Caroline's reason for getting into running?"). On
+LoCoMo the added detail outweighs the inventions in categories 1–4; injected into every prompt of a coding session, a
+memory that is wrong one time in ten is worse than none. **Not adopted for the live path**; no usefulness judgment was
+run — a judge cannot tell an invented detail from a true one. Episodes stay a harness option. A form that cannot
+invent is the next candidate: verbatim session excerpts retrieved next to the facts (the review series' "raw sessions
+searchable").
+
 ### 13.22 Episodes next to facts (v0.106) — the largest gain, measured on LoCoMo
 
 Atomic facts lose what connects them: the order of events, who was there, why, and the dates of things mentioned in

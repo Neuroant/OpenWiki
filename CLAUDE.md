@@ -305,7 +305,10 @@ temporal set does (checks 13 / 13, add-only 12 / 13, tags 10 / 13) → the check
 3–6 sentences, relative dates resolved; one chat call per session, kept in `episodes.jsonl`) and shows the M most
 similar to each question after its facts, in date order (`assemble_context(…, episodes=)`). With 3: overall J 62.9 →
 **74.7 %** (+226 / −45, p ≈ 3·10⁻³⁰; temporal 48.3 → 64.2 %, single-hop 68.6 → 81.6 %), adversarial 83.9 → 71.5 % (a
-narrative holds both speakers' days). Harness only — the live path is measured first (§13.22, ADR-42).
+narrative holds both speakers' days). Harness only: on the live path the narratives were measured and **not
+adopted** — on coding windows they contain specific terms absent from their source at ten times the facts' rate (12 %
+vs 1 %), and a stricter prompt + a grounding filter cannot catch invented framing; LoCoMo's narratives invent too
+(misattributions behind adversarial losses) (§13.22–13.23, ADR-42).
 
 **Sleep — nightly memory maintenance + forgetting** (Path B++): one schedulable writable pass — fold what
 read-only processes queued (usage + journal) → redact credentials in facts stored before v0.99 → **forget** what the

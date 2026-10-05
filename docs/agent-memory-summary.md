@@ -165,7 +165,9 @@ already have, then changes that only real sessions can judge. Each names where i
 9. **Episodes next to facts** — one dated narrative per session, retrieved with the facts (Nemori, Hindsight, waku);
    aimed at the temporal category. **Measured in v0.106 — the largest gain:** 3 episodes next to the facts took
    LoCoMo overall J 62.9 → 74.7 % (+226 / −45; temporal 48.3 → 64.2 %, single-hop 68.6 → 81.6 %), adversarial 83.9 →
-   71.5 % (narratives hold both speakers' days). In the harness; the live path is next, measured there first
+   71.5 % (narratives hold both speakers' days). In the harness. **Not for the live path:** narratives of coding
+   windows invent specifics at ten times the facts' rate (12 % vs 1 %), and a stricter prompt plus a grounding filter
+   cannot catch invented framing (§13.23); verbatim excerpts are the next candidate. Measured there first
    (`path-b-memory.md` §13.22).
 
 **Changes judged in real sessions**

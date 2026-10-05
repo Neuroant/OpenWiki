@@ -211,9 +211,9 @@ sequenceDiagram
   participant GS as GraphStore
 
   CC->>H: UserPromptSubmit (prompt)
-  H->>GS: context_for(prompt, k = context_k, within context_budget) (read-only, probes if [memory] probes)
-  GS-->>H: identity + recalled facts + themes
-  H-->>CC: context on stdout (injected into the prompt)
+  H->>GS: context_for(prompt, k = context_k, within context_budget, exclude = given this stretch) (read-only)
+  GS-->>H: identity + recalled facts + themes not given yet (+ what the text holds)
+  H-->>CC: context on stdout (injected into the prompt); record what was given
   CC->>H: SessionEnd / PreCompact (transcript path)
   H->>W: park the event under .openwiki/, spawn, return at once
   loop each window of turns since the session's watermark
@@ -223,6 +223,10 @@ sequenceDiagram
   end
   Note over W,GS: graph locked by a reader (e.g. the MCP server) → the facts are queued to the journal
 ```
+
+Since v0.107 the inject hook gives a session each fact, theme and the identity once per stretch: what it gave is
+recorded in `.openwiki/inject-state.json`, and the record is dropped at `PreCompact` and when a session starts from
+`compact` or `clear`, since those drop the earlier injections from the agent's context (ADR-43).
 
 Since v0.97 the worker captures **every turn since the session's watermark** (the last captured turn, kept in
 `.openwiki/capture-state.json`), in per-day windows of at most 20,000 characters dated by their first turn; one

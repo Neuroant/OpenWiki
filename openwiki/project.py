@@ -185,6 +185,14 @@ class Project:
             return WINDOW_WEIGHT
 
     @property
+    def repeat_facts(self) -> bool:
+        """Re-inject facts already injected earlier in the session (``[memory] repeat_facts``). **Off by
+        default** (v0.107): each fact, theme and the identity is injected once per stretch — until a
+        compaction or ``/clear`` — since the earlier injection is still in the agent's context; measured on
+        the dogfooding session, 55 % of injected facts were such repeats."""
+        return bool(self.setting("memory", "repeat_facts", False))
+
+    @property
     def skip_chores(self) -> bool:
         """No memory injection for chore prompts — git operations ("push and tag v1.2"), slash
         commands, and bare acknowledgements once a session is under way (``cli.chore_kind``).
@@ -345,6 +353,7 @@ enabled = {str(memory).lower()}
 # temporal_weight = 0.1   # favour facts from the time window a request names ("in July", "last week"); 0 = off
 # agent_writes = false    # let a coding agent record facts / new states via MCP wiki_remember
 # skip_chores = true      # no memory for chore prompts (push / tag / commit, slash commands, a later "ok")
+# repeat_facts = false    # re-inject facts the session already got (default: each once, until a compaction)
 # skip_prompts = []       # more chore prompts for this project, as regexes, e.g. ["sync arc42 docs"]
 # markdown_dir = "memory" # sleep writes a readable Markdown view of the memory here ("" = off)
 

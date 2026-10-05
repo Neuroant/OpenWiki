@@ -931,6 +931,13 @@ The **genuine gaps**, measure-first as always:
   set (paired, 2 captures, no probes) the cue reached the context 8/16 → 16/16 and the constraint was applied
   7/16 → 12/16 (+5 / −0). Adopted: `[memory] context_k` (default 16) + `context_budget` 2,000 → 3,000; facts may
   use theme budget the themes don't need. `path-b-memory.md` §13.12.
+- **Each fact once per stretch (v0.107).** Item 10 of the review series' plan, "when to inject", judged on the
+  dogfooding transcript (318 prompts, 11 stretches between compactions): later prompts still get 3–4 useful new facts
+  (the first 6.7), so the hook keeps injecting on every non-chore prompt — but 55 % of what it injected was already in
+  the agent's context from earlier in the stretch. Now each fact, theme and the identity is injected once per stretch;
+  the record resets at a compaction or `/clear`, and a fact the budget cut can come later. Replayed: 2,757 → 1,405
+  characters per prompt (49 % fewer). `[memory] repeat_facts` restores the old behaviour. ADR-43,
+  `docs/path-b-memory.md` §13.24.
 - **Episodes on the live path — measured, not adopted.** Before usefulness, faithfulness: narratives of the
   dogfooding transcript's capture windows contained specific terms absent from their source at ten times the facts'
   rate (12 % vs 1 %); a stricter prompt (4 %) and a grounding filter (0 % of what a rule can see) left invented

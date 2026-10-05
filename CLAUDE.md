@@ -905,6 +905,13 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   "continue" keeps its memory); "push and proceed with X" is a task and keeps it. `[memory] skip_chores` (default on)
   and `[memory] skip_prompts` (more whole-prompt regexes, e.g. `["sync arc42 docs"]`). Measured: 87 of 474 dogfooding
   prompts (18.4 %) skipped, ≈ 62 K injected tokens saved; no eval question matches (path-b-memory.md §13.16).
+  **Each fact once per stretch (v0.107):** the inject hook gives a session each fact, theme and the identity once per
+  *stretch* (session start or compaction → the next compaction): `.openwiki/inject-state.json` (`cli._inject_state`)
+  records what it gave, `context_for(…, exclude=, report=)` leaves that out and reports what the text holds
+  (`assemble_context(report=)` — a fact the budget cut is not "given"); reset by the `PreCompact` capture hook and a
+  `SessionStart` with `source` `compact` / `clear` (`cli._reset_injected`); `[memory] repeat_facts = true` restores the
+  old behaviour. Measured: later prompts still get 3–4 useful new facts (judge), 55 % of injected facts were repeats;
+  replayed, 2,757 → 1,405 characters per prompt (49 % fewer) (path-b-memory.md §13.24).
   `usage.py` + `journal.py` are the **lock-free deferred-write log** (**B1 concurrency**): Kuzu is
   reader-XOR-writer (no simultaneous read+write), so a read-only process queues its intended writes to a
   JSONL sidecar instead of failing — `usage.py` holds reinforce pairs (`fold_usage`), `journal.py` holds
@@ -1214,7 +1221,7 @@ http — count, p50/p95, total time, token in/out) + a live recent-events table,
   The hooks run `cli._cmd_hook`
   (reads the event JSON on stdin, **always exits 0** — fail-soft — else exit 2 would reject the
   prompt): `inject` = `GraphStore.context_for(prompt)` → stdout (Claude Code injects it; chore prompts get none —
-  v0.101), `capture`
+  v0.101; each fact once per stretch — v0.107), `capture`
   = **every turn since the session's watermark** → `capture_session` per window → `remember` (queued if the
   graph is write-locked). Gated by the project's `[memory] enabled`. Design: Path B / B6 host-hook refinement.
   **Incremental capture (v0.97):** `claude_code_template.capture_windows(text, after_ts, max_chars)` cuts the turns

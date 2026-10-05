@@ -361,7 +361,7 @@ older one **supersedes** it (history stays queryable); `recall` ranks by decay-w
 cosine so useful facts persist and stale ones fade. It's read-safe under concurrency (Kuzu
 is reader-XOR-writer, so writes queue to a lock-free journal a writer folds in), and it can
 wire into a coding agent's lifecycle via **host hooks** (`claude-code --hooks`: inject memory
-on each prompt, capture on session end). With `[memory] probes = true` (or `context --probes`) a
+on each prompt — each fact once, until the next compaction —, capture on session end). With `[memory] probes = true` (or `context --probes`) a
 context read also reaches **implicit constraints** — "book a venue" recalls "can't stand noisy
 offices" although they share no words (cue-trigger recall). `openwiki sleep` (schedule it nightly) **forgets** one-off
 session events ("vX was pushed and tagged") that would otherwise crowd the injected context — archived, not

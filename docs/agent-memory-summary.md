@@ -173,7 +173,11 @@ already have, then changes that only real sessions can judge. Each names where i
 **Changes judged in real sessions**
 
 10. **When to inject** — the first prompt and after compaction, an index of themes, facts on file reads — instead of
-    every prompt (Mem0, Letta, Hermes, Cognee).
+    every prompt (Mem0, Letta, Hermes, Cognee). **Done in v0.107**, differently: a judge found later prompts still
+    getting 3–4 useful new facts (the first prompt 6.7), so the hook keeps injecting on every non-chore prompt — but
+    each fact, theme and the identity once per stretch, until a compaction or `/clear`, since 55 % of injected facts
+    were already in the agent's context. 2,757 → 1,405 characters per prompt on the replayed session (49 % fewer).
+    The themes index and file-read facts were not measured (`path-b-memory.md` §13.24).
 11. **Session search for agents** — raw sessions searchable, full text first (Hermes, Letta, Graphiti).
 12. **Typed facts with a volatility class** — volatile facts marked "possibly outdated" after some weeks (MIRIX,
     memory-champ). First evidence: a volatile-phrasing rule caught 12 of the 14 labeled stale facts while flagging

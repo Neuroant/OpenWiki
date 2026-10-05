@@ -710,7 +710,8 @@
   size); − the cue set places its cues near the k = 8 boundary by design, so it shows the mechanism, not how often it
   matters. Sizes the B6 assembly of [ADR-14](#adr-14); carries the [ADR-34](#adr-34) finding into production.
   *Addendum (v0.101):* chore prompts — git chores, slash commands, a later bare acknowledgement — get no memory at
-  all (`[memory] skip_chores`): 18.4 % of the dogfooding prompts, ≈ 62 K tokens over the session.
+  all (`[memory] skip_chores`): 18.4 % of the dogfooding prompts, ≈ 62 K tokens over the session. *Addendum (v0.107):*
+  each fact once per stretch ([ADR-43](#adr-43)): 2,757 → 1,405 characters per prompt on the replayed session.
 
 ### ADR-36
 **A session hands over to the next through a handoff that OpenWiki derives and the agent annotates.** *(v0.98)*
@@ -873,6 +874,28 @@ changes.** *(v0.102; builds on [ADR-16](#adr-16); mitigates R10)*
   every prompt must not be wrong one time in ten; verbatim session excerpts are the next candidate
   (`path-b-memory.md` §13.23).
 
+### ADR-43
+**Inject on every prompt, but each fact once per stretch.** *(v0.107; refines [ADR-35](#adr-35))*
+- **Context:** the hook injected the top 16 facts into every non-chore prompt. Other systems inject less often —
+  Mem0 on the first prompt, Hermes once per session, Letta a core plus an index, Cognee on file reads. On the dogfooding
+  transcript (318 prompts, 11 stretches between compactions) a judge that saw the agent's context found later prompts
+  still getting 3–4 useful facts the context did not hold (71 sampled prompts; the first prompt 6.7, four in five later
+  prompts at least one), while 55 % of the injected facts had been injected earlier in the same stretch (71 % from the
+  16th prompt on).
+- **Decision:** keep injecting on every non-chore prompt, but each fact, theme and the identity only once per
+  *stretch* — until a compaction or `/clear` drops the earlier injection from the agent's context. The hook records per
+  session what it gave (`.openwiki/inject-state.json`); `context_for(…, exclude=, report=)` leaves it out and reports
+  what the budgeted text holds; the record resets at `PreCompact` and at a `SessionStart` from `compact` / `clear`.
+  Recall is unchanged (the top 16 minus what was given). `[memory] repeat_facts` restores the old behaviour.
+- **Alternatives:** the first prompt and after compaction only (Mem0, Hermes) — loses the 3–4 useful new facts later
+  prompts get; refilling to 16 new facts from lower ranks — k = 24 on first prompts added 0.5 judged facts, the judge
+  picking a near-constant count; an index of the themes, facts on file reads (Cognee) — not measured (needs a
+  `PreToolUse` hook and a file-to-fact link).
+- **Consequences:** + replayed on the 318 prompts: 2,757 → 1,405 characters per prompt (49 % fewer), 40 prompts
+  with nothing new to inject. − A small state file per project; a session resumed after 14 days gets everything again.
+  − A fact the agent has seen but no longer attends to in a long stretch is not repeated (the judge's "evident from
+  context" is the assumption). No eval set changes — the harnesses don't exclude.
+
 ---
 *Chapter complete. The Path-B agent-memory direction landed via ADR-14/15/16/17/18/19; the graph then
 deepened (ADR-22 typed relations + relation-aware GraphRAG, ADR-23 entity resolution), gained
@@ -888,6 +911,7 @@ path (ADR-35), a **session handoff** of derived state + the agent's note (ADR-36
 a normalized instruction policy (ADR-37), and **writes that land during a session** — per-call readers, two-phase
 writers (ADR-38), **portable memory** — a COGX export / import, a Markdown view and a LadybugDB spike (ADR-39), and
 **hybrid recall** — BM25 as a recall aid within the dense pool (ADR-40), **the question's time window** (ADR-41), and
-**episodes** next to facts, measured on the benchmark first (ADR-42). §11
+**episodes** next to facts, measured on the benchmark first (ADR-42), and memory injected **once per stretch**
+(ADR-43). §11
 debts D1/D2/D6 are resolved. Deep designs in `docs/path-b-memory.md` and `docs/RAG-vs-GraphRAG.md`. New significant
 decisions should be appended here with the next id.*

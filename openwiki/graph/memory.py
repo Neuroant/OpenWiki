@@ -412,8 +412,14 @@ _THEMES_HEADER = "## Themes across my memory"
 def _fit_section(header: str, lines: list, budget) -> tuple:
     """Header + as many ``lines`` as fit within ``budget`` chars → ``(block, chars_used)``.
     ``budget=None`` is unbounded; ``("", 0)`` if nothing beyond the header fits."""
+    block, used, _ = _fit_lines(header, lines, budget)
+    return block, used
+
+
+def _fit_lines(header: str, lines: list, budget) -> tuple:
+    """``_fit_section`` plus how many of ``lines`` (a prefix) made it in → ``(block, chars_used, n)``."""
     if not lines:
-        return "", 0
+        return "", 0, 0
     out, used = [header], len(header)
     for line in lines:
         need = len(line) + 1                       # + newline
@@ -421,7 +427,7 @@ def _fit_section(header: str, lines: list, budget) -> tuple:
             break
         out.append(line)
         used += need
-    return ("\n".join(out), used) if len(out) > 1 else ("", 0)
+    return ("\n".join(out), used, len(out) - 1) if len(out) > 1 else ("", 0, 0)
 
 
 # -- episodes: one dated narrative per session (v0.106) -------------------------------------
@@ -461,7 +467,7 @@ def narrate_session(chat, transcript: str, session_date: Optional[int] = None) -
 
 
 def assemble_context(identity: str, facts: list, themes: list, max_facts: int = 8,
-                     max_themes: int = 4, max_chars=None, episodes=None) -> str:
+                     max_themes: int = 4, max_chars=None, episodes=None, report=None) -> str:
     """B6: assemble a session's context from the **three memory tiers** — identity (DNA),
     the activated facts (``recall`` — the epigenetic tier), and the relevant consolidated
     themes (B5 ``MemoryConcept``s — the attractor tier). Pure + **fail-soft**: any tier may
@@ -471,7 +477,9 @@ def assemble_context(identity: str, facts: list, themes: list, max_facts: int = 
     first (truncated if it alone overflows), then **facts** (the majority share — the primary
     signal), then **themes** (whatever remains). Graceful truncation, facts prioritized over
     themes; ``max_chars=None`` keeps the prior count-only behavior. ``episodes`` (dicts with ``text``, v0.106) are
-    the dated session narratives retrieved for the query, shown after the facts, before the themes."""
+    the dated session narratives retrieved for the query, shown after the facts, before the themes. ``report`` (a
+    dict) receives what made it into the text — ``facts`` and ``themes`` (the dicts) and ``identity`` (bool) — so a
+    caller can tell what the budget cut (v0.107)."""
     facts = list(facts)[:max_facts]
     themes = list(themes)[:max_themes]
     # P1 cue-trigger: facts a constraint probe surfaced get their own section, *before* the rest — a
@@ -484,6 +492,7 @@ def assemble_context(identity: str, facts: list, themes: list, max_facts: int = 
 
     blocks: list = []
     remaining = None if max_chars is None else max(0, int(max_chars))
+    shown_identity = False
 
     ident = (identity or "").strip()
     if ident:
@@ -492,6 +501,7 @@ def assemble_context(identity: str, facts: list, themes: list, max_facts: int = 
             block = block[:remaining].rstrip()     # identity is small + always useful → keep, truncate
         if block.strip():
             blocks.append(block)
+            shown_identity = True
             if remaining is not None:
                 remaining = max(0, remaining - len(block) - 2)   # -2 ≈ the blank-line separator
 
@@ -500,7 +510,7 @@ def assemble_context(identity: str, facts: list, themes: list, max_facts: int = 
         # facts get the majority share — plus whatever the themes won't use (none, few or short)
         theme_need = (len(_THEMES_HEADER) + sum(len(t) + 1 for t in theme_lines) + 2) if theme_lines else 0
         fact_budget = max(int(remaining * _FACT_BUDGET_SHARE), remaining - theme_need)
-    keep_block, keep_used = _fit_section(
+    keep_block, keep_used, keep_n = _fit_lines(
         "## Keep in mind — the user's own circumstances; apply them where they bear on the request",
         keep_lines, fact_budget)
     if keep_block:
@@ -508,7 +518,7 @@ def assemble_context(identity: str, facts: list, themes: list, max_facts: int = 
         if remaining is not None:
             remaining = max(0, remaining - keep_used - 2)
             fact_budget = max(0, fact_budget - keep_used - 2)
-    fact_block, fact_used = _fit_section("## What I remember (most relevant)", fact_lines, fact_budget)
+    fact_block, fact_used, fact_n = _fit_lines("## What I remember (most relevant)", fact_lines, fact_budget)
     if fact_block:
         blocks.append(fact_block)
         if remaining is not None:
@@ -521,8 +531,11 @@ def assemble_context(identity: str, facts: list, themes: list, max_facts: int = 
         if remaining is not None:
             remaining = max(0, remaining - episode_used - 2)
 
-    theme_block, _ = _fit_section(_THEMES_HEADER, theme_lines, remaining)
+    theme_block, _, theme_n = _fit_lines(_THEMES_HEADER, theme_lines, remaining)
     if theme_block:
         blocks.append(theme_block)
+    if report is not None:
+        report.update({"facts": keep[:keep_n] + facts[:fact_n], "themes": themes[:theme_n],
+                       "identity": shown_identity})
 
     return "\n\n".join(blocks)

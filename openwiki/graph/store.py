@@ -1881,14 +1881,17 @@ class GraphStore:
     def context_for(self, query: str, embedder, identity: str = "",
                     k: int = 16, max_themes: int = 4, max_chars=None,
                     as_of: Optional[int] = None, probes=None, lexical: float = 0.0,
-                    temporal: float = 0.0) -> str:
+                    temporal: float = 0.0, exclude: Optional[dict] = None, report: Optional[dict] = None) -> str:
         """B6: assemble a session's context for ``query`` from the three memory tiers —
         identity + decay-weighted ``recall`` (activation) + the relevant consolidated themes
         (attractors), optionally fit within a ``max_chars`` budget. Facts carry their validity
         (B7), and ``as_of`` assembles the memory as it was true at that date. ``probes`` (P1
         cue-trigger, ``memory.constraint_probes``) reserve slots for the user's implicit
-        constraints, shown first under "Keep in mind". Read-only + **fail-soft** (missing
-        embedder / empty memory → identity only, or ``""``)."""
+        constraints, shown first under "Keep in mind". ``exclude`` (``{"facts": ids, "themes": ids,
+        "identity": bool}``) leaves out what the caller already gave this session — the inject hook
+        injects each fact once per stretch (v0.107); ``report`` (a dict) receives what was assembled
+        (``facts``, ``themes``, ``identity``). Read-only + **fail-soft** (missing embedder / empty
+        memory → identity only, or ``""``)."""
         from .memory import assemble_context
         facts = []
         if embedder is not None:
@@ -1899,9 +1902,20 @@ class GraphStore:
                                                     temporal=temporal))
             except Exception:      # never let a memory read break the caller
                 facts = []
+        exclude = exclude or {}
+        seen_facts, seen_themes = set(exclude.get("facts") or ()), set(exclude.get("themes") or ())
+        facts = [f for f in facts if f["id"] not in seen_facts]
         themes = self.relevant_concepts([f["id"] for f in facts], limit=max_themes) if facts else []
-        return assemble_context(identity, facts, themes, max_facts=k, max_themes=max_themes,
-                                max_chars=max_chars)
+        themes = [t for t in themes if t["id"] not in seen_themes]
+        if exclude.get("identity"):
+            identity = ""
+        shown: dict = {}
+        text = assemble_context(identity, facts, themes, max_facts=k, max_themes=max_themes,
+                                max_chars=max_chars, report=shown)
+        if report is not None:         # what the text holds — a fact the budget cut is not "given"
+            report.update({"facts": [f["id"] for f in shown["facts"]], "themes": [t["id"] for t in shown["themes"]],
+                           "identity": shown["identity"]})
+        return text
 
     def hybrid_search(self, vector, k: int = 5) -> list[dict]:
         """Vector k-NN over chunks, then hop to the owning page (GraphRAG)."""

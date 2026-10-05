@@ -3604,6 +3604,41 @@ def _skip_memory(project: Project, payload: dict) -> bool:
     return kind != "ack" or _session_has_turns(payload.get("transcript_path"))
 
 
+INJECT_STATE_FILE = "inject-state.json"     # per session: what the inject hook already gave it (v0.107)
+INJECT_STATE_DAYS = 14                       # forget sessions not seen for this long
+
+
+def _inject_state(project: Project) -> dict:
+    path = project.state_dir / INJECT_STATE_FILE
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_inject_state(project: Project, state: dict) -> None:
+    cutoff = time.time() - INJECT_STATE_DAYS * 86400
+    state = {sid: s for sid, s in state.items() if isinstance(s, dict) and s.get("updated", 0) >= cutoff}
+    path = project.state_dir / INJECT_STATE_FILE
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError:
+        pass
+
+
+def _reset_injected(project: Project, session_id) -> None:
+    """A compaction or ``/clear`` dropped the earlier injections from the agent's context → give it everything
+    again (the next prompt injects in full)."""
+    state = _inject_state(project)
+    if str(session_id or "") in state:
+        state.pop(str(session_id))
+        _save_inject_state(project, state)
+
+
 def _hook_inject(project: Project, payload: dict) -> None:
     """UserPromptSubmit → assemble the three-tier memory context for the prompt and print
     it (Claude Code adds a hook's stdout to the prompt context). Chore prompts get none
@@ -3621,12 +3656,25 @@ def _hook_inject(project: Project, payload: dict) -> None:
     graph = _open_reader(project.graph_path, wait=5.0)   # a writer applies in seconds
     if graph is None:
         return
+    # each fact, theme and the identity once per stretch — the earlier injection is still in the agent's
+    # context until a compaction or /clear (55 % of injected facts were repeats, v0.107)
+    sid = str(payload.get("session_id") or "")
+    state = _inject_state(project) if sid and not project.repeat_facts else {}
+    given = state.get(sid) or {}
+    used: dict = {}
     try:
         context = graph.context_for(prompt, embedder, identity=project.identity, k=project.context_k,
                                     max_chars=project.context_budget, probes=probes,
-                                    lexical=project.lexical_weight, temporal=project.temporal_weight)
+                                    lexical=project.lexical_weight, temporal=project.temporal_weight,
+                                    exclude=given if given else None, report=used)
     finally:
         graph.close()
+    if sid and not project.repeat_facts and (used.get("facts") or used.get("themes") or used.get("identity")):
+        state[sid] = {"facts": sorted(set(given.get("facts") or ()) | set(used.get("facts") or ())),
+                      "themes": sorted(set(given.get("themes") or ()) | set(used.get("themes") or ())),
+                      "identity": bool(given.get("identity") or used.get("identity")),
+                      "updated": int(time.time())}
+        _save_inject_state(project, state)
     if context.strip():
         sys.stdout.write(
             "Relevant memory from earlier sessions (OpenWiki Second Brain) — use if helpful; "
@@ -3642,6 +3690,8 @@ def _hook_resume(project: Project, payload: dict) -> None:
     context. Only a handoff written for this repository; bounded (``HOOK_BRIEF_CHARS``) and fail-soft.
     The session is noted in ``handoff.json``, so the next one sees it was already picked up."""
     from . import handoff as ho
+    if str(payload.get("source") or "") in ("clear", "compact"):
+        _reset_injected(project, payload.get("session_id"))   # the context was dropped or summarized
     if str(payload.get("source") or "startup") not in ("startup", "clear"):
         return
     repo = Path(payload.get("cwd") or os.getcwd())
@@ -3807,6 +3857,8 @@ def _hook_capture(project: Project, payload: dict) -> None:
     (older turns: ``openwiki backfill``)."""
     from .claude_code_template import capture_windows
 
+    if not payload.get("_worker") and str(payload.get("hook_event_name") or "") == "PreCompact":
+        _reset_injected(project, payload.get("session_id"))   # the compaction drops earlier injections
     if not payload.get("_worker") and _spawn_capture(project, payload):
         return
     tpath = payload.get("transcript_path")

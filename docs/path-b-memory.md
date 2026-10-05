@@ -90,7 +90,7 @@ capture style (D14, §13.10) gained +2.8 points on 4 LoCoMo conversations, not s
 10. [Recommended first slice](#10-recommended-first-slice)
 11. [Prior art & learnings — "Cognitive Substrate"](#11-prior-art--learnings--cognitive-substrate)
 12. [Second-Brain refinements (B7 / B9 built; A2 / B8 open)](#12-second-brain-refinements-b7--b9-built-a2--b8-open)
-13. [Memory hygiene, implicit recall and the LoCoMo benchmark (built v0.86 to v0.96)](#13-memory-hygiene-implicit-recall-and-the-locomo-benchmark-built-v086-to-v096)
+13. [Memory hygiene, implicit recall and the LoCoMo benchmark (built v0.86 to v0.107)](#13-memory-hygiene-implicit-recall-and-the-locomo-benchmark-built-v086-to-v0107)
 
 ---
 
@@ -873,7 +873,7 @@ errs toward "different thing" (safe: fragmentation over a wrong merge); descript
 extra coexistence calls; subject identity is only inferred inside a resolved group (no general
 subject resolution).
 
-## 13. Memory hygiene, implicit recall and the LoCoMo benchmark (built v0.86 to v0.106)
+## 13. Memory hygiene, implicit recall and the LoCoMo benchmark (built v0.86 to v0.107)
 
 *Planned from the cognitive-agent report (B10+); every item below was built or measured — see §13.1–13.12.*
 
@@ -1369,6 +1369,63 @@ The largest single step so far ("Not mentioned" on single-hop 219 → 178). **Ad
 the live context — the hooks assemble k = 8 within a 2,000-character budget, a per-prompt token cost; the finding
 suggests trying a larger k there, measured on that path (→ §13.12). LoCoMo now: **overall J 60.7 %** with a local
 30B (Mem0 reports ≈ 67 % with GPT-4o-mini — and both are generous-judge numbers).
+
+### 13.24 When to inject — each fact once per stretch (v0.107)
+
+The inject hook put the top 16 facts into every prompt. Item 10 of the plan in `agent-memory-summary.md` asked whether
+that is the right moment: Mem0 injects on a session's first prompt and leaves the rest to a search tool, Hermes once
+per session, Letta keeps a core and an index, Cognee adds the facts about a file when the agent reads it. Two
+questions, asked of the dogfooding transcript — 318 non-chore prompts in 11 *stretches* (the turns from a session's
+start or a compaction to the next compaction, 4–53 prompts each), against the memory as it stood before each prompt's
+capture window, so no fact comes from the turns being judged:
+
+1. **Does memory stop helping after the first prompt?** A judge (the local 30B) saw what the agent's context already
+   held — the last compaction summary and the conversation since — then the prompt and its 16 injected facts, and named
+   the facts that help *and* are not evident from that context. 71 prompts, sampled by position in their stretch:
+
+   | position in the stretch | prompts | useful and new facts per prompt | prompts with any |
+   |---|---|---|---|
+   | 1st | 11 | 6.7 | 11 / 11 |
+   | 2nd–5th | 20 | 3.7 | 16 / 20 |
+   | 6th–15th | 20 | 4.2 | 17 / 20 |
+   | 16th and later | 20 | 3.5 | 15 / 20 |
+
+   The first prompt gains most, but later prompts still get three to four useful new facts, four in five of them at
+   least one; injecting only on the first prompt and after a compaction would drop those. The useful facts spread over
+   the ranks (the top 8 hold 32–43 % of them), and a larger first injection did not help: with k = 24 the 11 first
+   prompts got 7.3 useful new facts instead of 6.7 — the judge named facts from ranks 17–24 in place of others, a
+   near-constant count.
+2. **What do later prompts repeat?** Replaying the hook for every prompt in order: **55 %** of the injected facts had
+   been injected earlier in the same stretch — 30 % at positions 2–5, 44 % at 6–15, 71 % from the 16th prompt on. The
+   earlier injection stays in the agent's context until a compaction drops it, so the repeats are pure cost.
+
+**Built:** the hook still injects on every non-chore prompt, but each fact, theme and the identity only **once per
+stretch**. `.openwiki/inject-state.json` records per session what the hook gave it; `context_for(…, exclude=,
+report=)` leaves that out and reports what the assembled text holds — a fact or theme the char budget cut does not
+count as given, so it can come later. The record is dropped at `PreCompact` (the capture hook) and when a session
+starts with `source` `compact` or `clear` (the resume hook), so the first prompt after a compaction gets everything
+again; sessions not seen for 14 days are pruned. Recall itself is unchanged — the top 16 for the prompt, minus what was
+given, not refilled from lower ranks, since more facts per prompt added little above. `[memory] repeat_facts = true`
+restores the old behaviour.
+
+**Measured** by replaying the 318 prompts through `context_for` as the hook calls it (k 16, 3,000 chars, the project's
+identity, hybrid recall and the time window), the record reset at each compaction:
+
+| position in the stretch | prompts | every prompt (chars) | once per stretch (chars) | new facts shown |
+|---|---|---|---|---|
+| 1st | 11 | 2,767 | 2,767 | 15.6 |
+| 2nd–5th | 43 | 2,740 | 2,089 | 11.2 |
+| 6th–15th | 98 | 2,742 | 1,767 | 8.9 |
+| 16th and later | 166 | 2,770 | 924 | 4.6 |
+| all | 318 | **2,757** (≈ 689 tokens; 15.7 facts, 2.2 themes) | **1,405** (≈ 351 tokens; 1.4 new themes) | 7.2 |
+
+**49 % fewer** injected characters over the session; 40 prompts had nothing new and got no injection. The
+savings grow with the stretch — from the 16th prompt on, a third of the old size. No eval set changes: the harnesses
+call `context_for` without `exclude`, one question per session.
+
+**Not built:** the other two ideas of item 10 — an index of the themes in place of facts, and the facts about a file
+when the agent reads it (Cognee) — were not measured. The first prompt of every stretch already gets its themes, and
+injecting on file reads needs a `PreToolUse` hook and a link from files to facts that the memory does not keep.
 
 ### 13.23 Episodes on the live path — measured, not adopted: the narratives invent
 

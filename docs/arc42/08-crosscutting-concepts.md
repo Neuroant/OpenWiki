@@ -241,7 +241,8 @@ Alongside the document tier, a project in **Second Brain mode** (`[memory] enabl
   last session handoff, ADR-36 — v0.98), through the fail-soft `owiki hook` command), so memory flows automatically. The cross-session eval scores it
   ("assembled" beats raw-log). *Load the concentrate, not the log.* Its size is a per-prompt cost, so it is set
   by measurement: `[memory] context_k` facts (16) within `context_budget` chars (3,000 ≈ 710 tokens on real
-  prompts) — facts take the majority share plus whatever the themes don't need (ADR-35).
+  prompts) — facts take the majority share plus whatever the themes don't need (ADR-35). The hook gives a session
+  each fact, theme and the identity once per stretch, until a compaction or `/clear` (ADR-43).
 
 The lifecycle is **independent of documents** (ADR-14/16): `graph-build` rebuilds the document tier but
 preserves the remembered tier; consolidation touches memory, never documents. The payoff metric — *does

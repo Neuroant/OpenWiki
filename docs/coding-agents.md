@@ -171,7 +171,9 @@ blocks a prompt):
   (identity + recalled facts + relevant themes) for your prompt and injects it, so the agent starts
   each turn already oriented. Chore prompts get none — "push", "commit and push", "push and tag v1.2", slash commands,
   and a bare "ok" / "continue" once the session is under way (`[memory] skip_prompts` adds your own, `skip_chores =
-  false` turns the gate off). Also available on demand as `owiki context "<query>"` and the `wiki_memory` MCP tool.
+  false` turns the gate off). Each fact is injected once until the next compaction or `/clear` — the agent still has
+  it in context — so later prompts get only what is new (`repeat_facts = true` repeats them). Also available on demand
+  as `owiki context "<query>"` and the `wiki_memory` MCP tool.
 - **`SessionEnd` / `PreCompact` → `owiki hook capture`** — captures the conversation transcript into
   memory (`remember`), so what you discussed persists into the next session.
 - **`SessionStart` → `owiki hook resume`** — on a new session (and after `/clear`) injects the brief of

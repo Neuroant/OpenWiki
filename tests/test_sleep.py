@@ -269,3 +269,19 @@ def test_consolidate_budget_leaves_the_rest_pending_for_the_next_run(tmp_path, c
     calls, themes3, pending3, shown3 = run()
     assert calls == pending2 and pending3 == 0 and themes3 == themes + pending
     assert len(shown3) == themes3
+
+
+def test_volatile_kinds_are_the_facts_that_go_stale_on_their_own():
+    from openwiki.graph.memory import MemoryFact, volatile_kind
+    cases = {("roadmap", "has remaining item", "graph tools"): "plan",
+             ("pipeline observability", "is next on", "the roadmap"): "plan",
+             ("CI", "exercises", "357 tests"): "count",
+             ("OpenWiki", "lacks", "contradiction resolution"): "gap",
+             ("OpenWiki", "is versioned", "0.2.0"): "version",
+             ("0.33.0", "contains", "Markdown parser"): "version",          # a milestone: the rule can't tell
+             ("capture worker", "is running", "yes"): "state",
+             ("RAG agent", "retrieves top chunks from", "SemanticIndex"): None,
+             ("default chat model", "is set to", "qwen3:30b-a3b-instruct-2507-q4_K_M"): None}
+    for (s, p, o), want in cases.items():
+        assert volatile_kind({"subject": s, "predicate": p, "object": o}) == want, (s, p, o)
+    assert volatile_kind(MemoryFact("CI", "exercises", "357 tests")) == "count"     # a fact object too

@@ -467,6 +467,7 @@ embeddings; no Ollama call):
 .venv\Scripts\python -m openwiki analyze --json          # the coupling/gaps fingerprint (compare/export)
 .venv\Scripts\python -m openwiki analyze --compare fp.json   # diff two coupling fingerprints (P3b)
 .venv\Scripts\python -m openwiki analyze memory         # Path B memory-tier dynamics (P4)
+.venv\Scripts\python -m openwiki analyze memory --review   # facts of kinds that go stale, as `replaces` lines
 ```
 Two modes (positional `coupling` (default) | `gaps`). **`gaps`** (P3, `openwiki/analysis/gaps.py`) is the
 **analysis→improvement loop** — a ranked, offline to-do list: **link_candidates** (page pairs that
@@ -498,7 +499,12 @@ surface. **`analyze memory`** (P4, `openwiki/analysis/memory.py`) analyzes the *
 the part of the world model that *learns over time*: **revision** (SUPERSEDES rate — how much belief has
 been overwritten), **consolidation** (fraction of facts folded into B5 themes + theme-size shape),
 **temperature** (hot/warm/cold buckets by decayed `effective_weight` + per-fact `confidence` re-affirmation),
-**breadth** (distinct subjects/predicates + top predicates), and **growth** (facts per session). Graph-only
+**breadth** (distinct subjects/predicates + top predicates), **growth** (facts per session), and **review** (v0.109):
+the current facts of kinds that go stale on their own (`memory.volatile_kind` — plans, counts, gaps, versions, running
+states; the stale-fact analysis's rule, unchanged), which `analyze memory --review` lists as `wiki_remember` `replaces`
+lines to check — a list, not a label: on blind labels 1 in 4 was stale (2½–9× the rest), a "possibly outdated" mark
+was measured and not adopted, refined rules and the local model's tags did worse (`docs/path-b-memory.md` §13.26).
+Graph-only
 (no index/embeddings), gated on `has_memory()`, decay imported lazily so the analysis package stays light.
 
 **Web UI** — browse + search + chat/edit + graph in the browser (stdlib server):

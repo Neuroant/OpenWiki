@@ -931,6 +931,13 @@ The **genuine gaps**, measure-first as always:
   set (paired, 2 captures, no probes) the cue reached the context 8/16 → 16/16 and the constraint was applied
   7/16 → 12/16 (+5 / −0). Adopted: `[memory] context_k` (default 16) + `context_budget` 2,000 → 3,000; facts may
   use theme budget the themes don't need. `path-b-memory.md` §13.12.
+- **Volatility classes — measured; a review list, not a label (v0.109).** Item 12 of the review series' plan. The
+  phrasing rule of the stale-fact analysis, frozen and checked on blind hand labels of the dogfooding memory: 25 % of
+  the facts it flags were stale (26 of 104), 2½–9 times the rate of the others — but a "possibly outdated" mark would be
+  wrong three times in four; a rule refined on those labels failed on fresh facts (1 of 11), the local model's tags did
+  worse (12–26 %), and stale facts were no older than the rest. So `analyze memory --review` lists the facts of the
+  volatile kinds (plans, counts, gaps, versions, running states) as `replaces` lines to check; one pass on the dev
+  memory closed 39 stale facts. `docs/path-b-memory.md` §13.26.
 - **Session search for agents (v0.108).** Item 11 of the review series' plan: the raw transcripts, searched by full
   text — BM25 over every user and assistant turn, no model — as the MCP tool `wiki_sessions`, `owiki sessions search |
   list` and `eval --locomo --excerpts M`; verbatim, dated excerpts, redacted and screened. On LoCoMo full text found

@@ -315,6 +315,19 @@ def test_analyze_memory_growth_is_oldest_first():
     assert growth[0]["session_id"] == "s2"                        # s2 has the oldest fact (−120d)
 
 
+def test_analyze_memory_review_lists_the_kinds_that_go_stale():
+    from openwiki.analysis import analyze_memory
+    facts = [_mf("v1", "OpenWiki", "is versioned", "0.2.0", "s1", _NOW - 60 * _DAY),
+             _mf("c1", "CI", "exercises", "357 tests", "s1", _NOW - 9 * _DAY),
+             _mf("p1", "roadmap", "has remaining item", "graph tools", "s2", _NOW - 30 * _DAY),
+             _mf("s1", "RAG agent", "retrieves top chunks from", "SemanticIndex", "s2", _NOW - 30 * _DAY),
+             _mf("v0", "OpenWiki", "is versioned", "0.1.0", "s0", _NOW - 90 * _DAY, sup=True)]   # not current
+    rv = analyze_memory(_FakeMemGraph(facts), now=_NOW)["review"]
+    assert rv["count"] == 3 and rv["share"] == 0.75 and rv["by_kind"] == {"plan": 1, "count": 1, "version": 1}
+    assert [r["id"] for r in rv["facts"]] == ["p1", "c1", "v1"]              # the most often stale kinds first
+    assert rv["facts"][2]["line"].startswith("- OpenWiki is versioned 0.2.0  (")   # what `replaces` matches
+
+
 def test_project_2d_pca_is_normalized_and_shaped():
     from openwiki.analysis.projection import project_2d
     rng = np.random.default_rng(0)

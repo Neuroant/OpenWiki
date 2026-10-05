@@ -187,7 +187,11 @@ already have, then changes that only real sessions can judge. Each names where i
 12. **Typed facts with a volatility class** — volatile facts marked "possibly outdated" after some weeks (MIRIX,
     memory-champ). First evidence: a volatile-phrasing rule caught 12 of the 14 labeled stale facts while flagging
     10 % of memory (written after seeing them — confirm on a fresh labeled set); co-change dependencies were at
-    chance, since every stale fact had been stated only once (`memory-systems-review.md` §13).
+    chance, since every stale fact had been stated only once (`memory-systems-review.md` §13). **Measured in v0.109 —
+    a review list, not a label:** on blind labels the frozen rule's flags were 25 % stale (2½–9× the rest), too few
+    for a mark in every prompt; a refined rule failed on fresh facts, the local model's tags did worse, and stale facts
+    were no older than the rest. `analyze memory --review` lists the volatile kinds as `replaces` lines; one pass
+    closed 39 stale facts (`path-b-memory.md` §13.26).
 13. **An approval step** — the journal as the staging area for agent writes and for an always-present core
     (memory-champ, Hermes).
 14. **Procedural memory from errors** — failure → fix pairs, with Hermes' guardrails: no negative tool claims, no

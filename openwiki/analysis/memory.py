@@ -14,6 +14,9 @@ confidence), and consolidated into themes (B5). The metrics are its *dynamics*:
 - **breadth** — distinct subjects/predicates + the dominant predicates: the shape of what's
   known.
 - **growth** — facts contributed per session: the accrual curve.
+- **review** — the current facts of a kind that goes stale on its own (plans, counts, gaps, versions,
+  running states — ``graph.memory.volatile_kind``), most likely stale kinds first, each as the line
+  ``wiki_remember``'s ``replaces`` matches: a list to check, not a verdict (1 in 4 was stale, v0.109).
 
 Read-only. Pure over the data the ``GraphStore`` memory methods return; the decay math is
 imported lazily so importing :mod:`openwiki.analysis` never pulls in the graph/Kuzu layer.
@@ -129,6 +132,18 @@ def analyze_memory(graph, now: "int | None" = None, half_life: "float | None" = 
     growth = [{"session_id": sid, "facts": per_session[sid]}
               for sid in sorted(per_session, key=lambda s: (first_seen.get(s, 0), s))]
 
+    # -- review: current facts of a kind that goes stale (plans, counts, gaps, versions, running states) — the
+    # list to check against the project and correct with wiki_remember; each line is in the form `replaces` matches
+    from ..graph.memory import VOLATILE_KINDS, fact_line, volatile_kind
+    rank = {k: i for i, k in enumerate(VOLATILE_KINDS)}
+    to_check = sorted(({"kind": k, "line": fact_line(f), "id": f["id"], "valid_from": f.get("valid_from")}
+                       for f in current if (k := volatile_kind(f)) is not None),
+                      key=lambda r: (rank[r["kind"]], r["valid_from"] or 0))
+    review = {"count": len(to_check),
+              "share": round(len(to_check) / n_current, 3) if n_current else 0.0,
+              "by_kind": {k: n for k in VOLATILE_KINDS if (n := sum(1 for r in to_check if r["kind"] == k))},
+              "facts": to_check}
+
     return {
         "available": True,
         "counts": {
@@ -142,4 +157,5 @@ def analyze_memory(graph, now: "int | None" = None, half_life: "float | None" = 
         "temperature": temperature,
         "breadth": breadth,
         "growth": growth,
+        "review": review,
     }

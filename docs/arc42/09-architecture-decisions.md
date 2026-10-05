@@ -919,6 +919,25 @@ changes.** *(v0.102; builds on [ADR-16](#adr-16); mitigates R10)*
   58.3 %). − Sentences the policy flags are withheld (27 of 3,249 in the dogfooding transcript's matching turns —
   discussions of the poisoning set). − The agent has to ask; the tool description says when.
 
+### ADR-45
+**No "possibly outdated" label — volatile kinds feed a review list.** *(v0.109; refines [ADR-33](#adr-33))*
+- **Context:** a fact true when said goes stale when no later session restates the new state (D12). memory-champ gives
+  each fact a volatility class with recheck intervals; our stale-fact analysis found a phrasing rule — plans, running
+  states, versions, counts, gaps — that caught 12 of 14 labeled stale facts, but it was written after seeing them.
+- **Decision:** checked out of sample first. On blind hand labels the frozen rule's flags were 25 % stale (26 of 104;
+  2½–9× the rate of other facts); a rule refined on those labels caught 1 of 11 on a fresh set; the local model's
+  volatility tags reached 12–26 %; and among the flagged facts the youngest were stale most often. So no mark in the
+  context. Instead `memory.volatile_kind` (the frozen patterns) orders a **review list** — `analyze memory --review`,
+  each fact as a `replaces` line — that an agent or a person checks and corrects with `wiki_remember`.
+- **Alternatives:** a "possibly outdated" mark after N days (memory-champ) — wrong three times in four here, and the age
+  threshold points the wrong way in a project that releases several times a day; a volatility tag at capture — the
+  local model's tags were the weakest signal measured; dependency propagation (the transfer-entropy report) — the
+  stale facts had no history to learn from.
+- **Consequences:** + one review of the dogfooding memory closed 39 stale facts with their current state. + No model
+  call, no schema change, no effect on any prompt or eval set. − The list is 3 in 4 true facts, so it costs a check per
+  entry; − half of the stale facts are design changes no phrasing reveals, so D12 stays partly open — the agent
+  recording the new state when it makes a change (ADR-33) remains the main fix.
+
 ---
 *Chapter complete. The Path-B agent-memory direction landed via ADR-14/15/16/17/18/19; the graph then
 deepened (ADR-22 typed relations + relation-aware GraphRAG, ADR-23 entity resolution), gained
@@ -935,6 +954,7 @@ a normalized instruction policy (ADR-37), and **writes that land during a sessio
 writers (ADR-38), **portable memory** — a COGX export / import, a Markdown view and a LadybugDB spike (ADR-39), and
 **hybrid recall** — BM25 as a recall aid within the dense pool (ADR-40), **the question's time window** (ADR-41), and
 **episodes** next to facts, measured on the benchmark first (ADR-42), and memory injected **once per stretch**
-(ADR-43), and the raw sessions kept **searchable** by full text (ADR-44). §11
+(ADR-43), the raw sessions kept **searchable** by full text (ADR-44), and volatile kinds as a **review list**, not a
+label (ADR-45). §11
 debts D1/D2/D6 are resolved. Deep designs in `docs/path-b-memory.md` and `docs/RAG-vs-GraphRAG.md`. New significant
 decisions should be appended here with the next id.*

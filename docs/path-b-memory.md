@@ -90,7 +90,7 @@ capture style (D14, §13.10) gained +2.8 points on 4 LoCoMo conversations, not s
 10. [Recommended first slice](#10-recommended-first-slice)
 11. [Prior art & learnings — "Cognitive Substrate"](#11-prior-art--learnings--cognitive-substrate)
 12. [Second-Brain refinements (B7 / B9 built; A2 / B8 open)](#12-second-brain-refinements-b7--b9-built-a2--b8-open)
-13. [Memory hygiene, implicit recall and the LoCoMo benchmark (built v0.86 to v0.108)](#13-memory-hygiene-implicit-recall-and-the-locomo-benchmark-built-v086-to-v0108)
+13. [Memory hygiene, implicit recall and the LoCoMo benchmark (built v0.86 to v0.109)](#13-memory-hygiene-implicit-recall-and-the-locomo-benchmark-built-v086-to-v0109)
 
 ---
 
@@ -873,7 +873,7 @@ errs toward "different thing" (safe: fragmentation over a wrong merge); descript
 extra coexistence calls; subject identity is only inferred inside a resolved group (no general
 subject resolution).
 
-## 13. Memory hygiene, implicit recall and the LoCoMo benchmark (built v0.86 to v0.108)
+## 13. Memory hygiene, implicit recall and the LoCoMo benchmark (built v0.86 to v0.109)
 
 *Planned from the cognitive-agent report (B10+); every item below was built or measured — see §13.1–13.12.*
 
@@ -1369,6 +1369,51 @@ The largest single step so far ("Not mentioned" on single-hop 219 → 178). **Ad
 the live context — the hooks assemble k = 8 within a 2,000-character budget, a per-prompt token cost; the finding
 suggests trying a larger k there, measured on that path (→ §13.12). LoCoMo now: **overall J 60.7 %** with a local
 30B (Mem0 reports ≈ 67 % with GPT-4o-mini — and both are generous-judge numbers).
+
+### 13.26 Volatility classes — measured; a review list instead of a label (v0.109)
+
+Item 12 of the plan in `agent-memory-summary.md`: typed facts with a volatility class, volatile ones marked "possibly
+outdated" after some weeks (memory-champ rechecks volatile facts after 14 days, slow ones after 90, stable ones after
+365; MIRIX types its memory). The first evidence (`memory-systems-review.md` §13): a phrasing rule — plans, running
+states, versions and counts, capability gaps — caught 12 of the 14 hand-labeled stale facts of §13.4 while flagging
+10 % of memory, but it had been written after seeing them. So it was frozen and checked on facts it hadn't seen.
+
+**Two checks.** (a) The memory's own history: rewound to a date, each fact current then is labeled by whether a
+later-said fact closed it. Too few positives — the merge registered 2–6 changes after each date (the rule caught
+2 / 6, 2 / 2, 3 / 3: versions and a test count) —, since the memory rarely closes a stale fact on its own, which is the
+problem this item is about. (b) Blind hand labels: all 119 facts the rule flags and 120 random others, shuffled and
+labeled without the flag against today's state — stale (the state it describes has changed), current, a true
+statement about the past (a milestone, a measurement), or unclear. A second fresh set (113 facts) then tested a rule
+refined on the first.
+
+| on fresh labels | flags | stale among the flagged | stale facts caught |
+|---|---|---|---|
+| the phrasing rule, frozen | 10.0 % of memory | **25 %** (26 of 104) | ≈ 27–49 % |
+| a rule refined on set 1 (milestones and IP addresses out; more counts, plans, gaps), on set 2 | 1.4 % | 1 of 11 | ≈ 1 % |
+| the local 30B, tagging each fact volatile or stable by kind | 14–15 % | 12 % / 26 % (set 1 / 2) | 38 % / 30 % |
+
+The recall range comes from the stale share among the facts the rule leaves out — 3 of 113 in one sample, 11 of 104 in
+the other. Within the rule's flags the kinds differ: plans 4 of 5 stale, counts 6 of 10, gaps 5 of 19, versions 11 of
+64 — most version facts are milestones ("0.33.0 contains the Markdown parser", "the System tab was added in v0.58") —,
+running states 0 of 6. The refinement did well where it was written (70 % precision, in-sample) and failed on fresh
+facts: "X is not yet implemented" stays true until someone does the work, and half of the stale facts are design
+changes no phrasing reveals ("the coexistence check only vetoes", "the build stages are ingest, wiki, index, graph").
+Age did not help either: among the flagged facts the youngest were stale most often (36 % of those said in the last
+14 days, 21 % of those older than 35) — in a project that releases several times a day, a current version is outdated
+within days, not weeks.
+
+**Not adopted:** a "possibly outdated" mark in the context — wrong three times in four, and blind to most stale
+facts.
+
+**Adopted: a review list.** The rule's lift is real — a flagged fact was stale 2½ to 9 times as often as another —,
+and a list to check is the one use where a 1-in-4 hit rate pays. `memory.volatile_kind` names the kind (the frozen
+rule's patterns, unchanged; plans, counts, gaps, versions, running states); `analyze memory` reports how many current
+facts are of such kinds, and `analyze memory --review` lists them, the most often stale kinds first, each as the line
+`wiki_remember`'s `replaces` matches. Reviewing the dogfooding memory once — the two labeled sets — found 40 stale
+facts; 39 were closed with `wiki_remember`, with the current state recorded where memory lacked it (697 tests, the
+build's five stages, the informatik graph's scale, what the coexistence check decides, …). The most damaging kinds are
+already kept current at the source since v0.90: the agent records each new release and test count, and each
+supersedes the last.
 
 ### 13.25 Session search — the raw sessions, searchable by full text (v0.108)
 

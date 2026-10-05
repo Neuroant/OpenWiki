@@ -642,6 +642,9 @@ def _build_argparser() -> argparse.ArgumentParser:
     an_p.add_argument("-k", type=int, default=8, dest="k",
                       help="Embedding neighbors per page for the coupling overlap metric (default: 8).")
     an_p.add_argument("--top", type=int, default=15, help="Max candidates per gaps category (default: 15).")
+    an_p.add_argument("--review", action="store_true",
+                      help="memory: list the current facts of kinds that go stale (plans, counts, gaps, versions, "
+                           "running states) as wiki_remember `replaces` lines, to check against the project.")
     an_p.add_argument("--compare", metavar="PATH", default=None,
                       help="Compare the coupling fingerprint against another KB: a saved "
                            "`analyze --json` file, a project dir, or an output dir (index/ + graph/).")
@@ -3490,6 +3493,20 @@ def _resolve_compare_fingerprint(path: str, k: int):
     raise FileNotFoundError(f"nothing to compare at {path}.")
 
 
+def _print_review(review: dict) -> None:
+    """The current facts of kinds that go stale, by kind (most often stale first), each as ``wiki_remember``'s
+    ``replaces`` line: check each against the project; record the new state and replace the line, or keep it."""
+    print(f"{review['count']} current fact(s) of kinds that go stale ({review['share']:.0%} of memory) — check each "
+          f"against the project; for an outdated one, record the new state with wiki_remember and put the line in "
+          f"`replaces` (on a labeled sample about 1 in 4 was outdated).")
+    kind = None
+    for r in review["facts"]:
+        if r["kind"] != kind:
+            kind = r["kind"]
+            print(f"\n## {kind} ({review['by_kind'][kind]})")
+        print(r["line"])
+
+
 def _print_memory_report(res: dict) -> None:
     """Human-readable rendering of the Path B memory-tier dynamics."""
     c = res["counts"]
@@ -3517,6 +3534,12 @@ def _print_memory_report(res: dict) -> None:
     tops = ", ".join(f"{p['predicate']}×{p['count']}" for p in b["top_predicates"][:5])
     print(f"  Breadth:          {b['distinct_subjects']} subjects · {b['distinct_predicates']} "
           f"predicates{('  ·  top: ' + tops) if tops else ''}")
+
+    rv = res.get("review") or {}
+    if rv.get("count"):
+        kinds = " · ".join(f"{k} {n}" for k, n in rv["by_kind"].items())
+        print(f"  To review:        {rv['count']} current facts of kinds that go stale ({rv['share']:.0%}) — {kinds}"
+              f"\n                    (`analyze memory --review` lists them; ~1 in 4 was stale on a labeled sample)")
 
     growth = res["growth"]
     if growth:
@@ -3551,6 +3574,8 @@ def _cmd_analyze(args: argparse.Namespace) -> int:
             return 0
         if args.as_json:
             print(json.dumps(res, ensure_ascii=False, indent=2))
+        elif getattr(args, "review", False):
+            _print_review(res["review"])
         else:
             _print_memory_report(res)
         return 0

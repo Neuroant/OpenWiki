@@ -189,6 +189,11 @@ reliably infer it afterwards (`docs/path-b-memory.md` §13.4–13.6). A line suc
 memory describes, record the new state with wiki_remember and list the outdated facts in `replaces`"* in your
 `CLAUDE.md` makes the agent use it.
 
+**Review what may be outdated.** `owiki analyze memory --review` lists the remembered facts of kinds that go stale on
+their own — plans, counts, gaps, versions, running states —, each as the line `replaces` takes. Have the agent check
+them against the project and correct the outdated ones with `wiki_remember`; on the dogfooding memory about 1 in 4 was
+outdated.
+
 **Search earlier sessions.** In a Second Brain project the MCP server also offers **`wiki_sessions`**: full-text
 search over the transcripts of earlier sessions — every user and assistant turn, as capture sees it — returning dated,
 verbatim excerpts. Where `wiki_memory` holds the decision, the session holds the detail: the exact error, the number a

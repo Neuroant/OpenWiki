@@ -209,6 +209,18 @@ class Project:
         return [str(v) for v in value] if isinstance(value, list) else [str(value)]
 
     @property
+    def transcripts(self) -> list:
+        """More session transcripts for session search (``[memory] transcripts``, v0.108) — files or folders
+        (Claude Code ``*.jsonl`` transcripts, ``*.md`` / ``*.txt``), ``~`` expanded, relative to the project
+        root. The sessions the hooks capture are found without it."""
+        raw = self.setting("memory", "transcripts", []) or []
+        out = []
+        for item in ([raw] if isinstance(raw, str) else raw):
+            p = Path(os.path.expanduser(str(item)))
+            out.append(p if p.is_absolute() else self.root / p)
+        return out
+
+    @property
     def memory_markdown_dir(self) -> Optional[Path]:
         """Where ``sleep`` writes the readable Markdown view of the memory — ``[memory]
         markdown_dir``, relative to the project root (default ``memory``; ``""`` turns it off).
@@ -356,6 +368,7 @@ enabled = {str(memory).lower()}
 # repeat_facts = false    # re-inject facts the session already got (default: each once, until a compaction)
 # skip_prompts = []       # more chore prompts for this project, as regexes, e.g. ["sync arc42 docs"]
 # markdown_dir = "memory" # sleep writes a readable Markdown view of the memory here ("" = off)
+# transcripts = []        # more transcripts for session search (files / folders); hooked sessions are found anyway
 
 [serve]
 port = {port}

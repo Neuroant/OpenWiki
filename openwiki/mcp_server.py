@@ -14,6 +14,7 @@ Tools (all read-only; advertised only when their backing artifact is present):
   wiki_find_path      shortest relationship chain between two pages
   wiki_find_entity    pages that mention a named concept
   wiki_memory         assemble cross-session memory for a query (Path B, Second Brain)
+  wiki_sessions       search the raw transcripts of earlier sessions -> verbatim, dated excerpts
 
 Run via ``openwiki mcp`` (see cli.py). stdout carries the protocol — everything
 else (logs, errors) must go to stderr.
@@ -194,7 +195,7 @@ def build_server(wiki_dir, index=None, graph=None, agent=None, name="openwiki",
                  memory_probes: bool = False, memory_writes: bool = False, memory_lexical: float = 0.0,
                  memory_temporal: float = 0.0,
                  handoff: Optional[Callable] = None,
-                 on_remember: Optional[Callable] = None) -> MCPStdioServer:
+                 on_remember: Optional[Callable] = None, sessions=None) -> MCPStdioServer:
     """Assemble the MCP server from already-loaded OpenWiki components.
 
     `index` (SemanticIndex) enables search/ask; `graph` (GraphStore) enables the
@@ -206,7 +207,8 @@ def build_server(wiki_dir, index=None, graph=None, agent=None, name="openwiki",
     `handoff` (``handoff(mode, note, repo) -> str``, from the CLI) adds `wiki_handoff` — the
     session handoff (resume / preview / prepare) for the project the server belongs to.
     `on_remember` (from the CLI) is called after `wiki_remember` queued a write — it starts the
-    fold worker, so the write lands within seconds.
+    fold worker, so the write lands within seconds. `sessions` (a ``sessions.SessionCorpus``, from the
+    CLI for a Second Brain project) adds `wiki_sessions` — full-text search over earlier sessions' transcripts.
     """
     from .tools import WikiTools
 
@@ -325,6 +327,30 @@ def build_server(wiki_dir, index=None, graph=None, agent=None, name="openwiki",
                 "main themes' / 'how do X and Y relate across the corpus' questions; use "
                 "wiki_ask for a specific fact on a page.", {"question": {"type": "string"}}, ["question"]))
             handlers["wiki_global"] = lambda a: _global_answer(agent.chat, graph, str(a["question"]))
+
+    # Session search (v0.108): the raw transcripts of earlier sessions, by full text — what the remembered facts
+    # leave out (the exact wording, numbers, errors, reasons). Read-only; no graph.
+    if sessions is not None and getattr(sessions, "paths", None):
+        specs.append(_tool(
+            "wiki_sessions",
+            "Search the transcripts of earlier sessions by full text (BM25 over every user and assistant turn): "
+            "the exact wording, numbers, commands, errors, reasons and what was tried — the details remembered "
+            "facts leave out. Returns dated, verbatim excerpts (the matching turn marked », with its neighbours). "
+            "Query with words that would appear in what was said; use when wiki_memory isn't specific enough.",
+            {"query": {"type": "string"},
+             "k": {"type": "integer", "description": "Matching turns to return (default 8)."},
+             "context": {"type": "integer", "description": "Turns shown on either side of a match (default 1)."},
+             "since": {"type": "string", "description": "Optional ISO date: only turns from then on."},
+             "until": {"type": "string", "description": "Optional ISO date: only turns up to then."}},
+            ["query"]))
+
+        def _wiki_sessions(a):
+            from .sessions import format_excerpts
+            hits = sessions.index().search(str(a["query"]), k=max(1, min(int(a.get("k") or 8), 30)),
+                                           context=max(0, min(int(a.get("context") or 1), 5)),
+                                           since=str(a.get("since") or ""), until=str(a.get("until") or ""))
+            return format_excerpts(hits) or "(no turn of an earlier session matches)"
+        handlers["wiki_sessions"] = _wiki_sessions
 
     # Session handoff (the CLI wires it when the server belongs to a project): the previous session's
     # Next steps + what changed since, or write one for the next session.

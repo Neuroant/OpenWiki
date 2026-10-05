@@ -931,6 +931,13 @@ The **genuine gaps**, measure-first as always:
   set (paired, 2 captures, no probes) the cue reached the context 8/16 → 16/16 and the constraint was applied
   7/16 → 12/16 (+5 / −0). Adopted: `[memory] context_k` (default 16) + `context_budget` 2,000 → 3,000; facts may
   use theme budget the themes don't need. `path-b-memory.md` §13.12.
+- **Session search for agents (v0.108).** Item 11 of the review series' plan: the raw transcripts, searched by full
+  text — BM25 over every user and assistant turn, no model — as the MCP tool `wiki_sessions`, `owiki sessions search |
+  list` and `eval --locomo --excerpts M`; verbatim, dated excerpts, redacted and screened. On LoCoMo full text found
+  the evidence more often than the embedding (68 % vs 59 % in the top 5 turns ±1), and 5 excerpts next to the facts
+  took overall J 62.9 → 78.2 % (+276 / −41; single-hop 68.6 → 89.8 %) — the largest gain of the series, ahead of
+  episodes of the same size (74.7 %). On coding-session detail questions the facts held the answer 8 / 47 times, the
+  excerpts 41 / 47. Pulled by the agent, not injected. ADR-44, `docs/path-b-memory.md` §13.25.
 - **Each fact once per stretch (v0.107).** Item 10 of the review series' plan, "when to inject", judged on the
   dogfooding transcript (318 prompts, 11 stretches between compactions): later prompts still get 3–4 useful new facts
   (the first 6.7), so the hook keeps injecting on every non-chore prompt — but 55 % of what it injected was already in

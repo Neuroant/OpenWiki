@@ -167,7 +167,7 @@ already have, then changes that only real sessions can judge. Each names where i
    LoCoMo overall J 62.9 → 74.7 % (+226 / −45; temporal 48.3 → 64.2 %, single-hop 68.6 → 81.6 %), adversarial 83.9 →
    71.5 % (narratives hold both speakers' days). In the harness. **Not for the live path:** narratives of coding
    windows invent specifics at ten times the facts' rate (12 % vs 1 %), and a stricter prompt plus a grounding filter
-   cannot catch invented framing (§13.23); verbatim excerpts are the next candidate. Measured there first
+   cannot catch invented framing (§13.23); verbatim excerpts (item 11) did better at the same size. Measured there first
    (`path-b-memory.md` §13.22).
 
 **Changes judged in real sessions**
@@ -178,7 +178,12 @@ already have, then changes that only real sessions can judge. Each names where i
     each fact, theme and the identity once per stretch, until a compaction or `/clear`, since 55 % of injected facts
     were already in the agent's context. 2,757 → 1,405 characters per prompt on the replayed session (49 % fewer).
     The themes index and file-read facts were not measured (`path-b-memory.md` §13.24).
-11. **Session search for agents** — raw sessions searchable, full text first (Hermes, Letta, Graphiti).
+11. **Session search for agents** — raw sessions searchable, full text first (Hermes, Letta, Graphiti). **Done in
+    v0.108:** `wiki_sessions` / `owiki sessions` — BM25 over every turn of the transcripts, verbatim dated excerpts,
+    redacted and screened. On LoCoMo 5 excerpts next to the facts took J 62.9 → 78.2 % (+276 / −41), ahead of
+    episodes of the same size (74.7 %); on coding-session detail questions the facts held the answer 8 / 47 times, the
+    excerpts 41 / 47 (`path-b-memory.md` §13.25). Pulled by the agent; injecting excerpts is measured on the live path
+    first.
 12. **Typed facts with a volatility class** — volatile facts marked "possibly outdated" after some weeks (MIRIX,
     memory-champ). First evidence: a volatile-phrasing rule caught 12 of the 14 labeled stale facts while flagging
     10 % of memory (written after seeing them — confirm on a fresh labeled set); co-change dependencies were at

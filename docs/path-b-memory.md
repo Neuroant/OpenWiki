@@ -90,7 +90,7 @@ capture style (D14, §13.10) gained +2.8 points on 4 LoCoMo conversations, not s
 10. [Recommended first slice](#10-recommended-first-slice)
 11. [Prior art & learnings — "Cognitive Substrate"](#11-prior-art--learnings--cognitive-substrate)
 12. [Second-Brain refinements (B7 / B9 built; A2 / B8 open)](#12-second-brain-refinements-b7--b9-built-a2--b8-open)
-13. [Memory hygiene, implicit recall and the LoCoMo benchmark (built v0.86 to v0.107)](#13-memory-hygiene-implicit-recall-and-the-locomo-benchmark-built-v086-to-v0107)
+13. [Memory hygiene, implicit recall and the LoCoMo benchmark (built v0.86 to v0.108)](#13-memory-hygiene-implicit-recall-and-the-locomo-benchmark-built-v086-to-v0108)
 
 ---
 
@@ -873,7 +873,7 @@ errs toward "different thing" (safe: fragmentation over a wrong merge); descript
 extra coexistence calls; subject identity is only inferred inside a resolved group (no general
 subject resolution).
 
-## 13. Memory hygiene, implicit recall and the LoCoMo benchmark (built v0.86 to v0.107)
+## 13. Memory hygiene, implicit recall and the LoCoMo benchmark (built v0.86 to v0.108)
 
 *Planned from the cognitive-agent report (B10+); every item below was built or measured — see §13.1–13.12.*
 
@@ -1369,6 +1369,75 @@ The largest single step so far ("Not mentioned" on single-hop 219 → 178). **Ad
 the live context — the hooks assemble k = 8 within a 2,000-character budget, a per-prompt token cost; the finding
 suggests trying a larger k there, measured on that path (→ §13.12). LoCoMo now: **overall J 60.7 %** with a local
 30B (Mem0 reports ≈ 67 % with GPT-4o-mini — and both are generous-judge numbers).
+
+### 13.25 Session search — the raw sessions, searchable by full text (v0.108)
+
+Item 11 of the plan in `agent-memory-summary.md`. Memory keeps facts; capture drops the rest — the exact wording, a
+number, a command, an error, the reason behind a decision — and episodes, the narrative alternative, invent (§13.23).
+Letta's 74.0 % on LoCoMo came from an agent searching the raw conversations; Hermes keeps every message in a full-text
+index its agent searches, without a model. So the turns stay where they are — Claude Code's transcripts, a project's
+session sources — and become searchable.
+
+**Built.** `openwiki/sessions.py` reads every user and assistant turn as capture sees it (`iter_claude_turns`: tool
+output, host blocks, compaction summaries and skill bodies stripped; plain transcripts by paragraph) and ranks them by
+BM25 over `lexical.terms` — full text, no model, no embeddings. A search returns **excerpts**: each matching turn with
+one turn on either side, overlapping ones merged, long turns cut to their best-matching 600 characters, dated and by
+session. What is returned is redacted (credentials) and screened: the sentences the P0 policy flags are withheld, so
+a quoted injection stays out of the agent's context. `SessionCorpus` reads a growing transcript from where the last
+read stopped. Surfaces: the MCP tool `wiki_sessions` (`query`, `k`, `context`, `since`, `until`), `owiki sessions
+search | list`, and `eval --locomo --excerpts M [--excerpt-window W]` (excerpts next to the facts in the answer
+context). A project's corpus: `[memory] transcripts` (files or folders), the Claude Code folder of a repository whose
+hooks are bound to the project, every session the capture hook has seen, and the project's session sources. Nothing
+is stored in the graph.
+
+**Measured on LoCoMo — retrieval.** Every question names its evidence turns (`D1:3`). Evidence found among the
+conversation's turns (categories 1–4, 1,535 questions):
+
+| ranking | top 5 turns | top 10 | top 5, ±1 turn | top 10, ±1 turn |
+|---|---|---|---|---|
+| full text (BM25) | 0.53 | 0.60 | **0.68** | **0.75** |
+| embedding (bge-m3) | 0.47 | 0.57 | 0.59 | 0.69 |
+| fused (RRF) | 0.56 | 0.64 | 0.68 | 0.75 |
+
+Full text first: it finds more than the embedding at every k up to 10, and fusion adds nothing once the neighbouring
+turns are shown — so there are no embeddings to compute or keep. By category (top 5, ±1 turn): single-hop 0.81,
+temporal 0.71, multi-hop 0.36, open-domain 0.28.
+
+**Measured on LoCoMo — answers.** Gold-answer words in the context (as in §13.22): facts 0.565 → 0.759 with 3
+matching turns ±1 (1,824 characters), **0.785** with 5 (3,053); three episodes, the same size (3,120 characters),
+reached 0.698. Then the paired re-answer — production recall plus 5 excerpts ±1, on the same graphs:
+
+| category | production | + 5 excerpts | wins / losses | 3 episodes instead |
+|---|---|---|---|---|
+| single-hop (841) | 68.6 % | **89.8 %** | +188 / −10 | 81.6 % |
+| multi-hop (282) | 67.4 % | 75.5 % | +29 / −6 | 72.3 % |
+| temporal (321) | 48.3 % | 58.3 % | +47 / −15 | 64.2 % |
+| open-domain (96) | 49.0 % | 51.0 % | +12 / −10 | 56.2 % |
+| **overall 1–4 (1,540)** | 62.9 % | **78.2 %** | +276 / −41 (p ≈ 6·10⁻⁴⁴) | 74.7 % |
+| adversarial (446) | 83.9 % | 76.9 % | +22 / −53 | 71.5 % |
+
+The largest gain of the series, and paired against episodes of the same size it wins too: overall +151 / −97 (p ≈
+7·10⁻⁴), single-hop +95 / −26, adversarial +50 / −26 — a quoted turn names its speaker, where a narrative mixes both
+people's days. Episodes keep the temporal edge (+47 / −28 for them): a narrative resolves "yesterday" into a date, an
+excerpt carries the raw word next to its session's date. Excerpts cost no model call at write time.
+
+**On the live path — coding sessions.** 50 detail-rich turns of the dogfooding transcript, from before the memory copy
+was taken; for each, the local 30B wrote a question a later session could ask — paraphrased — with a short exact
+answer span (47 usable). The answer reached the production fact context (16 facts, 3,000 characters) for **8 of 47**,
+the top 5 session-search excerpts (±1 turn, ≈ 3,700 characters) for **41 of 47**; the source turn itself was retrieved
+for 37, and the facts never held an answer the excerpts lacked. A generated question shares more words with its source
+than LoCoMo's do with their evidence (67 % vs 58 % of its terms), so this overstates full-text retrieval somewhat; the
+direction stands — the facts keep the decision, the session keeps the detail. The dogfooding corpus is one 122 MB
+transcript with 4,065 turns: parsed in 2.0 s, indexed in 0.2 s, a CLI search in 1.6 s end to end; the MCP server
+reads only what was appended since its last search. The screen: no credential in any of the turns; 21 turns matched
+the policy, and 27 of their 3,249 sentences are withheld (discussions of the poisoning set); none of LoCoMo's 5,882.
+
+**Not adopted:** excerpts injected into every prompt. On LoCoMo every prompt is a question about the past; a coding
+prompt is mostly a task, ≈ 900 more tokens per prompt (next to ≈ 690 for the facts) are unmeasured against their use
+there, and verbatim text widens what reaches every prompt. The agent pulls instead (`wiki_sessions`); injection would
+get its own judged measurement on the live path first. Candidates: excerpts and episodes together (the temporal edge),
+and an agentic answer condition — the 30B with recall and session search as tools, searching again — which is where
+Letta's number came from.
 
 ### 13.24 When to inject — each fact once per stretch (v0.107)
 

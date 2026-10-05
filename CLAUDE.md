@@ -308,7 +308,13 @@ similar to each question after its facts, in date order (`assemble_context(…, 
 narrative holds both speakers' days). Harness only: on the live path the narratives were measured and **not
 adopted** — on coding windows they contain specific terms absent from their source at ten times the facts' rate (12 %
 vs 1 %), and a stricter prompt + a grounding filter cannot catch invented framing; LoCoMo's narratives invent too
-(misattributions behind adversarial losses) (§13.22–13.23, ADR-42).
+(misattributions behind adversarial losses) (§13.22–13.23, ADR-42). **Session search (v0.108):** `--excerpts M`
+(`--excerpt-window W`, default 1) shows the M turns that best match each question by full text
+(`sessions.SessionIndex`), verbatim and dated next to its facts (`assemble_context(…, excerpts=)`; answers `…-ex5.jsonl`;
+`LocomoSession.turns` keeps the dialogue): with 5, overall J 62.9 → **78.2 %** (+276 / −41, p ≈ 6·10⁻⁴⁴; single-hop
+68.6 → 89.8 %, multi-hop 67.4 → 75.5 %, temporal 48.3 → 58.3 %; adversarial 83.9 → 76.9 %) — paired against 3
+episodes of the same size +151 / −97, though episodes keep the temporal edge (§13.25). `reuse_base` never copies an
+answer made without a variant's extra context (episodes, excerpts).
 
 **Sleep — nightly memory maintenance + forgetting** (Path B++): one schedulable writable pass — fold what
 read-only processes queued (usage + journal) → redact credentials in facts stored before v0.99 → **forget** what the
@@ -412,6 +418,25 @@ agent_writes`) and the **`/session-restart prepare | resume`** skill (`.claude/s
 the start: check, summarize, propose the first Next task. The note is screened line by line by the P0 policy
 (`policy.is_unsafe_text`) — it is injected into later sessions like memory. `openwiki status` shows the latest handoff.
 
+**Search earlier sessions (v0.108)** — session search: the raw transcripts of earlier sessions, ranked by full text
+(BM25 over `lexical.terms` of every user and assistant turn as capture sees it — no model, no embeddings), returned as
+verbatim, dated excerpts (each matching turn with its neighbours, long turns cut to their best 600 characters) — the
+exact wording, numbers, commands, errors and reasons the remembered facts leave out:
+```
+.venv\Scripts\python -m openwiki sessions search "why did we set the recency floor to 0.9"
+.venv\Scripts\python -m openwiki sessions list
+```
+`search` options: `-k N` (matching turns, default 8), `--context N` (turns on either side, default 1), `--since` /
+`--until DATE`, `--repo DIR`, `--json`. The corpus (`cli._session_files`): `[memory] transcripts` (files or folders,
+`Project.transcripts`), the Claude Code folder of the repo (`--repo`, default the CWD) when its hooks are bound to this
+project, every session the capture hook has seen (`capture-state.json`), and the project's session sources; nothing is
+stored in the graph. Coding agents get it as the MCP tool **`wiki_sessions`** (`query`, `k`, `context`, `since`,
+`until`). Output is redacted (credentials) and screened — the sentences the P0 policy flags are withheld. Gated by
+`[memory] enabled`. **Measured** (`docs/path-b-memory.md` §13.25, arc42 ADR-44): on LoCoMo full text found a question's
+evidence turns more often than the embedding (top 5 ±1 turn: 68 % vs 59 %), and 5 excerpts next to the facts took
+overall J 62.9 → **78.2 %** (+276 / −41; single-hop 68.6 → 89.8 %) — ahead of same-size episodes (74.7 %); on
+coding-session detail questions the facts held the answer 8 / 47 times, the excerpts 41 / 47. Pulled, not injected.
+
 **Assemble a session's memory context (B6)** — the Path B payoff: build the context for a query
 from the **three memory tiers** — **identity** (the project's, or `[memory] identity`), **activation**
 (decay-weighted `recall`), and **attractors** (the B5 themes the recalled facts belong to). *Load the
@@ -495,7 +520,7 @@ graph access).
 .venv\Scripts\python -m openwiki mcp --wiki output\wiki -i output\index --graph output\graph
 ```
 Read-only tools (`wiki_ask`/`wiki_global`/`wiki_search`/`wiki_read_page`/`wiki_list_pages`/
-`wiki_graph_neighbors`/`wiki_find_path`/`wiki_find_entity`/`wiki_memory`), advertised by
+`wiki_graph_neighbors`/`wiki_find_path`/`wiki_find_entity`/`wiki_memory`/`wiki_sessions`), advertised by
 availability (`wiki_global` needs a chat model + community summaries; `wiki_memory` — the B6
 three-tier context — needs an index + a non-empty memory tier), plus the opt-in **write** tool
 `wiki_remember` (`[memory] agent_writes = true`, below). Options:
@@ -1176,6 +1201,14 @@ http — count, p50/p95, total time, token in/out) + a live recent-events table,
   stale ones removed). Works on `GraphStore.memory_snapshot(with_emb)` (the B0 snapshot shape, every schema generation
   read as B7) and feeds `GraphStore.restore_memory(snapshot, embedder)` (empty tier only; shares
   `builder.restore_memory_snapshot` with the B0 rebuild; restores the theme layer too).
+- **`openwiki/sessions.py`** — **session search** (v0.108, ADR-44): pure apart from reading files, no Kuzu. `Turn`
+  (session, n, ts, speaker, text); `turns_from_claude` (via `iter_claude_turns`) / `turns_from_text` (paragraphs) /
+  `load_turns`; `SessionIndex` — BM25 over `lexical.terms` of `speaker: text`, `rank(query, since, until)`,
+  `search(query, k, context, …)` → excerpts (a matching turn ± `context` turns, overlapping ones merged, best first);
+  `snippet` (a long turn cut to its best-matching `SNIPPET_CHARS` = 600, centred on the matches); `safe_text`
+  (credentials redacted, the sentences the P0 policy flags withheld — `WITHHELD`); `SessionCorpus` (a project's
+  session files; a growing transcript read from where the last read stopped, the index rebuilt only on change);
+  `format_excerpts`. Used by `owiki sessions`, the MCP `wiki_sessions` tool and the LoCoMo harness (`--excerpts`).
 - **`openwiki/merge.py`** — `combine_documents(docs, names)` merges several
   `ParsedDocument`s into one corpus (concatenate pages with a running offset, shift
   table/image page numbers, wrap each source under a synthetic level-1 outline node
@@ -1254,7 +1287,7 @@ http — count, p50/p95, total time, token in/out) + a live recent-events table,
   `build-wiki`, `index`, `search`, `eval`, `ask` (`--global` = global search),
   `chat`, `graph-build`, `references`, `communities`, `decay`, `remember`, `backfill`, `recall`,
   `consolidate`, `sleep` (nightly maintenance + forgetting), `memory` (`export` / `import` — portable
-  memory), `context`,
+  memory), `sessions` (`search` / `list` — session search), `context`,
   `analyze` (world-model analysis — `coupling` | `gaps` | `memory`, offline), `hook` (host-lifecycle
   memory hook — `inject` / `capture` / `resume`, plus `fold`, the detached worker the MCP server
   spawns after `wiki_remember`; reads the event JSON on stdin), `handoff` (`prepare` /

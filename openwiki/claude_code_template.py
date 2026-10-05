@@ -86,7 +86,7 @@ Project-aware (run inside the project folder):
 
 MCP tools (this wiki): `wiki_ask`, `wiki_global`, `wiki_search`, `wiki_read_page`,
 `wiki_list_pages`, `wiki_graph_neighbors`, `wiki_find_path`, `wiki_find_entity`; memory: `wiki_memory`,
-`wiki_remember`, `wiki_handoff`. Between sessions: `/session-restart prepare` (end) and `/session-restart
+`wiki_sessions` (earlier sessions, verbatim), `wiki_remember`, `wiki_handoff`. Between sessions: `/session-restart prepare` (end) and `/session-restart
 resume` (start). Full docs: `README.md`, `CLAUDE.md`, `docs/coding-agents.md`, or the web UI **Hilfe** tab.
 """
 

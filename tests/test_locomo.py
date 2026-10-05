@@ -212,3 +212,29 @@ def test_episodes_are_written_once_and_shown_next_to_the_facts(tmp_path):
     assert "## Episodes" in marathon and "On 19 May 2023, Bob ran a marathon." in marathon   # the closest one
     lc.run_locomo(convs, tmp_path / "work", _Graph, _Emb(), _NarratingChat(), episodes=1)    # resumable
     assert len((cdir / "episodes.jsonl").read_text(encoding="utf-8").splitlines()) == 2      # not written twice
+
+
+def test_excerpts_show_the_matching_turns_next_to_the_facts(tmp_path):
+    convs = lc.load_locomo(_data(tmp_path))
+    assert convs[0].sessions[0].turns == [("Ann", "I adopted a cat named Tom."),
+                                          ("Bob", "Nice! [shares a photo: a grey cat]")]
+    _Graph.store, _NarratingChat.contexts = {}, []
+    res = lc.run_locomo(convs, tmp_path / "work", _Graph, _Emb(), _NarratingChat(), excerpts=1, excerpt_window=0)
+    cdir = tmp_path / "work" / "conv-x"
+    assert (cdir / "answers-infer-ex1w0.jsonl").is_file() and res["complete"]
+    marathon = next(c for c in _NarratingChat.contexts if "marathon" in c.split("Question:")[-1])
+    assert "## From the sessions — verbatim excerpts" in marathon
+    assert "[2023-05-20] Bob: I ran a marathon yesterday." in marathon and "cat named Tom" not in \
+        marathon.split("## From the sessions")[1]
+
+
+def test_a_variant_with_more_context_never_copies_an_answer(tmp_path):
+    convs = lc.load_locomo(_data(tmp_path))
+    _Graph.store = {}
+    lc.run_locomo(convs, tmp_path / "work", _Graph, _Emb(), _Chat(), categories=[4])          # the dense base
+    res = lc.run_locomo(convs, tmp_path / "work", _Graph, _Emb(), _Chat(), categories=[4], lexical=0.5,
+                        reuse_base=True, excerpts=1)
+    assert res["records"] and not any(r.get("reused") for r in res["records"])
+    plain = lc.run_locomo(convs, tmp_path / "work", _Graph, _Emb(), _Chat(), categories=[4], lexical=0.4,
+                          reuse_base=True)
+    assert all(r.get("reused") for r in plain["records"])                  # without excerpts it still copies

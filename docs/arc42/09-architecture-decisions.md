@@ -896,6 +896,29 @@ changes.** *(v0.102; builds on [ADR-16](#adr-16); mitigates R10)*
   − A fact the agent has seen but no longer attends to in a long stretch is not repeated (the judge's "evident from
   context" is the assumption). No eval set changes — the harnesses don't exclude.
 
+### ADR-44
+**The raw sessions stay searchable — by full text, pulled by the agent.** *(v0.108; follows [ADR-42](#adr-42))*
+- **Context:** memory keeps facts; capture drops the rest — the exact wording, numbers, commands, errors, the reason
+  behind a decision — and episodes, the narrative alternative, invent on coding sessions (ADR-42 addendum). Letta's
+  LoCoMo score came from an agent searching the raw conversations; Hermes keeps every message in a full-text index its
+  agent searches.
+- **Decision:** search the transcripts where they are, by full text — BM25 over every user and assistant turn as
+  capture sees it, no model, no embeddings (`sessions.py`) — and return verbatim, dated excerpts (the matching turn with
+  its neighbours), redacted and screened by the P0 policy sentence by sentence. Agents pull it (MCP `wiki_sessions`,
+  `owiki sessions`); nothing is stored in the graph and nothing is injected. The LoCoMo harness can show the excerpts
+  next to the facts (`--excerpts M`).
+- **Alternatives:** embeddings over the turns — found the evidence less often than full text at k ≤ 10 (59 % vs 68 % in
+  the top 5 ±1 turn), and fusing both added nothing; excerpts injected into every prompt — LoCoMo's largest gain, but a
+  coding prompt is mostly a task, ≈ 900 more tokens per prompt are unmeasured against their use, and verbatim text
+  widens what reaches every prompt; turns stored in the graph — a copy of the transcripts that pulls credentials and
+  instructions into the memory tier.
+- **Consequences:** + LoCoMo with 5 excerpts next to the facts: overall J 62.9 → 78.2 % (+276 / −41, p ≈ 6·10⁻⁴⁴;
+  single-hop 68.6 → 89.8 %), paired against 3 episodes of the same size +151 / −97; on coding-session detail questions
+  the fact context held the answer 8 / 47 times, the excerpts 41 / 47. + No model call at write time, no new store.
+  − Adversarial questions 83.9 → 76.9 % with excerpts in the context; episodes keep the temporal edge (64.2 vs
+  58.3 %). − Sentences the policy flags are withheld (27 of 3,249 in the dogfooding transcript's matching turns —
+  discussions of the poisoning set). − The agent has to ask; the tool description says when.
+
 ---
 *Chapter complete. The Path-B agent-memory direction landed via ADR-14/15/16/17/18/19; the graph then
 deepened (ADR-22 typed relations + relation-aware GraphRAG, ADR-23 entity resolution), gained
@@ -912,6 +935,6 @@ a normalized instruction policy (ADR-37), and **writes that land during a sessio
 writers (ADR-38), **portable memory** — a COGX export / import, a Markdown view and a LadybugDB spike (ADR-39), and
 **hybrid recall** — BM25 as a recall aid within the dense pool (ADR-40), **the question's time window** (ADR-41), and
 **episodes** next to facts, measured on the benchmark first (ADR-42), and memory injected **once per stretch**
-(ADR-43). §11
+(ADR-43), and the raw sessions kept **searchable** by full text (ADR-44). §11
 debts D1/D2/D6 are resolved. Deep designs in `docs/path-b-memory.md` and `docs/RAG-vs-GraphRAG.md`. New significant
 decisions should be appended here with the next id.*

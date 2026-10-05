@@ -444,6 +444,7 @@ EPISODE_SYSTEM = (
     "\"last week\" → \"in the week before 8 May 2023\"). Leave out greetings and small talk. "
     "Reply with the paragraph only.")
 _EPISODES_HEADER = "## Episodes — what happened in a session"
+_EXCERPTS_HEADER = "## From the sessions — verbatim excerpts"
 
 
 def _day_words(epoch: int) -> str:
@@ -467,7 +468,7 @@ def narrate_session(chat, transcript: str, session_date: Optional[int] = None) -
 
 
 def assemble_context(identity: str, facts: list, themes: list, max_facts: int = 8,
-                     max_themes: int = 4, max_chars=None, episodes=None, report=None) -> str:
+                     max_themes: int = 4, max_chars=None, episodes=None, report=None, excerpts=None) -> str:
     """B6: assemble a session's context from the **three memory tiers** — identity (DNA),
     the activated facts (``recall`` — the epigenetic tier), and the relevant consolidated
     themes (B5 ``MemoryConcept``s — the attractor tier). Pure + **fail-soft**: any tier may
@@ -477,7 +478,8 @@ def assemble_context(identity: str, facts: list, themes: list, max_facts: int = 
     first (truncated if it alone overflows), then **facts** (the majority share — the primary
     signal), then **themes** (whatever remains). Graceful truncation, facts prioritized over
     themes; ``max_chars=None`` keeps the prior count-only behavior. ``episodes`` (dicts with ``text``, v0.106) are
-    the dated session narratives retrieved for the query, shown after the facts, before the themes. ``report`` (a
+    the dated session narratives retrieved for the query, shown after the facts, before the themes; ``excerpts``
+    (lines of text, v0.108) are verbatim session turns found by session search, shown after them. ``report`` (a
     dict) receives what made it into the text — ``facts`` and ``themes`` (the dicts) and ``identity`` (bool) — so a
     caller can tell what the budget cut (v0.107)."""
     facts = list(facts)[:max_facts]
@@ -530,6 +532,13 @@ def assemble_context(identity: str, facts: list, themes: list, max_facts: int = 
         blocks.append(episode_block)
         if remaining is not None:
             remaining = max(0, remaining - episode_used - 2)
+
+    excerpt_lines = [f"- {line.strip()}" for line in (excerpts or []) if (line or "").strip()]
+    excerpt_block, excerpt_used = _fit_section(_EXCERPTS_HEADER, excerpt_lines, remaining)
+    if excerpt_block:
+        blocks.append(excerpt_block)
+        if remaining is not None:
+            remaining = max(0, remaining - excerpt_used - 2)
 
     theme_block, _, theme_n = _fit_lines(_THEMES_HEADER, theme_lines, remaining)
     if theme_block:

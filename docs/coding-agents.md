@@ -189,6 +189,14 @@ reliably infer it afterwards (`docs/path-b-memory.md` §13.4–13.6). A line suc
 memory describes, record the new state with wiki_remember and list the outdated facts in `replaces`"* in your
 `CLAUDE.md` makes the agent use it.
 
+**Search earlier sessions.** In a Second Brain project the MCP server also offers **`wiki_sessions`**: full-text
+search over the transcripts of earlier sessions — every user and assistant turn, as capture sees it — returning dated,
+verbatim excerpts. Where `wiki_memory` holds the decision, the session holds the detail: the exact error, the number a
+run produced, the reason something was dropped. It covers the sessions the hooks have captured and the repository's
+own Claude Code folder when its hooks are bound to the project; `[memory] transcripts` adds more (files or folders).
+Credentials are redacted, and sentences the memory policy flags are withheld. On the shell: `owiki sessions search
+"…"` and `owiki sessions list`.
+
 **Hand a session over to the next one.** At the end of a long session, `/session-restart prepare` (the skill
 `owiki claude-code` installs) has the agent look at what OpenWiki derives (`wiki_handoff` with `mode: "preview"`:
 the repository, the memory, the environment), record decisions with `wiki_remember`, write a short note — Next (start

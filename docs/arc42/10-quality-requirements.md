@@ -54,6 +54,7 @@ Scenarios are written as *stimulus → expected response* so they can be checked
 | QS-18 | Usefulness (memory noise) | should | After `openwiki sleep`, the facts injected for real prompts contain no one-off session events ("vX was pushed and tagged", commit hashes), and no fact a person would keep was removed — forgotten facts stay in the graph (ADR-32). |
 | QS-21 | Efficiency (prompt context) | should | Every prompt of a coding session gets the assembled memory injected → its size stays within `[memory] context_budget` (3,000 chars ≈ 750 tokens; measured mean ≈ 710 tokens over 335 real prompts) while recalling `[memory] context_k` facts (16), and both are project settings a user can lower; a change to either is measured on the live path — cost, usefulness of the facts, effect on answers — before it ships (ADR-35). |
 | QS-22 | Usability (continuity) | should | A new Claude Code session starts in a repository whose last session wrote a handoff → before the first prompt the agent has the next steps and what changed since (commits, memory, environment), within 6,000 chars; a stale handoff says so (new commits, "already resumed"); a handoff line that would weaken security or address AI assistants never reaches it (ADR-36). |
+| QS-28 | Recall (detail) | should | A later session asks for a detail an earlier one stated — an error, a number, a command, a reason → session search returns the turn that said it, verbatim and dated, with credentials redacted and instruction-like sentences withheld; nothing is injected unless the agent asks (ADR-44). |
 | QS-27 | Efficiency (repeated context) | should | Later prompts of a coding session → the hook injects only facts, themes and identity the session has not been given since its last compaction or `/clear`; after one, the next prompt gets everything again; a fact the budget cut is not counted as given (ADR-43). |
 | QS-26 | Relevance (time) | should | A request names a period ("in July 2023", "last week") → the facts whose valid time falls in it reach the memory context ahead of the same topic from other times; a request without a date recalls exactly as before; measured paired on LoCoMo's dated questions (ADR-41). |
 | QS-25 | Relevance (recall) | should | A request names an identifier, a version or a file → the facts that mention it reach the memory context, without keyword matches from deep in the ranking displacing relevant facts; measured on real prompts — the facts the lexical signal brings in are judged helpful more often than the ones they displace (ADR-40). |
@@ -91,7 +92,9 @@ Scenarios are written as *stimulus → expected response* so they can be checked
   judged real prompts — swapped-in facts helpful 21.9 % vs 12.0 % for those displaced, 26 / 9 prompts (ADR-40); QS-26
   by the time window — LoCoMo's dated questions 46.2 → 56.2 %, +24 / −3 paired (ADR-41); QS-27 by the replayed
   dogfooding session — 2,757 → 1,405 characters per prompt (49 % fewer), later prompts still judged to get 3–4
-  useful new facts (ADR-43). All on small, hand-labeled sets (one annotator) — direction checks, not benchmarks.
+  useful new facts (ADR-43); QS-28 by LoCoMo's evidence turns — full text found them in the top 5 ±1 turn for 68 % of
+  the questions — and 47 generated questions about coding-session details: the answer in the fact context 8 times, in
+  the session excerpts 41 (ADR-44). All on small, hand-labeled sets (one annotator) — direction checks, not benchmarks.
 - **Measured externally (memory):** LoCoMo (`owiki eval --locomo`, ADR-34) — all 10 conversations, 1,986 questions,
   a local 30B answering + judging: overall J **50.0 %** (multi-hop 54.3, temporal 34.0, open-domain 34.4, single-hop
   56.5; adversarial 89.2). Mem0 reports ≈ 67 % with GPT-4o-mini — a reference point, not a like-for-like comparison.
@@ -102,7 +105,8 @@ Scenarios are written as *stimulus → expected response* so they can be checked
   recall budget of 20 facts (v0.95) took overall J to **60.7 %** (+117 / −29 paired, p ≈ 6·10⁻¹³), hybrid recall (v0.103)
   to **61.6 %** (+47 / −34, p ≈ 0.18 — adopted for the live path, ADR-40), the question's time window (v0.104) to
   **62.9 %** (+24 / −3, p ≈ 5·10⁻⁵, ADR-41); one dated episode per session next to the facts (v0.106, harness only)
-  to **74.7 %** (+226 / −45, p ≈ 3·10⁻³⁰; adversarial 83.9 → 71.5 %, ADR-42). A hand audit of 60
+  to **74.7 %** (+226 / −45, p ≈ 3·10⁻³⁰; adversarial 83.9 → 71.5 %, ADR-42); five verbatim session excerpts in their
+  place (v0.108, harness option) to **78.2 %** (+276 / −41, p ≈ 6·10⁻⁴⁴; adversarial 76.9 %, ADR-44). A hand audit of 60
   judgments: the judge agrees 51/60, never rejects a right answer, accepts 8 % wrong ones (dates off by days) — J is
   generous by ~7 points, paired comparisons stand. QS-20 is met by the harness itself.
 - **Not formally measured (performance):** there is no latency/throughput *budget* yet — though the

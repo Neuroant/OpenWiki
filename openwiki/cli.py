@@ -277,6 +277,12 @@ def _build_argparser() -> argparse.ArgumentParser:
     eval_p.add_argument("--episodes", type=int, default=0, metavar="M",
                         help="--locomo: write one dated narrative per session (one chat call each, kept in "
                              "episodes.jsonl) and show the M most similar to each question next to its facts.")
+    eval_p.add_argument("--excerpts", type=int, default=0, metavar="M",
+                        help="--locomo: session search — show the M turns that best match each question by full "
+                             "text (BM25), each with --excerpt-window turns on either side, verbatim and dated next "
+                             "to its facts (answers go to their own -exM file).")
+    eval_p.add_argument("--excerpt-window", type=int, default=1, metavar="W",
+                        help="--locomo --excerpts: turns shown on either side of each matching turn (default 1).")
     eval_p.add_argument("--merge", choices=("checks", "tags", "add-only"), default="checks",
                         help="--locomo / --cross-session: the memory merge — checks (production: the coexistence "
                              "check and attribute resolution, two LLM calls), tags (the capture's cardinality tags "
@@ -605,6 +611,26 @@ def _build_argparser() -> argparse.ArgumentParser:
     ctx_p.add_argument("-i", "--index", type=Path, default=None, help="Index dir (for the embedder; default: project's).")
     ctx_p.add_argument("--graph", type=Path, default=None, help="Graph dir (default: project's graph).")
     ctx_p.add_argument("--host", default=None, help="Ollama host URL.")
+
+    ses_p = sub.add_parser("sessions", help="Session search: the raw transcripts of earlier sessions, searched by "
+                                            "full text — verbatim, dated excerpts (Second Brain projects).")
+    ssub = ses_p.add_subparsers(dest="sessions_cmd", required=True)
+    s_search = ssub.add_parser("search", parents=[common],
+                               help="Find the turns of earlier sessions that match a query (BM25), with their "
+                                    "neighbouring turns.")
+    s_search.add_argument("query", help="What to look for — words that would appear in what was said.")
+    s_search.add_argument("-k", "--top-k", type=int, default=8, help="Matching turns to show (default 8).")
+    s_search.add_argument("--context", type=int, default=1,
+                          help="Turns shown on either side of each match (default 1).")
+    s_search.add_argument("--since", default="", metavar="DATE", help="Only turns from DATE on (YYYY-MM-DD).")
+    s_search.add_argument("--until", default="", metavar="DATE", help="Only turns up to DATE (YYYY-MM-DD).")
+    s_search.add_argument("--repo", type=Path, default=None,
+                          help="The repository whose Claude Code sessions to include when its hooks are bound to "
+                               "the project (default: the working directory).")
+    s_search.add_argument("--json", action="store_true", help="Print the excerpts as JSON.")
+    s_list = ssub.add_parser("list", parents=[common], help="List the sessions session search covers.")
+    s_list.add_argument("--repo", type=Path, default=None,
+                        help="The repository whose Claude Code sessions to include (default: the working directory).")
 
     an_p = sub.add_parser("analyze", parents=[common],
                           help="World-model analysis: measure graph↔semantic coupling, or mine "
@@ -1976,7 +2002,8 @@ def _locomo_eval(args: argparse.Namespace) -> int:
                      capture_style=args.capture_style,
                      lexical=RECALL_WEIGHT if args.recall_lexical is None else max(0.0, args.recall_lexical),
                      temporal=WINDOW_WEIGHT if args.recall_window is None else max(0.0, args.recall_window),
-                     reuse_base=True, merge=args.merge, episodes=max(0, args.episodes))
+                     reuse_base=True, merge=args.merge, episodes=max(0, args.episodes),
+                     excerpts=max(0, args.excerpts), excerpt_window=max(0, args.excerpt_window))
     s = res["summary"]
     state = "complete" if res["complete"] else "partial — re-run to continue"
     print(f"\nLoCoMo  [{len(res['records'])} answered question(s), {state}, {res['seconds']}s this run]")
@@ -3198,6 +3225,81 @@ def _format_timeline(groups: list) -> str:
     return "\n".join(out)
 
 
+def _same_path(a, b) -> bool:
+    try:
+        return os.path.normcase(str(Path(a).resolve())) == os.path.normcase(str(Path(b).resolve()))
+    except OSError:
+        return False
+
+
+def _session_files(project: Project, repo=None) -> list:
+    """The transcripts session search covers for ``project``: ``[memory] transcripts`` (files or folders), the
+    Claude Code folder of ``repo`` (default: the working directory) when its hooks are bound to this project,
+    every session the capture hook has seen (``capture-state.json``), and the project's session sources."""
+    from .handoff import bound_project, claude_home, claude_slug
+    found: list = []
+
+    def add(p: Path) -> None:
+        if p.is_dir():
+            found.extend(sorted(x for x in p.iterdir()
+                                if x.is_file() and x.suffix.lower() in (".jsonl", ".md", ".txt")))
+        elif p.is_file():
+            found.append(p)
+
+    for p in project.transcripts:
+        add(p)
+    base = claude_home() / "projects"
+    repo = Path(repo or os.getcwd())
+    bound = bound_project(repo)
+    if bound is not None and _same_path(bound, project.root):
+        folder = base / claude_slug(repo)
+        if not folder.is_dir() and base.is_dir():   # Windows paths are case-insensitive; the folder name is not
+            folder = next((d for d in base.iterdir() if d.is_dir() and d.name.lower() == folder.name.lower()),
+                          folder)
+        if folder.is_dir():
+            found.extend(sorted(folder.glob("*.jsonl")))
+    try:
+        seen = json.loads(_capture_state_path(project).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        seen = {}
+    for sid in (seen if isinstance(seen, dict) else {}):
+        if base.is_dir() and re.fullmatch(r"[A-Za-z0-9._-]+", str(sid)):
+            found.extend(base.glob(f"*/{sid}.jsonl"))
+    for p in project.session_paths():
+        add(Path(p))
+    unique: dict = {}
+    for p in found:
+        unique.setdefault(os.path.normcase(str(p.resolve())), p)
+    return list(unique.values())
+
+
+def _cmd_sessions(args: argparse.Namespace) -> int:
+    """Session search (v0.108): the raw transcripts of earlier sessions, searched by full text — verbatim,
+    dated excerpts (``search``), or what the search covers (``list``)."""
+    from .sessions import SessionCorpus, format_excerpts
+    project = getattr(args, "project_obj", None)
+    if project is None or not project.memory_enabled:
+        print("(session search belongs to Second Brain projects — run it in one with [memory] enabled = true)")
+        return 0
+    corpus = SessionCorpus(_session_files(project, args.repo))
+    if args.sessions_cmd == "list":
+        rows = corpus.sessions()
+        for s in rows:
+            print(f"{s['first'][:16].replace('T', ' ') or '?':<16} → {s['last'][:16].replace('T', ' ') or '?':<16} "
+                  f"{s['turns']:>6} turns  {s['session']}")
+        print(f"({len(rows)} session(s), {sum(s['turns'] for s in rows)} turns)" if rows else
+              "(no session transcripts found — hooked sessions appear once captured; add more with "
+              "[memory] transcripts)")
+        return 0
+    hits = corpus.index().search(args.query, k=max(1, args.top_k), context=max(0, args.context),
+                                 since=args.since or "", until=args.until or "")
+    if args.json:
+        print(json.dumps(hits, ensure_ascii=False, indent=1))
+    else:
+        print(format_excerpts(hits) or "(no turn of an earlier session matches)")
+    return 0
+
+
 def _cmd_context(args: argparse.Namespace) -> int:
     """Path B (B6): assemble a session's memory context for a query — identity (DNA) +
     decay-weighted recall (activation) + relevant consolidated themes (attractors)."""
@@ -4214,6 +4316,10 @@ def _cmd_mcp(args: argparse.Namespace) -> int:
                if project is not None else None)
     # an agent's write lands within seconds: a detached worker folds the queue (two phases)
     on_remember = (lambda: _spawn_worker(project, "fold")) if writes else None
+    sessions = None
+    if project is not None and project.memory_enabled:
+        from .sessions import SessionCorpus
+        sessions = SessionCorpus(_session_files(project))
     server = build_server(args.wiki, index=index, graph=graph, agent=agent,
                           version=__version__, identity=identity, context_budget=budget,
                           context_k=project.context_k if project is not None else 16,
@@ -4221,7 +4327,7 @@ def _cmd_mcp(args: argparse.Namespace) -> int:
                                              and project.memory_probes),
                           memory_lexical=project.lexical_weight if project is not None else RECALL_WEIGHT,
                           memory_temporal=project.temporal_weight if project is not None else WINDOW_WEIGHT,
-                          memory_writes=writes, handoff=handoff, on_remember=on_remember)
+                          memory_writes=writes, handoff=handoff, on_remember=on_remember, sessions=sessions)
     server.serve()   # blocks on stdio (JSON-RPC)
     return 0
 
@@ -4251,6 +4357,7 @@ _DISPATCH = {
     "consolidate": _cmd_consolidate,
     "sleep": _cmd_sleep,
     "memory": _cmd_memory,
+    "sessions": _cmd_sessions,
     "remember": _cmd_remember,
     "recall": _cmd_recall,
     "context": _cmd_context,

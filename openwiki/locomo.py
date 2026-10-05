@@ -53,6 +53,7 @@ class LocomoSession:
     sid: str
     date: Optional[int]      # epoch seconds (UTC) of the session's stated date + time
     text: str                # "Session of …\nCaroline: …\nMelanie: …"
+    turns: list = field(default_factory=list)    # [(speaker, text)] in order — for session search (v0.108)
 
 
 @dataclass
@@ -90,11 +91,15 @@ def parse_locomo_date(text) -> Optional[int]:
     return int(datetime(int(year), mon, int(day), h, int(minute), tzinfo=timezone.utc).timestamp())
 
 
-def _turn_text(turn: dict) -> str:
+def _turn_body(turn: dict) -> str:
     text = str(turn.get("text") or "").strip()
     if turn.get("blip_caption"):                     # a shared photo, described in the data
         text = f"{text} [shares a photo: {turn['blip_caption']}]".strip()
-    return f"{turn.get('speaker', '?')}: {text}"
+    return text
+
+
+def _turn_text(turn: dict) -> str:
+    return f"{turn.get('speaker', '?')}: {_turn_body(turn)}"
 
 
 def load_locomo(path) -> list:
@@ -111,7 +116,8 @@ def load_locomo(path) -> list:
             when = conv.get(f"session_{n}_date_time", "")
             body = "\n".join(_turn_text(t) for t in conv[f"session_{n}"])
             sessions.append(LocomoSession(f"{item.get('sample_id', 'conv')}-s{n}", parse_locomo_date(when),
-                                          f"Session of {when}.\n{body}"))
+                                          f"Session of {when}.\n{body}",
+                                          [(str(t.get("speaker", "?")), _turn_body(t)) for t in conv[f"session_{n}"]]))
         qa = []
         for q in item.get("qa", []):
             cat = int(q.get("category", 0))
@@ -232,7 +238,8 @@ def run_locomo(conversations, work_dir, open_graph: Callable, embedder, chat, ju
                categories=None, budget_s: Optional[float] = None, coexist=None, resolve=None,
                on_progress: Optional[Callable] = None, now_mode: str = "present",
                answer_style: str = "infer", capture_style: str = "durable", lexical: float = 0.0,
-               temporal: float = 0.0, reuse_base: bool = False, merge: str = "checks", episodes: int = 0) -> dict:
+               temporal: float = 0.0, reuse_base: bool = False, merge: str = "checks", episodes: int = 0,
+               excerpts: int = 0, excerpt_window: int = 1) -> dict:
     """Capture + remember each conversation (once — resumable per session), then answer + score its questions
     (resumable per question). ``open_graph(path)`` returns a **writable** memory graph at ``path`` (created if
     absent). Stops when ``budget_s`` seconds are spent (``complete: False``); the next call continues.
@@ -245,9 +252,14 @@ def run_locomo(conversations, work_dir, open_graph: Callable, embedder, chat, ju
     ``coexist`` / ``resolve`` as given), ``tags`` (neither LLM check) or ``add-only`` (every fact ``"many"``, no checks:
     nothing superseded) — an ablation; use a separate ``work_dir`` per mode. ``episodes`` (v0.106): one dated
     narrative per session (``memory.narrate_session``, kept in ``episodes.jsonl``, written once — resumable like the
-    capture) and the ``episodes`` most similar to each question shown next to its facts, in date order. Returns
-    ``{"complete", "records", "summary"}`` over every answered question in ``work_dir``."""
+    capture) and the ``episodes`` most similar to each question shown next to its facts, in date order.
+    ``excerpts`` (v0.108): session search — the ``excerpts`` turns of the conversation that best match the question
+    by full text (``sessions.SessionIndex``, BM25), each with ``excerpt_window`` turns on either side, shown verbatim
+    and dated next to its facts (the sessions need their ``turns``). Returns ``{"complete", "records", "summary"}``
+    over every answered question in ``work_dir``."""
     from .graph.memory import MemoryFact, assemble_context, capture_session, narrate_session
+    from .graph.temporal import format_date
+    from .sessions import SessionIndex, Turn
 
     t0 = time.time()
     work = Path(work_dir)
@@ -262,11 +274,15 @@ def run_locomo(conversations, work_dir, open_graph: Callable, embedder, chat, ju
         core = "".join(f"-{t}" for t in (now_mode if now_mode != "present" else "", answer_style,
                                          f"k{recall_k}" if recall_k != 10 else "") if t)
         lex_tag = f"-lex{lexical:g}" if lexical else ""
-        tag = core + lex_tag + (f"-tw{temporal:g}" if temporal else "") + (f"-ep{episodes}" if episodes else "")
+        tag = (core + lex_tag + (f"-tw{temporal:g}" if temporal else "") + (f"-ep{episodes}" if episodes else "")
+               + (f"-ex{excerpts}" + (f"w{excerpt_window}" if excerpt_window != 1 else "") if excerpts else ""))
+        turn_index = SessionIndex(Turn(s.sid, n, format_date(s.date), speaker, text)
+                                  for s in conv.sessions for n, (speaker, text) in enumerate(s.turns)) \
+            if excerpts else None
         ans_path = cdir / f"answers{tag}.jsonl"             # each variant keeps its own answers
         base_tag, base_kw = ((core + lex_tag, {"lexical": lexical}) if temporal else (core, {}))
-        base_answers = ({r["i"]: r for r in _read_jsonl(cdir / f"answers{base_tag}.jsonl")}
-                        if reuse_base and (lexical or temporal) else {})
+        base_answers = ({r["i"]: r for r in _read_jsonl(cdir / f"answers{base_tag}.jsonl")}  # never with more
+                        if reuse_base and (lexical or temporal) and not (episodes or excerpts) else {})  # context
         done = json.loads(done_path.read_text(encoding="utf-8")) if done_path.is_file() else []
         captured = {r["sid"]: r["facts"] for r in _read_jsonl(cap_path)}
         answers = {r["i"]: r for r in _read_jsonl(ans_path)}
@@ -341,7 +357,13 @@ def run_locomo(conversations, work_dir, open_graph: Callable, embedder, chat, ju
                                 qv /= np.linalg.norm(qv) or 1.0
                                 best = sorted(np.argsort(-(ep_vecs @ qv))[:episodes])
                                 shown = sorted((ep_list[n] for n in best), key=lambda e: e.get("date") or 0)
-                            ctx = assemble_context("", hits, [], max_facts=recall_k, episodes=shown)
+                            found = []
+                            if turn_index is not None:
+                                found = [f"[{t['ts'] or 'undated'}] {t['speaker']}: {t['text']}"
+                                         for e in turn_index.search(q.question, k=excerpts, context=excerpt_window)
+                                         for t in e["turns"]]
+                            ctx = assemble_context("", hits, [], max_facts=recall_k, episodes=shown,
+                                                   excerpts=found)
                             raw = _retry(lambda: chat.chat(build_answer_messages(q.question, ctx,
                                                                                  answer_style))) or ""
                             pred = re.sub(r"<think>.*?</think>", "", raw, flags=re.S).strip()

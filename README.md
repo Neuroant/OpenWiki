@@ -369,7 +369,9 @@ deleted. The memory is **portable**: `openwiki memory export` writes a COGX arch
 read, `memory import` restores one losslessly, and `sleep` keeps a readable Markdown view (`memory/`, one file per
 subject) to track in git. Recall is **hybrid**: next to the embedding, BM25 over the facts lets an exact name, version
 or file name pull in the facts that mention it, and a date in the question ("in July 2023", "last week") favours the
-facts from that time. Design: **[docs/path-b-memory.md](docs/path-b-memory.md)**.
+facts from that time. Raw sessions stay **searchable**: `openwiki sessions search` (and the MCP tool
+`wiki_sessions`) finds the turns of earlier sessions by full text — the exact wording, numbers and reasons the facts
+leave out, quoted and dated. Design: **[docs/path-b-memory.md](docs/path-b-memory.md)**.
 
 ### Web UI
 
@@ -429,7 +431,8 @@ agents — **Claude Code**, **OpenCode**, Cursor, … — can query it as tools:
 `wiki_ask` (grounded, cited answers), `wiki_global` (thematic answers from community
 summaries), `wiki_search`, `wiki_list_pages`, `wiki_read_page`, `wiki_graph_neighbors`,
 `wiki_find_path`, `wiki_find_entity` (with its typed relations), `wiki_memory` (the
-three-tier memory context, in Second Brain mode), `wiki_handoff` (the session handoff, below) and —
+three-tier memory context, in Second Brain mode), `wiki_sessions` (earlier sessions' transcripts,
+searched by full text), `wiki_handoff` (the session handoff, below) and —
 opt-in via `[memory] agent_writes` — `wiki_remember` (the agent records facts / a new state and closes
 what it `replaces`). Tools are advertised by availability.
 

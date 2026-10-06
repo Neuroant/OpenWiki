@@ -185,6 +185,13 @@ class Project:
             return WINDOW_WEIGHT
 
     @property
+    def approve_writes(self) -> bool:
+        """Stage the agent's memory writes (``wiki_remember``) for a person's approval —
+        ``[memory] approve_writes``, off by default (v0.110): ``openwiki memory pending`` lists them,
+        ``approve`` / ``reject`` decide. Captures are not staged (the memory policy screens them)."""
+        return bool(self.setting("memory", "approve_writes", False))
+
+    @property
     def repeat_facts(self) -> bool:
         """Re-inject facts already injected earlier in the session (``[memory] repeat_facts``). **Off by
         default** (v0.107): each fact, theme and the identity is injected once per stretch — until a
@@ -366,6 +373,7 @@ enabled = {str(memory).lower()}
 # agent_writes = false    # let a coding agent record facts / new states via MCP wiki_remember
 # skip_chores = true      # no memory for chore prompts (push / tag / commit, slash commands, a later "ok")
 # repeat_facts = false    # re-inject facts the session already got (default: each once, until a compaction)
+# approve_writes = false  # stage the agent's wiki_remember writes until a person approves them (memory pending)
 # skip_prompts = []       # more chore prompts for this project, as regexes, e.g. ["sync arc42 docs"]
 # markdown_dir = "memory" # sleep writes a readable Markdown view of the memory here ("" = off)
 # transcripts = []        # more transcripts for session search (files / folders); hooked sessions are found anyway

@@ -938,6 +938,26 @@ changes.** *(v0.102; builds on [ADR-16](#adr-16); mitigates R10)*
   entry; − half of the stale facts are design changes no phrasing reveals, so D12 stays partly open — the agent
   recording the new state when it makes a change (ADR-33) remains the main fix.
 
+### ADR-46
+**An opt-in approval step for agent writes; no always-present core.** *(v0.110; refines [ADR-33](#adr-33))*
+- **Context:** `wiki_remember` writes land without review. Hermes stages writes for approval (a staged replacement
+  pinned to the entry it was reviewed against); memory-champ signs procedures with a key the agent lacks. The review
+  series paired the gate with an always-present core of user conventions — the most powerful and most poisonable memory
+  OpenWiki could add.
+- **Decision:** `[memory] approve_writes` (off by default) stages agent writes in a sidecar next to the journal; a
+  person approves (`openwiki memory approve`, the Gedächtnis tab) — the write moves into the journal, valid from
+  staging and recorded at approval — or rejects it into an audit log. No MCP tool approves; captures are not staged.
+  Pinning needs no extra state: replacements are fact ids, facts are immutable, closing skips closed facts. **No
+  core:** measured on the dogfooding memory, none of the user-tagged captured facts was a standing convention.
+- **Alternatives:** a signature the agent cannot produce (memory-champ) — a real boundary, but key management for a
+  single-user local tool; staging every write, captures included (Hermes) — about a hundred captured facts a day to
+  review; an always-present core filled from user-sourced facts — nothing to fill it with here, and the host's own
+  memory and `CLAUDE.local.md` already hold the conventions.
+- **Consequences:** + a person can see and veto every agent write before it lands, in the terminal or the browser.
+  + Bi-temporal history stays honest about when memory accepted a fact. − About a dozen approvals a day on an active
+  project (35 agent writes in three days), hence opt-in. − Not a security boundary: an agent with a shell can run the
+  approve command where the host lets it — the host's permission prompt is the gate.
+
 ---
 *Chapter complete. The Path-B agent-memory direction landed via ADR-14/15/16/17/18/19; the graph then
 deepened (ADR-22 typed relations + relation-aware GraphRAG, ADR-23 entity resolution), gained
@@ -954,7 +974,7 @@ a normalized instruction policy (ADR-37), and **writes that land during a sessio
 writers (ADR-38), **portable memory** — a COGX export / import, a Markdown view and a LadybugDB spike (ADR-39), and
 **hybrid recall** — BM25 as a recall aid within the dense pool (ADR-40), **the question's time window** (ADR-41), and
 **episodes** next to facts, measured on the benchmark first (ADR-42), and memory injected **once per stretch**
-(ADR-43), the raw sessions kept **searchable** by full text (ADR-44), and volatile kinds as a **review list**, not a
-label (ADR-45). §11
+(ADR-43), the raw sessions kept **searchable** by full text (ADR-44), volatile kinds as a **review list**, not a
+label (ADR-45), and an opt-in **approval step** for agent writes (ADR-46). §11
 debts D1/D2/D6 are resolved. Deep designs in `docs/path-b-memory.md` and `docs/RAG-vs-GraphRAG.md`. New significant
 decisions should be appended here with the next id.*

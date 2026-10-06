@@ -517,6 +517,15 @@ def _build_argparser() -> argparse.ArgumentParser:
                        help="Index dir (the embedder for facts without a usable embedding; default: project's).")
     m_imp.add_argument("--model", default=None, help="Chat model for the merge checks (default: manifest models.chat).")
     m_imp.add_argument("--host", default=None, help="Ollama host URL.")
+    m_pend = msub.add_parser("pending", parents=[common],
+                             help="List the agent's memory writes awaiting approval ([memory] approve_writes).")
+    m_pend.add_argument("--graph", type=Path, default=None, help="Graph database dir (default: project's graph).")
+    for name, verb in (("approve", "Approve staged writes: they land in memory (valid from when they were staged)."),
+                       ("reject", "Reject staged writes: never applied, kept in an audit log.")):
+        m_dec = msub.add_parser(name, parents=[common], help=verb)
+        m_dec.add_argument("ids", nargs="*", help="Staged write ids (from `memory pending`).")
+        m_dec.add_argument("--all", action="store_true", help="Every staged write.")
+        m_dec.add_argument("--graph", type=Path, default=None, help="Graph database dir (default: project's graph).")
 
     cons_p = sub.add_parser("consolidate", parents=[common],
                             help="Path B 'sleep' pass: cluster remembered facts into themes + summaries, then fold usage + decay.")
@@ -1483,6 +1492,13 @@ def _cmd_status(args: argparse.Namespace) -> int:
           f"{project.setting('build', 'overlap', 30)}w  "
           f"entities={project.setting('graph', 'entities', False)}")
     print(f"  memory : {'Second Brain (enabled)' if project.memory_enabled else 'Wiki (disabled)'}")
+    if project.memory_enabled:
+        from .graph.journal import journal_path, pending_journal, read_staged, staged_path
+        queued, staged = pending_journal(journal_path(project.graph_path)), len(read_staged(staged_path(project.graph_path)))
+        if queued or staged or project.approve_writes:
+            print(f"           {queued} write(s) queued for the next fold"
+                  + (f" · {staged} awaiting approval (`openwiki memory pending`)" if staged or project.approve_writes
+                     else ""))
     print("  sources:")
     for src in sources:
         rel = src.relative_to(project.root) if src.is_relative_to(project.root) else src
@@ -2771,7 +2787,66 @@ def _cmd_memory(args: argparse.Namespace) -> int:
     backup) or the Markdown view — and ``import`` a COGX archive."""
     if args.memory_cmd == "export":
         return _memory_export(args)
+    if args.memory_cmd in ("pending", "approve", "reject"):
+        return _memory_review(args)
     return _memory_import(args)
+
+
+def _memory_review(args: argparse.Namespace) -> int:
+    """The approval step (v0.110): ``pending`` lists the agent's staged writes; ``approve`` moves them into
+    the journal and starts a fold; ``reject`` moves them to the audit log. No graph lock needed — the
+    staging file sits next to the graph."""
+    from .graph.journal import approve_staged, journal_path, read_staged, reject_staged, rejected_path, staged_path
+    project = getattr(args, "project_obj", None)
+    staged = staged_path(args.graph)
+    if args.memory_cmd == "pending":
+        recs = read_staged(staged)
+        if not recs:
+            print("(no memory writes awaiting approval)")
+            return 0
+        for rec in recs:
+            when = time.strftime("%Y-%m-%d %H:%M", time.localtime(rec.get("t") or 0))
+            print(f"\n[{rec['id']}] {when} · {rec.get('session', '')}")
+            for f in rec.get("facts", []):
+                print(f"  + {f[0]} {f[1]} {f[2]}")
+            for line in _staged_replaces(args.graph, rec.get("retire") or []):
+                print(f"  − {line}")
+        print(f"\n{len(recs)} write(s) awaiting approval — `openwiki memory approve ID …` (or `--all`), "
+              f"`openwiki memory reject ID …`.")
+        return 0
+    if not args.ids and not args.all:
+        print("error: name the staged write ids (see `openwiki memory pending`) or pass --all.", file=sys.stderr)
+        return 2
+    ids = None if args.all else args.ids
+    if args.memory_cmd == "approve":
+        done = approve_staged(staged, journal_path(args.graph), ids)
+    else:
+        done = reject_staged(staged, rejected_path(args.graph), ids)
+    missing = [] if ids is None else sorted(set(ids) - {r["id"] for r in done})
+    verb = "approved" if args.memory_cmd == "approve" else "rejected"
+    print(f"{len(done)} staged write(s) {verb}" + (f"; no staged write with id {', '.join(missing)}" if missing else ""))
+    if done and args.memory_cmd == "approve":
+        if project is not None and _spawn_worker(project, "fold"):
+            print("(folding them into memory in the background)")
+        else:
+            print("(they land at the next write pass — `openwiki sleep`, `serve` / `chat` start, or a capture)")
+    return 0 if not missing else 1
+
+
+def _staged_replaces(graph_path, ids) -> list:
+    """The facts a staged write would close, as memory prints them (ids when the graph can't be read)."""
+    if not ids:
+        return []
+    from .graph.memory import fact_line
+    graph = _open_reader(graph_path, wait=5.0)
+    if graph is None:
+        return [f"fact {i}" for i in ids]
+    try:
+        recs = {r["id"]: r for r in graph._load_assertions()}
+    finally:
+        graph.close()
+    return [fact_line(recs[i]) + ("" if recs[i].get("valid_to") is None else "  [already closed]")
+            if i in recs else f"fact {i} (no longer in memory)" for i in ids]
 
 
 def _memory_export(args: argparse.Namespace) -> int:
@@ -4295,8 +4370,9 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     tools = WikiTools(args.wiki, index=index, graph=graph, embedder=embedder, dry_run=args.dry_run)
     chat = OllamaChat(model=args.model, host=args.host, temperature=args.temperature)
     agent = WikiAgent(chat, tools, wiki_summary=summarize_wiki(args.wiki))
-    app = WikiWebApp(args.wiki, index=index, agent=agent, tools=tools, graph=graph,
-                     project=getattr(args, "project_obj", None))
+    project = getattr(args, "project_obj", None)
+    app = WikiWebApp(args.wiki, index=index, agent=agent, tools=tools, graph=graph, project=project,
+                     on_approved=(lambda: _spawn_worker(project, "fold")) if project is not None else None)
 
     graph_feat = ("graph+sync" if graph and getattr(graph, "writable", False) else
                   ("graph (read-only, concurrent)" if graph else None))
@@ -4352,7 +4428,8 @@ def _cmd_mcp(args: argparse.Namespace) -> int:
                                              and project.memory_probes),
                           memory_lexical=project.lexical_weight if project is not None else RECALL_WEIGHT,
                           memory_temporal=project.temporal_weight if project is not None else WINDOW_WEIGHT,
-                          memory_writes=writes, handoff=handoff, on_remember=on_remember, sessions=sessions)
+                          memory_writes=writes, handoff=handoff, on_remember=on_remember, sessions=sessions,
+                          approve_writes=bool(writes and project.approve_writes))
     server.serve()   # blocks on stdio (JSON-RPC)
     return 0
 

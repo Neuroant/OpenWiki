@@ -931,6 +931,13 @@ The **genuine gaps**, measure-first as always:
   set (paired, 2 captures, no probes) the cue reached the context 8/16 → 16/16 and the constraint was applied
   7/16 → 12/16 (+5 / −0). Adopted: `[memory] context_k` (default 16) + `context_budget` 2,000 → 3,000; facts may
   use theme budget the themes don't need. `path-b-memory.md` §13.12.
+- **The approval step (v0.110).** Item 13 of the review series' plan. Opt-in `[memory] approve_writes`: the agent's
+  `wiki_remember` writes are staged next to the journal until a person approves them (`openwiki memory pending` /
+  `approve` / `reject`, or the Gedächtnis tab's "Zur Freigabe"); an approved write is valid from when it was staged and
+  recorded when approved, and a staged replacement closes exactly the fact that was reviewed. Judged on the dogfooding
+  session: about a dozen agent writes a day to review (35 in three days), so off by default. The always-present core
+  was not built: of the facts captured with a source, 19 were tagged as the user's and none was a standing convention —
+  those live in `CLAUDE.local.md` and the host's memory already. ADR-46, `docs/path-b-memory.md` §13.27.
 - **Volatility classes — measured; a review list, not a label (v0.109).** Item 12 of the review series' plan. The
   phrasing rule of the stale-fact analysis, frozen and checked on blind hand labels of the dogfooding memory: 25 % of
   the facts it flags were stale (26 of 104), 2½–9 times the rate of the others — but a "possibly outdated" mark would be

@@ -19,8 +19,11 @@ lives in ``store.py``.
 
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Optional
 
@@ -48,6 +51,17 @@ def _append(path, obj: dict) -> None:
 def append_remember(path, session_id, facts, now: Optional[int] = None,
                     session_date: Optional[int] = None, correct: bool = False,
                     retire=None, agent: bool = False) -> int:
+    """Queue a ``remember`` op — see :func:`_remember_record`. Returns the number of triples written
+    (0 → nothing queued)."""
+    rec = _remember_record(session_id, facts, now, session_date, correct, retire, agent)
+    if rec is None:
+        return 0
+    _append(path, rec)
+    return len(rec["facts"])
+
+
+def _remember_record(session_id, facts, now: Optional[int] = None, session_date: Optional[int] = None,
+                     correct: bool = False, retire=None, agent: bool = False) -> Optional[dict]:
     """Queue a ``remember`` op — (subject, predicate, object) triples for one session.
     ``facts`` may be ``MemoryFact``-likes (``.subject``/``.predicate``/``.object``) or
     ``(s, p, o)`` tuples. Returns the number of triples written (0 → nothing queued).
@@ -61,7 +75,8 @@ def append_remember(path, session_id, facts, now: Optional[int] = None,
     the fold closes them at the op's time (valid time ends: the world changed). A record may carry
     only ``retire`` (the new state already remembered, or none needed). ``agent`` marks an op
     written by the host agent (``wiki_remember``): it names its replacements itself, so the fold
-    skips the model-based attribute resolution (B9) for its facts."""
+    skips the model-based attribute resolution (B9) for its facts. ``None`` when there is nothing to
+    write."""
     triples = []
     for f in facts:
         if hasattr(f, "subject"):
@@ -87,7 +102,7 @@ def append_remember(path, session_id, facts, now: Optional[int] = None,
                 triples.append([s, p, o, None if vf is None else int(vf), card or "one"])
     retire = [str(i) for i in (retire or []) if str(i).strip()]
     if not triples and not retire:
-        return 0
+        return None
     rec = {"op": "remember", "t": _now(now), "session": str(session_id), "facts": triples}
     if retire:
         rec["retire"] = retire
@@ -97,8 +112,7 @@ def append_remember(path, session_id, facts, now: Optional[int] = None,
         rec["session_date"] = int(session_date)
     if correct:
         rec["correct"] = True
-    _append(path, rec)
-    return len(triples)
+    return rec
 
 
 def append_reindex(path, slug, text, now: Optional[int] = None) -> int:
@@ -139,3 +153,117 @@ def clear_journal(path) -> None:
 def pending_journal(path) -> int:
     """How many op records are queued (0 if none)."""
     return len(read_journal(path))
+
+
+# -- staging (v0.110): agent writes held for a person's approval ([memory] approve_writes) -----------
+# The same records as the journal, plus an ``id``, in a second sidecar. Approving moves a record into the
+# journal — the next fold applies it —, valid from when the agent staged it and recorded when it was
+# approved (B7: until then memory did not believe it). Rejecting moves it to an audit log. A staged
+# replacement names its facts by id, and a fact's content never changes (a new value is a new fact), so an
+# approval closes exactly the fact the reviewer saw — or nothing, if it was closed meanwhile.
+
+def staged_path(db_path) -> Path:
+    """The staging sidecar for a graph DB file: ``wiki_remember`` writes awaiting approval."""
+    p = Path(db_path)
+    return p.with_name(p.name + ".staged.jsonl")
+
+
+def rejected_path(db_path) -> Path:
+    """The audit log of rejected staged writes."""
+    p = Path(db_path)
+    return p.with_name(p.name + ".rejected.jsonl")
+
+
+@contextmanager
+def _locked(path, wait: float = 5.0, stale: float = 60.0):
+    """An advisory lock around a staging file's read-modify-write (the agent stages while a person
+    approves): a ``.lock`` file created exclusively; one older than ``stale`` seconds is taken over."""
+    lock = Path(str(path) + ".lock")
+    deadline = time.time() + wait
+    while True:
+        try:
+            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.close(fd)
+            break
+        except FileExistsError:
+            try:
+                if time.time() - lock.stat().st_mtime > stale:
+                    lock.unlink(missing_ok=True)
+                    continue
+            except OSError:
+                pass
+            if time.time() > deadline:
+                raise TimeoutError(f"staging file busy: {lock}")
+            time.sleep(0.05)
+    try:
+        yield
+    finally:
+        lock.unlink(missing_ok=True)
+
+
+def stage_remember(path, session_id, facts, now: Optional[int] = None, session_date: Optional[int] = None,
+                   retire=None, agent: bool = True) -> tuple:
+    """Stage a ``remember`` op for approval instead of queueing it → ``(triples staged, id)`` (``(0, "")``
+    when there is nothing to stage)."""
+    rec = _remember_record(session_id, facts, now, session_date, False, retire, agent)
+    if rec is None:
+        return 0, ""
+    rec["id"] = hashlib.sha1(json.dumps(rec, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()[:8]
+    with _locked(path):
+        _append(path, rec)
+    return len(rec["facts"]), rec["id"]
+
+
+def read_staged(path) -> list:
+    """The staged writes, oldest first."""
+    return [r for r in read_journal(path) if r.get("op") == "remember" and r.get("id")]
+
+
+def _take_staged(path, ids=None) -> list:
+    """Remove the staged records with these ids (all when ``ids`` is None) and return them."""
+    want = None if ids is None else {str(i).strip() for i in ids if str(i).strip()}
+    with _locked(path):
+        recs = read_staged(path)
+        taken = [r for r in recs if want is None or r["id"] in want]
+        keep = [r for r in recs if not (want is None or r["id"] in want)]
+        p = Path(path)
+        if keep:
+            tmp = p.with_name(p.name + ".tmp")
+            tmp.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in keep), encoding="utf-8")
+            os.replace(tmp, p)
+        else:
+            p.unlink(missing_ok=True)
+    return taken
+
+
+def _valid_from(fact, at: int) -> list:
+    """A journal fact with an explicit valid-from (``at`` unless it states one)."""
+    f = list(fact)
+    s, p, o = f[:3]
+    vf = f[3] if len(f) >= 4 and f[3] is not None else at
+    card = f[4] if len(f) >= 5 and f[4] else "one"
+    return [s, p, o, int(vf), card] + ([f[5]] if len(f) >= 6 else [])
+
+
+def approve_staged(path, journal, ids=None, now: Optional[int] = None) -> list:
+    """Approve staged writes (all when ``ids`` is None): each moves into the journal — the next fold applies
+    it —, valid from when it was staged (its facts, and the closing of what it replaces: ``valid_at``),
+    recorded now. Returns the approved records."""
+    at = _now(now)
+    taken = _take_staged(path, ids)
+    for rec in taken:
+        staged = int(rec.get("t") or at)
+        out = {k: v for k, v in rec.items() if k != "id"}
+        out["facts"] = [_valid_from(f, staged) for f in rec.get("facts", [])]
+        out.update({"t": at, "valid_at": staged, "approved": rec["id"]})
+        _append(journal, out)
+    return taken
+
+
+def reject_staged(path, log, ids=None, now: Optional[int] = None) -> list:
+    """Reject staged writes (all when ``ids`` is None): moved to the audit ``log``, never applied."""
+    at = _now(now)
+    taken = _take_staged(path, ids)
+    for rec in taken:
+        _append(log, dict(rec, rejected_at=at))
+    return taken

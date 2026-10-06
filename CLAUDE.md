@@ -368,6 +368,23 @@ themes included, recall identical for 20/20 queries; the believed export (0.14 M
 (cosine 1.0000); both archives pass Cognee's own unpacker + Pydantic models with 0 errors; the view: 293 subject files,
 218 KB (`docs/path-b-memory.md` §13.17, arc42 ADR-39).
 
+**Approve the agent's memory writes (v0.110, opt-in)** — with `[memory] approve_writes = true` the MCP tool
+`wiki_remember` stages each write next to the journal (`graph.staged.jsonl`, `journal.stage_remember`, an id per op)
+instead of queueing it; a person reviews and decides:
+```
+.venv\Scripts\python -m openwiki memory pending              # staged writes: + facts to add, − facts to close
+.venv\Scripts\python -m openwiki memory approve ID … | --all  # into the journal; the fold worker applies them
+.venv\Scripts\python -m openwiki memory reject ID … | --all   # to the audit log graph.rejected.jsonl
+```
+An approved write is valid from when it was staged (facts and the closing of what it replaces — the journal record's
+`valid_at`, which `fold_journal` uses for `retire`) and recorded when approved (`t`), so `--known-at` between the two
+leaves it out. Pinning by construction: replacements are fact ids, a fact's content never changes, `retire` skips closed
+facts. The Gedächtnis tab lists the staged writes under "Zur Freigabe" (`/api/memory` `staged`, POST
+`/api/memory/approve` / `reject`, `WikiWebApp(on_approved=)` starts the fold); `status` and the handoff brief count
+them. No MCP tool approves; captures are not staged. Judged on the dogfooding session: ~12 agent writes a day, so off
+by default; an always-present core was not built (no standing user conventions among the captured facts —
+`docs/path-b-memory.md` §13.27, ADR-46).
+
 **Backfill memory from Claude Code history** — turn existing Claude Code transcripts (JSONL) into the
 memory tier, **one dated session per UTC day** (`claude-YYYY-MM-DD`), each day cut into bounded capture
 windows, so B7's valid-time merge orders the facts by when they happened (a later day's change closes an
@@ -1293,7 +1310,8 @@ http — count, p50/p95, total time, token in/out) + a live recent-events table,
   `build-wiki`, `index`, `search`, `eval`, `ask` (`--global` = global search),
   `chat`, `graph-build`, `references`, `communities`, `decay`, `remember`, `backfill`, `recall`,
   `consolidate`, `sleep` (nightly maintenance + forgetting), `memory` (`export` / `import` — portable
-  memory), `sessions` (`search` / `list` — session search), `context`,
+  memory; `pending` / `approve` / `reject` — the approval step), `sessions` (`search` / `list` — session
+  search), `context`,
   `analyze` (world-model analysis — `coupling` | `gaps` | `memory`, offline), `hook` (host-lifecycle
   memory hook — `inject` / `capture` / `resume`, plus `fold`, the detached worker the MCP server
   spawns after `wiki_remember`; reads the event JSON on stdin), `handoff` (`prepare` /

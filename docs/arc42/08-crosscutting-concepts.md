@@ -121,6 +121,8 @@ The system assumes a **trusted local host** (§3.3, §11 R1):
   (capture, `remember`, the journal, `wiki_remember`), and `sleep` re-applies it to older facts (ADR-32); it matches
   NFKC-normalized text, so full-width or invisible characters can't slip an instruction past it (ADR-37). Session
   search excerpts pass the same policy, sentence by sentence, and the same redaction before an agent sees them (ADR-44).
+  Agent writes can be held for a person's approval (`[memory] approve_writes`, ADR-46) — the gate is the host's
+  permission prompt or the web UI, since no MCP tool approves.
 - **`--dry-run`** — edits can be previewed (no file write, no graph sync) before committing.
 - **No secrets** — OpenWiki needs no API keys (local Ollama, ADR-2), and a credential pasted into a session is
   redacted before it reaches the capture model, the journal, the graph or a handoff (ADR-37).

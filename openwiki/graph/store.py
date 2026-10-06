@@ -34,7 +34,7 @@ from .decay import (
 from .entities import _normalize
 from .journal import (
     append_reindex, append_remember, clear_journal, journal_path,
-    pending_journal, read_journal,
+    pending_journal, read_journal, read_staged, stage_remember, staged_path,
 )
 from .temporal import (
     MANY, ONE, believed_at, close_times, derive_legacy_intervals, plan_merge, question_window, valid_at,
@@ -145,6 +145,7 @@ class GraphStore:
         # B1 concurrency: a read-only store queues deferred writes (remember / edit
         # re-sync) to the op journal; the next writable pass folds them (fold_journal).
         self._journal_path = journal_path(self.db_path)
+        self._staged_path = staged_path(self.db_path)      # v0.110: agent writes awaiting approval
 
     def close(self) -> None:
         self._conn.close()
@@ -948,6 +949,18 @@ class GraphStore:
                                session_date=session_date, correct=correct, retire=retire,
                                agent=agent)
 
+    def stage_remember(self, session_id: str, facts, session_date: Optional[int] = None,
+                       retire=None, agent: bool = True) -> tuple:
+        """Stage a ``remember`` op for a person's approval (``[memory] approve_writes``) instead of
+        queueing it → ``(facts staged, id)``. Works read-only; ``openwiki memory approve`` moves it into
+        the journal."""
+        return stage_remember(self._staged_path, session_id, facts, session_date=session_date,
+                              retire=retire, agent=agent)
+
+    def staged_writes(self) -> list:
+        """The staged writes awaiting approval, oldest first."""
+        return read_staged(self._staged_path)
+
     def match_facts(self, lines) -> tuple:
         """``wiki_remember``'s ``replaces``: find the **believed** facts (current, not forgotten)
         each line names — as ``wiki_memory`` / ``recall`` print them ("- s p o  (since …; session)")
@@ -1039,7 +1052,8 @@ class GraphStore:
                                             dry_run=dry_run)
                         remembered += res.get("added", 0)
                     if rec.get("retire") and not dry_run:   # wiki_remember's replaces → close them
-                        retired += self.retire(rec["retire"], at=int(rec.get("t") or now))
+                        retired += self.retire(rec["retire"],     # an approved staged op: when it was staged
+                                               at=int(rec.get("valid_at") or rec.get("t") or now))
                 elif rec.get("op") == "reindex" and not dry_run:
                     slug = str(rec.get("slug") or "")
                     if slug:

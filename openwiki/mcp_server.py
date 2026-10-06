@@ -119,12 +119,13 @@ class MCPStdioServer:
 # Build the OpenWiki toolset over the existing library.
 # ---------------------------------------------------------------------------
 
-def _remember(graph, index, a: dict, on_queued=None) -> str:
+def _remember(graph, index, a: dict, on_queued=None, stage: bool = False) -> str:
     """``wiki_remember``: screen the agent's facts (P0 security policy; one-off events are
     refused with a hint to record the resulting state), resolve ``replaces`` against the
     believed facts *now* (exact lines only — near misses come back with suggestions), and
     queue one journal op; ``on_queued`` (the CLI's fold worker) folds it within seconds —
-    remember + close the replaced — else the next writable pass does."""
+    remember + close the replaced — else the next writable pass does. With ``stage``
+    (``[memory] approve_writes``) the op is staged for a person's approval instead (v0.110)."""
     import time as _time
     from .graph.memory import MemoryFact, is_ephemeral, is_secret_only, is_unsafe_instruction, redact_fact
     from .graph.temporal import parse_date
@@ -156,6 +157,16 @@ def _remember(graph, index, a: dict, on_queued=None) -> str:
     out = []
     if facts or retire:
         session = "agent-" + _time.strftime("%Y-%m-%d", _time.gmtime(now))
+        if stage:
+            _n, op_id = graph.stage_remember(session, facts, session_date=now, retire=retire, agent=True)
+            out.append(f"Staged {len(facts)} fact(s)"
+                       + (f", closing {len(retire)} replaced fact(s)" if retire else "")
+                       + f" for approval (id {op_id}) — they land in memory once a person approves them "
+                         f"(`openwiki memory pending`, then `openwiki memory approve {op_id}`).")
+            out += [f"  + {f.subject} {f.predicate} {f.object}" for f in facts]
+            out += [f"  − {line}" for line in matched]
+            return "\n".join(out + [f"No current fact matches “{line}” — nothing closed" for line in unmatched]
+                             + notes)
         graph.queue_remember(session, facts, session_date=now, retire=retire, agent=True)
         folding = False
         if on_queued is not None:
@@ -195,7 +206,8 @@ def build_server(wiki_dir, index=None, graph=None, agent=None, name="openwiki",
                  memory_probes: bool = False, memory_writes: bool = False, memory_lexical: float = 0.0,
                  memory_temporal: float = 0.0,
                  handoff: Optional[Callable] = None,
-                 on_remember: Optional[Callable] = None, sessions=None) -> MCPStdioServer:
+                 on_remember: Optional[Callable] = None, sessions=None,
+                 approve_writes: bool = False) -> MCPStdioServer:
     """Assemble the MCP server from already-loaded OpenWiki components.
 
     `index` (SemanticIndex) enables search/ask; `graph` (GraphStore) enables the
@@ -209,6 +221,8 @@ def build_server(wiki_dir, index=None, graph=None, agent=None, name="openwiki",
     `on_remember` (from the CLI) is called after `wiki_remember` queued a write — it starts the
     fold worker, so the write lands within seconds. `sessions` (a ``sessions.SessionCorpus``, from the
     CLI for a Second Brain project) adds `wiki_sessions` — full-text search over earlier sessions' transcripts.
+    `approve_writes` (``[memory] approve_writes``) stages `wiki_remember` writes for a person's approval
+    (``openwiki memory approve``) instead of queueing them.
     """
     from .tools import WikiTools
 
@@ -301,8 +315,11 @@ def build_server(wiki_dir, index=None, graph=None, agent=None, name="openwiki",
                 "is a subject / predicate / object triple. Put the remembered facts your change makes "
                 "outdated in `replaces`, copied as wiki_memory shows them — they are closed (kept as "
                 "history), not deleted. Record the resulting state, not the event (\"v1.2 was "
-                "pushed\" is not kept). Facts land in memory within a minute (a background fold), at the "
-                "latest at the next write pass.",
+                "pushed\" is not kept). "
+                + ("In this project every write is staged for a person's approval and lands once approved."
+                   if approve_writes else
+                   "Facts land in memory within a minute (a background fold), at the latest at the next "
+                   "write pass."),
                 {"facts": {"type": "array", "description": "Facts to remember.", "items": {
                     "type": "object", "properties": {
                         "subject": {"type": "string"}, "predicate": {"type": "string"},
@@ -316,7 +333,9 @@ def build_server(wiki_dir, index=None, graph=None, agent=None, name="openwiki",
                  "source": {"type": "string", "enum": ["assistant", "user"],
                             "description": "Who established it: you (default) or the user's decision."}},
                 []))
-            handlers["wiki_remember"] = lambda a: _remember(graph, index, a, on_queued=on_remember)
+            handlers["wiki_remember"] = lambda a: _remember(graph, index, a,
+                                                            on_queued=None if approve_writes else on_remember,
+                                                            stage=approve_writes)
 
         # Global search needs a chat model (from the agent) + community summaries.
         if agent is not None and _graph_has_communities(graph):

@@ -281,6 +281,10 @@ sequenceDiagram
   F->>GS: fold_journal: remember(facts) (no B9 for agent ops), then retire(ids, at = op time)
 ```
 
+With `[memory] approve_writes` (v0.110, ADR-46) the op goes to `graph.staged.jsonl` instead and no fold starts;
+`openwiki memory approve` (or the Gedächtnis tab) moves it into the journal — valid from when it was staged, recorded
+when approved — and starts the fold worker; `reject` moves it to `graph.rejected.jsonl`.
+
 ## 6.11 Scenario: A session hands over to the next (`owiki handoff`, `SessionStart`)
 
 Memory carries facts across sessions; the handoff carries the narrative — what was decided, what's half done, what

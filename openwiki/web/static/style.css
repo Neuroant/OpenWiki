@@ -517,3 +517,10 @@ header {
 /* -- #1 inline citation links ("Abschnitt 1.6" → the page it cites) ------- */
 .content a.cite-link { color: var(--accent); text-decoration: none; border-bottom: 1px solid transparent; }
 .content a.cite-link:hover { border-bottom-color: var(--accent); }
+
+/* v0.110: the agent's memory writes awaiting approval */
+.mem-staged { border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; margin: 6px 0; }
+.mem-staged-h { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.mem-staged-h .muted { flex: 1; }
+.mem-staged-add { color: var(--ok, #2e7d32); font-size: 0.92em; }
+.mem-staged-del { color: var(--muted); text-decoration: line-through; font-size: 0.92em; }

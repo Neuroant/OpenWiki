@@ -90,7 +90,7 @@ capture style (D14, §13.10) gained +2.8 points on 4 LoCoMo conversations, not s
 10. [Recommended first slice](#10-recommended-first-slice)
 11. [Prior art & learnings — "Cognitive Substrate"](#11-prior-art--learnings--cognitive-substrate)
 12. [Second-Brain refinements (B7 / B9 built; A2 / B8 open)](#12-second-brain-refinements-b7--b9-built-a2--b8-open)
-13. [Memory hygiene, implicit recall and the LoCoMo benchmark (built v0.86 to v0.109)](#13-memory-hygiene-implicit-recall-and-the-locomo-benchmark-built-v086-to-v0109)
+13. [Memory hygiene, implicit recall and the LoCoMo benchmark (built v0.86 to v0.110)](#13-memory-hygiene-implicit-recall-and-the-locomo-benchmark-built-v086-to-v0110)
 
 ---
 
@@ -873,7 +873,7 @@ errs toward "different thing" (safe: fragmentation over a wrong merge); descript
 extra coexistence calls; subject identity is only inferred inside a resolved group (no general
 subject resolution).
 
-## 13. Memory hygiene, implicit recall and the LoCoMo benchmark (built v0.86 to v0.109)
+## 13. Memory hygiene, implicit recall and the LoCoMo benchmark (built v0.86 to v0.110)
 
 *Planned from the cognitive-agent report (B10+); every item below was built or measured — see §13.1–13.12.*
 
@@ -1369,6 +1369,40 @@ The largest single step so far ("Not mentioned" on single-hop 219 → 178). **Ad
 the live context — the hooks assemble k = 8 within a 2,000-character budget, a per-prompt token cost; the finding
 suggests trying a larger k there, measured on that path (→ §13.12). LoCoMo now: **overall J 60.7 %** with a local
 30B (Mem0 reports ≈ 67 % with GPT-4o-mini — and both are generous-judge numbers).
+
+### 13.27 The approval step — a gate for agent writes; no always-present core (v0.110)
+
+Item 13 of the plan in `agent-memory-summary.md`: the journal as the staging area for agent writes and for an
+always-present core. Hermes offers an optional write approval — every write staged (`pending`, `approve`, `reject`),
+a staged replacement pinned to the exact entry it was reviewed against; memory-champ puts procedures behind a
+signature the agent cannot produce. Two questions first, judged on the dogfooding session.
+
+**How many writes would a person review?** The agent's `wiki_remember` writes over three days of active work: 35 ops
+(9, 15 and 11 a day) with 112 facts and 48 replacements — about a dozen approvals a day, each with three facts or so.
+Feasible as a batch review, too much as a default. Captures stay ungated: the memory policy and credential redaction
+screen them, and they would add about a hundred facts a day (318 in the same three days).
+
+**What would an always-present core hold?** One of the 1,187 current facts is tagged as said by the user (facts captured
+before v0.86 carry no source); of the 318 facts captured since and still queued, 19 are — and none is a standing
+convention: they describe what the user asked for ("the session-restart skill has mode prepare", another project's
+handoff files), and some are mis-tagged ("OpenWiki current release is v0.106.0" as said by the user). This project's
+standing conventions — the commit trailer, evals in the foreground in short chunks, LoCoMo data never committed —
+live in the user's `CLAUDE.local.md` and the host's own memory, both always present already. A core filled from
+capture would have nothing to hold; one written by hand is what the identity tier already is. **Not built.**
+
+**Built: the approval step, opt-in.** With `[memory] approve_writes = true` the MCP tool `wiki_remember` stages its op
+in a sidecar next to the journal (`graph.staged.jsonl`, an id per op) instead of queueing it — the tool's description
+and reply say so, and no fold starts. `openwiki memory pending` lists the staged writes (the facts to add, the facts to
+close as memory prints them); `memory approve ID … | --all` moves them into the journal and starts the fold worker;
+`memory reject ID … | --all` moves them to an audit log (`graph.rejected.jsonl`). The Gedächtnis tab shows the same
+list under "Zur Freigabe" with Freigeben / Verwerfen; `openwiki status` and the handoff brief say how many writes
+await approval. An approved write is **valid from when the agent staged it** — its facts, and the end of what it
+replaces — and **recorded when approved**: until then memory did not believe it, so `recall --known-at` between the two
+leaves it out (B7). **Pinning comes by construction:** a staged replacement names facts by id, a fact's content never
+changes (a new value is a new fact), and closing skips a fact already closed — an approval closes exactly the fact the
+reviewer saw, or nothing; a staged fact that a newer value overtook meanwhile lands in history through the valid-time
+merge. No MCP tool approves: approval happens in the user's terminal, through the host's permission prompt (which shows
+the command), or in the web UI — a gate against unreviewed writes, not a boundary against an agent with a shell.
 
 ### 13.26 Volatility classes — measured; a review list instead of a label (v0.109)
 

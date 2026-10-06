@@ -285,7 +285,11 @@ zusätzlich einen **Gedächtnis-Tier**: Fakten, die aus Sitzungen *erinnert* wer
   *gespeichert hatte*, vor späteren Korrekturen (Transaktionszeit, `recall --known-at`);
   „heute" setzt beide zurück;
 - **Themen-Karten** (konsolidierte Konzepte) und eine durchsuchbare **Faktentabelle**
-  (mit **Gültig**-Spalte, Konfidenz und Status).
+  (mit **Gültig**-Spalte, Konfidenz und Status);
+- **Zur Freigabe** — mit `approve_writes = true` unter `[memory]` legt der Agent seine Schreibvorgänge
+  (`wiki_remember`) nur vor: was er hinzufügen (+) und was er schließen (−) will. **Freigeben** lässt den
+  Vorgang ins Gedächtnis (gültig ab dem Zeitpunkt, an dem der Agent ihn vorgelegt hat), **Verwerfen** legt
+  ihn in ein Prüfprotokoll. Auf der Kommandozeile: `openwiki memory pending` / `approve` / `reject`.
 
 **Zeit im Gedächtnis (bitemporal).** Jeder Fakt kennt zwei Zeiten: *wann er in der Welt
 galt* (z. B. „seit 2025-09-16" — aus einem im Gespräch genannten Datum, sonst dem

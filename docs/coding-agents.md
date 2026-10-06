@@ -189,6 +189,12 @@ reliably infer it afterwards (`docs/path-b-memory.md` §13.4–13.6). A line suc
 memory describes, record the new state with wiki_remember and list the outdated facts in `replaces`"* in your
 `CLAUDE.md` makes the agent use it.
 
+**Approve the agent's writes first (opt-in).** With `approve_writes = true` under `[memory]`, `wiki_remember` stages
+each write instead of storing it: `owiki memory pending` shows what the agent wants to add and what it would close,
+`owiki memory approve ID` (or `--all`) lets it land, `owiki memory reject ID` drops it into an audit log — or use the
+Gedächtnis tab's "Zur Freigabe" in `owiki serve`. An approved fact counts from when the agent made the change. No MCP
+tool can approve; captured sessions are not staged.
+
 **Review what may be outdated.** `owiki analyze memory --review` lists the remembered facts of kinds that go stale on
 their own — plans, counts, gaps, versions, running states —, each as the line `replaces` takes. Have the agent check
 them against the project and correct the outdated ones with `wiki_remember`; on the dogfooding memory about 1 in 4 was

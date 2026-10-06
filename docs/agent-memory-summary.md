@@ -193,7 +193,11 @@ already have, then changes that only real sessions can judge. Each names where i
     were no older than the rest. `analyze memory --review` lists the volatile kinds as `replaces` lines; one pass
     closed 39 stale facts (`path-b-memory.md` §13.26).
 13. **An approval step** — the journal as the staging area for agent writes and for an always-present core
-    (memory-champ, Hermes).
+    (memory-champ, Hermes). **Done in v0.110 for agent writes:** opt-in `[memory] approve_writes` stages
+    `wiki_remember` next to the journal until a person approves (`openwiki memory pending` / `approve` / `reject`, the
+    Gedächtnis tab), valid from staging, recorded at approval; about a dozen approvals a day on the dogfooding session,
+    so off by default. **No core:** none of the 19 user-tagged captured facts was a standing convention — those live in
+    `CLAUDE.local.md` and the host's memory (`path-b-memory.md` §13.27).
 14. **Procedural memory from errors** — failure → fix pairs, with Hermes' guardrails: no negative tool claims, no
     unresolved failure presented as a method (MIRIX, Mem0's plugin, Hermes).
 15. **A use signal first** — git co-changes as edges for code corpora, before any learning-from-use method (the

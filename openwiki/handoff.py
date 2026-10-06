@@ -537,12 +537,13 @@ def queued_writes(graph_path, limit: int = 10) -> dict:
     ops and facts by origin (capture / the agent's ``wiki_remember``), facts they close, and the
     agent's facts — its recorded decisions and new states."""
     try:
-        from .graph.journal import journal_path, read_journal
+        from .graph.journal import journal_path, read_journal, read_staged, staged_path
         recs = read_journal(journal_path(graph_path))
+        staged = len(read_staged(staged_path(graph_path)))
     except Exception:
         return {"ops": 0}
     out = {"ops": len(recs), "facts": 0, "retire": 0, "agent_ops": 0, "capture_ops": 0,
-           "reindex": 0, "agent_facts": []}
+           "reindex": 0, "agent_facts": [], "staged": staged}
     for r in recs:
         if r.get("op") != "remember":
             out["reindex"] += 1
@@ -748,13 +749,15 @@ def _origin_text(groups: dict, own: str) -> str:
 
 
 def _queued_text(q: dict) -> str:
+    staged = (f"; {q['staged']} agent write(s) await approval (`owiki memory pending`)"
+              if q.get("staged") else "")
     if not q.get("ops"):
-        return "no writes queued"
+        return "no writes queued" + staged
     parts = [f"{q.get('facts', 0)} fact(s)"]
     if q.get("retire"):
         parts.append(f"closing {q['retire']}")
     return (f"{q['ops']} write(s) queued ({', '.join(parts)}) — they land at the next write pass "
-            "(session end or `owiki sleep`)")
+            "(session end or `owiki sleep`)" + staged)
 
 
 def _env_summary(env: dict) -> str:

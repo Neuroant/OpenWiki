@@ -877,9 +877,24 @@ function renderMemoryView(data) {
       <td class="num">${f.confidence}</td>
       <td>${memStatusBadge(f.status || (f.superseded ? "past" : ""))}${f.source === "material" ? " " + MEM_MATERIAL_BADGE : ""}</td></tr>`).join("");
 
+  const staged = data.staged || [];
+  const stagedBox = staged.length || data.approve_writes ? `
+    <h3 class="mem-h3"><span>Zur Freigabe <span class="muted">· ${staged.length} ${staged.length === 1 ? "Schreibvorgang" : "Schreibvorgänge"} des Agenten</span></span>
+      ${staged.length > 1 ? `<button class="mem-decide linkish" data-decision="approve" data-all="1">alle freigeben</button>
+      <button class="mem-decide linkish" data-decision="reject" data-all="1">alle verwerfen</button>` : ""}</h3>
+    ${staged.length ? staged.map((w) => `
+      <div class="mem-staged"><div class="mem-staged-h"><code>${escapeHtml(w.id)}</code>
+        <span class="muted">${w.t ? new Date(w.t * 1000).toLocaleString() : ""} · ${escapeHtml(w.session || "")}</span>
+        <button class="mem-decide" data-decision="approve" data-id="${escapeHtml(w.id)}">Freigeben</button>
+        <button class="mem-decide secondary" data-decision="reject" data-id="${escapeHtml(w.id)}">Verwerfen</button></div>
+        ${w.facts.map((f) => `<div class="mem-staged-add">+ ${escapeHtml(f)}</div>`).join("")}
+        ${w.closes.map((f) => `<div class="mem-staged-del">− ${escapeHtml(f.replace(/^- /, ""))}</div>`).join("")}</div>`).join("")
+      : `<p class="muted">Keine Schreibvorgänge warten auf Freigabe.</p>`}` : "";
+
   return `<div class="mem-head"><strong>Gedächtnis</strong>
       <span class="muted">Path B · Second Brain — was frühere Sitzungen hinterlassen haben</span></div>
     ${identity}${chips}
+    ${stagedBox}
     <h3 class="mem-h3">Abruf &amp; Kontext</h3>
     ${recallBox}
     ${themes}
@@ -910,6 +925,19 @@ async function renderMemory() {
 }
 
 function wireMemory() {
+  document.querySelectorAll(".mem-decide").forEach((btn) => btn.addEventListener("click", async () => {
+    const decision = btn.dataset.decision;
+    const body = btn.dataset.all ? { all: true } : { ids: [btn.dataset.id] };
+    btn.disabled = true;
+    try {
+      await postJSON(`/api/memory/${decision}`, body);
+    } catch (e) {
+      btn.disabled = false;
+      alert(`Fehler: ${e.message}`);
+      return;
+    }
+    renderMemory();
+  }));
   const table = $("#mem-table");
   const sup = $("#mem-show-sup");
   if (sup && table) sup.addEventListener("change", () => table.classList.toggle("show-sup", sup.checked));

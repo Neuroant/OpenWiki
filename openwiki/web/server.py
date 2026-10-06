@@ -36,8 +36,9 @@ _CONTENT_TYPES = {
 class WikiWebApp:
     def __init__(self, wiki_dir, index: Optional[SemanticIndex] = None,
                  agent: Optional[WikiAgent] = None, tools: Optional[WikiTools] = None,
-                 graph=None, dry_run: bool = False, project=None) -> None:
+                 graph=None, dry_run: bool = False, project=None, on_approved=None) -> None:
         self.wiki_dir = Path(wiki_dir)
+        self.on_approved = on_approved   # v0.110: starts a fold after staged memory writes were approved
         self.index = index
         self.tools = tools or WikiTools(wiki_dir, index=index, dry_run=dry_run)
         self.agent = agent
@@ -655,7 +656,56 @@ class WikiWebApp:
             "stats": self.graph.memory_overview(),
             "themes": self.graph.memory_concepts(),
             "assertions": self.graph.list_assertions(limit=200),
+            "approve_writes": bool(self.project is not None and self.project.approve_writes),
+            "staged": self.memory_staged(),
         }
+
+    def _graph_db_path(self):
+        path = getattr(self.graph, "db_path", None)
+        if path is None and self.project is not None:
+            path = self.project.graph_path
+        return path
+
+    def memory_staged(self) -> list:
+        """v0.110: the agent's memory writes awaiting approval — what each adds and the facts it would
+        close (as memory prints them). Read-only."""
+        path = self._graph_db_path()
+        if path is None:
+            return []
+        from ..graph.journal import read_staged, staged_path
+        recs = read_staged(staged_path(path))
+        ids = {i for r in recs for i in r.get("retire") or []}
+        lines: dict = {}
+        if ids and self.graph is not None:
+            try:
+                from ..graph.memory import fact_line
+                lines = {a["id"]: fact_line(a) for a in self.graph.list_assertions(limit=1_000_000)
+                         if a["id"] in ids}
+            except Exception:
+                lines = {}
+        return [{"id": r["id"], "t": r.get("t"), "session": r.get("session", ""),
+                 "facts": [f"{f[0]} {f[1]} {f[2]}" for f in r.get("facts", [])],
+                 "closes": [lines.get(i, f"fact {i}") for i in r.get("retire") or []]} for r in recs]
+
+    def memory_decide(self, decision: str, ids=None) -> dict:
+        """Approve or reject staged memory writes (``ids`` None = all of them). Approved writes move into the
+        journal — a fold applies them (started right away when the server belongs to a project, else at the
+        next write pass); rejected ones go to the audit log."""
+        path = self._graph_db_path()
+        if path is None:
+            raise RuntimeError("no graph")
+        from ..graph.journal import approve_staged, journal_path, reject_staged, rejected_path, staged_path
+        if decision == "approve":
+            done = approve_staged(staged_path(path), journal_path(path), ids)
+            folding = False
+            if done and self.on_approved is not None:
+                try:
+                    folding = self.on_approved() is not False
+                except Exception:
+                    folding = False
+            return {"approved": [r["id"] for r in done], "folding": folding}
+        done = reject_staged(staged_path(path), rejected_path(path), ids)
+        return {"rejected": [r["id"] for r in done]}
 
     def memory_recall(self, query: str, k: int = 8, include_superseded: bool = False,
                       as_of=None, known_at=None) -> dict:
@@ -999,6 +1049,12 @@ def make_handler(app: WikiWebApp):
                     if not query:
                         return self._json({"error": "empty query"}, 400)
                     return self._json(app.memory_context(query, as_of=data.get("as_of")))
+                if path in ("/api/memory/approve", "/api/memory/reject"):
+                    ids = data.get("ids")
+                    if not data.get("all") and not ids:
+                        return self._json({"error": "name the staged writes (ids) or pass all"}, 400)
+                    return self._json(app.memory_decide(path.rsplit("/", 1)[1],
+                                                        None if data.get("all") else [str(i) for i in ids]))
                 if path == "/api/timeline":
                     query = (data.get("query") or "").strip()
                     if not query:

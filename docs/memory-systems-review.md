@@ -9,7 +9,7 @@ code and docs, not its marketing, and measured against the same yardstick.
 path) · time and contradictions · consolidation · forgetting and hygiene · identity and procedural memory ·
 agent writes · surfaces and sharing · evaluation.
 
-**The summary** of the series — all twelve at a glance, what separates them, where they agree, where OpenWiki
+**The summary** of the series — all thirteen at a glance, what separates them, where they agree, where OpenWiki
 stands, and the plan — is in [`agent-memory-summary.md`](agent-memory-summary.md).
 
 ## Contents
@@ -27,6 +27,7 @@ stands, and the plan — is in [`agent-memory-summary.md`](agent-memory-summary.
 12. [Hermes Agent](#12-hermes-agent) (reviewed 2026-10-04)
 13. [A design report: predictive world models through transfer entropy](#13-a-design-report-predictive-world-models-through-transfer-entropy)
     (reviewed 2026-10-04 — a proposal, not a system)
+14. [HippoRAG 2](#14-hipporag-2) (reviewed 2026-10-08 — first of the brain-inspired shortlist)
 - [Across the series — what it suggests for OpenWiki](#across-the-series--what-it-suggests-for-openwiki)
 - [Candidates — world models and CoALA](#candidates--world-models-and-coala)
 
@@ -1385,12 +1386,121 @@ denser, testable substitute.
 
 ---
 
+## 14. HippoRAG 2
+
+*Sources: [github.com/OSU-NLP-Group/HippoRAG](https://github.com/OSU-NLP-Group/HippoRAG) at `d5c8329` (2026-10-06),
+MIT, Python (about 9,200 lines in `src/hipporag`), with an MCP server and a Claude Code plugin added in October 2026;
+the paper "From RAG to Memory: Non-Parametric Continual Learning for Large Language Models" (Gutiérrez, Shu, Qi, Zhou,
+Su; Ohio State / UIUC; [arXiv 2502.14802](https://arxiv.org/abs/2502.14802), ICML 2025). The first review from the
+brain-inspired part of the [shortlist](#candidates--world-models-and-coala), after the plan was complete.*
+
+**What it is.** A retrieval library named after the hippocampal indexing theory: the language model as neocortex, a
+knowledge graph walked by Personalized PageRank as the hippocampal index. It frames retrieval as *memory* —
+"non-parametric continual learning": new documents enter the index without training a model, and the graph lets a
+question reach passages that share no words with it. Since October 2026 an MCP server and a Claude Code plugin offer
+it as long-term memory for coding agents.
+
+### How its memory works
+- **Indexing: two LLM calls per passage.** Named-entity recognition, then triple extraction conditioned on those
+  entities (one-shot prompts); triples are normalized (case-folded, punctuation removed). The graph has **phrase
+  nodes** (subjects and objects), **fact edges** between them (weighted by how often the pair was extracted), **passage
+  nodes** linked to the phrases of their triples ("context edges"), and **synonym edges** between phrases whose
+  embeddings are at least 0.8 similar (up to 100 per phrase). Passages, facts (embedded as their tuple string) and
+  phrases are all embedded — NV-Embed-v2 (7B) in the paper; the plugin defaults to OpenAI's gpt-4o-mini and
+  text-embedding-3-small.
+- **Retrieval: question → facts → PageRank.** The question is embedded and every fact scored by similarity; the top 5
+  go to **recognition memory** — one LLM call with a DSPy-optimized prompt and ten demonstrations that keeps the
+  relevant ones. Their subjects and objects become the walk's seeds, each weighted by the fact's score divided by the
+  number of passages the phrase occurs in (a specificity weight), the best 5 kept; every passage is seeded too, with its
+  dense score × 0.05. Personalized PageRank (damping 0.5, undirected, weighted) then ranks the passages. If no fact
+  survives the filter, retrieval falls back to plain dense search.
+- **Updates.** Incremental indexing (only new passages' triples and synonyms) and deletion by passage or source —
+  edges carry the passages that produced them. No notion of time and no contradictions: a fact stays exactly as long as
+  its passage does.
+- **Evaluation** (paper; Llama-3.3-70B for extraction, filter and answers): retrieval Recall@5 over five sets
+  **78.2 vs 73.4** for NV-Embed-v2 alone — MuSiQue 74.7 vs 69.7, 2Wiki 90.4 vs 76.5, HotpotQA 96.3 vs 94.5, NQ 78.0 vs
+  75.4, PopQA 51.7 vs 51.0; QA F1 over seven sets 59.8 vs 57.0, ahead of GraphRAG (49.6), RAPTOR (48.8) and LightRAG
+  (6.6). The ablations (multi-hop Recall@5) say where the gain comes from: linking the question to **facts** (87.1)
+  rather than to entities (74.6 via NER, 59.6 via embeddings); seeding the passages too (+6.1); the LLM filter adds
+  0.7. Cost on MuSiQue's corpus: indexing 99.5 minutes vs 12.1 for dense retrieval, 1.2 s per question vs 0.3 s.
+
+### The description, against the code
+- The plugin's skill says `retrieve` "makes no LLM call". In the default (online) mode every retrieval runs the
+  recognition filter — one call to the configured LLM per question (`rerank_facts` → `DSPyFilter`). In offline mode
+  the filter is absent, the call on it raises inside a `try`, and retrieval silently falls back to dense search.
+- "Every new passage costs one LLM extraction call" — two: recognition, then extraction.
+- The plugin installs the repository's current `HEAD` through `uvx` at first launch — an unpinned dependency — and
+  sends documents to OpenAI unless both endpoints are pointed elsewhere.
+
+### Side by side
+
+| | HippoRAG 2 | OpenWiki |
+|---|---|---|
+| Purpose | retrieval over a document collection, framed as continual learning | a document wiki and a session memory under a coding agent |
+| Units | short passages + extracted triples | pages and chunks + typed entities and relations; facts with valid time |
+| Write path | two LLM calls per passage | entities and relations: one call each per page (opt-in); memory: one capture call per window |
+| Retrieval | question → facts, an LLM filter, PageRank over phrases and passages | dense + BM25 over chunks, graph expansion for answers; memory: dense recall with a BM25 aid and a time window |
+| Time, contradictions | none | bi-temporal facts, supersession |
+| Hygiene | none | the P0 policy, credential redaction |
+| Surfaces | Python, MCP (`index` / `retrieve` / `rag_qa` / `delete`), a Claude Code plugin | CLI, web UI, MCP |
+| Evaluation | NQ, PopQA, MuSiQue, 2Wiki, HotpotQA, LV-Eval, NarrativeQA | own sets, LoCoMo |
+
+### Against OpenWiki's data
+One claim matters for us: PageRank over a fact graph retrieves better than dense similarity, above all where a
+question needs several passages. HippoRAG 2's retrieval was rebuilt from its code (`graph_search_with_fact_entities`,
+`run_ppr`; model-free apart from the filter) and checked three times (`RAG-vs-GraphRAG.md` Finding 5,
+`path-b-memory.md` §13.30):
+
+1. **Its own setting, our models.** MuSiQue as HippoRAG ships it — 1,000 multi-hop questions, 11,656 passages,
+   140,825 triples extracted by Llama-3.3-70B — with bge-m3 instead of NV-Embed-v2 and our local 30B running its filter
+   prompt: Recall@5 **54.2 → 61.9 %** (248 questions better, 85 worse; p ≈ 10⁻¹⁹), R@2 40.5 → 44.9 %. Without the
+   filter only 56.1 % (R@2 35.8 %). The method replicates — with a weaker embedder the filter carries most of it.
+2. **The informatik wiki** (120 pages, 4,056 chunks, 2,193 entities, 1,875 typed relations; the RAG-vs-GraphRAG
+   question sets), entities as phrases, relations as facts. With pages as passages the walk loses everywhere
+   (definitional MRR 0.595 vs 0.848, relational recall@5 50.0 vs 70.8 %); with chunks as passages it is even on recall
+   and trades MRR — relational 0.610 vs 0.468 (6 questions better, 4 worse), definitional 0.762 vs 0.848 (1 / 4); the
+   filter changes nothing beyond noise.
+3. **LoCoMo memory** (1,540 questions, the offline check of §13.20 — the gold answer's words among the top 20 facts):
+   facts as passages, their subjects and objects as phrases — **0.428**, against 0.430 for dense recall alone and
+   0.456 for production recall; on multi-hop, with the filter, 0.474 vs 0.482 dense and 0.501 production.
+
+### What we learn
+1. **Link the question to facts, not to entities.** It is the part of HippoRAG 2 that carries its gains, and our
+   memory recall already works that way — every remembered fact is scored against the question.
+2. **With a weaker embedder, the filter is the method.** The paper credits its LLM filter with 0.7 points; with bge-m3
+   it was worth 5.8 (56.1 → 61.9 %) — the facts a question links to are noisier, and the filter keeps 2.3 of 5.
+3. **The walk needs bridge questions and dense triples.** MuSiQue's questions pass through an entity they don't name,
+   and each of its passages carries about 12 triples. Our wiki questions name their topics, our relation layer has
+   0.46 relations per chunk, and the facts a LoCoMo multi-hop question needs are linked by meaning, not by a shared
+   subject or object (§13.20) — on such data dense similarity is hard to beat.
+4. **Graph retrieval needs small passages.** Our wiki pages carry about 25 entities each; PageRank drains into
+   entity-rich pages, and at page level it lost to dense search on every measure.
+5. **A specificity weight for graph seeds.** HippoRAG divides a seed's weight by the number of passages its phrase
+   occurs in — an IDF for walks. Our GraphRAG expansion treats every neighbour alike.
+
+### What we would not adopt
+- **Open extraction over every chunk** with a local 30B: two calls per passage — about 8,000 calls for the informatik
+  wiki, 11–22 hours — plus a filter call per question, for a gain our questions would not see.
+- **PageRank as the ranking of memory recall** — below dense recall even with the filter (§13.30).
+- **The plugin's defaults** for a local-first setup: documents to OpenAI, an unpinned install, an LLM call per
+  retrieval the description says is free.
+
+**In short.** HippoRAG 2 is a careful, well-measured retrieval method: the question finds facts, an LLM keeps the
+relevant ones, and a PageRank walk from their entities lifts passages connected through them. It replicates with local
+models on its own benchmark — +7.7 points of Recall@5 on MuSiQue, most of it from the filter — but needs two things
+OpenWiki's data lacks: questions that bridge through an entity they don't name, and a dozen triples per passage. On the
+informatik wiki the walk is mixed at best, on the memory below dense recall. What transfers is the order of its steps:
+link the question to facts first.
+
+---
+
 ## Across the series — what it suggests for OpenWiki
 
-Twelve systems — six in a first round, then Hindsight, MIRIX, AriGraph, Nemori and memory-champ from the world-model
-shortlist, and Hermes Agent on request — read from their source in October 2026, plus one design report (§13). Where OpenWiki stands out: a real time model (only Graphiti matches it; Hindsight has event and
+Thirteen systems — six in a first round, then Hindsight, MIRIX, AriGraph, Nemori and memory-champ from the world-model
+shortlist, Hermes Agent on request and HippoRAG 2 from the brain-inspired part — read from their source in October 2026,
+plus one design report (§13). Where OpenWiki stands out: a real time model (only Graphiti matches it; Hindsight has event and
 mention time; Mem0 keeps time-aware retrieval on its hosted platform; Cognee has a query-time window),
-deterministic hygiene against poisoning (of the twelve, only Hermes Agent has a comparable policy — a threat-pattern
+deterministic hygiene against poisoning (of the thirteen, only Hermes Agent has a comparable policy — a threat-pattern
 scan on memory writes), policy-based forgetting,
 local-first operation on a 30B model, and audited measurement. Where it lags, the same gaps recur — and Hindsight
 shows how large the distance can be (83.6 % on LongMemEval with a 20B open model):
@@ -1409,7 +1519,7 @@ shows how large the distance can be (83.6 % on LongMemEval with a 20B open model
 | Richer context than atomic facts | waku (episodes), Graphiti (sagas), Mem0 (rich memories), Cognee (lessons with reasons), Hindsight (5W facts), Nemori (dated narrative episodes) | **measured in v0.106** (path-b §13.22): one dated narrative per session next to the facts — LoCoMo 62.9 → 74.7 % J, adversarial −12 | not for the live path — they invent (§13.23); verbatim session excerpts did better at the same size (§13.25) | — |
 | Write-time model judgments | Mem0 dropped them; Letta and LangMem rely on strong curators; Hindsight confines them to a derived layer over immutable facts | **measured in v0.105** (path-b §13.21): on LoCoMo add-only is as good (63.8 vs 62.9 %, n.s.); on changing state the checks are needed (13 / 13 vs 12 / 13 add-only, 10 / 13 tags alone) | keep both checks | — |
 | Time in the question | Cognee (query-time window), Mem0 platform, Hindsight and MIRIX (rule-based date parsers) | **done in v0.104** — before, recall ignored times in the query | a bonus for facts whose valid time falls in the question's window (rule-based) — done: LoCoMo dated questions 46.2 → 56.2 %, overall +1.3 J (p ≈ 5·10⁻⁵) | — |
-| Multi-hop recall by expansion | AriGraph (semantic BFS over triplets), Graphiti (BFS from entities), Hindsight (graph links), Cognee (graph completion) | **measured, not adopted** (path-b §13.20): linked facts lost to the ranking's own next candidates | expansion through shared subjects / objects, words or embeddings, depth 1–2 — offline, worse when swapped in and when added | — |
+| Multi-hop recall by expansion | AriGraph (semantic BFS over triplets), Graphiti (BFS from entities), Hindsight (graph links), Cognee (graph completion), HippoRAG 2 (PageRank from the facts a question links to) | **measured, not adopted** (path-b §13.20, §13.30): linked facts lost to the ranking's own next candidates; HippoRAG 2's walk stayed below dense recall even with its LLM filter (multi-hop 0.474 vs 0.482) | expansion through shared subjects / objects, words or embeddings, depth 1–2 — offline, worse when swapped in and when added; PageRank over facts replicated on MuSiQue (+7.7 Recall@5), not on our memory or wiki | — |
 | Typed memory | waku (facts / episodes / skills / persona), Letta (core / deferred / skills), Hindsight (world / experience), MIRIX (six purpose types), memory-champ (episodic / semantic / procedural, per-type write gates) | one untyped fact store (`source` tags only) | a type tag at capture, per-type recall budgets | small–medium |
 | Procedural memory from errors | Mem0 plugin (failed commands with fixes), MIRIX (tool errors → skills), Hermes (skills from corrections and fixes — never negative tool claims or unresolved failures) | **done in v0.111 as a review list** (path-b §13.28): `owiki sessions lessons` — lessons learned on two or more days from resolved failures, with the guardrails; the model alone called 121 of 122 failures a lesson | recorded by a person where the agent always sees them | — |
 | Staleness by volatility | memory-champ (stable / slow / volatile facts, rechecked after 365 / 90 / 14 days) | stale "current" facts persist until restated or corrected via `wiki_remember` (D12) | **measured in v0.109** (path-b §13.26): out of sample the phrasing rule's flags were 25 % stale — a review list (`analyze memory --review`), not a "possibly outdated" label; refined rules and the local model's tags did worse | — | — |
@@ -1444,7 +1554,7 @@ ground-truth tier, consolidation as a sleep cycle, perception from many sources)
 
 **Brain-inspired and theory**
 6. **[HippoRAG 2](https://arxiv.org/abs/2502.14802)** (ICML 2025) — the LLM as neocortex, a knowledge graph with
-   Personalized PageRank as hippocampus; non-parametric continual learning over documents.
+   Personalized PageRank as hippocampus; non-parametric continual learning over documents. → [§14](#14-hipporag-2)
 7. **[Human-Inspired Memory Architecture for LLM Agents](https://arxiv.org/abs/2605.08538)** (Microsoft Research) —
    sleep consolidation, interference-based forgetting, engram maturation, reconsolidation on retrieval, an entity
    graph, multi-cue retrieval; a streaming LongMemEval evaluation (475 sessions, ~540 K turns).

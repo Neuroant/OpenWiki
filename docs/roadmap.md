@@ -931,6 +931,15 @@ The **genuine gaps**, measure-first as always:
   set (paired, 2 captures, no probes) the cue reached the context 8/16 → 16/16 and the constraint was applied
   7/16 → 12/16 (+5 / −0). Adopted: `[memory] context_k` (default 16) + `context_budget` 2,000 → 3,000; facts may
   use theme budget the themes don't need. `path-b-memory.md` §13.12.
+- **HippoRAG 2 — replicated on its benchmark, not adopted.** The first review from the shortlist's brain-inspired
+  part (`memory-systems-review.md` §14): retrieval as a PageRank walk from the facts a question links to, with an LLM
+  filter in between. Rebuilt from its code with our local models, on its own MuSiQue setting (1,000 questions, its
+  70B triples) it beat dense retrieval clearly — Recall@5 54.2 → 61.9 % (248 better / 85 worse), most of it from the
+  filter. On our data it did not: over the informatik wiki's entities and relations it is even on recall and trades
+  MRR (relational 0.468 → 0.610, definitional 0.848 → 0.762), over the LoCoMo memory it stays below dense recall even
+  with the filter (multi-hop coverage 0.474 vs 0.482; production 0.501). Its gains need questions that bridge through
+  an unnamed entity and a dozen triples per passage. No code. `docs/RAG-vs-GraphRAG.md` Finding 5,
+  `docs/path-b-memory.md` §13.30.
 - **A use signal first — git co-changes (v0.112).** Item 15, the last of the review series' plan: files that change
   together in commits as `CO_CHANGED` edges for code corpora (built from `git log`, refreshed by `openwiki cochange`).
   Online over this repository's history, co-change found 51 % of the specific files a commit touched in the top 10 —

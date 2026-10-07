@@ -1,6 +1,6 @@
-# Agent memory — what twelve systems teach OpenWiki
+# Agent memory — what thirteen systems teach OpenWiki
 
-The summary of [`memory-systems-review.md`](memory-systems-review.md): twelve agent-memory systems, read from their
+The summary of [`memory-systems-review.md`](memory-systems-review.md): thirteen agent-memory systems, read from their
 source code in October 2026 and compared with OpenWiki's memory tier (Path B, [`path-b-memory.md`](path-b-memory.md)),
 plus one design report. What each system is, what separates them, where they agree, where OpenWiki stands — and what
 we will do about it.
@@ -29,6 +29,7 @@ experiments we can measure on graphs we already have, then the changes only real
 | 10 | [Nemori](memory-systems-review.md#10-nemori) | topic-segmented episodes, predict–calibrate | Postgres + Qdrant | four model calls per segment | dated episodes | LoCoMo 0.83 (gpt-4.1-mini) |
 | 11 | [memory-champ](memory-systems-review.md#11-memory-champ) | CoALA as an MCP service, without a model of its own | SQLite + sqlite-vec + FTS5 | the host agent, through tools | volatility classes | acceptance tests |
 | 12 | [Hermes Agent](memory-systems-review.md#12-hermes-agent) | a self-hosted agent harness with a memory slot | two Markdown files + SQLite FTS5 | the agent + a background review every 10 turns | none | behavior probes |
+| 13 | [HippoRAG 2](memory-systems-review.md#14-hipporag-2) | retrieval as memory: a fact graph walked by PageRank | Parquet stores + an igraph graph | two LLM calls per passage (open extraction) | none | MuSiQue Recall@5 74.7 % (dense 69.7); with our local models 61.9 % (dense 54.2) |
 | — | **OpenWiki** | the memory under a coding agent, next to a document wiki | Kuzu (archived upstream, R10) | a local 30B captures sessions; the agent writes via `wiki_remember` | bi-temporal | LoCoMo 60.7 % J (local 30B; judge ≈ 7 points generous) |
 
 The thirteenth review is a [design report, not a system](memory-systems-review.md#13-a-design-report-predictive-world-models-through-transfer-entropy):
@@ -50,25 +51,26 @@ predictive world models built by transfer entropy — real methods, applied wher
 | Nemori | store only what existing memory failed to predict; dated narrative episodes | episodes for temporal questions; capture the whole stream (fixed in v0.97) |
 | memory-champ | per-type write gates; procedures behind a signed human approval; contradictions surfaced | volatility classes against stale facts; a human gate for always-present memory |
 | Hermes Agent | small curated memory once per session; skills learned from corrections, kept by a curator | writes should land during a session; no memory for chore prompts; Unicode hardening of the policy |
+| HippoRAG 2 | the question linked to facts, an LLM filter, a PageRank walk from their entities | it pays on questions that bridge through an unnamed entity, over dense triples — not on our questions or memory; link questions to facts first |
 
 ## What separates them — the design space
 
 | Axis | Options seen across the series | OpenWiki |
 |---|---|---|
-| Who writes memory | the agent through tools (Letta, memory-champ, Hermes, LangMem's tools) · an extraction pipeline per message or batch (Graphiti, Mem0, Cognee, Hindsight, MIRIX, Nemori, AriGraph, waku) | whole sessions, captured afterwards by a local 30B; new states from the agent via `wiki_remember` |
-| Unit of memory | atomic triples (AriGraph; Graphiti's edges) · rich sentences (Mem0, Hindsight's 5W facts) · narrative episodes (Nemori, waku) · files and documents (Letta, Hermes, Cognee) | atomic facts with validity, cardinality and source |
+| Who writes memory | the agent through tools (Letta, memory-champ, Hermes, LangMem's tools) · an extraction pipeline per message or batch (Graphiti, Mem0, Cognee, Hindsight, MIRIX, Nemori, AriGraph, waku; HippoRAG 2 per passage) | whole sessions, captured afterwards by a local 30B; new states from the agent via `wiki_remember` |
+| Unit of memory | atomic triples (AriGraph; Graphiti's edges) · rich sentences (Mem0, Hindsight's 5W facts) · narrative episodes (Nemori, waku) · files and documents (Letta, Hermes, Cognee) · passages with their triples (HippoRAG 2) | atomic facts with validity, cardinality and source |
 | Time and contradictions | overwrite (Hermes, LangMem) · add-only, the reader resolves (Mem0) · surface, don't resolve (memory-champ; MIRIX when unsure) · invalidate and keep history (Graphiti; Letta through git) | a bi-temporal merge by valid time with a coexistence check — only Graphiti also models both times |
-| Retrieval | lexical + dense fused (Graphiti, Mem0, Cognee, Hindsight, MIRIX, memory-champ) · lexical only (waku; Hermes' session search) · graph expansion (Graphiti, Hindsight, AriGraph, Cognee) · rerankers (Graphiti, Hindsight) | dense similarity × confidence × recency, single hop |
+| Retrieval | lexical + dense fused (Graphiti, Mem0, Cognee, Hindsight, MIRIX, memory-champ) · lexical only (waku; Hermes' session search) · graph expansion (Graphiti, Hindsight, AriGraph, Cognee) · PageRank from the facts a question links to (HippoRAG 2) · rerankers (Graphiti, Hindsight) | dense similarity × confidence × recency, single hop; since v0.103–v0.104 a BM25 aid and the question's time window |
 | When memory enters the context | every prompt (Hindsight, Cognee) · once per session + pull (Mem0, Hermes) · an always-present core + pull (Letta) · behind a gate (waku) | 16 facts on every prompt + the handoff brief at session start |
 | Consolidation | derived layers over immutable facts (Hindsight's observations, Graphiti's summaries and communities) · curators and dreaming agents (Letta, Hermes) · lessons with feedback (Cognee) | themes over current facts, warm-started and incremental |
 | Forgetting | none (Graphiti, Mem0's library) · archiving by disuse (Hermes, for skills) · volatility rechecks (memory-champ) | policy-based archiving of one-off events; decaying usage edges |
 | Hygiene | credential redaction (Mem0's plugin, Cognee, Hindsight) · threat scans (Hermes) · human gates (memory-champ, Hermes) · secrets stored on purpose (MIRIX) | a source-independent policy against instructions and security-sensitive facts; credentials redacted before capture and storage (v0.99) |
 | Procedural memory | skills (waku, Letta, Hermes; memory-champ behind approval) · procedures from errors and fixes (MIRIX, Mem0's plugin) · rewritten prompts (LangMem) | none — the host's skills are written by hand |
-| Evaluation | LoCoMo, LongMemEval, BEAM, DMR · behavior probes, fixtures or nothing (Hermes, memory-champ, LangMem) | own cross-session sets + LoCoMo, with an audited judge |
+| Evaluation | LoCoMo, LongMemEval, BEAM, DMR · multi-hop QA (HippoRAG 2: MuSiQue, 2Wiki, HotpotQA) · behavior probes, fixtures or nothing (Hermes, memory-champ, LangMem) | own cross-session sets + LoCoMo, with an audited judge |
 
 ## Where they agree
 
-Patterns most of the twelve share — and OpenWiki does not, yet:
+Patterns most of the thirteen share — and OpenWiki does not, yet:
 1. **Lexical search next to dense search.** Six fuse BM25 or FTS5 with embeddings, two more search lexically alone. Our
    memory recall is dense-only — while the wiki side's hybrid search won decisively on a code corpus.
 2. **The raw record stays searchable.** Seven keep raw sessions or episodes next to the extracted memory (Graphiti,
@@ -93,7 +95,7 @@ were then ablated: unnecessary where facts rarely change (LoCoMo), necessary whe
 
 ## Where OpenWiki stands
 
-**Ahead** — what few or none of the twelve have:
+**Ahead** — what few or none of the thirteen have:
 - **a real time model** — valid and transaction time, merged by valid time, as-of and known-at views (only Graphiti
   matches it);
 - **deterministic hygiene against poisoning**, independent of the claimed source (only Hermes has a comparable scan);
@@ -217,7 +219,10 @@ already have, then changes that only real sessions can judge. Each names where i
 - model judgments of memory at write time on a local model (our audits);
 - a few kilobytes of curated files as the whole memory (Hermes);
 - secrets kept in memory (MIRIX);
-- transfer entropy on interaction telemetry (§13).
+- transfer entropy on interaction telemetry (§13);
+- PageRank retrieval over an extracted fact graph (HippoRAG 2) — it pays on questions that bridge through an entity
+  they don't name, over a dozen triples per passage; not on our questions or memory, and the triples would cost two
+  local 30B calls per chunk (§14).
 
 ## How the series was done
 
@@ -229,6 +234,7 @@ capture-coverage gap that Nemori exposed was fixed in v0.97 (at most 13 % of a l
 writes that never landed (Hermes) and the empty usage memory (the transfer-entropy report) were found by checking; two
 of Hermes' rules — declarative facts, no negative tool claims — turned out to hold for our capture already.
 
-Not yet reviewed from the [shortlist](memory-systems-review.md#candidates--world-models-and-coala): HippoRAG 2, the
-Microsoft human-inspired memory architecture, *The Missing Knowledge Layer*, OpenCog Hyperon, MemOS and Generative
-Agents.
+HippoRAG 2 was reviewed after the plan was complete ([§14](memory-systems-review.md#14-hipporag-2)): its retrieval
+replicated with our local models on its own benchmark (MuSiQue Recall@5 54.2 → 61.9 %) and did not help on our wiki or
+memory. Not yet reviewed from the [shortlist](memory-systems-review.md#candidates--world-models-and-coala): the Microsoft
+human-inspired memory architecture, *The Missing Knowledge Layer*, OpenCog Hyperon, MemOS and Generative Agents.

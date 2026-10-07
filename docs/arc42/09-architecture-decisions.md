@@ -368,6 +368,10 @@
   **tie or lose** (re-rank *drops* MRR; hybrid ties), but **hybrid wins decisively on a code corpus**
   (hit@1 57%→86%). + the capabilities exist and are corpus-testable; a clean negative result is as
   valuable as a positive one. − no default retrieval change — dense stays the baseline.
+- **Addendum (2026-10-08, HippoRAG 2):** PageRank from the facts a question links to, measured the same way —
+  replicated on its MuSiQue setting with local models (Recall@5 54.2 → 61.9 %, its LLM filter carrying most of it),
+  even on recall and mixed on MRR over the informatik wiki, below dense recall on the LoCoMo memory. Not adopted, no
+  code (`docs/RAG-vs-GraphRAG.md` Finding 5).
 
 ### ADR-22
 **Typed `Entity→Entity` relations + relation-aware GraphRAG.** *(v0.63 / v0.64 — extends [ADR-6](#adr-6)/[ADR-12](#adr-12))*

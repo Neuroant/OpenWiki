@@ -37,7 +37,7 @@ A chronological feature roadmap of everything built so far (by release) is in
 `docs/roadmap.md`. Full **architecture documentation** (arc42: goals, constraints,
 context, building blocks, runtime, deployment, concepts, decisions/ADRs, quality,
 risks) is in `docs/arc42/`.
-A comparative review of twelve other **agent-memory systems** is in
+A comparative review of thirteen other **agent-memory systems** is in
 `docs/memory-systems-review.md`; its summary — where they agree, where OpenWiki stands, and
 the ranked plan for Path B's next steps — is `docs/agent-memory-summary.md`.
 
@@ -1171,7 +1171,10 @@ http — count, p50/p95, total time, token in/out) + a live recent-events table,
   (definitional 92.9% vs 100%) while answer grounding holds/rises — the topically-connected pages
   the graph pulls in help the model even when they displace a semantic hit. Plus
   human exploration via the Graph tab / `find_path` / `find_entity`. Full writeup (methodology,
-  both metric tables, caveats) in `docs/RAG-vs-GraphRAG.md`. To reproduce, `owiki eval
+  both metric tables, caveats) in `docs/RAG-vs-GraphRAG.md`. **HippoRAG 2** (PageRank from the facts a question
+  links to, with an LLM filter) was measured the same way, no code kept: Recall@5 54.2 → 61.9 % on its own MuSiQue
+  setting with local models, even-to-mixed on informatik, below dense recall on the LoCoMo memory (Finding 5,
+  `path-b-memory.md` §13.30). To reproduce, `owiki eval
   --answers` also **generates** RAG vs GraphRAG answers
   (via `RAGAgent`, graph off/on) and scores **citation grounding** (`eval.grounding`: did the
   answer cite a ground-truth page? — objective, from the eval set); `--judge` adds an

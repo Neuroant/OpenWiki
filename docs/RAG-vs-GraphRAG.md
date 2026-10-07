@@ -10,7 +10,8 @@ relational question set) — but it **does improve answer quality** (better cita
 grounding and a clear LLM-judge preference, on both sets). The graph's payoff is in
 the *answer*, not the *ranking*: the topically-connected pages it pulls in help the
 model even when they displace a semantic hit, so page-recall drops while answer
-grounding rises.
+grounding rises. A published graph retriever confirms the shape: HippoRAG 2's PageRank over a fact graph
+(Finding 5) replicates on its multi-hop benchmark with our local models (+7.7 Recall@5) — and does not help here.
 
 ---
 
@@ -187,6 +188,64 @@ prose-vs-code contrast is the robust part.)*
 
 ---
 
+## Finding 5 — PageRank over a fact graph (HippoRAG 2): wins on its benchmark, not on ours
+
+HippoRAG 2 (ICML 2025; [`memory-systems-review.md` §14](memory-systems-review.md#14-hipporag-2)) is the strongest
+published case for graph retrieval: link the question to the stored facts most similar to it, let an LLM keep the
+relevant ones, and run Personalized PageRank from their entities over a graph of entities and passages — the passages
+also seeded with a small share (× 0.05) of their dense score. The paper reports Recall@5 74.7 vs 69.7 for a 7B dense
+retriever on MuSiQue. We rebuilt its retrieval from the code (`graph_search_with_fact_entities`, `run_ppr`) —
+model-free except for its LLM filter — and measured it twice.
+
+**On its own benchmark, with our models, it replicates.** MuSiQue as HippoRAG ships it — 1,000 multi-hop questions,
+11,656 passages, 140,825 triples extracted by Llama-3.3-70B — embedded with bge-m3 instead of NV-Embed-v2 (7B), the
+filter run on our local 30B with HippoRAG's own prompt:
+
+| retriever | R@2 | R@5 | R@10 |
+|---|---|---|---|
+| dense (bge-m3) | 40.5 % | 54.2 % | 62.0 % |
+| HippoRAG 2 without its filter | 35.8 % | 56.1 % | 68.5 % |
+| **HippoRAG 2 with its filter** | **44.9 %** | **61.9 %** | **70.2 %** |
+
++7.7 points of Recall@5 (248 questions better, 85 worse; p ≈ 10⁻¹⁹). The filter matters far more here than in the
+paper's ablation (+1.7 there, +5.8 here): with a weaker embedder the facts a question links to are noisier, and the
+filter keeps 2.3 of 5. Without the passage seeds the walk falls to 48.5 %; the synonym edges barely matter (55.8 vs
+56.1 %).
+
+**On the informatik wiki it doesn't.** Our graph has HippoRAG's ingredients — canonical entities (phrases), typed
+relations among them (facts), pages and chunks (passages) — so the walk runs over it unchanged (the corpus is now 120
+pages, 4,056 chunks, 2,193 entities, 1,875 relations; the question sets of Finding 1):
+
+| set | retriever | MRR | hit@1 | recall@5 | recall@8 |
+|---|---|---|---|---|---|
+| definitional (14q) | RAG | **0.848** | **78.6 %** | 89.3 % | **100 %** |
+| | GraphRAG (5 + 3) | 0.839 | 78.6 % | 89.3 % | 92.9 % |
+| | HippoRAG 2, pages as passages | 0.595 | 42.9 % | 71.4 % | 89.3 % |
+| | HippoRAG 2, chunks as passages | 0.762 | 64.3 % | **92.9 %** | 96.4 % |
+| | … with its filter | 0.732 | 57.1 % | 92.9 % | 96.4 % |
+| relational (12q) | RAG | 0.468 | 16.7 % | 70.8 % | **91.7 %** |
+| | GraphRAG (5 + 3) | 0.468 | 16.7 % | 70.8 % | 87.5 % |
+| | HippoRAG 2, pages as passages | 0.517 | 33.3 % | 50.0 % | 62.5 % |
+| | HippoRAG 2, chunks as passages | **0.610** | **41.7 %** | 70.8 % | 91.7 % |
+| | … with its filter | 0.541 | 25.0 % | **79.2 %** | 91.7 % |
+
+With whole pages as passages (about 25 entities each) the walk drains into entity-rich pages and loses everywhere.
+With chunks — about HippoRAG's passage size, linked to the entities they name — it is even on recall and trades MRR:
+relational up (6 questions better, 4 worse), definitional down (1 / 4); the filter doesn't change that. Nothing here is
+beyond noise at 12–14 questions.
+
+**Why the difference.** Two preconditions MuSiQue has and our data lacks. Its questions bridge through an entity they
+don't name ("the county of the birthplace of …"); ours name their topics ("Wie hängen X und Y zusammen?"), which dense
+retrieval finds directly. And every MuSiQue passage carries about 12 extracted triples; our relation layer has 0.46
+per chunk — 26 times sparser. Closing the second gap would take open extraction over every chunk, two local 30B calls
+each: about 8,000 calls (11–22 hours) for the informatik wiki, plus a filter call per question.
+
+*(The memory tier: the same walk over LoCoMo's remembered facts stays below dense recall even with the filter —
+`path-b-memory.md` §13.30. The measurements used one-off scripts — a scipy reimplementation of HippoRAG 2's retrieval
+over the project graph and over MuSiQue as HippoRAG ships it — not kept in the code base.)*
+
+---
+
 ## Caveats / threats to validity
 
 - **Small N** (12–14 questions per set), one corpus, one embedder. The result is robust
@@ -220,6 +279,9 @@ prose-vs-code contrast is the robust part.)*
    **code** (exact identifiers) **hybrid (BM25 + dense) wins big** (+28.6 pts hit@1). Don't
    adopt a retrieval add-on on faith — `owiki eval` tells you within one run whether it
    helps *your* corpus.
+5. **Graph retrieval pays where questions bridge and the graph is dense.** HippoRAG 2 replicated on
+   MuSiQue with local models (+7.7 Recall@5) and did nothing for our topic-naming questions over a
+   sparse relation layer (Finding 5) — the question type and the extraction density decide, not the walk.
 
 ---
 

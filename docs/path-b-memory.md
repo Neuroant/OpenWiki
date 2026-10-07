@@ -1370,6 +1370,39 @@ the live context — the hooks assemble k = 8 within a 2,000-character budget, a
 suggests trying a larger k there, measured on that path (→ §13.12). LoCoMo now: **overall J 60.7 %** with a local
 30B (Mem0 reports ≈ 67 % with GPT-4o-mini — and both are generous-judge numbers).
 
+### 13.30 HippoRAG 2 — PageRank over remembered facts, measured, not adopted
+
+After the plan: the first review from the shortlist's brain-inspired part (`memory-systems-review.md` §14). HippoRAG 2
+links the question to the stored facts most similar to it, lets an LLM keep the relevant ones, and runs Personalized
+PageRank from their subjects and objects; passages are ranked by where the walk ends. For the memory tier the mapping is
+direct — our facts are both its facts and its passages, their subjects and objects its phrases.
+
+**Offline on LoCoMo** (the D13 graphs; the gold answer's words among the top 20 facts, categories 1–4, as in §13.20):
+every fact seeded with its dense score × 0.05, the top 5 facts' subjects and objects with score / facts sharing the
+phrase, damping 0.5:
+
+| ranking | multi-hop | temporal | open-domain | single-hop | all |
+|---|---|---|---|---|---|
+| production (dense + BM25 aid + time window) | **0.501** | **0.195** | 0.211 | **0.568** | **0.456** |
+| dense recall alone | 0.482 | 0.172 | 0.206 | 0.535 | 0.430 |
+| HippoRAG 2's walk | 0.459 | 0.167 | 0.206 | 0.542 | 0.428 |
+| … with its LLM filter (local 30B; multi-hop, 282 questions) | 0.474 | | | | |
+| production's top 15 + the walk's best 5 | 0.464 | 0.174 | 0.212 | 0.547 | 0.434 |
+
+The walk is no better than the dense ranking it starts from, and below production on every category but open-domain;
+its filter — which carried HippoRAG 2's gains on its own benchmark — recovers 1.5 points on multi-hop, not enough. The
+reason is §13.20's: the facts a LoCoMo multi-hop question needs are linked to it by meaning or inference, not by a shared
+subject or object, and the speakers' names connect nearly everything.
+
+**The method itself replicates.** On HippoRAG's own MuSiQue setting — its 1,000 questions, 11,656 passages and
+Llama-3.3-70B triples — with our models (bge-m3, the local 30B as filter) it beats dense retrieval clearly: Recall@5
+54.2 → 61.9 % (248 questions better, 85 worse; p ≈ 10⁻¹⁹), most of it from the filter (without it 56.1 %). The walk works
+where questions bridge through an entity they don't name and every passage carries a dozen triples — not on a memory of
+atomic facts. `RAG-vs-GraphRAG.md` Finding 5 has the document side.
+
+**Not adopted; no code kept** (model-free reimplementations of `graph_search_with_fact_entities` / `run_ppr` on scipy,
+described in Finding 5).
+
 ### 13.29 A use signal first — git co-changes for code corpora (v0.112)
 
 Item 15, the last of the plan in `agent-memory-summary.md`. The transfer-entropy report proposed learning the world

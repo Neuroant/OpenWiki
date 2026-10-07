@@ -637,6 +637,20 @@ def _build_argparser() -> argparse.ArgumentParser:
                           help="The repository whose Claude Code sessions to include when its hooks are bound to "
                                "the project (default: the working directory).")
     s_search.add_argument("--json", action="store_true", help="Print the excerpts as JSON.")
+    s_less = ssub.add_parser("lessons", parents=[common],
+                             help="Lessons from failures: the same lesson learned on two or more days, from tool "
+                                  "failures that were then fixed — a list to check and record, nothing is stored.")
+    s_less.add_argument("--min-days", type=int, default=2, help="Days a lesson must recur on (default 2).")
+    s_less.add_argument("--threshold", type=float, default=0.75,
+                        help="Cosine similarity at which two lessons count as the same (default 0.75).")
+    s_less.add_argument("--budget", type=float, default=None, metavar="S",
+                        help="Stop distilling new failures after S seconds (the rest next run).")
+    s_less.add_argument("--repo", type=Path, default=None,
+                        help="The repository whose Claude Code sessions to include (default: the working directory).")
+    s_less.add_argument("--json", action="store_true", help="Print the lessons as JSON.")
+    s_less.add_argument("--model", default=None, help="Chat model that phrases the lessons (default: project's).")
+    s_less.add_argument("-i", "--index", type=Path, default=None, help="Index dir (the embedder; default: project's).")
+    s_less.add_argument("--host", default=None, help="Ollama host URL.")
     s_list = ssub.add_parser("list", parents=[common], help="List the sessions session search covers.")
     s_list.add_argument("--repo", type=Path, default=None,
                         help="The repository whose Claude Code sessions to include (default: the working directory).")
@@ -1675,6 +1689,10 @@ def _apply_project(args: argparse.Namespace, project: Optional[Project],
     elif cmd == "analyze":
         path("index", p.index_dir if p else None, Path("output") / "index")
         path("graph", p.graph_path if p else None, Path("output") / "graph")
+    elif cmd == "sessions":                 # lessons: the chat model phrases them, the index embeds them
+        path("index", p.index_dir if p else None, Path("output") / "index")
+        val("model", "models", "chat", DEFAULT_CHAT)
+        val("host", "models", "host", DEFAULT_HOST)
 
 
 def _cmd_ingest(args: argparse.Namespace) -> int:
@@ -3359,6 +3377,8 @@ def _cmd_sessions(args: argparse.Namespace) -> int:
     if project is None or not project.memory_enabled:
         print("(session search belongs to Second Brain projects — run it in one with [memory] enabled = true)")
         return 0
+    if args.sessions_cmd == "lessons":
+        return _session_lessons(args, project, _session_files(project, args.repo))
     corpus = SessionCorpus(_session_files(project, args.repo))
     if args.sessions_cmd == "list":
         rows = corpus.sessions()
@@ -3375,6 +3395,77 @@ def _cmd_sessions(args: argparse.Namespace) -> int:
         print(json.dumps(hits, ensure_ascii=False, indent=1))
     else:
         print(format_excerpts(hits) or "(no turn of an earlier session matches)")
+    return 0
+
+
+LESSONS_FILE = "lessons.jsonl"   # .openwiki/: one distilled lesson (or none) per resolved failure (v0.111)
+
+
+def _session_lessons(args: argparse.Namespace, project: Project, files) -> int:
+    """Procedural lessons from failures (v0.111): resolved tool failures in the transcripts → one lesson each from
+    the local model (cached in ``.openwiki/lessons.jsonl``, so a run distills only new failures) → the lessons learned
+    on ``--min-days`` different days, for a person to check and record. Nothing is stored in memory."""
+    from .sessions import distill_lesson, failure_episodes, recurring_lessons
+    episodes = []
+    for f in files:
+        if f.suffix.lower() == ".jsonl":
+            try:
+                episodes += failure_episodes(f.read_text(encoding="utf-8", errors="ignore"), f.stem)
+            except OSError:
+                continue
+    cache_path = project.state_dir / LESSONS_FILE
+    cache: dict = {}
+    if cache_path.is_file():
+        for line in cache_path.read_text(encoding="utf-8").splitlines():
+            try:
+                rec = json.loads(line)
+                cache[rec["key"]] = rec
+            except (ValueError, KeyError, TypeError):
+                continue
+    new = [ep for ep in episodes if ep.key not in cache]
+    if new:
+        chat = OllamaChat(model=args.model, host=args.host, temperature=0.0, timeout=600.0,
+                          options={"num_predict": 160})
+        print(f"(distilling {len(new)} new failure(s) with {args.model} …)", file=sys.stderr)
+        t0 = time.time()
+        project.state_dir.mkdir(parents=True, exist_ok=True)
+        with cache_path.open("a", encoding="utf-8") as fh:
+            for ep in new:
+                if args.budget is not None and time.time() - t0 > args.budget:
+                    print("(time budget reached — run again to distill the rest)", file=sys.stderr)
+                    break
+                rec = {"key": ep.key, "ts": ep.ts, "tool": ep.tool, "lesson": distill_lesson(chat, ep),
+                       "failing": ep.failing[:300], "fix": ep.fix[:300]}
+                cache[ep.key] = rec
+                fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+                fh.flush()
+    keys = {ep.key for ep in episodes}
+    items = [r for k, r in cache.items() if k in keys and r.get("lesson")]
+    groups = []
+    if items:
+        if not (args.index / "index.json").is_file():
+            print(f"error: no index at {args.index} (needed for the embedder that groups lessons).", file=sys.stderr)
+            return 2
+        embedder = SemanticIndex.load(args.index).embedder
+        if isinstance(embedder, OllamaEmbedder):
+            embedder.host = args.host.rstrip("/")
+        groups = recurring_lessons(items, embedder.embed_documents([r["lesson"] for r in items]),
+                                   threshold=args.threshold, min_days=max(1, args.min_days))
+    if args.json:
+        print(json.dumps(groups, ensure_ascii=False, indent=1))
+        return 0
+    print(f"{len(episodes)} failure(s) that were then fixed · {len(items)} lesson(s) distilled · "
+          f"{len(groups)} learned on {args.min_days}+ different days")
+    if not groups:
+        return 0
+    print("Check each; record the ones that hold where the agent always sees them — CLAUDE.md, CLAUDE.local.md, the "
+          "host's own memory — or with wiki_remember.\n")
+    for n, g in enumerate(groups, 1):
+        ex = g["members"][-1]
+        print(f"{n}. {g['lesson']}")
+        print(f"   learned {g['count']} time(s) on {g['days']} days ({g['first']} … {g['last']}); last failed: "
+              f"`{_trunc(ex['failing'].splitlines()[0] if ex['failing'] else '', 90)}` → worked: "
+              f"`{_trunc(ex['fix'].splitlines()[0] if ex['fix'] else '', 90)}`")
     return 0
 
 

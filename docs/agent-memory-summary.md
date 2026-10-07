@@ -199,7 +199,11 @@ already have, then changes that only real sessions can judge. Each names where i
     so off by default. **No core:** none of the 19 user-tagged captured facts was a standing convention — those live in
     `CLAUDE.local.md` and the host's memory (`path-b-memory.md` §13.27).
 14. **Procedural memory from errors** — failure → fix pairs, with Hermes' guardrails: no negative tool claims, no
-    unresolved failure presented as a method (MIRIX, Mem0's plugin, Hermes).
+    unresolved failure presented as a method (MIRIX, Mem0's plugin, Hermes). **Done in v0.111 as a review list:** the
+    local model called 121 of 122 resolved failures a lesson, so only lessons learned on two different days count —
+    five on the dogfooding transcript, four worth keeping, which would have covered 6 later failures in 38 days.
+    `owiki sessions lessons` lists them for a person to record where the agent always sees them
+    (`path-b-memory.md` §13.28).
 15. **A use signal first** — git co-changes as edges for code corpora, before any learning-from-use method (the
     transfer-entropy report).
 

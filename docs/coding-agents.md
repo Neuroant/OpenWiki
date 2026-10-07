@@ -195,6 +195,12 @@ each write instead of storing it: `owiki memory pending` shows what the agent wa
 Gedächtnis tab's "Zur Freigabe" in `owiki serve`. An approved fact counts from when the agent made the change. No MCP
 tool can approve; captured sessions are not staged.
 
+**Learn from repeated failures.** `owiki sessions lessons` reads the project's Claude Code transcripts for tool
+failures that were then fixed, has the local model phrase each as a lesson, and lists the ones learned on two or more
+different days ("inline Python with nested quotes in a heredoc → write a script file") — the same mistake made twice.
+Put the ones that hold in `CLAUDE.md` or the agent's own memory, where it sees them before it acts. Outages,
+unresolved failures and claims that a tool doesn't work are never listed.
+
 **Review what may be outdated.** `owiki analyze memory --review` lists the remembered facts of kinds that go stale on
 their own — plans, counts, gaps, versions, running states —, each as the line `replaces` takes. Have the agent check
 them against the project and correct the outdated ones with `wiki_remember`; on the dogfooding memory about 1 in 4 was

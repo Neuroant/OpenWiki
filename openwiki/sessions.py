@@ -12,6 +12,8 @@ P0 policy) like everything else that reaches a prompt. Pure apart from reading f
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -251,3 +253,186 @@ def format_excerpts(excerpts: Sequence[dict], header: bool = True) -> str:
             mark = "»" if t["hit"] else " "
             lines.append(f"{mark} {t['speaker']}: {t['text']}" if t["speaker"] else f"{mark} {t['text']}")
     return "\n".join(lines).strip()
+
+# -- procedural lessons from failures (v0.111) -------------------------------------------------------
+# A coding session's most reusable lesson is what failed and what then worked — and capture never sees it (tool
+# output is stripped). Distilling every failure gives mostly one-off advice (the local model called 121 of 122
+# failures a lesson), so a lesson counts only when the same lesson was learned on two different days
+# (path-b-memory.md §13.28). Hermes' guardrails: unresolved failures, outages, the host's own file-tool rules and
+# claims that a tool doesn't work are never lessons. A person records them; nothing is stored or injected.
+
+PROTOCOL_TOOLS = frozenset({"Edit", "MultiEdit", "Write", "Read", "NotebookEdit"})
+_OUTAGE = re.compile(r"temporarily unavailable|timed out|\btimeout\b|ERR_CONNECTION|connection refused|rate limit|"
+                     r"overloaded|\b50[234]\b", re.I)
+_TELLING = re.compile(r"Error|error|Exception|failed|not found|denied|Traceback|No such|invalid|cannot|Unknown|"
+                      r"unexpected|refused|Blocked")
+_NEGATIVE = re.compile(r"\b(does not|doesn't|do not|don't|never|cannot|can't)\s+(work|function)\b|\bis broken\b|"
+                       r"\bunusable\b", re.I)
+LESSON_SYSTEM = (
+    "You read one episode from a coding agent's work log: a tool call that failed, the error, what the agent said "
+    "next, and the call that then worked. Decide whether it teaches a reusable lesson about working in THIS project or "
+    "environment — something that would make the same failure less likely in a later session.\n"
+    "Reply NONE when the failure was a one-off mistake (a typo, a wrong path, a bug in throwaway code, a value that "
+    "didn't match), a transient outage or timeout, a test failing because work was in progress, or a tool-usage rule "
+    "the tool itself already enforces.\n"
+    "Otherwise reply with exactly one line: LESSON: When <situation>, <what works> (because <why it failed>).\n"
+    "Never write that a tool or command does not work at all; say what works instead.")
+
+
+@dataclass(frozen=True)
+class FailureEpisode:
+    """A tool call that failed and the call of the same tool that then worked."""
+    session: str
+    ts: str
+    tool: str
+    failing: str
+    error: str
+    said: str      # what the agent said between the failure and the fix
+    fix: str
+
+    @property
+    def key(self) -> str:
+        return hashlib.sha1(f"{self.session}|{self.ts}|{self.tool}|{self.failing[:300]}".encode("utf-8")).hexdigest()[:16]
+
+
+def _result_text(content) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(str(b.get("text", "")) for b in content if isinstance(b, dict) and b.get("type") == "text")
+    return ""
+
+
+def _bare_failure(error: str) -> bool:
+    """A failure that says nothing about its cause — only an exit code — or a test run with failures (work in
+    progress, not a mistake)."""
+    if re.search(r"\b\d+ failed, \d+ passed\b", error):
+        return True
+    telling = [line for line in error.splitlines() if line.strip() and _TELLING.search(line)]
+    return not telling and bool(re.match(r"\s*Exit code \d+", error))
+
+
+_CALL_TOKEN = re.compile(r"[A-Za-z_][\w.\-]{2,}")
+
+
+def _related(failing: str, fix: str) -> bool:
+    """Does the call that worked resemble the one that failed (a shell command)? The same command word, or a quarter
+    of their words shared — an unrelated later command is no fix."""
+    a, b = (set(_CALL_TOKEN.findall(x.lower())) for x in (failing, fix))
+    first_a, first_b = (_CALL_TOKEN.findall(x.lower())[:1] for x in (failing, fix))
+    if first_a and first_a == first_b:
+        return True
+    return bool(a and b) and len(a & b) / len(a | b) >= 0.25
+
+
+def failure_episodes(text: str, session: str = "", window: int = 6) -> list:
+    """The resolved tool failures of a Claude Code transcript (JSONL): a failed call, its error, what the agent said
+    next and the call of the same tool that then worked (within ``window`` tool results). Left out: failures nothing
+    resolved, outages and timeouts, bare exit codes and failing test runs, and the host's own file-tool rules (read
+    before edit, an exact match) — the tools enforce those themselves."""
+    events: list = []
+    for line in (text or "").splitlines():
+        try:
+            obj = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(obj, dict):
+            continue
+        msg = obj.get("message") if isinstance(obj.get("message"), dict) else {}
+        content, ts = msg.get("content"), str(obj.get("timestamp") or "")
+        if not isinstance(content, list):
+            continue
+        for b in content:
+            if not isinstance(b, dict):
+                continue
+            kind = b.get("type")
+            if kind == "text" and obj.get("type") == "assistant" and str(b.get("text") or "").strip():
+                events.append(("said", ts, str(b["text"]).strip()))
+            elif kind == "tool_use":
+                inp = b.get("input") if isinstance(b.get("input"), dict) else {}
+                brief = inp.get("command") or json.dumps(inp, ensure_ascii=False)
+                events.append(("use", ts, b.get("id"), str(b.get("name") or ""), str(brief)))
+            elif kind == "tool_result":
+                events.append(("result", ts, b.get("tool_use_id"), bool(b.get("is_error")),
+                               _result_text(b.get("content"))))
+    uses = {e[2]: e for e in events if e[0] == "use"}
+    out, i = [], 0
+    while i < len(events):
+        e = events[i]
+        use = uses.get(e[2]) if e[0] == "result" and e[3] else None
+        if use is None or use[3] in PROTOCOL_TOOLS or _OUTAGE.search(e[4][:600]) or _bare_failure(e[4]):
+            i += 1
+            continue
+        said, fix, seen, j = [], None, 0, i + 1
+        while j < len(events) and seen < window:
+            ev = events[j]
+            if ev[0] == "said":
+                said.append(ev[2])
+            elif ev[0] == "result":
+                seen += 1
+                u = uses.get(ev[2])
+                if u is not None and u[3] == use[3] and not ev[3] and \
+                        (use[3] not in ("Bash", "PowerShell") or _related(use[4], u[4])):
+                    fix = u[4]
+                    break
+            j += 1
+        if fix is None:                       # unresolved: never presented as a method
+            i += 1
+            continue
+        out.append(FailureEpisode(session, e[1], use[3], use[4][:700], e[4][:700], " ".join(said)[:900], fix[:700]))
+        i = j
+    return out
+
+
+def distill_lesson(chat, ep: FailureEpisode) -> Optional[str]:
+    """One chat call: the episode's lesson ("When …, … (because …)") or ``None`` — the model said NONE, the answer
+    didn't parse, it claims a tool doesn't work, or it trips the memory policy. Credentials are redacted from the
+    episode first and from the lesson after."""
+    def clean(text):
+        return redact_secrets(text)[0]
+    user = (f"Tool: {ep.tool}\nFailing call:\n{clean(ep.failing)}\n\nError:\n{clean(ep.error)}\n\n"
+            f"What the agent said next:\n{clean(ep.said) or '(nothing)'}\n\nThe call that then worked:\n{clean(ep.fix)}")
+    try:
+        raw = chat.chat([{"role": "system", "content": LESSON_SYSTEM}, {"role": "user", "content": user}]) or ""
+    except Exception:
+        return None
+    m = re.search(r"LESSON:\s*(.+)", re.sub(r"<think>.*?</think>", "", raw, flags=re.S))
+    if not m:
+        return None
+    lesson = clean(m.group(1).strip())[:400]
+    return None if _NEGATIVE.search(lesson) or is_unsafe_text(lesson) else lesson
+
+
+def recurring_lessons(items: Sequence[dict], vectors, threshold: float = 0.75, min_days: int = 2) -> list:
+    """Group distilled lessons (``items``: dicts with ``lesson`` and ``ts``; ``vectors``: their embeddings) by
+    meaning — single linkage at cosine ``threshold`` — and keep the groups learned on at least ``min_days`` different
+    days: ``[{"lesson" (the most central), "count", "days", "first", "last", "members"}]``, most often learned first."""
+    if not items:
+        return []
+    v = np.asarray(vectors, dtype=np.float32)
+    v = v / np.maximum(np.linalg.norm(v, axis=1, keepdims=True), 1e-9)
+    sim = v @ v.T
+    parent = list(range(len(items)))
+
+    def find(a):
+        while parent[a] != a:
+            parent[a] = parent[parent[a]]
+            a = parent[a]
+        return a
+    for a in range(len(items)):
+        for b in range(a + 1, len(items)):
+            if sim[a, b] >= threshold:
+                parent[find(a)] = find(b)
+    groups: dict = {}
+    for a in range(len(items)):
+        groups.setdefault(find(a), []).append(a)
+    out = []
+    for members in groups.values():
+        days = sorted({str(items[i].get("ts") or "")[:10] for i in members if items[i].get("ts")})
+        if len(days) < min_days:
+            continue
+        central = max(members, key=lambda i: float(sim[i, members].mean()))
+        out.append({"lesson": items[central]["lesson"], "count": len(members), "days": len(days), "first": days[0],
+                    "last": days[-1],
+                    "members": [items[i] for i in sorted(members, key=lambda i: str(items[i].get("ts") or ""))]})
+    return sorted(out, key=lambda g: (-g["count"], -g["days"], g["lesson"]))

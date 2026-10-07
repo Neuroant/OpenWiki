@@ -958,6 +958,24 @@ changes.** *(v0.102; builds on [ADR-16](#adr-16); mitigates R10)*
   project (35 agent writes in three days), hence opt-in. − Not a security boundary: an agent with a shell can run the
   approve command where the host lets it — the host's permission prompt is the gate.
 
+### ADR-47
+**Procedural lessons from failures: only what was learned twice, listed for a person.** *(v0.111; follows
+[ADR-44](#adr-44))*
+- **Context:** a coding session's most reusable lesson — what failed, and what then worked — never reaches memory:
+  capture strips tool output. MIRIX and Mem0's coding plugin distill tool errors and fixes; Hermes' guardrails forbid
+  outages, negative tool claims and unresolved failures as lessons.
+- **Decision:** `owiki sessions lessons` finds resolved failures in the transcripts (a later, similar call of the same
+  tool; outages, bare exit codes, test runs and the file tools' own rules left out), has the local model phrase one
+  lesson each (cached; redacted; "X doesn't work" and P0 hits dropped), groups the lessons by meaning and lists only
+  those learned on two or more different days. A person records them where the agent always sees them (`CLAUDE.md`, the
+  host's memory); OpenWiki stores and injects nothing.
+- **Alternatives:** every distilled lesson stored as a fact — the model called 121 of 122 failures a lesson (restated
+  tool rules, outages as advice, one-off bugs); lessons injected through similarity recall — a prompt rarely mentions
+  the encoding or quoting the lesson is about; recurrence of the error type — one error type has many causes.
+- **Consequences:** + four of the five lessons listed on the dogfooding transcript were worth keeping; the three
+  strongest now sit in the host's memory. + No schema, no prompt cost. − Small: the lessons would have covered 6
+  failures in 38 days. − A first run costs one model call per resolved failure (104 s for 44).
+
 ---
 *Chapter complete. The Path-B agent-memory direction landed via ADR-14/15/16/17/18/19; the graph then
 deepened (ADR-22 typed relations + relation-aware GraphRAG, ADR-23 entity resolution), gained
@@ -975,6 +993,7 @@ writers (ADR-38), **portable memory** — a COGX export / import, a Markdown vie
 **hybrid recall** — BM25 as a recall aid within the dense pool (ADR-40), **the question's time window** (ADR-41), and
 **episodes** next to facts, measured on the benchmark first (ADR-42), and memory injected **once per stretch**
 (ADR-43), the raw sessions kept **searchable** by full text (ADR-44), volatile kinds as a **review list**, not a
-label (ADR-45), and an opt-in **approval step** for agent writes (ADR-46). §11
+label (ADR-45), an opt-in **approval step** for agent writes (ADR-46), and **lessons from failures** learned twice,
+listed for a person (ADR-47). §11
 debts D1/D2/D6 are resolved. Deep designs in `docs/path-b-memory.md` and `docs/RAG-vs-GraphRAG.md`. New significant
 decisions should be appended here with the next id.*

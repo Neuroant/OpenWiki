@@ -931,6 +931,13 @@ The **genuine gaps**, measure-first as always:
   set (paired, 2 captures, no probes) the cue reached the context 8/16 → 16/16 and the constraint was applied
   7/16 → 12/16 (+5 / −0). Adopted: `[memory] context_k` (default 16) + `context_budget` 2,000 → 3,000; facts may
   use theme budget the themes don't need. `path-b-memory.md` §13.12.
+- **Procedural memory from errors — a review list (v0.111).** Item 14 of the review series' plan. 148 of 7,753 tool
+  calls in the dogfooding transcript failed; the local model wrote a "lesson" for 121 of 122 resolved failures (restated
+  tool rules, outages as advice, one-off bugs), so a lesson counts only when the same lesson was learned on two
+  different days: five on the transcript, four worth keeping (a script file instead of quote-heavy heredocs and
+  PowerShell inline code, `PYTHONIOENCODING=utf-8` on the cp1252 console, Windows paths from Bash). `owiki sessions
+  lessons` lists them with Hermes' guardrails for a person to record where the agent always sees them; nothing is stored
+  or injected. ADR-47, `docs/path-b-memory.md` §13.28.
 - **The approval step (v0.110).** Item 13 of the review series' plan. Opt-in `[memory] approve_writes`: the agent's
   `wiki_remember` writes are staged next to the journal until a person approves them (`openwiki memory pending` /
   `approve` / `reject`, or the Gedächtnis tab's "Zur Freigabe"); an approved write is valid from when it was staged and

@@ -90,7 +90,7 @@ capture style (D14, §13.10) gained +2.8 points on 4 LoCoMo conversations, not s
 10. [Recommended first slice](#10-recommended-first-slice)
 11. [Prior art & learnings — "Cognitive Substrate"](#11-prior-art--learnings--cognitive-substrate)
 12. [Second-Brain refinements (B7 / B9 built; A2 / B8 open)](#12-second-brain-refinements-b7--b9-built-a2--b8-open)
-13. [Memory hygiene, implicit recall and the LoCoMo benchmark (built v0.86 to v0.110)](#13-memory-hygiene-implicit-recall-and-the-locomo-benchmark-built-v086-to-v0110)
+13. [Memory hygiene, implicit recall and the LoCoMo benchmark (built v0.86 to v0.111)](#13-memory-hygiene-implicit-recall-and-the-locomo-benchmark-built-v086-to-v0111)
 
 ---
 
@@ -873,7 +873,7 @@ errs toward "different thing" (safe: fragmentation over a wrong merge); descript
 extra coexistence calls; subject identity is only inferred inside a resolved group (no general
 subject resolution).
 
-## 13. Memory hygiene, implicit recall and the LoCoMo benchmark (built v0.86 to v0.110)
+## 13. Memory hygiene, implicit recall and the LoCoMo benchmark (built v0.86 to v0.111)
 
 *Planned from the cognitive-agent report (B10+); every item below was built or measured — see §13.1–13.12.*
 
@@ -1369,6 +1369,50 @@ The largest single step so far ("Not mentioned" on single-hop 219 → 178). **Ad
 the live context — the hooks assemble k = 8 within a 2,000-character budget, a per-prompt token cost; the finding
 suggests trying a larger k there, measured on that path (→ §13.12). LoCoMo now: **overall J 60.7 %** with a local
 30B (Mem0 reports ≈ 67 % with GPT-4o-mini — and both are generous-judge numbers).
+
+### 13.28 Procedural memory from errors — lessons learned twice, as a review list (v0.111)
+
+Item 14 of the plan in `agent-memory-summary.md`: failure → fix pairs, with Hermes' guardrails — nothing that depends on
+a passing outage, no claim that a tool doesn't work, no unresolved failure presented as a method. MIRIX feeds tool
+errors and the fix that finally worked to its skill distiller; Mem0's coding plugin records failed commands with their
+fixes. Our capture strips tool output, so this lesson never reached memory: the dogfooding memory held no fact about
+the console encoding, shell quoting or where screenshots may be saved.
+
+**The signal.** The dogfooding transcript, 38 days: 148 of 7,753 tool calls failed (1.9 %), and 132 of those were
+followed within six calls by a success of the same tool. 16 error signatures recurred on two or more days (70 repeats)
+— but most are generic (a bare exit code, the file tools' own rules such as "read the file first", failing test runs)
+or one error type with different causes each time (`KeyError`, `FileNotFoundError`, `AssertionError`).
+
+**Distilling.** Given each resolved episode — the failing call, the error, what the agent said next, the call that then
+worked — the local 30B wrote a "lesson" for 121 of 122: it cannot tell a lesson from an accident. The file tools' rules
+came back restated, outages became advice ("when the classifier is unavailable, …"), and one-off bugs were dressed up
+as rules. What separates them is recurrence of the **lesson**, not of the error type: grouping the distilled lessons by
+meaning (cosine ≥ 0.75) and keeping the groups learned on two or more different days left five on the dogfooding
+transcript, four of them worth keeping:
+
+| lesson | learned |
+|---|---|
+| inline Python with nested quotes in a bash heredoc → write a script file and run it | 5 times on 5 days |
+| inline code containing `$` through PowerShell → a script file | 4 times on 4 days |
+| non-ASCII output on the cp1252 console → `PYTHONIOENCODING=utf-8` | 3 times on 3 days |
+| Windows paths from the Bash tool → `C:/…` paths, not `/c/…` | 2 times on 2 days |
+
+The fifth was a generic coding note (parsing JSON-RPC defensively). A lesson in place after its second occurrence
+would have covered 6 later failures in those 38 days — modest, and only if the agent sees it before it acts.
+
+**Not adopted:** lessons stored as facts automatically, or injected into prompts. The model can't filter them, and an
+environment lesson would not surface through similarity recall when it matters — a prompt rarely mentions encodings or
+quoting. Where the agent sees a lesson before acting is the host's always-loaded memory and `CLAUDE.md`, which a person
+(or the agent, asked to) keeps.
+
+**Adopted: a review list.** `owiki sessions lessons` finds the resolved failures in the project's transcripts — a later
+call of the same tool that resembles the failed one (an unrelated command is no fix: this check dropped 8 of 52
+"fixes"); outages, bare exit codes, failing test runs and the file tools' own rules left out —, distills each once with
+the local model (cached in `.openwiki/lessons.jsonl`; credentials redacted before and after; a lesson that claims a
+tool doesn't work, or trips the memory policy, is dropped), groups the lessons by meaning and lists those learned on
+two or more days, each with the last failing and the working call. On the dogfooding project: 44 resolved failures, 43
+lessons, five listed, 104 s for the first run; the three strongest are now in the host's memory for this repository.
+Nothing is stored in OpenWiki's memory.
 
 ### 13.27 The approval step — a gate for agent writes; no always-present core (v0.110)
 

@@ -453,6 +453,14 @@ stored in the graph. Coding agents get it as the MCP tool **`wiki_sessions`** (`
 evidence turns more often than the embedding (top 5 ±1 turn: 68 % vs 59 %), and 5 excerpts next to the facts took
 overall J 62.9 → **78.2 %** (+276 / −41; single-hop 68.6 → 89.8 %) — ahead of same-size episodes (74.7 %); on
 coding-session detail questions the facts held the answer 8 / 47 times, the excerpts 41 / 47. Pulled, not injected.
+**Lessons from failures (v0.111):** `openwiki sessions lessons` — the resolved tool failures in the transcripts
+(`sessions.failure_episodes`: a later call of the same tool that resembles the failed one; outages, bare exit codes,
+failing test runs and the file tools' own rules left out), one lesson each from the local model
+(`sessions.distill_lesson`, `LESSON_SYSTEM`; cached in `.openwiki/lessons.jsonl`; credentials redacted; "X doesn't
+work" claims and P0 hits dropped), grouped by meaning (`recurring_lessons`, cosine ≥ `--threshold` 0.75) and listed when
+learned on `--min-days` (2) different days — for a person to record in `CLAUDE.md` or the host's memory. Options:
+`--budget S`, `--json`, `--model`, `-i/--index`, `--host`, `--repo`. Measured: the model alone called 121 of 122
+failures a lesson; the two-day rule left five on the dogfooding transcript, four worth keeping (§13.28, ADR-47).
 
 **Assemble a session's memory context (B6)** — the Path B payoff: build the context for a query
 from the **three memory tiers** — **identity** (the project's, or `[memory] identity`), **activation**
@@ -1232,6 +1240,10 @@ http — count, p50/p95, total time, token in/out) + a live recent-events table,
   (credentials redacted, the sentences the P0 policy flags withheld — `WITHHELD`); `SessionCorpus` (a project's
   session files; a growing transcript read from where the last read stopped, the index rebuilt only on change);
   `format_excerpts`. Used by `owiki sessions`, the MCP `wiki_sessions` tool and the LoCoMo harness (`--excerpts`).
+  **Lessons (v0.111):** `FailureEpisode` + `failure_episodes(text, session)` (resolved tool failures of a Claude Code
+  transcript, with Hermes' guardrails — `PROTOCOL_TOOLS`, `_OUTAGE`, `_bare_failure`, `_related`), `distill_lesson(chat,
+  episode)` (`LESSON_SYSTEM`; redaction, `_NEGATIVE`, the P0 policy) and `recurring_lessons(items, vectors, threshold,
+  min_days)` (single-linkage groups, the most central lesson) — behind `owiki sessions lessons`.
 - **`openwiki/merge.py`** — `combine_documents(docs, names)` merges several
   `ParsedDocument`s into one corpus (concatenate pages with a running offset, shift
   table/image page numbers, wrap each source under a synthetic level-1 outline node

@@ -976,6 +976,23 @@ changes.** *(v0.102; builds on [ADR-16](#adr-16); mitigates R10)*
   strongest now sit in the host's memory. + No schema, no prompt cost. − Small: the lessons would have covered 6
   failures in 38 days. − A first run costs one model call per resolved failure (104 s for 44).
 
+### ADR-48
+**A use signal first: git co-changes as edges for code corpora.** *(v0.112; follows [ADR-25](#adr-25))*
+- **Context:** the transfer-entropy report proposed learning dependencies from activity; OpenWiki's one
+  learning-from-use signal (`REINFORCES`, from GraphRAG expansion) is empty in a coding workflow. Git records how a
+  repository is worked on anyway.
+- **Decision:** `CO_CHANGED {count, weight, last}` edges between the pages of a code corpus from `git log` (sweeps
+  skipped, pairs seen twice, each file's most frequent partners; files that change in most commits connected only to
+  each other), written at graph build and refreshed in place (`openwiki cochange`); shown as "changed together" next to
+  a file (agents, the web panel, the Graph tab) and in the coupling analysis. Not in GraphRAG expansion.
+- **Alternatives:** a learning-from-use method (transfer entropy, Hebbian weights on interaction telemetry) — no signal
+  to learn from yet; co-change normalized for popularity — weaker on the files that matter (23 / 39 % vs 32 / 51 % in
+  the top 5 / 10); co-change in GraphRAG expansion — retrieval on the code question set unchanged.
+- **Consequences:** + online over this repository's history, co-change found 51 % of the specific files a commit touched
+  in the top 10, embedding similarity 36 %, popularity 35 %; 76 % of co-change partners are not embedding neighbours.
+  + No model, one `git log` (0.2 s). − Only for code corpora with git history; commits mixing code and docs make docs
+  frequent partners. − A refresh needs a writable graph.
+
 ---
 *Chapter complete. The Path-B agent-memory direction landed via ADR-14/15/16/17/18/19; the graph then
 deepened (ADR-22 typed relations + relation-aware GraphRAG, ADR-23 entity resolution), gained
@@ -993,7 +1010,7 @@ writers (ADR-38), **portable memory** — a COGX export / import, a Markdown vie
 **hybrid recall** — BM25 as a recall aid within the dense pool (ADR-40), **the question's time window** (ADR-41), and
 **episodes** next to facts, measured on the benchmark first (ADR-42), and memory injected **once per stretch**
 (ADR-43), the raw sessions kept **searchable** by full text (ADR-44), volatile kinds as a **review list**, not a
-label (ADR-45), an opt-in **approval step** for agent writes (ADR-46), and **lessons from failures** learned twice,
-listed for a person (ADR-47). §11
+label (ADR-45), an opt-in **approval step** for agent writes (ADR-46), **lessons from failures** learned twice,
+listed for a person (ADR-47), and **git co-changes** as a use signal for code corpora (ADR-48). §11
 debts D1/D2/D6 are resolved. Deep designs in `docs/path-b-memory.md` and `docs/RAG-vs-GraphRAG.md`. New significant
 decisions should be appended here with the next id.*

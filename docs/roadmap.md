@@ -931,6 +931,13 @@ The **genuine gaps**, measure-first as always:
   set (paired, 2 captures, no probes) the cue reached the context 8/16 → 16/16 and the constraint was applied
   7/16 → 12/16 (+5 / −0). Adopted: `[memory] context_k` (default 16) + `context_budget` 2,000 → 3,000; facts may
   use theme budget the themes don't need. `path-b-memory.md` §13.12.
+- **A use signal first — git co-changes (v0.112).** Item 15, the last of the review series' plan: files that change
+  together in commits as `CO_CHANGED` edges for code corpora (built from `git log`, refreshed by `openwiki cochange`).
+  Online over this repository's history, co-change found 51 % of the specific files a commit touched in the top 10 —
+  embedding similarity 36 %, popularity 35 %; on the dev code wiki `app.js` co-changes with its stylesheet, server,
+  tests and help page. Shown under "changed together (git)" in `graph_neighbors`, the "Verwandte Seiten" panel, the
+  Graph tab and the coupling analysis; GraphRAG retrieval was unchanged by it, so it stays out of expansion. ADR-48,
+  `docs/path-b-memory.md` §13.29.
 - **Procedural memory from errors — a review list (v0.111).** Item 14 of the review series' plan. 148 of 7,753 tool
   calls in the dogfooding transcript failed; the local model wrote a "lesson" for 121 of 122 resolved failures (restated
   tool rules, outages as advice, one-off bugs), so a lesson counts only when the same lesson was learned on two

@@ -360,6 +360,7 @@ entities = {str(entities).lower()}
 # resolve_entities = false # merge same-concept surface variants into canonical entities (aliases + descriptions); implies entities
 # entity_types = ["Concept", "Method", "Component", "Property"]   # domain ontology used when entities = true
 # entity_max_chars = 8000   # how much of each page the entity model sees
+# cochange = true           # code corpora: git co-change edges (files changed together); false = off
 
 [memory]
 # Second Brain mode (Path B): capture sessions into a remembered tier the graph keeps

@@ -1524,7 +1524,7 @@ const SVG_NS = "http://www.w3.org/2000/svg";
 const EDGE_COLOR = { parent: "#7048e8", child: "#7048e8", prev: "#868e96", next: "#868e96",
                      similar: "#2f9e44", references: "#e8590c", referenced_by: "#e8590c",
                      shared_entity: "#0c8599", mentions: "#f08c00", reinforced: "#c2255c",
-                     relation: "#9c36b5" };
+                     relation: "#9c36b5", co_changed: "#5c940d" };
 // Legend/filter groups (a click toggles a whole relationship kind on/off).
 const FILTERS = [
   { key: "hier",    label: "Hierarchie",          types: ["parent", "child"],          color: "#7048e8" },
@@ -1535,6 +1535,7 @@ const FILTERS = [
   { key: "entity",  label: "Begriffe (Entitäten)", types: ["mentions"],                color: "#f08c00" },
   { key: "relation", label: "Beziehungen (typisiert)", types: ["relation"],            color: "#9c36b5" },
   { key: "reinforced", label: "Verstärkt (Nutzung)", types: ["reinforced"],            color: "#c2255c" },
+  { key: "cochange", label: "Gemeinsam geändert (git)", types: ["co_changed"],         color: "#5c940d" },
 ];
 const TYPE_FILTER = {};
 FILTERS.forEach((f) => f.types.forEach((t) => (TYPE_FILTER[t] = f.key)));

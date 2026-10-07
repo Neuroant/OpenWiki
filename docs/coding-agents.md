@@ -195,6 +195,10 @@ each write instead of storing it: `owiki memory pending` shows what the agent wa
 Gedächtnis tab's "Zur Freigabe" in `owiki serve`. An approved fact counts from when the agent made the change. No MCP
 tool can approve; captured sessions are not staged.
 
+**Files that change together.** In a code project the knowledge graph also holds git co-changes: `wiki_graph_neighbors`
+for a file lists the files that usually changed with it ("changed together (git)" — its stylesheet, its tests, the doc
+that describes it) ahead of textually similar ones. `owiki cochange` refreshes them as the history grows.
+
 **Learn from repeated failures.** `owiki sessions lessons` reads the project's Claude Code transcripts for tool
 failures that were then fixed, has the local model phrase each as a lesson, and lists the ones learned on two or more
 different days ("inline Python with nested quotes in a heredoc → write a script file") — the same mistake made twice.

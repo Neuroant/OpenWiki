@@ -400,6 +400,12 @@ def _build_argparser() -> argparse.ArgumentParser:
     mcp_p.add_argument("--temperature", type=float, default=0.2, help="Sampling temperature (default: 0.2).")
     mcp_p.add_argument("--no-ask", action="store_true", help="Disable the `wiki_ask` tool (no chat model).")
 
+    co_p = sub.add_parser("cochange", parents=[common],
+                          help="Refresh the git co-change edges of a code corpus in place (files changed together).")
+    co_p.add_argument("--repo", type=Path, default=None,
+                      help="The repository (default: the project's code sources, else the working directory).")
+    co_p.add_argument("--graph", type=Path, default=None, help="Graph dir (default: project's graph).")
+
     refs_p = sub.add_parser("references", parents=[common],
                             help="Re-extract the cross-references (+ the citation phrases the web UI "
                                  "links inline) into an existing graph, in place — no rebuild.")
@@ -426,6 +432,11 @@ def _build_argparser() -> argparse.ArgumentParser:
     graph_p.add_argument("--similar-k", type=int, default=None, help="SIMILAR_TO edges per page (default: 6).")
     graph_p.add_argument("--no-references", action="store_true",
                          help="Skip 'siehe Seite N' cross-reference (REFERENCES) edges.")
+    graph_p.add_argument("--repo", type=Path, default=None,
+                         help="Code corpora: the git repository for co-change edges (default: the parsed source's "
+                              "directory).")
+    graph_p.add_argument("--no-cochange", action="store_true",
+                         help="Skip the git co-change (CO_CHANGED) edges of a code corpus.")
     graph_p.add_argument("--entities", action="store_true",
                          help="Extract typed entities via an LLM (one call/page; slow). Adds Entity + MENTIONS.")
     graph_p.add_argument("--relations", action="store_true",
@@ -1216,6 +1227,18 @@ def _entity_retry_chat(model: str, host: str) -> OllamaChat:
                       options={"seed": 1, "num_predict": 4096})
 
 
+def _code_cochanges(wiki, repos) -> list:
+    """``CO_CHANGED`` edges from the git history of each code source (a repository directory) — v0.112."""
+    from .graph.cochange import cochange_edges
+    pages = [(p.slug, p.title) for p in wiki.pages]
+    edges: dict = {}
+    for repo in repos:
+        if Path(str(repo)).is_dir():
+            for e in cochange_edges(pages, repo):
+                edges[(e[0], e[1])] = e
+    return list(edges.values())
+
+
 def _corpus_references(project, sources, doc, wiki, multi, labels: bool = True):
     """Cross-reference edges for the corpus: single-source direct, else per-source
     (each resolved within its own page span via the retained per-source IR). With
@@ -1416,11 +1439,15 @@ def _cmd_build(args: argparse.Namespace) -> int:
                       file=sys.stderr)
                 relations = extract_relations(wiki, entities, _entity_chat(model, host),
                                               max_chars=int(gcfg.get("entity_max_chars", 8000)))
+        cochanges = (_code_cochanges(wiki, [s for s in sources if source_type(s) == "code"])
+                     if gcfg.get("cochange", True) else None)
         stats = build_graph(wiki, index, project.graph_path,
                             similar_k=int(gcfg.get("similar_k", 6)),
-                            references=references, entities=entities, relations=relations)
+                            references=references, entities=entities, relations=relations, cochanges=cochanges)
         graph_stats = {"pages": stats["pages"], "chunks": stats["chunks"],
                        "similar_to": stats["similar_edges"], "references": stats["reference_edges"]}
+        if stats.get("cochange_edges"):
+            graph_stats["co_changed"] = stats["cochange_edges"]
         if want_relations:
             graph_stats["relations"] = stats["relation_edges"]
         _finish_stage(state, "graph", fps["graph"], project.graph_path, graph_stats, _meter)
@@ -1688,6 +1715,8 @@ def _apply_project(args: argparse.Namespace, project: Optional[Project],
         val("host", "models", "host", DEFAULT_HOST)
     elif cmd == "analyze":
         path("index", p.index_dir if p else None, Path("output") / "index")
+        path("graph", p.graph_path if p else None, Path("output") / "graph")
+    elif cmd == "cochange":
         path("graph", p.graph_path if p else None, Path("output") / "graph")
     elif cmd == "sessions":                 # lessons: the chat model phrases them, the index embeds them
         path("index", p.index_dir if p else None, Path("output") / "index")
@@ -2475,6 +2504,30 @@ def _cmd_chat(args: argparse.Namespace) -> int:
             _transient_fold(args.graph, embedder)
 
 
+def _cmd_cochange(args: argparse.Namespace) -> int:
+    """Refresh the ``CO_CHANGED`` edges of a code corpus in place from git (v0.112) — the history grows with every
+    commit, and nothing else in the graph needs a rebuild for it. Needs a writable graph."""
+    from .graph.cochange import cochange_edges
+    project = getattr(args, "project_obj", None)
+    repos = [args.repo] if args.repo else ([s for s in project.source_paths() if source_type(s) == "code"]
+                                           if project is not None else [Path.cwd()])
+    graph = _open_graph(args.graph, writable=True)
+    if graph is None:
+        print(f"error: no writable graph at {args.graph} (stop `serve` / the MCP server first).", file=sys.stderr)
+        return 2
+    try:
+        pages = graph._rows("MATCH (p:Page) RETURN p.slug, p.title;")
+        edges: dict = {}
+        for repo in repos:
+            for e in cochange_edges(pages, repo):
+                edges[(e[0], e[1])] = e
+        n = graph.replace_cochanges(list(edges.values()))
+    finally:
+        graph.close()
+    print(f"{n} co-change edge(s) between {len(pages)} page(s) from {', '.join(str(r) for r in repos) or '(no repo)'}")
+    return 0
+
+
 def _cmd_references(args: argparse.Namespace) -> int:
     """Refresh the graph's ``REFERENCES`` edges from the parsed corpus — with the citation
     phrases the web UI turns into inline links (ADR-28). In place: entities, relations,
@@ -2563,13 +2616,17 @@ def _cmd_graph_build(args: argparse.Namespace) -> int:
                                           max_chars=args.entity_max_chars or 8000,
                                           on_progress=_rprogress if args.verbose else None)
 
+    repo = args.repo or Path(doc.metadata.source_path or "")
+    cochanges = None if args.no_cochange else _code_cochanges(wiki, [repo] if str(repo) and repo.is_dir() else [])
     stats = build_graph(wiki, index, args.out, similar_k=args.similar_k,
-                        references=references, entities=entities, relations=relations)
+                        references=references, entities=entities, relations=relations, cochanges=cochanges)
     print(f"Built graph from {args.source.name}")
     print(f"  pages         : {stats['pages']}")
     print(f"  chunks (dim {stats['dim']}): {stats['chunks']}")
     print(f"  SIMILAR_TO    : {stats['similar_edges']}")
     print(f"  REFERENCES    : {stats['reference_edges']}")
+    if stats.get("cochange_edges"):
+        print(f"  CO_CHANGED    : {stats['cochange_edges']}  (git co-changes)")
     if args.entities or want_relations or want_resolve:
         canon = "  (canonical, aliases resolved)" if want_resolve else ""
         print(f"  entities      : {stats['entities']}  (MENTIONS: {stats['mention_edges']}){canon}")
@@ -4550,6 +4607,7 @@ _DISPATCH = {
     "consolidate": _cmd_consolidate,
     "sleep": _cmd_sleep,
     "memory": _cmd_memory,
+    "cochange": _cmd_cochange,
     "sessions": _cmd_sessions,
     "remember": _cmd_remember,
     "recall": _cmd_recall,

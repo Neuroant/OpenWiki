@@ -205,7 +205,10 @@ already have, then changes that only real sessions can judge. Each names where i
     `owiki sessions lessons` lists them for a person to record where the agent always sees them
     (`path-b-memory.md` §13.28).
 15. **A use signal first** — git co-changes as edges for code corpora, before any learning-from-use method (the
-    transfer-entropy report).
+    transfer-entropy report). **Done in v0.112:** `CO_CHANGED` edges from `git log` — online over this repository's
+    history they found 51 % of the specific files a commit touched in the top 10 (embedding similarity 36 %); shown as
+    "changed together" next to a file, in the Graph tab and the coupling analysis; GraphRAG retrieval unchanged, so
+    not used for expansion (`path-b-memory.md` §13.29).
 
 **Not planned** — argued or measured against in the reviews:
 - extraction pipelines per message or segment — several model calls each is too slow on a local 30B (Graphiti, MIRIX,

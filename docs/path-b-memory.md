@@ -90,7 +90,7 @@ capture style (D14, §13.10) gained +2.8 points on 4 LoCoMo conversations, not s
 10. [Recommended first slice](#10-recommended-first-slice)
 11. [Prior art & learnings — "Cognitive Substrate"](#11-prior-art--learnings--cognitive-substrate)
 12. [Second-Brain refinements (B7 / B9 built; A2 / B8 open)](#12-second-brain-refinements-b7--b9-built-a2--b8-open)
-13. [Memory hygiene, implicit recall and the LoCoMo benchmark (built v0.86 to v0.111)](#13-memory-hygiene-implicit-recall-and-the-locomo-benchmark-built-v086-to-v0111)
+13. [Memory hygiene, implicit recall and the LoCoMo benchmark (built v0.86 to v0.112)](#13-memory-hygiene-implicit-recall-and-the-locomo-benchmark-built-v086-to-v0112)
 
 ---
 
@@ -873,7 +873,7 @@ errs toward "different thing" (safe: fragmentation over a wrong merge); descript
 extra coexistence calls; subject identity is only inferred inside a resolved group (no general
 subject resolution).
 
-## 13. Memory hygiene, implicit recall and the LoCoMo benchmark (built v0.86 to v0.111)
+## 13. Memory hygiene, implicit recall and the LoCoMo benchmark (built v0.86 to v0.112)
 
 *Planned from the cognitive-agent report (B10+); every item below was built or measured — see §13.1–13.12.*
 
@@ -1369,6 +1369,48 @@ The largest single step so far ("Not mentioned" on single-hop 219 → 178). **Ad
 the live context — the hooks assemble k = 8 within a 2,000-character budget, a per-prompt token cost; the finding
 suggests trying a larger k there, measured on that path (→ §13.12). LoCoMo now: **overall J 60.7 %** with a local
 30B (Mem0 reports ≈ 67 % with GPT-4o-mini — and both are generous-judge numbers).
+
+### 13.29 A use signal first — git co-changes for code corpora (v0.112)
+
+Item 15, the last of the plan in `agent-memory-summary.md`. The transfer-entropy report proposed learning the world
+model's dependencies from activity; the check it prompted (`memory-systems-review.md` §13) found OpenWiki's one
+learning-from-use signal empty — `REINFORCES` edges come from GraphRAG expansion, which a coding workflow never runs —
+and named git co-changes as the denser, testable substitute: how a repository is actually worked on, recorded anyway.
+A use signal first, before any learning-from-use method.
+
+**Does it predict how the code is worked on?** Online over this repository's 191 commits: for each of the last 58
+(2026-09-24 … 2026-10-07), learned only from the commits before it, each changed file with a page in the code wiki
+(551 queries) asks for the other files of its commit. The commits are large and mixed (a median of 9 files; the
+version files change in 127 of them), so the useful targets are the files that change in less than half the commits:
+
+| ranking | all files: top 5 / top 10 | rarely-changed files: top 5 / top 10 |
+|---|---|---|
+| co-change count, the ubiquitous files set aside (shipped) | 0.29 / 0.45 | **0.32 / 0.51** |
+| co-change count | 0.33 / 0.53 | 0.25 / 0.45 |
+| co-change normalized for popularity (count / √(n_a · n_b)) | 0.26 / 0.42 | 0.23 / 0.39 |
+| popularity | 0.32 / 0.46 | 0.18 / 0.35 |
+| embedding similarity of the files' wiki pages | 0.21 / 0.36 | 0.21 / 0.36 |
+
+Co-change by raw count, with the files that change in most commits kept out of an ordinary file's list, finds half of
+the specific files a change touches in the top 10 — embedding similarity a third. On the code wiki of the dev project the
+edges describe the work: `app.js` co-changes with `style.css`, `server.py`, `test_web.py` and `help.md` (its embedding
+neighbours: `server.py`, `store.py`, `eval.py`, `test_graph.py`); each module with its test file. Co-changed files are
+semantically related (endpoint cosine 0.813 against 0.691 for random pairs; 5 % no closer than random), but 76 % of a
+file's co-change partners are not among its nearest embedding neighbours — structure the embedder doesn't see, and in a
+code corpus nearly all of its non-similarity structure (436 co-change edges against 12 references).
+
+**Retrieval: unchanged, so not wired in.** On the code question set (14 "where is X implemented" questions, remapped to
+the dev wiki's pages) RAG, GraphRAG as shipped and GraphRAG with co-change expansion score the same (MRR 0.61–0.62,
+hits 0.93 / 1.00 at the two budgets) — single-file questions don't need the neighbours. Co-change stays out of
+GraphRAG expansion.
+
+**Built.** `openwiki/graph/cochange.py` reads `git log` (commits touching more than 40 files skipped as sweeps), counts
+pairs (at least 2), keeps each file's 8 most frequent partners and connects files that change in at least half of the
+commits only to each other; `CO_CHANGED {count, weight, last}` edges between the pages of a code corpus (a page's title
+is its repo-relative path) are written by `graph-build` / `build` for code sources (`--no-cochange`, `[graph] cochange =
+false`) and refreshed in place by `openwiki cochange` — the history grows with every commit. They surface as "changed
+together (git)" in `graph_neighbors` (ranked first: in a code wiki prev / next is only file order), as "Oft zusammen
+geändert" under a page and in the Graph tab, and in the coupling analysis, where they count toward graph reach.
 
 ### 13.28 Procedural memory from errors — lessons learned twice, as a review list (v0.111)
 

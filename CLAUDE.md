@@ -160,7 +160,21 @@ call/page), `--relations` (also extract typed **`Entity→Entity` relations** �
 page — Direction B), `--resolve-entities` (**corpus-wide entity resolution** → merge
 same-concept surface variants into **canonical** entities with `aliases` + a `description`;
 implies `--entities`, embedding candidates + one LLM call per cluster), `--entity-model NAME`,
-`--entity-types "A,B,C"` (the domain ontology; overrides the default), `--entity-max-chars N`, `-v`.
+`--entity-types "A,B,C"` (the domain ontology; overrides the default), `--entity-max-chars N`, `-v`, `--repo DIR`
+/ `--no-cochange` (code corpora: the git co-change edges below; default the parsed source's directory).
+
+**Git co-changes for code corpora (v0.112)** — `graph-build` / `build` add `CO_CHANGED {count, weight, last}` edges
+between the pages of a code corpus (`graph/cochange.py`: `git log`, sweeps of 40+ files skipped, pairs seen at least
+twice, each file's 8 most frequent partners; files changed in half of the commits connected only to each other); refresh
+them in place as the history grows:
+```
+.venv\Scripts\python -m openwiki cochange               # inside a project: its code sources + graph
+```
+Options: `--repo DIR`, `--graph DIR` (writable). They show as "changed together (git)" in `graph_neighbors` (first:
+prev / next is only file order in a code wiki), "Oft zusammen geändert" under a page and in the Graph tab, and in the
+coupling analysis (graph reach). Not in GraphRAG expansion — retrieval on the code question set was unchanged.
+Measured online over this repository's history: co-change found 51 % of the specific files a commit touched in the top
+10, embedding similarity 36 % (`docs/path-b-memory.md` §13.29, ADR-48). `[graph] cochange = false` turns it off.
 
 **Refresh the cross-references in place** — re-extract the `REFERENCES` edges **with their citation
 phrases** ("Abschnitt 1.6", "Seite 42" — what the web UI links inline) from the parsed corpus into an
@@ -748,6 +762,10 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   CLI command detects + summarizes (one LLM call per community, not per page) and
   `GraphStore.upsert_communities` writes `Community` nodes + `IN_COMMUNITY` edges
   (always-created empty tables, like Entity/MENTIONS).
+  `cochange.py` (v0.112) is the code corpora's **use signal**: `git_commits(repo)` (newest first, one `git log`),
+  `cochange_pairs(commits, files)` (count, weight = count / √(n_a·n_b), last; `MAX_COMMIT_FILES` / `MIN_COUNT` /
+  `TOP_K` / `UBIQUITOUS_SHARE`) and `cochange_edges(pages, repo)` (titles = repo-relative paths) → `CO_CHANGED` edges
+  (`builder.insert_cochanges`, `GraphStore.replace_cochanges` / `has_cochanges` / `_cochange_neighbors`).
   `decay.py` is the **usage-memory** core (Path B's first step): pure exponential
   decay (`effective_weight`) + capped reinforcement (`reinforced_weight`) + the gentle
   log-scaled `confidence_weight` (B6 per-fact confidence → recall tie-breaker). The graph
@@ -982,7 +1000,8 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   `/api/pages/{slug}`, `/api/related/{slug}` = the **"Verwandte Seiten"** panel (`WikiWebApp.related` →
   `GraphStore.neighborhood`: the graph connectivity the prose doesn't hyperlink — **Verweise** (REFERENCES)
   + **Erwähnt in** (backlinks) + **Verwandte Themen** (typed relations) + **Ähnliche Seiten** (SIMILAR_TO) +
-  **Gemeinsame Begriffe** (shared entities), all clickable; structural parent/child/prev/next omitted since
+  **Gemeinsame Begriffe** (shared entities) + **Oft zusammen geändert** (git co-changes, code corpora), all
+  clickable; structural parent/child/prev/next omitted since
   the page already links those. A read-only overlay — the source `.md` stays verbatim, turning link-sparse
   pages into hubs; its payload also carries the page's canonical **entities**, which the client
   **auto-links** — the first mention of each in the prose gets a dotted link → the Begriffe view (`app.js`

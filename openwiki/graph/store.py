@@ -250,6 +250,9 @@ class GraphStore:
             raise KeyError(f"page '{slug}' not in graph")
 
         groups = {
+            # v0.112, code corpora only: the files git shows changing together with this one. First, because in a
+            # code wiki prev/next is alphabetical file order — a file that is both is shown as changed together
+            "co_changed": self._cochange_neighbors(slug, k=similar_k),
             "parent": self._rows(
                 f"MATCH (:Page {{slug:$s}})-[:CHILD_OF]->(p:Page) RETURN {self._P};", {"s": slug}),
             "child": self._rows(
@@ -285,11 +288,45 @@ class GraphStore:
                 node = self._node(row)
                 nodes.setdefault(node["slug"], {**node, "rel": rel})
                 edge = {"source": slug, "target": node["slug"], "type": rel}
-                if rel in ("similar", "reinforced"):
+                if rel in ("similar", "reinforced", "co_changed"):
                     edge["score"] = round(float(row[5]), 3)
+                if rel == "co_changed":
+                    edge["count"] = int(row[6])
                 edges.append(edge)
 
         return {"center": slug, "nodes": list(nodes.values()), "edges": edges}
+
+    def _cochange_neighbors(self, slug: str, k: int = 6) -> list:
+        """Pages whose files git shows changing together with ``slug``'s, most often first (rows: slug, title, level,
+        pdf_start, pdf_end, weight, count). ``[]`` on graphs built before the layer."""
+        try:
+            return self._rows(
+                f"MATCH (:Page {{slug:$s}})-[r:CO_CHANGED]-(p:Page) RETURN {self._P}, r.weight, r.count "
+                f"ORDER BY r.count DESC, r.weight DESC LIMIT $k;", {"s": slug, "k": k})
+        except Exception:
+            return []
+
+    def has_cochanges(self) -> bool:
+        """Does the graph hold git co-change edges (a code corpus, v0.112)?"""
+        try:
+            return bool(self._rows("MATCH ()-[r:CO_CHANGED]->() RETURN count(r);")[0][0])
+        except Exception:
+            return False
+
+    def replace_cochanges(self, edges) -> int:
+        """Replace the ``CO_CHANGED`` edges in place (``openwiki cochange`` — git history grows with every commit, and
+        a full rebuild can be expensive); creates the table on a graph built before v0.112. Writable."""
+        if not self.writable:
+            raise RuntimeError("GraphStore is read-only; open it writable to refresh co-change edges.")
+        from .builder import insert_cochanges
+        with self._lock:
+            try:
+                self._conn.execute("CREATE REL TABLE CO_CHANGED(FROM Page TO Page, count INT64, weight DOUBLE, "
+                                   "last INT64);")
+            except Exception:
+                pass                                  # already there
+            self._conn.execute("MATCH ()-[r:CO_CHANGED]->() DELETE r;")
+            return insert_cochanges(self._conn, edges)
 
     def _relation_neighbors(self, slug: str, limit: int = 6) -> list:
         """Pages connected to ``slug`` by a **typed** entity relation
@@ -753,6 +790,8 @@ class GraphStore:
             "relation": undirected(
                 "MATCH (a:Page)-[:MENTIONS]->(:Entity)-[:RELATED_TO]-(:Entity)"
                 "<-[:MENTIONS]-(b:Page) WHERE a.slug <> b.slug RETURN a.slug, b.slug;"),
+            "co_changed": undirected(
+                "MATCH (a:Page)-[:CO_CHANGED]->(b:Page) RETURN a.slug, b.slug;"),
             "child_of": undirected(
                 "MATCH (a:Page)-[:CHILD_OF]->(b:Page) RETURN a.slug, b.slug;"),
             "next": undirected(

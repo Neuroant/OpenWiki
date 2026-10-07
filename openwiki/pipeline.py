@@ -89,6 +89,8 @@ def compute_fingerprints(project: Project, sources: Iterable[Path]) -> dict:
         graph.get("similar_k", 6), graph.get("references", True), entities, relations, resolve,
         (models.get("chat", ""), graph.get("entity_types"), graph.get("entity_max_chars"))
         if (entities or relations or resolve) else "",
+        # v0.112: only when switched off, so every existing graph fingerprint stays the same
+        *(("no-cochange",) if graph.get("cochange", True) is False else ()),
     )
     memory = _hash(
         "memory", sources_signature(project.session_paths()),

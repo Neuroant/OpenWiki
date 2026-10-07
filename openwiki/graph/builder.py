@@ -48,7 +48,7 @@ class GraphBuilder:
         self.similar_k = similar_k
 
     def build(self, wiki: Wiki, index: SemanticIndex, references=None, entities=None,
-              relations=None) -> dict:
+              relations=None, cochanges=None) -> dict:
         if not index.chunks:
             raise ValueError("The semantic index is empty; run `openwiki index` first.")
         dim = int(index.embeddings.shape[1])
@@ -77,6 +77,7 @@ class GraphBuilder:
             n_refs = self._insert_references(conn, references or [])
             n_entities, n_mentions = self._insert_entities(conn, entities or [])
             n_relations = self._insert_relations(conn, relations or [])
+            n_cochange = insert_cochanges(conn, cochanges or [])
             n_assertions, n_reinf = self._restore_memory(conn, preserved, dim)
         finally:
             conn.close()
@@ -90,6 +91,7 @@ class GraphBuilder:
             "entities": n_entities,
             "mention_edges": n_mentions,
             "relation_edges": n_relations,
+            "cochange_edges": n_cochange,
             "preserved_assertions": n_assertions,
             "preserved_reinforced": n_reinf,
             "dim": dim,
@@ -211,6 +213,8 @@ class GraphBuilder:
         # Usage-memory overlay: reinforced page↔page edges that decay over time
         # (empty until `reinforce()` runs; see openwiki/graph/decay.py).
         conn.execute("CREATE REL TABLE REINFORCES(FROM Page TO Page, weight DOUBLE, last_seen INT64);")
+        # v0.112: git co-changes between the pages of a code corpus (empty for other corpora)
+        conn.execute("CREATE REL TABLE CO_CHANGED(FROM Page TO Page, count INT64, weight DOUBLE, last INT64);")
         # Remembered tier (Path B, B2/B3/B6): sessions + reified assertions (empty until
         # `remember()` runs; see openwiki/graph/memory.py). Assertions carry a mirrored
         # embedding so `recall()` can brute-force cosine over them.
@@ -398,9 +402,23 @@ class GraphBuilder:
 
 
 def build_graph(wiki: Wiki, index: SemanticIndex, db_path,
-                similar_k: int = 6, references=None, entities=None, relations=None) -> dict:
+                similar_k: int = 6, references=None, entities=None, relations=None, cochanges=None) -> dict:
     return GraphBuilder(db_path, similar_k=similar_k).build(
-        wiki, index, references=references, entities=entities, relations=relations)
+        wiki, index, references=references, entities=entities, relations=relations, cochanges=cochanges)
+
+
+def insert_cochanges(conn, edges) -> int:
+    """``CO_CHANGED {count, weight, last}`` edges (``graph.cochange.cochange_edges``) between existing pages."""
+    n = 0
+    for a, b, count, weight, last in edges:
+        rows = conn.execute(
+            "MATCH (x:Page {slug:$a}), (y:Page {slug:$b}) "
+            "CREATE (x)-[:CO_CHANGED {count:$c, weight:$w, last:$t}]->(y) RETURN 1;",
+            {"a": a, "b": b, "c": int(count), "w": float(weight), "t": int(last)})
+        while rows.has_next():
+            rows.get_next()
+            n += 1
+    return n
 
 
 def restore_memory_snapshot(conn, snap: Optional[dict], dim: int, page_slugs=None) -> tuple:

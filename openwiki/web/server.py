@@ -121,7 +121,7 @@ class WikiWebApp:
     # structural spine (parent/child/prev/next) is already linked in the page, so it's omitted.
     _RELATED_GROUPS = [
         ("references", "Verweise"), ("referenced_by", "Erwähnt in"),
-        ("relation", "Verwandte Themen"), ("similar", "Ähnliche Seiten"),
+        ("relation", "Verwandte Themen"), ("co_changed", "Oft zusammen geändert"), ("similar", "Ähnliche Seiten"),
         ("shared_entity", "Gemeinsame Begriffe"),
     ]
 

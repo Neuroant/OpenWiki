@@ -34,7 +34,7 @@ import numpy as np
 # The graph's *non-similarity* structure — the edges whose reach beyond the embedding
 # geometry is the interesting signal (SIMILAR_TO is cosine-derived, so it's the anchor,
 # not part of the "reach"; CHILD_OF/NEXT are structural navigation, reported separately).
-SEMANTIC_REACH_KINDS = ("references", "shared_entity", "relation")
+SEMANTIC_REACH_KINDS = ("references", "shared_entity", "relation", "co_changed")   # co_changed: v0.112, code corpora
 
 
 def page_vectors(index) -> "tuple[list[str], np.ndarray]":

@@ -164,6 +164,7 @@ class WikiTools:
         "parent": "parent", "child": "child", "prev": "previous", "next": "next",
         "references": "references", "referenced_by": "referenced by", "similar": "similar",
         "shared_entity": "shared concept", "relation": "related (typed)", "reinforced": "reinforced",
+        "co_changed": "changed together (git)",
     }
 
     def graph_neighbors(self, slug: str) -> str:

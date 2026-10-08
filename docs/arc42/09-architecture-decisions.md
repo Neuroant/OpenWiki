@@ -1011,7 +1011,8 @@ changes.** *(v0.102; builds on [ADR-16](#adr-16); mitigates R10)*
 - **Consequences:** + on 267 real prompts, fewer stale-labeled facts in the context in 67, more in 6 (p ≈ 4·10⁻¹⁴),
   judged helpfulness unchanged; LoCoMo coverage +0.5 (n.s.); temporal 13/13, cue-trigger 8/8. − It rests on the
   phrasing rule (25 % precision as a stale label, ADR-45): a current version or count is ranked as if it might be
-  stale, and a stale description gets no recency penalty.
+  stale, and a stale description gets no recency penalty. **Checked by replay** at prompt time (`path-b-memory.md`
+  §13.32): with a capture lag of 6 hours or a day judged alike to recency on every fact (14 / 11, 9 / 11 prompts).
 
 ---
 *Chapter complete. The Path-B agent-memory direction landed via ADR-14/15/16/17/18/19; the graph then

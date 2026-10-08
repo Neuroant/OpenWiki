@@ -1370,6 +1370,45 @@ the live context — the hooks assemble k = 8 within a 2,000-character budget, a
 suggests trying a larger k there, measured on that path (→ §13.12). LoCoMo now: **overall J 60.7 %** with a local
 30B (Mem0 reports ≈ 67 % with GPT-4o-mini — and both are generous-judge numbers).
 
+### 13.32 Replayed at their own time — maturation, deduplication and v0.113, checked
+
+The third review from the shortlist's brain-inspired part, Microsoft's human-inspired memory architecture
+(`memory-systems-review.md` §16), adds two mechanisms that would change what recall returns: *engram maturation* — a new
+memory stays silent for about a week — and deduplication, its "dominant mechanism". Both depend on when a fact is
+recalled, so they were judged the way the inject hook meets them: the 339 real prompts of this repository's transcript
+(2026-07-31 … 09-27), each **replayed at its own time** — recall with `as_of` = the prompt's time minus a capture lag
+and `now` = the prompt's time — on a scratch copy of the dev memory, with a blind judge on the facts. (The judgments of
+§13.18, §13.24 and §13.31 recalled every prompt against today's memory with `now` = today; for time-dependent
+mechanisms that misplaces the prompt in time.)
+
+**Maturation:**
+
+| memory as it stood | recalled facts younger than a week | helpful facts younger than a week | helpful rate, young vs older | prompts that would lose a helpful fact |
+|---|---|---|---|---|
+| at the prompt | 53 % | **70 %** | 35.4 vs 16.8 % | 62 of 75 |
+| a day before | 36 % | **40 %** | 26.9 vs 22.4 % | 39 of 75 |
+
+In a coding memory the newest facts are the current task; a week of silence would hide them. Not adopted.
+
+**Deduplication as a recall aid** — drop a recalled fact whose cosine to one already kept reaches the memory's 99.9th
+percentile of pairwise similarity (the paper's calibration), refill from the next candidates: LoCoMo coverage 0.461 →
+0.463 (48 / 31 questions; production's own selection kept — recalling a wider list instead changes what the BM25 aid and
+the time window pick, and cost 2 points). On the replayed prompts the threshold is 0.752 (a topically dense memory), 91 %
+of the recalled lists hold such pairs, and dropping them hurt: the dropped facts were helpful 24.9 % of the time, their
+replacements 9.2 % (7 prompts better, 42 worse). Not adopted.
+
+**v0.113 under replay** — recency on every fact against recency for volatile kinds only (§13.31):
+
+| memory as it stood | prompts changed | facts in (every fact) helpful | facts out (volatile only) helpful | prompts better / worse |
+|---|---|---|---|---|
+| at the prompt | 252 | 16.7 % | 5.7 % | 23 / 8 |
+| 6 hours before | 250 | 11.7 % | 11.1 % | 14 / 11 |
+| a day before | 255 | 16.3 % | 18.6 % | 9 / 11 |
+
+Recency on every fact wins only while the last hours' facts are in memory — facts the agent still has in its context,
+and mostly not yet captured (capture runs at compaction and session end). With a realistic lag the two are judged
+alike, and v0.113's other evidence (fewer stale-labeled facts, LoCoMo) stands: kept.
+
 ### 13.31 Recency only where truth changes with time (v0.113)
 
 After the plan: the second review from the shortlist's brain-inspired part, *The Missing Knowledge Layer*
@@ -1413,7 +1452,9 @@ or more sessions were stale more often (3 of 7 labeled) than facts said once (14
 across sessions is the state that changes.
 
 *Caveats:* the labels cover 352 of 1,486 facts and oversample volatile kinds (the rule chose half of the first set); the
-judge saw no loss of helpfulness but cannot see staleness.
+judge saw no loss of helpfulness but cannot see staleness. **Checked by replay** (§13.32): with the memory as it stood
+6 hours or a day before each prompt, the two are judged alike; only with the last hours' facts in memory does recency
+on every fact win.
 
 ### 13.30 HippoRAG 2 — PageRank over remembered facts, measured, not adopted
 

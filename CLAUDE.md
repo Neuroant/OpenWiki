@@ -37,7 +37,7 @@ A chronological feature roadmap of everything built so far (by release) is in
 `docs/roadmap.md`. Full **architecture documentation** (arc42: goals, constraints,
 context, building blocks, runtime, deployment, concepts, decisions/ADRs, quality,
 risks) is in `docs/arc42/`.
-A comparative review of fourteen other **agent-memory systems** is in
+A comparative review of fifteen other **agent-memory systems** is in
 `docs/memory-systems-review.md`; its summary — where they agree, where OpenWiki stands, and
 the ranked plan for Path B's next steps — is `docs/agent-memory-summary.md`.
 
@@ -806,7 +806,8 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   unrounded score); returns **current only** by default. **Since v0.113** the recency factor applies only to facts of
   a volatile kind (`memory.volatile_kind`: plans, counts, gaps, versions, running states; `store.RECENCY_ALL_KINDS =
   False`) — every other fact is timeless in recall (*The Missing Knowledge Layer*'s storage-vs-query litmus: LoCoMo
-  unchanged, fewer stale facts in 67 of 267 real prompts — §13.31, ADR-49). **Hybrid recall (v0.103):** `recall(…, lexical=w)` lets
+  unchanged, fewer stale facts in 67 of 267 real prompts — §13.31, ADR-49; confirmed by replaying real prompts at their
+  own time, §13.32). **Hybrid recall (v0.103):** `recall(…, lexical=w)` lets
   BM25 decide *which* facts get in, never their order — among the dense top `LEXICAL_POOL × k` (2k) the k with the
   highest `score + w × fact_scores(…, max_df=LEXICAL_MAX_DF)` (0.05) are kept and shown in dense order (each hit
   carries its `lexical` match); on wherever memory is recalled (`[memory] lexical_weight`, `Project.lexical_weight`,

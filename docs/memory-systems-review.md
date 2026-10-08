@@ -9,7 +9,7 @@ code and docs, not its marketing, and measured against the same yardstick.
 path) · time and contradictions · consolidation · forgetting and hygiene · identity and procedural memory ·
 agent writes · surfaces and sharing · evaluation.
 
-**The summary** of the series — all fourteen at a glance, what separates them, where they agree, where OpenWiki
+**The summary** of the series — all fifteen at a glance, what separates them, where they agree, where OpenWiki
 stands, and the plan — is in [`agent-memory-summary.md`](agent-memory-summary.md).
 
 ## Contents
@@ -29,6 +29,7 @@ stands, and the plan — is in [`agent-memory-summary.md`](agent-memory-summary.
     (reviewed 2026-10-04 — a proposal, not a system)
 14. [HippoRAG 2](#14-hipporag-2) (reviewed 2026-10-08 — first of the brain-inspired shortlist)
 15. [The Missing Knowledge Layer](#15-the-missing-knowledge-layer) (reviewed 2026-10-08)
+16. [A human-inspired memory architecture (Microsoft)](#16-a-human-inspired-memory-architecture-microsoft) (reviewed 2026-10-08)
 - [Across the series — what it suggests for OpenWiki](#across-the-series--what-it-suggests-for-openwiki)
 - [Candidates — world models and CoALA](#candidates--world-models-and-coala)
 
@@ -1588,13 +1589,105 @@ no measurable cost.
 
 ---
 
+## 16. A human-inspired memory architecture (Microsoft)
+
+*Source: "Human-Inspired Memory Architecture for LLM Agents" (Doga Kerestecioglu, Alexei Robsky, Clemens Vasters, Anshul
+Sharma, Yitzhak Kesselman — all Microsoft; [arXiv 2605.08538](https://arxiv.org/abs/2605.08538), v1 2026-05-08, 10
+pages). No code is released. The third review from the brain-inspired part of the
+[shortlist](#candidates--world-models-and-coala).*
+
+**What it is.** A memory pipeline modelled on six mechanisms from neuroscience, each aimed at a failure of memory that
+only accumulates — sleep-phase consolidation, interference-based forgetting, engram maturation, reconsolidation on
+retrieval, an entity knowledge graph and hybrid multi-cue retrieval — over three tiers: a hot cache (minutes to hours),
+a warm episodic vector store (days to weeks) and a permanent knowledge graph. All thresholds are calibrated on synthetic
+conversations, so that no benchmark data leaks into them.
+
+### How its memory works
+- **Write path.** Every event is kept in the episodic store with a timestamp, metadata, entity references and an
+  importance score (the calibrated formula weighs content length 0.363 — AUC 0.77 —, turn position 0.325, embedding
+  surprise and recency 0.019 — AUC 0.51: recency barely predicts importance). Entity extraction and consolidation gists
+  call a model (GPT-4o-mini); the lifecycle mechanisms are deterministic.
+- **Consolidation** every 6 hours: temporal validation (out-of-order arrivals, duplicates, causal inversions), then the
+  top 20 % of events are promoted to the graph, the middle 60 % kept and the bottom 20 % pruned; near-duplicates
+  (cosine ≥ the 99th percentile of pairwise similarity) merged, clusters summarized into gists.
+- **Forgetting**: passive decay of importance (half-life ≈ 29 days) plus *interference* — a memory's summed similarity
+  to the others (retroactive 0.6, proactive 0.4); high-interference, low-value memories go.
+- **Maturation**: a new memory starts *silent* (activation 0.03), crosses the retrieval threshold after a week (sigmoid,
+  t½ = 168 h) and is mature after two; below threshold it only primes.
+- **Reconsolidation**: a retrieved memory stays *labile* for 60 minutes; new context, a contradiction or an elaboration
+  is blended in by confidence, recency and contradiction severity.
+- **Retrieval**: hot cache, then the warm store filtered by importance, then the graph filtered by activation; vector
+  search seeds graph traversal; results merged, deduplicated and ranked with a recency boost. Dates on retrieved
+  memories in the answer prompt add "+10 percentage points versus date-unaware prompts across all benchmarks".
+- **Evaluation** (GPT-4o answering and judging, text-embedding-3-large): on 13,127 VSCode issues (120,000 events)
+  consolidation and forgetting keep the events later referenced at 97.2 % retention precision with 58 % fewer stored
+  (keep-everything: 75.4 %) — "deduplication-based consolidation is the dominant mechanism"; graph retrieval and
+  maturation are not integrated there. On LongMemEval no configuration beats plain retrieval: S tier 78.4 % (raw RAG)
+  vs 76.8 % (deduplication only), 75.8 % (+ reconsolidation), 74.8 % (+ graph), 48.4 % (aggressive consolidation); the
+  M tier (475 sessions, ~540 K turns, streamed in order) 71.2 % vs 70.1 % at a 200 K-token budget and 38.8 % at 25 K.
+  Maturation and reconsolidation are not measured — the benchmark has no repeated access and no contradictions.
+
+### Side by side
+
+| | The human-inspired architecture | OpenWiki |
+|---|---|---|
+| Unit | events (turns, issue events) with an importance score | facts captured per session window |
+| Tiers | hot cache, warm episodic store, permanent graph | one fact store with valid time; themes; session search over raw turns |
+| Consolidation | every 6 h: promote / keep / prune by score, deduplicate, cluster into gists | `sleep`: forget one-off events by rule, re-consolidate themes; the merge deduplicates exact restatements |
+| Forgetting | importance decay (≈ 29 days) + interference | policy, not decay; usage edges decay |
+| New memories | silent for about a week (maturation) | retrievable at once |
+| Retrieval-time updates | reconsolidation in a 60-minute window | re-affirmation raises confidence; `wiki_remember` replaces |
+| Evaluation | VSCode retention precision; LongMemEval S / M, GPT-4o judge | own sets, LoCoMo, judged real prompts |
+
+### Against OpenWiki's data
+Two of its mechanisms could change what our recall puts in front of an agent; both were checked on our memories
+(`path-b-memory.md` §13.32), together with the method itself:
+1. **Maturation** — 339 real prompts of this repository, replayed at their own time with the memory as it stood a day
+   before each: in the 75 judged, 36 % of the facts recall gave were younger than a week, and so were 40 % of the facts a
+   blind judge found helpful (young facts helpful 26.9 % of the time, older ones 22.4 %). A week of silence would have
+   taken at least one helpful fact from 39 of the 75 prompts (with same-day facts allowed: 70 % of the helpful facts,
+   62 of 75 prompts).
+2. **Deduplication as a recall aid** — dropping near-duplicates (the paper's calibration: the 99.9th percentile of
+   pairwise similarity) from the recalled facts and refilling: LoCoMo coverage 0.461 → 0.463 (48 / 31 questions); on
+   the replayed prompts it hurt — the "duplicates" (cosine ≥ 0.75 in a topically dense coding memory) were helpful
+   24.9 % of the time, their replacements 9.2 % (7 prompts better, 42 worse).
+3. **The replay itself** checked v0.113: recency on every fact against recency for volatile kinds only, judged alike
+   with the memory as it stood 6 hours or a day before each prompt (14 / 11, 9 / 11 prompts); only with the last hours'
+   facts in memory — facts the agent still has in its context — did recency on every fact win (23 / 8).
+
+### What we learn
+1. **Measure time-dependent mechanisms at prompt time.** Our earlier live-path judgments recalled every prompt
+   against today's memory with "now" set to today; for recency or maturation that misplaces the prompt in time. A replay
+   (`as_of` the prompt's time, a capture lag) is the honest setup — and it confirmed v0.113.
+2. **In a coding memory the newest facts are the useful ones.** Facts under a week old were judged helpful at least as
+   often as older ones: maturation, which protects a memory from transient noise, would hide the current task.
+3. **Near-duplicate is a property of the memory, not a number.** A percentile threshold that merges duplicates in
+   personal chat merges distinct, related facts in a dense coding memory.
+4. **Dates in the context matter** (+10 points there) — our assembled context carries them already.
+
+### What we would not adopt
+- **Maturation** — above.
+- **Deduplication at recall time** — above; the merge's exact deduplication and B9's attribute groups stay.
+- **Pruning by an importance score** — aggressive consolidation lost 30 points on LongMemEval; our forgetting stays
+  policy-based (ADR-32).
+- **Reconsolidation windows** — not measured by the paper either; re-affirmation and `wiki_remember` cover the update
+  path.
+
+**In short.** A carefully argued architecture with an honest evaluation: of its six mechanisms, deduplication is the
+one that pays — on a stream of repetitive events — and on conversational memory none beats plain retrieval. For a
+coding agent's memory, maturation would silence the facts it needs most, and similarity-based deduplication would drop
+related facts it uses. What it gave OpenWiki is a method: replay real prompts at their own time before judging anything
+that depends on time.
+
+---
+
 ## Across the series — what it suggests for OpenWiki
 
-Fourteen systems — six in a first round, then Hindsight, MIRIX, AriGraph, Nemori and memory-champ from the world-model
-shortlist, Hermes Agent on request, HippoRAG 2 and The Missing Knowledge Layer from the brain-inspired part — read from
-their source in October 2026, plus one design report (§13). Where OpenWiki stands out: a real time model (only Graphiti matches it; Hindsight has event and
+Fifteen systems — six in a first round, then Hindsight, MIRIX, AriGraph, Nemori and memory-champ from the world-model
+shortlist, Hermes Agent on request, and HippoRAG 2, The Missing Knowledge Layer and a human-inspired architecture from
+the brain-inspired part — read from their source in October 2026, plus one design report (§13). Where OpenWiki stands out: a real time model (only Graphiti matches it; Hindsight has event and
 mention time; Mem0 keeps time-aware retrieval on its hosted platform; Cognee has a query-time window),
-deterministic hygiene against poisoning (of the fourteen, only Hermes Agent has a comparable policy — a threat-pattern
+deterministic hygiene against poisoning (of the fifteen, only Hermes Agent has a comparable policy — a threat-pattern
 scan on memory writes), policy-based forgetting,
 local-first operation on a 30B model, and audited measurement. Where it lags, the same gaps recur — and Hindsight
 shows how large the distance can be (83.6 % on LongMemEval with a 20B open model):
@@ -1620,6 +1713,7 @@ shows how large the distance can be (83.6 % on LongMemEval with a 20B open model
 | Unicode evasion of the policy | Hermes (NFKC folding, invisible and bidirectional characters) | **fixed in v0.99** — before, the regexes matched the raw text | NFKC, zero-width characters removed, bidirectional overrides refused — done | — |
 | Unresolved conflicts shown | MIRIX (keep both, note the discrepancy), memory-champ (surfaced, never resolved) | the merge closes or keeps silently | a "disputed" mark in the context | small |
 | Learning from use | the transfer-entropy report (§13: directed, decaying edges from activity), Hermes (skill usage counts drive the curator) | **done in v0.112** (path-b §13.29): `CO_CHANGED` edges from git for code corpora — online, 51 % of a commit's specific files in the top 10 vs 36 % by embedding similarity | facts an answer uses; a learning-from-use method only on top of such a signal | — |
+| Lifecycle mechanisms from neuroscience | the human-inspired architecture (sleep consolidation, interference-based forgetting, engram maturation, reconsolidation) | policy-based forgetting at `sleep`, themes, supersession | **measured, not adopted** (path-b §13.32), on real prompts replayed at their own time: maturation would hide 40 % of the helpful facts; deduplicating similar facts at recall hurt (7 / 42 prompts) | — |
 | Memory writes documents | Hindsight (five knowledge pages per repository), Letta (memory as Markdown) | the wiki is built from documents only; memory writes no pages | "Decisions" / "Conventions" pages regenerated from facts at `sleep`; git history as a capture source | medium |
 
 **The order** in which we take these up — deterministic fixes, then paired LoCoMo experiments, then changes judged in
@@ -1649,9 +1743,9 @@ ground-truth tier, consolidation as a sleep cycle, perception from many sources)
 **Brain-inspired and theory**
 6. **[HippoRAG 2](https://arxiv.org/abs/2502.14802)** (ICML 2025) — the LLM as neocortex, a knowledge graph with
    Personalized PageRank as hippocampus; non-parametric continual learning over documents. → [§14](#14-hipporag-2)
-7. **[Human-Inspired Memory Architecture for LLM Agents](https://arxiv.org/abs/2605.08538)** (Microsoft Research) —
+7. **[Human-Inspired Memory Architecture for LLM Agents](https://arxiv.org/abs/2605.08538)** (Microsoft) —
    sleep consolidation, interference-based forgetting, engram maturation, reconsolidation on retrieval, an entity
-   graph, multi-cue retrieval; a streaming LongMemEval evaluation (475 sessions, ~540 K turns).
+   graph, multi-cue retrieval; a streaming LongMemEval evaluation (475 sessions, ~540 K turns). → [§16](#16-a-human-inspired-memory-architecture-microsoft)
 8. **[The Missing Knowledge Layer in Cognitive Architectures](https://arxiv.org/abs/2604.11364)** — argues CoALA lacks
    a knowledge layer with its own persistence: facts are superseded, never decayed; applying decay to factual claims
    is a category error — a challenge to our recency factor in recall. → [§15](#15-the-missing-knowledge-layer)

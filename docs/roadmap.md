@@ -931,6 +931,13 @@ The **genuine gaps**, measure-first as always:
   set (paired, 2 captures, no probes) the cue reached the context 8/16 → 16/16 and the constraint was applied
   7/16 → 12/16 (+5 / −0). Adopted: `[memory] context_k` (default 16) + `context_budget` 2,000 → 3,000; facts may
   use theme budget the themes don't need. `path-b-memory.md` §13.12.
+- **A human-inspired memory architecture — measured, not adopted.** The third review from the shortlist's
+  brain-inspired part (`memory-systems-review.md` §16; Microsoft, 2026): sleep consolidation, interference-based
+  forgetting, engram maturation, reconsolidation, an entity graph, multi-cue retrieval — and, by its own LongMemEval
+  runs, nothing that beats plain retrieval. Its two mechanisms that change what recall returns, judged on 339 real
+  prompts replayed at their own time: maturation (a week of silence) would have hidden 40 % of the helpful facts,
+  39 of 75 prompts losing one; deduplicating similar facts hurt (7 / 42 prompts). The replay also confirmed v0.113
+  at realistic capture lags. No code. `docs/path-b-memory.md` §13.32.
 - **Recency only where truth changes with time (v0.113).** The second review from the shortlist's brain-inspired
   part, *The Missing Knowledge Layer* (`memory-systems-review.md` §15): decay belongs to experience in storage,
   recency to the query — decaying factual claims is a category error. OpenWiki passed that litmus already; measured,

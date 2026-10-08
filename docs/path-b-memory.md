@@ -1370,6 +1370,34 @@ the live context — the hooks assemble k = 8 within a 2,000-character budget, a
 suggests trying a larger k there, measured on that path (→ §13.12). LoCoMo now: **overall J 60.7 %** with a local
 30B (Mem0 reports ≈ 67 % with GPT-4o-mini — and both are generous-judge numbers).
 
+### 13.33 Symbolic inference — measured, not adopted
+
+The fourth review from the shortlist's brain-inspired part, OpenCog Hyperon and its coding-agent adapter Hyperon-MCP
+(`memory-systems-review.md` §17), offers what OpenWiki lacks entirely: inference — PLN/NAL rules deriving new claims
+from stored atoms, confidence decaying per hop, proof traces. Checked with Hyperon-MCP's own code — its import scanner,
+its inference on the pure-Python backend (the same rule table as the MeTTa runtime).
+
+**What a change touches** — v0.112's evaluation (§13.29): for each changed file of each of the last 59 commits (549
+queries), the other files the commit changed; co-change learned only from earlier commits, imports read at HEAD:
+
+| ranking | recall@5 | recall@10 | from Python files: @5 / @10 |
+|---|---|---|---|
+| co-change (v0.112) | **0.33** | **0.53** | **0.32 / 0.49** |
+| embedding similarity | 0.22 | 0.37 | 0.16 / 0.25 |
+| Hyperon-MCP's inferred blast radius | 0.03 | 0.04 | 0.09 / 0.13 |
+| exact import traversal (two-hop dependents + direct imports) | 0.03 | 0.04 | 0.09 / 0.12 |
+
+**The inference on its own premises** — against the true two-hop dependents of the same import graph (108 files):
+precision 0.30, recall 0.44; 50 files that nothing imports get a blast radius. Inversion and abduction derive reversed
+implications above the 0.3 confidence cut, and the 64-premise neighbourhood misses edges.
+
+**Our memory as premises** — 1,187 current facts, 809 distinct predicates (696 used once); by predicate 1,062 would be
+plain `Evaluation`s, 109 dependencies and 16 taxonomy relations, forming two two-hop chains through a shared term (both
+"openwiki → the PDF ingestion tool → …").
+
+Not adopted; no code kept. Co-change stays the structural signal for code corpora; captured facts stay unreasoned —
+inference would first need a vocabulary the capture does not produce.
+
 ### 13.32 Replayed at their own time — maturation, deduplication and v0.113, checked
 
 The third review from the shortlist's brain-inspired part, Microsoft's human-inspired memory architecture

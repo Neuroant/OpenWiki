@@ -931,6 +931,13 @@ The **genuine gaps**, measure-first as always:
   set (paired, 2 captures, no probes) the cue reached the context 8/16 → 16/16 and the constraint was applied
   7/16 → 12/16 (+5 / −0). Adopted: `[memory] context_k` (default 16) + `context_budget` 2,000 → 3,000; facts may
   use theme budget the themes don't need. `path-b-memory.md` §13.12.
+- **OpenCog Hyperon — measured, not adopted.** The fourth review from the shortlist's brain-inspired part
+  (`memory-systems-review.md` §17): Hyperon's Atomspace, MeTTa and probabilistic logic, and its coding-agent adapter
+  Hyperon-MCP — curated atoms with truth values, PLN/NAL inference, an import-derived "blast radius". Checked with its
+  own code on this repository: as a predictor of what a change touches the blast radius reached recall@10 0.04 (exact
+  import traversal the same) against 0.53 for git co-change; against its own import graph the inference's precision was
+  0.30; our 1,187 captured facts (809 distinct predicates) form two two-hop chains for a reasoner. No code.
+  `docs/path-b-memory.md` §13.33.
 - **A human-inspired memory architecture — measured, not adopted.** The third review from the shortlist's
   brain-inspired part (`memory-systems-review.md` §16; Microsoft, 2026): sleep consolidation, interference-based
   forgetting, engram maturation, reconsolidation, an entity graph, multi-cue retrieval — and, by its own LongMemEval

@@ -9,7 +9,7 @@ code and docs, not its marketing, and measured against the same yardstick.
 path) · time and contradictions · consolidation · forgetting and hygiene · identity and procedural memory ·
 agent writes · surfaces and sharing · evaluation.
 
-**The summary** of the series — all fifteen at a glance, what separates them, where they agree, where OpenWiki
+**The summary** of the series — all sixteen at a glance, what separates them, where they agree, where OpenWiki
 stands, and the plan — is in [`agent-memory-summary.md`](agent-memory-summary.md).
 
 ## Contents
@@ -30,6 +30,7 @@ stands, and the plan — is in [`agent-memory-summary.md`](agent-memory-summary.
 14. [HippoRAG 2](#14-hipporag-2) (reviewed 2026-10-08 — first of the brain-inspired shortlist)
 15. [The Missing Knowledge Layer](#15-the-missing-knowledge-layer) (reviewed 2026-10-08)
 16. [A human-inspired memory architecture (Microsoft)](#16-a-human-inspired-memory-architecture-microsoft) (reviewed 2026-10-08)
+17. [OpenCog Hyperon and Hyperon-MCP](#17-opencog-hyperon-and-hyperon-mcp) (reviewed 2026-10-08)
 - [Across the series — what it suggests for OpenWiki](#across-the-series--what-it-suggests-for-openwiki)
 - [Candidates — world models and CoALA](#candidates--world-models-and-coala)
 
@@ -1681,13 +1682,106 @@ that depends on time.
 
 ---
 
+## 17. OpenCog Hyperon and Hyperon-MCP
+
+*Sources: "OpenCog Hyperon: A Framework for AGI at the Human Level and Beyond" (Ben Goertzel and twelve co-authors,
+[arXiv 2310.18318](https://arxiv.org/abs/2310.18318), 2023) — an informal overview of a framework in development; the core
+[hyperon-experimental](https://github.com/trueagi-io/hyperon-experimental) at `3f76dc4` (2026-02-11; MeTTa in Rust with
+Python bindings); and [Hyperon-MCP](https://github.com/amiroussama/Hyperon-MCP) (`atomspace-agent` 0.1.0, MIT per its
+`pyproject`) at `9628b36` (2026-07-20; Python, about 3,300 lines with the vendored MeTTa rule libraries; three commits,
+all that day) — the shortlist's "symbolic memory with inference for coding agents". The fourth review from the
+brain-inspired part of the [shortlist](#candidates--world-models-and-coala).*
+
+**What it is.** Hyperon is a framework for building AGI, not a memory product: the *Atomspace*, a metagraph of atoms —
+nodes and links that may carry subgraphs, truth and attention values — distributed over MongoDB and Redis; *MeTTa*, a
+language whose programs are themselves atoms that rewrite the Atomspace (pattern matching with unification,
+non-determinism, self-modification); and cognitive processes over both — probabilistic logic (PLN), economic attention
+allocation (ECAN: short- and long-term importance, forgetting), evolutionary program learning, pattern mining — meant to
+cooperate ("cognitive synergy"), with LLMs as modules a reasoning core controls. The paper says plainly that it
+describes work in progress; it reports no benchmarks. Hyperon-MCP brings a slice of it to coding agents: persistent
+atoms with truth values, one Atomspace per repository and a global one, and PLN/NAL inference over them.
+
+### How its memory works (Hyperon-MCP)
+- **Store.** SQLite per scope — a repository keyed by its normalized git remote, plus a global scope for preferences;
+  an atom's id is the SHA-1 of its canonical form; a term index bounds inference to a query's neighbourhood. Atoms are
+  parsed to an AST and validated (a closed whitelist of heads and symbols, size caps), never evaluated as code.
+- **What the agent writes:** five shapes — `Inheritance` (taxonomy), `Implication` (change impact, invariants),
+  `Similarity`, `Evaluation` (conventions, decisions, preferences), `Not` — over namespaced terms (`file:`, `module:`,
+  `dir:`, `dep:`, `decision:`, `user:`). The skill budgets about five asserts per work session — durable, verified, not
+  derivable from a file read. Confidence comes from the source (a tool result 0.9, the user 0.8, prior knowledge 0.7,
+  the model 0.55), discounted by 0.9.
+- **Contradictions:** re-asserting an atom with a diverging frequency triggers NAL revision, both provenance rows stay;
+  `atom_retract` supersedes, never deletes.
+- **Inference:** `infer` pairs the premises of a query's neighbourhood (at most 64 atoms and one ring of neighbours)
+  through the vendored PLN/NAL rule tables, two hops, a confidence beam (≥ 0.3), with proof traces, in a subprocess under
+  a hard timeout. Without the `hyperon` runtime a pure-Python backend applies the same rule table (the project's
+  conformance tests hold the two equal on this schema).
+- **Bootstrap:** an import scan turns every local Python / TypeScript import into `(Implication (affected file:dep)
+  (affected file:dependent))` (confidence 0.81) and document headings into topic atoms, written to a committable
+  `.atomspace/seed.metta`; `infer (Implication (affected file:X) $y)` is the "blast radius" the skill tells an agent to
+  check before a cross-module change.
+- **`hybrid_recall`:** token overlap over the atoms (a vector store only through OmegaClaw's Chroma collection), plus
+  one hop of inference from the best hit.
+- **Evaluation:** gates in a sibling benchmark repository — engine conformance, retrieval, multi-hop decision change,
+  agent outcomes; the history shows the first gate in progress.
+
+### Side by side
+
+| | Hyperon-MCP, on OpenCog Hyperon | OpenWiki |
+|---|---|---|
+| Unit | typed atoms in five shapes, with (strength, confidence) | captured facts with free predicates, valid time, confidence |
+| Who writes | the agent — about five curated atoms a session — and an import scan | a capture model per session window; the agent via `wiki_remember` |
+| Retrieval | pattern queries, token overlap, inference from the best hit | dense + BM25 + the question's time window; session search |
+| Inference | PLN/NAL deduction, abduction, inversion, revision; two hops | none — themes are summaries, supersession is a merge rule |
+| Contradictions | NAL revision of truth values; retraction supersedes | a valid-time merge with a coexistence check; `replaces` |
+| Code structure | import-derived implication edges, a blast radius by inference | co-change edges from git (v0.112), references |
+| Evaluation | conformance gates in progress | own sets, LoCoMo, judged real prompts |
+
+### Against OpenWiki's data
+Three checks, model-free, with Hyperon-MCP's own scanner and inference on this repository (`path-b-memory.md` §13.33):
+1. **The blast radius as a predictor of what a change touches** — the question v0.112 asked of co-change: for each
+   changed file of each of the last 59 commits, which other files did the commit change (549 queries)? Recall@10:
+   co-change **0.53** (from Python files 0.49), embedding similarity 0.37 (0.25), the inferred blast radius **0.04**
+   (0.13) — and exact import traversal no better (0.04 / 0.12). Imports describe structure; what changes together is the
+   workflow — tests, docs, the web client.
+2. **The inference against its own premises** — the inferred "affected" set of each of 108 files against the true
+   two-hop dependents from the same import scan: precision **0.30**, recall 0.44; 50 files that nothing imports (the
+   tests) still get a blast radius. The rule table derives reversed implications (inversion, abduction) above its
+   confidence threshold, and the 64-premise neighbourhood misses edges.
+3. **Our memory as premises** — 1,187 current facts carry 809 distinct predicates, 696 of them used once; mapped to the
+   five shapes, 89 % are plain `Evaluation`s, 125 facts are dependency or taxonomy relations, and they form **2** two-hop
+   chains through a shared term.
+
+### What we learn
+1. **Inference needs a vocabulary before it needs a reasoner.** Hyperon-MCP gets one by asking the agent for a few
+   curated atoms in five shapes; our capture's free predicates would give a reasoner two chains in 1,187 facts.
+2. **For code, the use signal beats the structure.** Imports — traversed exactly or inferred — find a change's
+   companions at a tenth of co-change's rate; v0.112's choice holds against the symbolic alternative.
+3. **Proof traces and confidence that decays per hop** are the right form for derived claims, should OpenWiki ever
+   derive any.
+4. **Atoms parsed, never evaluated** — the instinct of our P0 policy: memory content is data, not instructions.
+
+### What we would not adopt
+- **PLN/NAL inference over captured facts** — nothing to chain (3), and on its own structural task the inference was
+  imprecise (2).
+- **An import-derived blast radius** — co-change predicts a change's companions far better (1).
+- **The MeTTa stack as a dependency** — research software (`hyperon` 0.2.x) and a young adapter without a history yet.
+
+**In short.** Hyperon is a framework for building AGI, and its MCP adapter the most concrete coding-agent use of it: a
+few curated, typed atoms with truth values, and probabilistic inference for questions like "what does a change to this
+file affect". On this repository the inferred blast radius was imprecise against its own import graph and — even made
+exact — predicted what a change touches far worse than git co-change, and our captured memory gives a symbolic reasoner
+almost nothing to chain. The lesson is about vocabulary, not about logic.
+
+---
+
 ## Across the series — what it suggests for OpenWiki
 
-Fifteen systems — six in a first round, then Hindsight, MIRIX, AriGraph, Nemori and memory-champ from the world-model
-shortlist, Hermes Agent on request, and HippoRAG 2, The Missing Knowledge Layer and a human-inspired architecture from
-the brain-inspired part — read from their source in October 2026, plus one design report (§13). Where OpenWiki stands out: a real time model (only Graphiti matches it; Hindsight has event and
+Sixteen systems — six in a first round, then Hindsight, MIRIX, AriGraph, Nemori and memory-champ from the world-model
+shortlist, Hermes Agent on request, and HippoRAG 2, The Missing Knowledge Layer, a human-inspired architecture and
+OpenCog Hyperon from the brain-inspired part — read from their source in October 2026, plus one design report (§13). Where OpenWiki stands out: a real time model (only Graphiti matches it; Hindsight has event and
 mention time; Mem0 keeps time-aware retrieval on its hosted platform; Cognee has a query-time window),
-deterministic hygiene against poisoning (of the fifteen, only Hermes Agent has a comparable policy — a threat-pattern
+deterministic hygiene against poisoning (of the sixteen, only Hermes Agent has a comparable policy — a threat-pattern
 scan on memory writes), policy-based forgetting,
 local-first operation on a 30B model, and audited measurement. Where it lags, the same gaps recur — and Hindsight
 shows how large the distance can be (83.6 % on LongMemEval with a 20B open model):
@@ -1714,6 +1808,7 @@ shows how large the distance can be (83.6 % on LongMemEval with a 20B open model
 | Unresolved conflicts shown | MIRIX (keep both, note the discrepancy), memory-champ (surfaced, never resolved) | the merge closes or keeps silently | a "disputed" mark in the context | small |
 | Learning from use | the transfer-entropy report (§13: directed, decaying edges from activity), Hermes (skill usage counts drive the curator) | **done in v0.112** (path-b §13.29): `CO_CHANGED` edges from git for code corpora — online, 51 % of a commit's specific files in the top 10 vs 36 % by embedding similarity | facts an answer uses; a learning-from-use method only on top of such a signal | — |
 | Lifecycle mechanisms from neuroscience | the human-inspired architecture (sleep consolidation, interference-based forgetting, engram maturation, reconsolidation) | policy-based forgetting at `sleep`, themes, supersession | **measured, not adopted** (path-b §13.32), on real prompts replayed at their own time: maturation would hide 40 % of the helpful facts; deduplicating similar facts at recall hurt (7 / 42 prompts) | — |
+| Symbolic inference over memory | OpenCog Hyperon via Hyperon-MCP (PLN/NAL over curated typed atoms, an import-derived blast radius) | none — facts are retrieved, not reasoned over | **measured, not adopted** (path-b §13.33): 1,187 captured facts with 809 distinct predicates form 2 two-hop chains; the inferred blast radius had precision 0.30 against its own import graph and recall@10 0.04 for what a change touches (git co-change: 0.53) | — |
 | Memory writes documents | Hindsight (five knowledge pages per repository), Letta (memory as Markdown) | the wiki is built from documents only; memory writes no pages | "Decisions" / "Conventions" pages regenerated from facts at `sleep`; git history as a capture source | medium |
 
 **The order** in which we take these up — deterministic fixes, then paired LoCoMo experiments, then changes judged in
@@ -1751,7 +1846,7 @@ ground-truth tier, consolidation as a sleep cycle, perception from many sources)
    is a category error — a challenge to our recency factor in recall. → [§15](#15-the-missing-knowledge-layer)
 9. **[OpenCog Hyperon](https://arxiv.org/abs/2310.18318)** + **[Hyperon-MCP](https://glama.ai/mcp/servers/amiroussama/Hyperon-MCP)**
    — a symbolic metagraph world model with probabilistic logic inference; symbolic memory with inference for coding
-   agents.
+   agents. → [§17](#17-opencog-hyperon-and-hyperon-mcp)
 10. **[MemOS](https://github.com/MemTensor/MemOS)** ([paper](https://arxiv.org/abs/2507.03724)) — memory types below the
     prompt: plaintext, activation (KV cache) and parametric (LoRA) memory under one scheduler.
 11. **Generative Agents** (Park et al., 2023) — the memory stream, reflection into beliefs, planning: the archetype

@@ -1,6 +1,6 @@
-# Agent memory — what seventeen systems teach OpenWiki
+# Agent memory — what eighteen systems teach OpenWiki
 
-The summary of [`memory-systems-review.md`](memory-systems-review.md): seventeen agent-memory systems, read from their
+The summary of [`memory-systems-review.md`](memory-systems-review.md): eighteen agent-memory systems, read from their
 source code in October 2026 and compared with OpenWiki's memory tier (Path B, [`path-b-memory.md`](path-b-memory.md)),
 plus one design report. What each system is, what separates them, where they agree, where OpenWiki stands — and what
 we will do about it.
@@ -34,6 +34,7 @@ experiments we can measure on graphs we already have, then the changes only real
 | 15 | [A human-inspired architecture](memory-systems-review.md#16-a-human-inspired-memory-architecture-microsoft) (Microsoft) | six mechanisms from neuroscience over a hot cache, an episodic store and a graph | a vector store + a knowledge graph (no code released) | every event, scored; consolidation every 6 h | timestamps; decay; maturation | LongMemEval S 76.8 % vs raw retrieval 78.4 %, M 70.1 vs 71.2 % (GPT-4o) |
 | 16 | [OpenCog Hyperon + Hyperon-MCP](memory-systems-review.md#17-opencog-hyperon-and-hyperon-mcp) | an AGI framework (Atomspace, MeTTa, probabilistic logic) and its coding-agent memory adapter | SQLite atom stores per repository + a global one | the agent, about five curated atoms a session, and an import scan | truth values, NAL revision | conformance gates in progress |
 | 17 | [MemOS](memory-systems-review.md#18-memos) | a memory OS — plaintext, KV-cache and parametric memory — and a platform with plugins for agent harnesses | Neo4j + Qdrant, SQLite (local plugin), a cloud service | a reader extracts items; the local plugin stores every agent step and scores tasks with a model | provenance, versioning | LoCoMo 88.83, LongMemEval 89.20 (its own OmniMemEval) |
+| 18 | [Generative Agents](memory-systems-review.md#19-generative-agents) | the archetype: simulated people with a memory stream, retrieval by recency, importance and relevance, and reflection | a JSON memory stream per agent | every perception, rated 1–10 by the model; a reflection when importance sums past 150 | creation and last-access times | human believability rankings (TrueSkill 29.89 full vs 21.21 without memory) |
 | — | **OpenWiki** | the memory under a coding agent, next to a document wiki | Kuzu (archived upstream, R10) | a local 30B captures sessions; the agent writes via `wiki_remember` | bi-temporal | LoCoMo 60.7 % J (local 30B; judge ≈ 7 points generous) |
 
 The thirteenth review is a [design report, not a system](memory-systems-review.md#13-a-design-report-predictive-world-models-through-transfer-entropy):
@@ -55,6 +56,7 @@ predictive world models built by transfer entropy — real methods, applied wher
 | Nemori | store only what existing memory failed to predict; dated narrative episodes | episodes for temporal questions; capture the whole stream (fixed in v0.97) |
 | memory-champ | per-type write gates; procedures behind a signed human approval; contradictions surfaced | volatility classes against stale facts; a human gate for always-present memory |
 | Hermes Agent | small curated memory once per session; skills learned from corrections, kept by a curator | writes should land during a session; no memory for chore prompts; Unicode hardening of the policy |
+| Generative Agents | a memory stream; retrieval by recency, importance and relevance; reflections — insights citing their evidence | importance belongs to the question, not the memory; interpretations are recomputed from facts, never cited as evidence |
 | MemOS | memory as an OS resource of three kinds; skills learned from value-scored task traces; recall by moment | KV-cache and LoRA memory need the model's internals; recalling past fixes when a step fails helped about four times in 70 days here |
 | OpenCog Hyperon | typed atoms with truth values; probabilistic inference with proof traces | inference needs a curated vocabulary; for code, co-change beats imports |
 | A human-inspired architecture | consolidation, interference, maturation, reconsolidation — thresholds calibrated without benchmark data | judge time-dependent mechanisms at prompt time; in a coding memory the newest facts are the useful ones |
@@ -68,17 +70,17 @@ predictive world models built by transfer entropy — real methods, applied wher
 | Who writes memory | the agent through tools (Letta, memory-champ, Hermes, LangMem's tools) · an extraction pipeline per message or batch (Graphiti, Mem0, Cognee, Hindsight, MIRIX, Nemori, AriGraph, waku; HippoRAG 2 per passage) | whole sessions, captured afterwards by a local 30B; new states from the agent via `wiki_remember` |
 | Unit of memory | atomic triples (AriGraph; Graphiti's edges) · rich sentences (Mem0, Hindsight's 5W facts) · narrative episodes (Nemori, waku) · files and documents (Letta, Hermes, Cognee) · passages with their triples (HippoRAG 2) | atomic facts with validity, cardinality and source |
 | Time and contradictions | overwrite (Hermes, LangMem) · add-only, the reader resolves (Mem0) · surface, don't resolve (memory-champ; MIRIX when unsure) · invalidate and keep history (Graphiti; Letta through git) | a bi-temporal merge by valid time with a coexistence check — only Graphiti also models both times |
-| Retrieval | lexical + dense fused (Graphiti, Mem0, Cognee, Hindsight, MIRIX, memory-champ) · lexical only (waku; Hermes' session search) · graph expansion (Graphiti, Hindsight, AriGraph, Cognee) · PageRank from the facts a question links to (HippoRAG 2) · rerankers (Graphiti, Hindsight) | dense similarity × confidence × recency, single hop; since v0.103–v0.104 a BM25 aid and the question's time window |
+| Retrieval | lexical + dense fused (Graphiti, Mem0, Cognee, Hindsight, MIRIX, memory-champ) · lexical only (waku; Hermes' session search) · graph expansion (Graphiti, Hindsight, AriGraph, Cognee) · PageRank from the facts a question links to (HippoRAG 2) · rerankers (Graphiti, Hindsight) · recency + importance + relevance (Generative Agents) | dense similarity × confidence × recency, single hop; since v0.103–v0.104 a BM25 aid and the question's time window |
 | When memory enters the context | every prompt (Hindsight, Cognee) · once per session + pull (Mem0, Hermes) · an always-present core + pull (Letta) · behind a gate (waku) | 16 facts on every prompt + the handoff brief at session start |
-| Consolidation | derived layers over immutable facts (Hindsight's observations, Graphiti's summaries and communities) · curators and dreaming agents (Letta, Hermes) · lessons with feedback (Cognee) | themes over current facts, warm-started and incremental |
+| Consolidation | derived layers over immutable facts (Hindsight's observations, Graphiti's summaries and communities) · curators and dreaming agents (Letta, Hermes) · lessons with feedback (Cognee) · reflections that cite earlier reflections (Generative Agents) | themes over current facts, warm-started and incremental |
 | Forgetting | none (Graphiti, Mem0's library) · archiving by disuse (Hermes, for skills) · volatility rechecks (memory-champ) · importance-based decay of episodic facts only, semantic and procedural exempt (the Missing Knowledge Layer) | policy-based archiving of one-off events; decaying usage edges; recall's recency for volatile kinds only (v0.113) |
 | Hygiene | credential redaction (Mem0's plugin, Cognee, Hindsight) · threat scans (Hermes) · human gates (memory-champ, Hermes) · secrets stored on purpose (MIRIX) | a source-independent policy against instructions and security-sensitive facts; credentials redacted before capture and storage (v0.99) |
 | Procedural memory | skills (waku, Letta, Hermes; memory-champ behind approval) · procedures from errors and fixes (MIRIX, Mem0's plugin) · rewritten prompts (LangMem) | none — the host's skills are written by hand |
-| Evaluation | LoCoMo, LongMemEval, BEAM, DMR · multi-hop QA (HippoRAG 2: MuSiQue, 2Wiki, HotpotQA) · behavior probes, fixtures or nothing (Hermes, memory-champ, LangMem) | own cross-session sets + LoCoMo, with an audited judge |
+| Evaluation | LoCoMo, LongMemEval, BEAM, DMR · multi-hop QA (HippoRAG 2: MuSiQue, 2Wiki, HotpotQA) · human believability rankings (Generative Agents) · behavior probes, fixtures or nothing (Hermes, memory-champ, LangMem) | own cross-session sets + LoCoMo, with an audited judge |
 
 ## Where they agree
 
-Patterns most of the seventeen share — and OpenWiki does not, yet:
+Patterns most of the eighteen share — and OpenWiki does not, yet:
 1. **Lexical search next to dense search.** Six fuse BM25 or FTS5 with embeddings, two more search lexically alone. Our
    memory recall is dense-only — while the wiki side's hybrid search won decisively on a code corpus.
 2. **The raw record stays searchable.** Seven keep raw sessions or episodes next to the extracted memory (Graphiti,
@@ -103,7 +105,7 @@ were then ablated: unnecessary where facts rarely change (LoCoMo), necessary whe
 
 ## Where OpenWiki stands
 
-**Ahead** — what few or none of the seventeen have:
+**Ahead** — what few or none of the eighteen have:
 - **a real time model** — valid and transaction time, merged by valid time, as-of and known-at views (only Graphiti
   matches it);
 - **deterministic hygiene against poisoning**, independent of the claimed source (only Hermes has a comparable scan);
@@ -238,7 +240,10 @@ already have, then changes that only real sessions can judge. Each names where i
 - symbolic inference over captured facts (OpenCog Hyperon) — 809 free predicates in 1,187 facts give a reasoner two
   chains; for code, an import-derived blast radius found a change's companions at a tenth of co-change's rate (§17);
 - KV-cache and LoRA memory, and a failure-time recall hook (MemOS) — the first need control of the model, the second
-  found about four useful past fixes in 70 days of this repository (§18).
+  found about four useful past fixes in 70 days of this repository (§18);
+- an importance score per fact and reflections kept as memories (Generative Agents) — importance lowered recall on
+  LoCoMo and on real prompts; reflections cited earlier reflections 95 % of the time, repeated each other and were no
+  better per prompt than the facts they displaced (§19).
 
 ## How the series was done
 
@@ -250,14 +255,16 @@ capture-coverage gap that Nemori exposed was fixed in v0.97 (at most 13 % of a l
 writes that never landed (Hermes) and the empty usage memory (the transfer-entropy report) were found by checking; two
 of Hermes' rules — declarative facts, no negative tool claims — turned out to hold for our capture already.
 
-HippoRAG 2 and *The Missing Knowledge Layer* were reviewed after the plan was complete
-([§14](memory-systems-review.md#14-hipporag-2), [§15](memory-systems-review.md#15-the-missing-knowledge-layer)):
-HippoRAG 2's retrieval replicated with our local models on its own benchmark (MuSiQue Recall@5 54.2 → 61.9 %) and did
-not help on our wiki or memory; the Missing Knowledge Layer's litmus — decay in storage, recency at query time — led
+The shortlist's brain-inspired part was reviewed after the plan was complete. HippoRAG 2's
+([§14](memory-systems-review.md#14-hipporag-2)) retrieval replicated with our local models on its own benchmark
+(MuSiQue Recall@5 54.2 → 61.9 %) and did not help on our wiki or memory; the Missing Knowledge Layer's
+([§15](memory-systems-review.md#15-the-missing-knowledge-layer)) litmus — decay in storage, recency at query time — led
 to recall's recency applying only to the kinds of fact that go stale (v0.113); the human-inspired architecture's
 ([§16](memory-systems-review.md#16-a-human-inspired-memory-architecture-microsoft)) maturation and deduplication hurt on real prompts replayed at their own
-time — a method that also confirmed v0.113; and OpenCog Hyperon's symbolic inference
+time — a method that also confirmed v0.113; OpenCog Hyperon's symbolic inference
 ([§17](memory-systems-review.md#17-opencog-hyperon-and-hyperon-mcp)) found nothing to chain in our captured facts and, as a blast radius, lost
 to co-change; MemOS's ([§18](memory-systems-review.md#18-memos)) activation and parametric memory need the model's
-internals, and its failure-time recall of past fixes helped about four times in 70 days. Not yet reviewed from the
-[shortlist](memory-systems-review.md#candidates--world-models-and-coala): Generative Agents.
+internals, and its failure-time recall of past fixes helped about four times in 70 days; and Generative Agents'
+([§19](memory-systems-review.md#19-generative-agents)) importance score lowered recall on LoCoMo and on real prompts, while its
+reflections turned into an echo of themselves. That completes the
+[shortlist](memory-systems-review.md#candidates--world-models-and-coala).

@@ -9,7 +9,7 @@ code and docs, not its marketing, and measured against the same yardstick.
 path) · time and contradictions · consolidation · forgetting and hygiene · identity and procedural memory ·
 agent writes · surfaces and sharing · evaluation.
 
-**The summary** of the series — all seventeen at a glance, what separates them, where they agree, where OpenWiki
+**The summary** of the series — all eighteen at a glance, what separates them, where they agree, where OpenWiki
 stands, and the plan — is in [`agent-memory-summary.md`](agent-memory-summary.md).
 
 ## Contents
@@ -32,6 +32,7 @@ stands, and the plan — is in [`agent-memory-summary.md`](agent-memory-summary.
 16. [A human-inspired memory architecture (Microsoft)](#16-a-human-inspired-memory-architecture-microsoft) (reviewed 2026-10-08)
 17. [OpenCog Hyperon and Hyperon-MCP](#17-opencog-hyperon-and-hyperon-mcp) (reviewed 2026-10-08)
 18. [MemOS](#18-memos) (reviewed 2026-10-08)
+19. [Generative Agents](#19-generative-agents) (reviewed 2026-10-09 — the last of the shortlist)
 - [Across the series — what it suggests for OpenWiki](#across-the-series--what-it-suggests-for-openwiki)
 - [Candidates — world models and CoALA](#candidates--world-models-and-coala)
 
@@ -1863,14 +1864,151 @@ times in 70 days here, each time with a pitfall better written down once.
 
 ---
 
+## 19. Generative Agents
+
+*Sources: the paper "Generative Agents: Interactive Simulacra of Human Behavior" (Joon Sung Park, Joseph C. O'Brien,
+Carrie J. Cai, Meredith Ringel Morris, Percy Liang, Michael S. Bernstein — Stanford, Google Research, Google DeepMind;
+UIST 2023; [arXiv 2304.03442](https://arxiv.org/abs/2304.03442)) and its code,
+[github.com/joonspk-research/generative_agents](https://github.com/joonspk-research/generative_agents) at `fe05a71`
+(2023-08-11), Apache-2.0 — the Smallville simulation server (`reverie/backend_server`) with its persona modules and
+prompt templates. The last review from the [shortlist](#candidates--world-models-and-coala): the archetype CoALA draws
+on.*
+
+**What it is.** Twenty-five agents living two game days in a town like The Sims, each a language model with a memory: a
+*memory stream* records what an agent perceives as natural-language observations, *retrieval* chooses what enters the
+prompt by recency, importance and relevance, *reflection* periodically turns observations into higher-level insights
+that join the stream, and *plans* for the day join it too. A research prototype for believable behavior, not a memory
+product — and the design most agent memories since start from.
+
+### How its memory works
+- **The stream** — each record holds a description, a creation time, a last-access time, an embedding and an
+  **importance** ("poignancy") score, rated 1–10 by the model when the record is created: "1 is purely mundane (e.g.,
+  brushing teeth, making bed) and 10 is extremely poignant (e.g., a break up, college acceptance)".
+- **Retrieval** — recency + importance + relevance, each min-max normalized over the stream: recency an exponential
+  decay over the game hours since the record was last retrieved (factor 0.995), relevance the cosine to the query. The
+  paper sets all three weights to 1; the top-ranked records that fit the context window enter the prompt.
+- **Reflection** — when the importance of the latest events sums past 150 (two or three times a game day): the 100 most
+  recent records → "what are 3 most salient high-level questions we can answer about the subjects in the statements?" →
+  per question the relevant records, earlier reflections included → "What 5 high-level insights can you infer from the
+  above statements? (example format: insight (because of 1, 5, 3))" → each insight stored as a record pointing to its
+  evidence; reflections on reflections grow into trees.
+- **Plans** — a day's agenda, decomposed recursively into hour-long and then 5–15-minute actions, stored in the stream
+  and revised when the agent reacts to what it perceives.
+- **Evaluation** — "interviews" after two game days (self-knowledge, memory, plans, reactions, reflections): for the same
+  agent, the answers of the full architecture, three ablations and human crowdworkers ranked by believability by 100
+  evaluators. TrueSkill: full 29.89, without reflection 26.88, without reflection and plans 25.64, crowdworkers 22.95,
+  without any memory 21.21 (d = 8.16 between the first and the last). Each ablation removes a whole kind of memory; none
+  isolates the importance score or the recency term. In the two-day run news spread from 1 to 8 and to 13 agents, 6 of
+  453 answers about other agents were hallucinated, and the paper names embellished memories and retrieval failures;
+  the run cost "thousands of dollars in token credits".
+
+### Description vs. code
+The released retrieval (`retrieve.py`, `new_retrieve`) differs from the paper in two places that matter:
+- **Weights** — `gw = [0.5, 3, 2]`: relevance ×3, importance ×2, recency ×0.5. The paper says all 1; the settings
+  `[1, 1, 1]` and `[1, 2, 1]` are commented out next to a note that the weights "should likely be learned".
+- **Recency** — a decay over ranks, not hours, and inverted: the records are sorted by last access, oldest first, and
+  given 0.99¹, 0.99², …, so after min-max scaling the *least* recently accessed record scores 1 and the latest 0. Since
+  retrieval stamps what it returns as accessed, the term pushes records not retrieved lately to the front — the
+  opposite of the paper's "attentional sphere".
+
+Reflection in the code reads the records since the last reflection, not the 100 most recent, and retrieves 30 per
+question.
+
+### Side by side
+
+| | Generative Agents | OpenWiki |
+|---|---|---|
+| Purpose | believable simulated people in a game world | the memory under a coding agent, next to a document wiki |
+| Store | a JSON memory stream per agent (records + embeddings) | Kuzu (one file) + JSONL sidecars |
+| Unit | a sentence: observation, reflection or plan | an atomic fact with validity, cardinality and source; themes; raw sessions searchable |
+| Write path | every perception, rated 1–10 by the model | one capture call per session window; `wiki_remember` |
+| Retrieval | recency + importance + relevance, min-max normalized | dense × confidence × recency for volatile kinds; a BM25 aid; the question's time window |
+| Consolidation | reflection: questions → insights with evidence, recursive | themes over clusters of current facts (B5), warm-started |
+| Time and contradictions | creation and last-access times; nothing resolved | a bi-temporal merge with supersession |
+| Forgetting | none — recency only ranks | policy-based archiving at `sleep` |
+| Evaluation | human believability rankings of interview answers | own sets, LoCoMo, judged real prompts |
+
+### Against OpenWiki's data
+Two of its mechanisms are missing from OpenWiki and checkable: importance and reflection. (Recency is ours already —
+bounded, and since v0.113 only for the kinds of fact that go stale; plans belong to the agent, not its memory.)
+`path-b-memory.md` §13.35 has the details.
+
+**Importance** — every fact rated 1–10 by our local 30B with the paper's prompt, 25 facts a call (for the coding memory
+adapted to project work: 1 a temporary path or a one-off command, 10 a core decision or constraint of the project).
+On LoCoMo (the D13 graphs, 3,279 facts, categories 1–4; the gold answer's words among the top 20):
+
+| recall | multi-hop | temporal | open-domain | single-hop | all |
+|---|---|---|---|---|---|
+| production (v0.113) | 0.513 | 0.195 | 0.221 | 0.571 | **0.461** |
+| dense | 0.495 | 0.169 | 0.220 | 0.552 | 0.441 |
+| dense + importance × 0.05 | 0.490 | 0.177 | 0.221 | 0.552 | 0.442 |
+| dense + importance × 0.1 | 0.465 | 0.165 | 0.221 | 0.541 | 0.429 |
+| GA's formula (released weights, recency newest-first) | 0.355 | 0.185 | 0.171 | 0.453 | **0.363** |
+| the same without importance | 0.478 | 0.189 | 0.222 | 0.563 | 0.449 |
+
+Inside GA's formula importance costs 8.6 points of coverage; as a small aid between +0.1 (× 0.05) and −1.2 (× 0.1).
+On the live path — the dev memory's
+1,486 facts, the 339 real prompts of this repository's transcript replayed at their own time with a 6-hour capture lag
+(§13.32), a blind judge where the 16 recalled facts change — as an aid (dense + 0.1 × importance) it changed 327
+prompts by 4.1 facts: the facts it brought in were helpful 11.5 % of the time, those it pushed out 15.1 % (16 / 18
+prompts better / worse); inside GA's formula against the same formula without it, 336 prompts by 7.7 facts: 14.0 % vs
+18.5 % (17 / 33, p ≈ 0.03). The ratings are not noise — core decisions do get 8–10 — but they rate the fact, not its use
+for the request at hand: a core decision enters prompts it doesn't bear on and displaces a specific fact that does.
+
+**Reflection** — GA's own prompts over the dev memory as a stream: the facts in the order they were said, a reflection
+whenever their importance sums past 150 (65 times, every 22 facts), the 100 most recent records → 3 questions → the 30
+most similar records, earlier reflections included → 5 insights with evidence. 924 insights from 260 calls of the local
+30B. They stay with what they cite — 1 % of their specific terms are missing from their evidence, where narratives of
+raw windows invented 12 % (§13.23) — but what they cite becomes themselves: 95 % of the evidence is earlier
+reflections, and 74 % of the insights repeat an earlier one (cosine ≥ 0.90; 46 % at 0.95). Replayed at the prompts'
+own time and competing with the facts for the 16 slots in one stream, reflections entered for 170 of 339 prompts (4.1
+each). Judged blind on 80, those that entered were helpful 34.1 % of the time, the facts they pushed out 27.4 % — and
+the prompts came out 19 better, 18 worse. The judge rewards overviews: of the 70 distinct reflections it called
+helpful, 7 say nothing checkable ("designed to enable long-term adaptability, sustainability, and autonomous knowledge
+development"), 7 are wrong or outdated — the manifest is "openwiki.json" (a stale fact in memory, summarized), "its
+primary input is … especially PDFs" on 2026-09-23 — and the other 56 restate facts the memory holds.
+
+### What we learn
+1. **Importance belongs to the question, not the memory.** A fixed 1–10 rating lifts the same core facts into every
+   prompt; relevance already decides which of them bear on it. In a simulation, where the poignant (a party
+   invitation) should drive action, it may pay; for answering a request it costs.
+2. **Read the code, not only the paper.** The released retrieval weighs relevance six times above recency, and its
+   recency term points backwards — the published behavior came from code that differs from its description.
+3. **Interpretations are recomputed from facts, never cited as evidence.** GA's reflections cite earlier reflections,
+   so in a memory that keeps returning to the same topics they converge on a few overviews and keep whatever held when
+   they were first written. Our themes are recomputed from the current facts at each `sleep` and cited by nothing — the
+   series' convergent pattern OpenWiki already followed ([summary](agent-memory-summary.md#where-they-agree), point 6).
+4. **The ablations remove kinds of memory, not scoring terms.** The paper's evidence is for keeping a stream,
+   reflections and plans at all, not for its retrieval formula — which it calls a first implementation, to be tuned.
+
+### What we would not adopt
+- **An importance score per fact** — measured above, in both settings.
+- **Reflections as records in recall** — an echo of earlier reflections, no better per prompt than the facts they
+  displace, and one in ten of those judged helpful wrong or outdated, with no merge to close them; the themes tier
+  holds the overview for one call per changed cluster.
+- **Min-max normalization across the stream** — each term's weight then depends on the spread of the current
+  candidates.
+- **A model rating every memory at write time** — one more model judgment of memory on a local model, where our audits
+  found them unreliable.
+
+**In short.** Generative Agents is where agent memory started: a stream of observations, retrieval by recency,
+importance and relevance, reflections that turn observations into beliefs. OpenWiki carries its descendants already —
+relevance, a bounded recency, themes. What it lacked held up poorly here: an importance score lowered recall on LoCoMo
+and the judged usefulness of real prompts' memory, and reflections became an echo of themselves — 95 % of their
+evidence earlier reflections, three in four a repeat — no better per prompt than the facts they displaced, and wrong
+where the facts had moved on. Its lasting lessons are ones OpenWiki follows: consolidate, and derive interpretations
+from the facts each time.
+
+---
+
 ## Across the series — what it suggests for OpenWiki
 
-Seventeen systems — six in a first round, then Hindsight, MIRIX, AriGraph, Nemori and memory-champ from the world-model
+Eighteen systems — six in a first round, then Hindsight, MIRIX, AriGraph, Nemori and memory-champ from the world-model
 shortlist, Hermes Agent on request, and HippoRAG 2, The Missing Knowledge Layer, a human-inspired architecture,
-OpenCog Hyperon and MemOS from the brain-inspired part — read from their source in October 2026, plus one design
-report (§13). Where OpenWiki stands out: a real time model (only Graphiti matches it; Hindsight has event and
+OpenCog Hyperon, MemOS and Generative Agents from the brain-inspired part — read from their source in October 2026,
+plus one design report (§13). Where OpenWiki stands out: a real time model (only Graphiti matches it; Hindsight has event and
 mention time; Mem0 keeps time-aware retrieval on its hosted platform; Cognee has a query-time window),
-deterministic hygiene against poisoning (of the seventeen, only Hermes Agent has a comparable policy — a threat-pattern
+deterministic hygiene against poisoning (of the eighteen, only Hermes Agent has a comparable policy — a threat-pattern
 scan on memory writes), policy-based forgetting,
 local-first operation on a 30B model, and audited measurement. Where it lags, the same gaps recur — and Hindsight
 shows how large the distance can be (83.6 % on LongMemEval with a 20B open model):
@@ -1898,6 +2036,8 @@ shows how large the distance can be (83.6 % on LongMemEval with a 20B open model
 | Learning from use | the transfer-entropy report (§13: directed, decaying edges from activity), Hermes (skill usage counts drive the curator) | **done in v0.112** (path-b §13.29): `CO_CHANGED` edges from git for code corpora — online, 51 % of a commit's specific files in the top 10 vs 36 % by embedding similarity | facts an answer uses; a learning-from-use method only on top of such a signal | — |
 | Lifecycle mechanisms from neuroscience | the human-inspired architecture (sleep consolidation, interference-based forgetting, engram maturation, reconsolidation) | policy-based forgetting at `sleep`, themes, supersession | **measured, not adopted** (path-b §13.32), on real prompts replayed at their own time: maturation would hide 40 % of the helpful facts; deduplicating similar facts at recall hurt (7 / 42 prompts) | — |
 | Symbolic inference over memory | OpenCog Hyperon via Hyperon-MCP (PLN/NAL over curated typed atoms, an import-derived blast radius) | none — facts are retrieved, not reasoned over | **measured, not adopted** (path-b §13.33): 1,187 captured facts with 809 distinct predicates form 2 two-hop chains; the inferred blast radius had precision 0.30 against its own import graph and recall@10 0.04 for what a change touches (git co-change: 0.53) | — |
+| Importance scoring | Generative Agents (a 1–10 rating per memory, a retrieval term), the human-inspired architecture (every event scored) | none — relevance, confidence and a bounded recency rank | **measured, not adopted** (path-b §13.35): LoCoMo coverage 0.449 → 0.363 when GA's formula adds it (production 0.461); on real prompts the facts it lifted were judged less helpful than those they displaced (14.0 vs 18.5 %, 17 / 33 prompts) | — |
+| Reflection into higher-level beliefs | Generative Agents (insights citing their evidence, recursively), Hindsight (observations over facts), Letta (a dreaming subagent) | themes over current facts (B5), recomputed at `sleep` | **measured, not adopted** (path-b §13.35): GA's reflections cited earlier reflections 95 % of the time and repeated each other (74 %); in recall no better per prompt than the facts they displaced (19 / 18) | — |
 | Memory writes documents | Hindsight (five knowledge pages per repository), Letta (memory as Markdown) | the wiki is built from documents only; memory writes no pages | "Decisions" / "Conventions" pages regenerated from facts at `sleep`; git history as a capture source | medium |
 
 **The order** in which we take these up — deterministic fixes, then paired LoCoMo experiments, then changes judged in
@@ -1938,8 +2078,8 @@ ground-truth tier, consolidation as a sleep cycle, perception from many sources)
    agents. → [§17](#17-opencog-hyperon-and-hyperon-mcp)
 10. **[MemOS](https://github.com/MemTensor/MemOS)** ([paper](https://arxiv.org/abs/2507.03724)) — memory types below the
     prompt: plaintext, activation (KV cache) and parametric (LoRA) memory under one scheduler. → [§18](#18-memos)
-11. **Generative Agents** (Park et al., 2023) — the memory stream, reflection into beliefs, planning: the archetype
-    CoALA draws on.
+11. **[Generative Agents](https://arxiv.org/abs/2304.03442)** (Park et al., UIST 2023) — the memory stream, reflection
+    into beliefs, planning: the archetype CoALA draws on. → [§19](#19-generative-agents)
 
 **Trends and references.** Between-session "dreaming" consolidation is spreading (OpenDream, Opencode-Dreams,
 clawdreamer; Anthropic's Dreaming for Claude Managed Agents, research preview since May 2026). A second exchange

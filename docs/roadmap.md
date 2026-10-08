@@ -931,6 +931,15 @@ The **genuine gaps**, measure-first as always:
   set (paired, 2 captures, no probes) the cue reached the context 8/16 → 16/16 and the constraint was applied
   7/16 → 12/16 (+5 / −0). Adopted: `[memory] context_k` (default 16) + `context_budget` 2,000 → 3,000; facts may
   use theme budget the themes don't need. `path-b-memory.md` §13.12.
+- **Generative Agents — measured, not adopted.** The last review from the shortlist (`memory-systems-review.md`
+  §19): the archetype — a memory stream, retrieval by recency, importance and relevance, reflections into insights.
+  Its released code weighs relevance ×3, importance ×2, recency ×0.5 (the paper: all 1), and its recency term points
+  backwards. Importance, a 1–10 rating per fact with the paper's prompt: LoCoMo coverage 0.449 → 0.363 when GA's
+  formula adds it (production 0.461), +0.1 to −1.2 as an aid; on real prompts replayed at their own time the facts it
+  lifted were judged less helpful than those they displaced (14.0 vs 18.5 %, 17 / 33 prompts). Reflection over the dev
+  memory: 924 insights, 95 % of their evidence earlier reflections, 74 % repeats; competing in recall, 34.1 vs 27.4 %
+  helpful per item but 19 / 18 prompts, and 7 of the 70 judged helpful wrong or outdated. No code.
+  `docs/path-b-memory.md` §13.35.
 - **MemOS — measured, not adopted.** The fifth review from the shortlist's brain-inspired part
   (`memory-systems-review.md` §18): memory as an OS resource — plaintext, KV-cache and LoRA memory in MemCubes under a
   scheduler — a memory platform with an API and plugins, and a local plugin for coding agents that learns skills from

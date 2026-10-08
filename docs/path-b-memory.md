@@ -1370,6 +1370,50 @@ the live context — the hooks assemble k = 8 within a 2,000-character budget, a
 suggests trying a larger k there, measured on that path (→ §13.12). LoCoMo now: **overall J 60.7 %** with a local
 30B (Mem0 reports ≈ 67 % with GPT-4o-mini — and both are generous-judge numbers).
 
+### 13.35 Importance and reflection — measured, not adopted
+
+The last review from the shortlist, Generative Agents (`memory-systems-review.md` §19), ranks memories by recency +
+importance + relevance — importance a 1–10 rating the model gives each memory when it is stored — and turns them into
+higher-level insights by *reflection*. Recency OpenWiki has (bounded, for the kinds of fact that go stale — §13.31);
+the other two were checked, each with GA's own prompts on the local 30B.
+
+**Importance** — every fact rated, 25 a call (for the coding memory the prompt adapted to project work: 1 a temporary
+path or a one-off command, 10 a core decision or constraint). LoCoMo offline (the D13 graphs, 3,279 facts, categories
+1–4, the gold answer's words among the top 20): production 0.461, dense 0.441, dense + importance 0.442 (× 0.05) /
+0.429 (× 0.1), GA's formula (relevance 3, importance 2, recency 0.5 — the released weights — each min-max normalized,
+recency newest-first) **0.363**, the same without importance 0.449. On the live path, replayed at the prompts' own time
+(as in §13.32, a 6-hour capture lag; a blind judge where the 16 facts change):
+
+| pair | prompts changed | facts changed per prompt | helpful: in / out | prompts better / worse |
+|---|---|---|---|---|
+| dense + 0.1 × importance vs dense | 327 | 4.1 | 11.5 % / 15.1 % | 16 / 18 |
+| GA's formula vs the same without importance | 336 | 7.7 | 14.0 % / 18.5 % | 17 / 33 (p ≈ 0.03) |
+
+The ratings rate the fact, not its use: a core decision is lifted into prompts it doesn't bear on and displaces a
+specific fact that does.
+
+**Reflection** — the dev memory as GA's stream: the facts in the order they were said, a reflection whenever their
+importance sums past 150 (every 22 facts), the 100 most recent records → 3 questions → the 30 most similar records,
+earlier reflections included → 5 insights with evidence (10 of the 195 insight replies broke the format and were
+dropped):
+
+| | |
+|---|---|
+| reflections / insights / chat calls | 65 / 924 / 260 |
+| specific terms missing from the cited evidence (§13.23's check) | 1 % |
+| cited evidence that is an earlier reflection | 95 % |
+| insights repeating an earlier one (cosine ≥ 0.90 / 0.95) | 74 % / 46 % |
+| prompts where reflections enter the 16 (replayed, one stream) | 170 of 339, 4.1 each |
+| judged helpful, 80 prompts: reflections in / facts out | 34.1 % / 27.4 % |
+| prompts better / worse | 19 / 18 |
+| distinct reflections judged helpful: wrong or outdated / nothing checkable / restating facts | 7 / 7 / 56 of 70 |
+
+Grounded, but in themselves: once reflections exist they win the retrieval for the next reflection's questions, and the
+stream converges on a few overviews. Among those judged helpful, "a centralized project configuration (openwiki.json)"
+summarizes a stale fact in memory (the manifest is `openwiki.toml`), and "its primary input is … especially PDFs" dates
+from 2026-09-23 — facts are closed by the merge, reflections by nothing. Not adopted; no code kept. Themes stay the
+consolidated tier: recomputed from the current facts at each `sleep`, cited by nothing.
+
 ### 13.34 Failure-time recall of past fixes — measured, not adopted
 
 The fifth review from the shortlist's brain-inspired part, MemOS (`memory-systems-review.md` §18): its local plugin for

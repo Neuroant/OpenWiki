@@ -37,7 +37,7 @@ A chronological feature roadmap of everything built so far (by release) is in
 `docs/roadmap.md`. Full **architecture documentation** (arc42: goals, constraints,
 context, building blocks, runtime, deployment, concepts, decisions/ADRs, quality,
 risks) is in `docs/arc42/`.
-A comparative review of seventeen other **agent-memory systems** is in
+A comparative review of eighteen other **agent-memory systems** is in
 `docs/memory-systems-review.md`; its summary — where they agree, where OpenWiki stands, and
 the ranked plan for Path B's next steps — is `docs/agent-memory-summary.md`.
 

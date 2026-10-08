@@ -9,7 +9,7 @@ code and docs, not its marketing, and measured against the same yardstick.
 path) · time and contradictions · consolidation · forgetting and hygiene · identity and procedural memory ·
 agent writes · surfaces and sharing · evaluation.
 
-**The summary** of the series — all sixteen at a glance, what separates them, where they agree, where OpenWiki
+**The summary** of the series — all seventeen at a glance, what separates them, where they agree, where OpenWiki
 stands, and the plan — is in [`agent-memory-summary.md`](agent-memory-summary.md).
 
 ## Contents
@@ -31,6 +31,7 @@ stands, and the plan — is in [`agent-memory-summary.md`](agent-memory-summary.
 15. [The Missing Knowledge Layer](#15-the-missing-knowledge-layer) (reviewed 2026-10-08)
 16. [A human-inspired memory architecture (Microsoft)](#16-a-human-inspired-memory-architecture-microsoft) (reviewed 2026-10-08)
 17. [OpenCog Hyperon and Hyperon-MCP](#17-opencog-hyperon-and-hyperon-mcp) (reviewed 2026-10-08)
+18. [MemOS](#18-memos) (reviewed 2026-10-08)
 - [Across the series — what it suggests for OpenWiki](#across-the-series--what-it-suggests-for-openwiki)
 - [Candidates — world models and CoALA](#candidates--world-models-and-coala)
 
@@ -1775,13 +1776,101 @@ almost nothing to chain. The lesson is about vocabulary, not about logic.
 
 ---
 
+## 18. MemOS
+
+*Sources: [github.com/MemTensor/MemOS](https://github.com/MemTensor/MemOS) at `a7367d0` (2026-09-22), Apache-2.0 — a
+Python core (`src/memos`), a TypeScript local plugin for coding agents (`apps/memos-local-plugin`), cloud and OpenClaw
+plugins and evaluation scripts; the paper "MemOS: A Memory OS for AI System" (Zhiyu Li, … Feiyu Xiong — 39 authors,
+MemTensor and partners; [arXiv 2507.03724](https://arxiv.org/abs/2507.03724), v4 2025-12-03, 36 pages). The fifth
+review from the brain-inspired part of the [shortlist](#candidates--world-models-and-coala).*
+
+**What it is.** A "memory operating system": memory as a managed system resource of three kinds — plaintext (retrieved
+text), activation (KV caches of preloaded memory) and parametric (LoRA adapters) — packed into *MemCubes* that carry
+content with provenance and versioning and can be composed, migrated and fused, under a scheduler that moves memory
+between kinds. In practice the project is a memory platform: an API to add, search, edit and delete memories organized
+as a graph (Neo4j and Qdrant when self-hosted), asynchronous ingestion, natural-language feedback and correction,
+"cubes" per user or project, a cloud service, and plugins for agent harnesses (OpenClaw, Hermes Agent, DeepSeek
+Harness).
+
+### How its memory works
+- **The core** (`src/memos`): a reader extracts memory items from conversations; textual memory is a tree / graph with
+  working, long-term and user memory; search combines a vector database, the graph and a reranker; a scheduler ingests
+  asynchronously and preloads working memory; a "dream" module consolidates; activation memory is a KV cache for local
+  Hugging Face models, parametric memory a LoRA adapter.
+- **The local plugin for coding agents** (`memos-local-plugin` 2.0; SQLite with FTS5 and vectors, a viewer): every agent
+  step — thought, action, observation — is stored; at a task's end one model call scores the task (from a rubric and the
+  user's reaction) and weights each step, and a value is propagated back over the steps (V_t = α_t·R + (1 − α_t)·γ·V_t+1).
+  *Experiences* (trigger, procedure, verification, boundary) are induced from similar steps across tasks, an *environment
+  model* (structure, regularities, constraints) is abstracted from several experiences, and *skills* crystallize when
+  frequency, gain and stability thresholds and a double check pass. Retrieval comes in tiers by moment: a skill at a
+  task's start, **the earlier step that fixed a similar error when a step fails** (error signature, embedding and tags,
+  ranked by value), a similar sub-task's sequence, the environment model on "structural uncertainty". Its own docs: in a
+  single-user setting the environment-model table stays empty for a long time.
+- **Evaluation:** the README reports LoCoMo 88.83 and LongMemEval 89.20 through the project's own OmniMemEval (14
+  commercial memory products, ten datasets). The repository's LoCoMo scripts recall per speaker, answer with a Mem0-style
+  prompt and judge with Mem0's generous judge (gpt-4o-mini by default) over categories 1–4 — the judging style of ours,
+  with hosted models.
+
+### Side by side
+
+| | MemOS | OpenWiki |
+|---|---|---|
+| Kinds of memory | plaintext, activation (KV cache), parametric (LoRA) | plaintext facts, themes, raw sessions; documents |
+| Store | Neo4j + Qdrant (self-hosted), SQLite (local plugin), a cloud service | Kuzu (one file) + JSONL sidecars |
+| Write path | a reader extracts items; the plugin stores every agent step and scores tasks with a model | one capture call per session window; `wiki_remember` |
+| Procedural memory | experiences → environment model → skills, value-weighted | a lessons review list (v0.111) |
+| Retrieval | vector + graph + reranker; tiers by moment — task start, failed step, sub-task, uncertainty | dense + BM25 + time window, every prompt; session search |
+| Governance | MemCube provenance and versioning, cubes per user or project | provenance tags, bi-temporal history, the P0 policy, an approval step |
+| Evaluation | OmniMemEval (LoCoMo 88.83, LongMemEval 89.20) | own sets, LoCoMo 78.2 % J (local 30B), judged real prompts |
+
+### Against OpenWiki's data
+Activation and parametric memory need a model whose KV cache or weights we control — not the coding agent's model
+behind its host, and not Ollama's API — so they are out of reach here. The local plugin's failure-time recall fits a
+coding agent and our data (`path-b-memory.md` §13.34): on the 47 resolved tool failures of this repository's 70-day
+transcript (v0.111's episodes), for each the most similar earlier failure (at least an hour before) by error signature,
+BM25 and bge-m3:
+- an earlier fix genuinely applies — same cause, same remedy, by hand audit — for **10 of 46** later failures (22 %);
+  the local judge said 32, rewarding surface likeness;
+- the three matchers find 7–8 of the ten at rank 1, but suggest something for every failure — four suggestions in five
+  are noise; at an embedding cosine of 0.85 or more, 5 suggestions, 4 right;
+- the ten are recurring environment pitfalls — inline code broken by shell quoting, heredoc quoting, Git-Bash paths
+  handed to Windows Python, a screenshot directory — the ones the lessons review (v0.111) lists and the agent's own
+  memory records, which keeps them from failing at all.
+
+### What we learn
+1. **A value per step, propagated from the task's outcome**, is a principled use signal for procedural memory — if
+   outcomes were scored; v0.111 counted recurrence instead.
+2. **Retrieval by moment** — a task's start, a failed step, a moment of uncertainty — is a sharper "when" than our
+   inject hook's every prompt.
+3. **Failure-time recall pays only where failures recur** — here a handful of environment pitfalls, better written
+   down once where the agent always reads.
+4. **Leaderboard numbers need their models.** MemOS's LoCoMo harness judges like ours (Mem0's generous judge,
+   categories 1–4); the gap to our 78.2 % is largely hosted answer models against a local 30B, which this review cannot
+   separate.
+
+### What we would not adopt
+- **KV-cache and LoRA memory** — they need control of the model; ours is the coding agent's.
+- **A step-level trace store with model-scored tasks** — a model call per task and weights per step, on top of a
+  capture that already costs a call per window.
+- **A failure-time recall hook** — about four useful recalls in 70 days (above).
+- **Neo4j and Qdrant** — a server stack, against our one-file local store.
+
+**In short.** MemOS is the most ambitious system of the series: memory as an OS resource of three kinds, a platform with
+an API and plugins for agent harnesses, and a procedural layer that learns skills from scored task traces. Little of it
+fits a local-first memory under someone else's model: its activation and parametric memory need the model's internals,
+and its most transferable coding-agent idea — recall the earlier fix when a step fails — would have helped about four
+times in 70 days here, each time with a pitfall better written down once.
+
+---
+
 ## Across the series — what it suggests for OpenWiki
 
-Sixteen systems — six in a first round, then Hindsight, MIRIX, AriGraph, Nemori and memory-champ from the world-model
-shortlist, Hermes Agent on request, and HippoRAG 2, The Missing Knowledge Layer, a human-inspired architecture and
-OpenCog Hyperon from the brain-inspired part — read from their source in October 2026, plus one design report (§13). Where OpenWiki stands out: a real time model (only Graphiti matches it; Hindsight has event and
+Seventeen systems — six in a first round, then Hindsight, MIRIX, AriGraph, Nemori and memory-champ from the world-model
+shortlist, Hermes Agent on request, and HippoRAG 2, The Missing Knowledge Layer, a human-inspired architecture,
+OpenCog Hyperon and MemOS from the brain-inspired part — read from their source in October 2026, plus one design
+report (§13). Where OpenWiki stands out: a real time model (only Graphiti matches it; Hindsight has event and
 mention time; Mem0 keeps time-aware retrieval on its hosted platform; Cognee has a query-time window),
-deterministic hygiene against poisoning (of the sixteen, only Hermes Agent has a comparable policy — a threat-pattern
+deterministic hygiene against poisoning (of the seventeen, only Hermes Agent has a comparable policy — a threat-pattern
 scan on memory writes), policy-based forgetting,
 local-first operation on a 30B model, and audited measurement. Where it lags, the same gaps recur — and Hindsight
 shows how large the distance can be (83.6 % on LongMemEval with a 20B open model):
@@ -1802,7 +1891,7 @@ shows how large the distance can be (83.6 % on LongMemEval with a 20B open model
 | Time in the question | Cognee (query-time window), Mem0 platform, Hindsight and MIRIX (rule-based date parsers) | **done in v0.104** — before, recall ignored times in the query | a bonus for facts whose valid time falls in the question's window (rule-based) — done: LoCoMo dated questions 46.2 → 56.2 %, overall +1.3 J (p ≈ 5·10⁻⁵) | — |
 | Multi-hop recall by expansion | AriGraph (semantic BFS over triplets), Graphiti (BFS from entities), Hindsight (graph links), Cognee (graph completion), HippoRAG 2 (PageRank from the facts a question links to) | **measured, not adopted** (path-b §13.20, §13.30): linked facts lost to the ranking's own next candidates; HippoRAG 2's walk stayed below dense recall even with its LLM filter (multi-hop 0.474 vs 0.482) | expansion through shared subjects / objects, words or embeddings, depth 1–2 — offline, worse when swapped in and when added; PageRank over facts replicated on MuSiQue (+7.7 Recall@5), not on our memory or wiki | — |
 | Typed memory | waku (facts / episodes / skills / persona), Letta (core / deferred / skills), Hindsight (world / experience), MIRIX (six purpose types), memory-champ (episodic / semantic / procedural, per-type write gates) | one untyped fact store (`source` tags only) | a type tag at capture, per-type recall budgets | small–medium |
-| Procedural memory from errors | Mem0 plugin (failed commands with fixes), MIRIX (tool errors → skills), Hermes (skills from corrections and fixes — never negative tool claims or unresolved failures) | **done in v0.111 as a review list** (path-b §13.28): `owiki sessions lessons` — lessons learned on two or more days from resolved failures, with the guardrails; the model alone called 121 of 122 failures a lesson | recorded by a person where the agent always sees them | — |
+| Procedural memory from errors | Mem0 plugin (failed commands with fixes), MIRIX (tool errors → skills), Hermes (skills from corrections and fixes — never negative tool claims or unresolved failures), MemOS (skills from value-scored task traces; the earlier fix recalled when a step fails) | **done in v0.111 as a review list** (path-b §13.28): `owiki sessions lessons` — lessons learned on two or more days from resolved failures, with the guardrails; the model alone called 121 of 122 failures a lesson; failure-time recall of past fixes **measured, not adopted** (path-b §13.34): a genuinely applicable earlier fix for 10 of 46 failures, 4 of 5 right at a strict similarity bar | recorded by a person where the agent always sees them | — |
 | Staleness by volatility | memory-champ (stable / slow / volatile facts, rechecked after 365 / 90 / 14 days), the Missing Knowledge Layer (decay by fact type — semantic and procedural facts exempt) | stale "current" facts persist until restated or corrected via `wiki_remember` (D12) | **measured in v0.109** (path-b §13.26): out of sample the phrasing rule's flags were 25 % stale — a review list (`analyze memory --review`), not a "possibly outdated" label; refined rules and the local model's tags did worse; **changed in v0.113** (path-b §13.31): recall's recency applies only to volatile kinds — fewer stale facts in 67 of 267 real prompts, more in 6; LoCoMo unchanged | — | — |
 | Unicode evasion of the policy | Hermes (NFKC folding, invisible and bidirectional characters) | **fixed in v0.99** — before, the regexes matched the raw text | NFKC, zero-width characters removed, bidirectional overrides refused — done | — |
 | Unresolved conflicts shown | MIRIX (keep both, note the discrepancy), memory-champ (surfaced, never resolved) | the merge closes or keeps silently | a "disputed" mark in the context | small |
@@ -1848,7 +1937,7 @@ ground-truth tier, consolidation as a sleep cycle, perception from many sources)
    — a symbolic metagraph world model with probabilistic logic inference; symbolic memory with inference for coding
    agents. → [§17](#17-opencog-hyperon-and-hyperon-mcp)
 10. **[MemOS](https://github.com/MemTensor/MemOS)** ([paper](https://arxiv.org/abs/2507.03724)) — memory types below the
-    prompt: plaintext, activation (KV cache) and parametric (LoRA) memory under one scheduler.
+    prompt: plaintext, activation (KV cache) and parametric (LoRA) memory under one scheduler. → [§18](#18-memos)
 11. **Generative Agents** (Park et al., 2023) — the memory stream, reflection into beliefs, planning: the archetype
     CoALA draws on.
 

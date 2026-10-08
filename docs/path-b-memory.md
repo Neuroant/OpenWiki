@@ -1370,6 +1370,29 @@ the live context — the hooks assemble k = 8 within a 2,000-character budget, a
 suggests trying a larger k there, measured on that path (→ §13.12). LoCoMo now: **overall J 60.7 %** with a local
 30B (Mem0 reports ≈ 67 % with GPT-4o-mini — and both are generous-judge numbers).
 
+### 13.34 Failure-time recall of past fixes — measured, not adopted
+
+The fifth review from the shortlist's brain-inspired part, MemOS (`memory-systems-review.md` §18): its local plugin for
+coding agents recalls, when a step fails, the earlier step that fixed a similar error — matched by error signature,
+embedding and tags, ranked by a learned value. Checked on this repository's 47 resolved tool failures (v0.111's
+`failure_episodes` over the 70-day transcript): for each, the most similar earlier failure (at least an hour before) by
+error-signature overlap, BM25 and bge-m3; the local 30B judged whether the earlier fix would have helped, and every
+positive was audited by hand.
+
+| | failures |
+|---|---|
+| later failures with an earlier one | 46 |
+| judged helpful by the local model (any matcher) | 32 |
+| an earlier fix genuinely applies (hand audit: same cause, same remedy) | **10** |
+| … found at rank 1 by signature / BM25 / embedding | 7 / 8 / 8 |
+| suggestions at embedding cosine ≥ 0.85 (right / all) | 4 / 5 |
+
+The ten are recurring environment pitfalls: inline code broken by shell quoting (write a script file), unbalanced quotes
+in a heredoc, Git-Bash paths (`/c/…`, `/tmp`) handed to Windows Python, Playwright's screenshot directory. A recall hook
+would have helped about four times in 70 days and been noise otherwise; the lessons review (§13.28) lists exactly these,
+and recorded once where the agent always reads, they don't fail. Not adopted; no code kept. (The local judge rewarded
+surface likeness — "No such file" for two different files — one more reason a model judgment cannot gate such a hook.)
+
 ### 13.33 Symbolic inference — measured, not adopted
 
 The fourth review from the shortlist's brain-inspired part, OpenCog Hyperon and its coding-agent adapter Hyperon-MCP

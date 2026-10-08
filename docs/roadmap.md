@@ -931,6 +931,14 @@ The **genuine gaps**, measure-first as always:
   set (paired, 2 captures, no probes) the cue reached the context 8/16 → 16/16 and the constraint was applied
   7/16 → 12/16 (+5 / −0). Adopted: `[memory] context_k` (default 16) + `context_budget` 2,000 → 3,000; facts may
   use theme budget the themes don't need. `path-b-memory.md` §13.12.
+- **MemOS — measured, not adopted.** The fifth review from the shortlist's brain-inspired part
+  (`memory-systems-review.md` §18): memory as an OS resource — plaintext, KV-cache and LoRA memory in MemCubes under a
+  scheduler — a memory platform with an API and plugins, and a local plugin for coding agents that learns skills from
+  model-scored task traces and recalls the earlier fix when a step fails. KV-cache and LoRA memory need the model's
+  internals; the failure-time recall, checked on this repository's 47 resolved tool failures: an earlier fix
+  genuinely applied to 10 (hand audit; the local judge said 32), and at a strict similarity bar 4 of 5 suggestions were
+  right — about four helpful recalls in 70 days, all recurring pitfalls the lessons review lists. No code.
+  `docs/path-b-memory.md` §13.34.
 - **OpenCog Hyperon — measured, not adopted.** The fourth review from the shortlist's brain-inspired part
   (`memory-systems-review.md` §17): Hyperon's Atomspace, MeTTa and probabilistic logic, and its coding-agent adapter
   Hyperon-MCP — curated atoms with truth values, PLN/NAL inference, an import-derived "blast radius". Checked with its

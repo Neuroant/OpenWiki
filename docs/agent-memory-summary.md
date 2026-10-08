@@ -1,6 +1,6 @@
-# Agent memory — what sixteen systems teach OpenWiki
+# Agent memory — what seventeen systems teach OpenWiki
 
-The summary of [`memory-systems-review.md`](memory-systems-review.md): sixteen agent-memory systems, read from their
+The summary of [`memory-systems-review.md`](memory-systems-review.md): seventeen agent-memory systems, read from their
 source code in October 2026 and compared with OpenWiki's memory tier (Path B, [`path-b-memory.md`](path-b-memory.md)),
 plus one design report. What each system is, what separates them, where they agree, where OpenWiki stands — and what
 we will do about it.
@@ -33,6 +33,7 @@ experiments we can measure on graphs we already have, then the changes only real
 | 14 | [The Missing Knowledge Layer](memory-systems-review.md#15-the-missing-knowledge-layer) | a position paper: knowledge, memory, wisdom and intelligence persist differently; two companion implementations | SQLite (+ FTS5, vectors, an in-memory graph) | the agent records conclusions; the consumer types facts | four timestamps per fact; decay for episodic facts only | a BEAM pilot: typed routing 46.3 % vs flat 33.4 % (80 questions) |
 | 15 | [A human-inspired architecture](memory-systems-review.md#16-a-human-inspired-memory-architecture-microsoft) (Microsoft) | six mechanisms from neuroscience over a hot cache, an episodic store and a graph | a vector store + a knowledge graph (no code released) | every event, scored; consolidation every 6 h | timestamps; decay; maturation | LongMemEval S 76.8 % vs raw retrieval 78.4 %, M 70.1 vs 71.2 % (GPT-4o) |
 | 16 | [OpenCog Hyperon + Hyperon-MCP](memory-systems-review.md#17-opencog-hyperon-and-hyperon-mcp) | an AGI framework (Atomspace, MeTTa, probabilistic logic) and its coding-agent memory adapter | SQLite atom stores per repository + a global one | the agent, about five curated atoms a session, and an import scan | truth values, NAL revision | conformance gates in progress |
+| 17 | [MemOS](memory-systems-review.md#18-memos) | a memory OS — plaintext, KV-cache and parametric memory — and a platform with plugins for agent harnesses | Neo4j + Qdrant, SQLite (local plugin), a cloud service | a reader extracts items; the local plugin stores every agent step and scores tasks with a model | provenance, versioning | LoCoMo 88.83, LongMemEval 89.20 (its own OmniMemEval) |
 | — | **OpenWiki** | the memory under a coding agent, next to a document wiki | Kuzu (archived upstream, R10) | a local 30B captures sessions; the agent writes via `wiki_remember` | bi-temporal | LoCoMo 60.7 % J (local 30B; judge ≈ 7 points generous) |
 
 The thirteenth review is a [design report, not a system](memory-systems-review.md#13-a-design-report-predictive-world-models-through-transfer-entropy):
@@ -54,6 +55,7 @@ predictive world models built by transfer entropy — real methods, applied wher
 | Nemori | store only what existing memory failed to predict; dated narrative episodes | episodes for temporal questions; capture the whole stream (fixed in v0.97) |
 | memory-champ | per-type write gates; procedures behind a signed human approval; contradictions surfaced | volatility classes against stale facts; a human gate for always-present memory |
 | Hermes Agent | small curated memory once per session; skills learned from corrections, kept by a curator | writes should land during a session; no memory for chore prompts; Unicode hardening of the policy |
+| MemOS | memory as an OS resource of three kinds; skills learned from value-scored task traces; recall by moment | KV-cache and LoRA memory need the model's internals; recalling past fixes when a step fails helped about four times in 70 days here |
 | OpenCog Hyperon | typed atoms with truth values; probabilistic inference with proof traces | inference needs a curated vocabulary; for code, co-change beats imports |
 | A human-inspired architecture | consolidation, interference, maturation, reconsolidation — thresholds calibrated without benchmark data | judge time-dependent mechanisms at prompt time; in a coding memory the newest facts are the useful ones |
 | The Missing Knowledge Layer | decay belongs to experience in storage, recency to the query; knowledge is superseded, never decayed | we passed the litmus; recency now applies only to the kinds of fact that go stale |
@@ -76,7 +78,7 @@ predictive world models built by transfer entropy — real methods, applied wher
 
 ## Where they agree
 
-Patterns most of the sixteen share — and OpenWiki does not, yet:
+Patterns most of the seventeen share — and OpenWiki does not, yet:
 1. **Lexical search next to dense search.** Six fuse BM25 or FTS5 with embeddings, two more search lexically alone. Our
    memory recall is dense-only — while the wiki side's hybrid search won decisively on a code corpus.
 2. **The raw record stays searchable.** Seven keep raw sessions or episodes next to the extracted memory (Graphiti,
@@ -101,7 +103,7 @@ were then ablated: unnecessary where facts rarely change (LoCoMo), necessary whe
 
 ## Where OpenWiki stands
 
-**Ahead** — what few or none of the sixteen have:
+**Ahead** — what few or none of the seventeen have:
 - **a real time model** — valid and transaction time, merged by valid time, as-of and known-at views (only Graphiti
   matches it);
 - **deterministic hygiene against poisoning**, independent of the claimed source (only Hermes has a comparable scan);
@@ -234,7 +236,9 @@ already have, then changes that only real sessions can judge. Each names where i
 - engram maturation and deduplication of similar facts at recall time (the human-inspired architecture) — on real
   prompts replayed at their own time, maturation hid the current task and deduplication dropped related facts (§16);
 - symbolic inference over captured facts (OpenCog Hyperon) — 809 free predicates in 1,187 facts give a reasoner two
-  chains; for code, an import-derived blast radius found a change's companions at a tenth of co-change's rate (§17).
+  chains; for code, an import-derived blast radius found a change's companions at a tenth of co-change's rate (§17);
+- KV-cache and LoRA memory, and a failure-time recall hook (MemOS) — the first need control of the model, the second
+  found about four useful past fixes in 70 days of this repository (§18).
 
 ## How the series was done
 
@@ -254,5 +258,6 @@ to recall's recency applying only to the kinds of fact that go stale (v0.113); t
 ([§16](memory-systems-review.md#16-a-human-inspired-memory-architecture-microsoft)) maturation and deduplication hurt on real prompts replayed at their own
 time — a method that also confirmed v0.113; and OpenCog Hyperon's symbolic inference
 ([§17](memory-systems-review.md#17-opencog-hyperon-and-hyperon-mcp)) found nothing to chain in our captured facts and, as a blast radius, lost
-to co-change. Not yet reviewed from the [shortlist](memory-systems-review.md#candidates--world-models-and-coala):
-MemOS and Generative Agents.
+to co-change; MemOS's ([§18](memory-systems-review.md#18-memos)) activation and parametric memory need the model's
+internals, and its failure-time recall of past fixes helped about four times in 70 days. Not yet reviewed from the
+[shortlist](memory-systems-review.md#candidates--world-models-and-coala): Generative Agents.

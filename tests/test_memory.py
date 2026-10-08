@@ -404,19 +404,24 @@ def test_reaffirmation_raises_confidence_and_recall_score(tmp_path):
         store.close()
 
 
-def test_confidence_decays_by_recency(tmp_path):
+def test_recency_only_for_kinds_that_go_stale(tmp_path):
     import pytest
     pytest.importorskip("kuzu")
     from openwiki.graph import GraphStore
     from openwiki.graph.decay import DAY_SECONDS
 
     store = GraphStore(_build_graph(tmp_path), writable=True)
+    later = 1000 + int(20 * DAY_SECONDS)                             # ~2 half-lives
     try:
-        store.remember("s1", [MemoryFact("the database", "is", "kuzu")], _MemEmbedder(), now=1000)
-        fresh = store.recall("which database", _MemEmbedder(), now=1000, half_life_days=10.0)[0]
-        stale = store.recall("which database", _MemEmbedder(),
-                             now=1000 + int(20 * DAY_SECONDS), half_life_days=10.0)[0]
-        assert stale["score"] < fresh["score"]                       # ~2 half-lives → decayed
+        store.remember("s1", [MemoryFact("the database", "is", "kuzu 0.11"),
+                              MemoryFact("the database", "stores", "the graph")], _MemEmbedder(), now=1000)
+
+        def score(obj, now):
+            hits = store.recall("which database", _MemEmbedder(), k=5, now=now, half_life_days=10.0)
+            return next(h["score"] for h in hits if h["object"] == obj)
+
+        assert score("kuzu 0.11", later) < score("kuzu 0.11", 1000)        # a version goes stale → decays
+        assert score("the graph", later) == score("the graph", 1000)       # a description doesn't (§13.31)
     finally:
         store.close()
 

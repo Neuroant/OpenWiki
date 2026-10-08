@@ -36,6 +36,7 @@ from .journal import (
     append_reindex, append_remember, clear_journal, journal_path,
     pending_journal, read_journal, read_staged, stage_remember, staged_path,
 )
+from .memory import volatile_kind
 from .temporal import (
     MANY, ONE, believed_at, close_times, derive_legacy_intervals, plan_merge, question_window, valid_at,
     valid_to_known_at, window_match,
@@ -54,6 +55,7 @@ _A_P0 = ("source",)                                                       # P0 p
 _A_SLEEP = ("forgotten_at", "forgotten")                                  # sleep: archived (when, why)
 MATERIAL_WEIGHT = 0.75                # P0: a claim from discussed material ranks below decisions
 RECENCY_FLOOR = 0.9                   # recall: recency is a tie-breaker — a fact keeps ≥ 90% of its score (LoCoMo)
+RECENCY_ALL_KINDS = False             # recall: recency only for the kinds that go stale (memory.volatile_kind, §13.31)
 LEXICAL_POOL = 2                      # hybrid recall: BM25 may only promote facts within the dense top (2 × k) …
 LEXICAL_MAX_DF = 0.05                 # … on terms in at most 5 % of the facts (not the speakers' names) — §13.18
 TEMPORAL_POOL = 4                     # the question's time window may promote from the dense top (4 × k), §13.19
@@ -1455,7 +1457,8 @@ class GraphStore:
                include_superseded: bool = False, as_of: Optional[int] = None,
                known_at: Optional[int] = None, lexical: float = 0.0, temporal: float = 0.0) -> list:
         """B6 (activation tier) + **B7 point-in-time**: the remembered facts most relevant to
-        ``query`` — cosine over assertion embeddings × decayed confidence. By default only the
+        ``query`` — cosine over assertion embeddings × confidence × a bounded recency factor for the kinds of
+        fact that go stale (``memory.volatile_kind``; every other fact is timeless here). By default only the
         facts **valid now and still believed**; ``as_of`` = valid at that (valid) time,
         ``known_at`` = as OpenWiki believed at that (transaction) time (valid time then
         defaults to it too). ``include_superseded`` also returns everything outside the view,
@@ -1487,8 +1490,12 @@ class GraphStore:
             cos = float(q @ np.asarray(r["emb"], dtype=np.float32))  # stored normalized
             # gentle, log-scaled confidence lift; recency as a *bounded* tie-breaker — relevance (cos)
             # dominates: unbounded decay let any recent, weakly related fact beat an old, highly
-            # relevant one (a year-old "allergic to hazelnuts" scored ~0.0001 × cos — cue-trigger eval)
-            decay = effective_weight(1.0, ref, now, half_life_days)
+            # relevant one (a year-old "allergic to hazelnuts" scored ~0.0001 × cos — cue-trigger eval).
+            # And only for the kinds of fact that go stale on their own — plans, counts, gaps, versions,
+            # running states (memory.volatile_kind): a decision or a description is no less true for its
+            # age (§13.31 — fewer stale facts in the live context, LoCoMo unchanged)
+            decay = (effective_weight(1.0, ref, now, half_life_days)
+                     if RECENCY_ALL_KINDS or volatile_kind(r) else 1.0)
             score = (cos * confidence_weight(r["confidence"])
                      * (RECENCY_FLOOR + (1.0 - RECENCY_FLOOR) * decay))
             if r.get("source") == "material":                      # P0: a claim, not a decision

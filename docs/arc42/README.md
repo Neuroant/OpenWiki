@@ -5,7 +5,7 @@ This is the architecture documentation for **OpenWiki**, structured after the
 into 12 sections, from goals and constraints down to building blocks, runtime, decisions,
 quality, and risks.
 
-> **Status: COMPLETE** (maintained through v0.112). All 12 chapters are complete; diagrams use Mermaid
+> **Status: COMPLETE** (maintained through v0.113). All 12 chapters are complete; diagrams use Mermaid
 > (rendered by GitHub) and have been validated. The **Path B agent-memory** direction is complete
 > (B0–B6; ADR-14–19). Since then the architecture has grown eight more decision clusters (§9), all
 > reflected here: the graph **deepened** — typed `Entity→Entity` relations + relation-aware GraphRAG
@@ -36,7 +36,8 @@ quality, and risks.
 > the raw sessions kept **searchable** by full text for agents (ADR-44, QS-28) — and volatile kinds as a **review
 > list** rather than a label, measured out of sample (ADR-45) — and an opt-in **approval step** for agent writes
 > (ADR-46, QS-29) — and **lessons from failures**, only those learned twice, listed for a person (ADR-47) — and **git
-> co-changes** as a use signal for code corpora (ADR-48). Deep detail: `docs/path-b-memory.md`,
+> co-changes** as a use signal for code corpora (ADR-48) — and recall's **recency only for the kinds of fact that go
+> stale** (ADR-49, QS-30). Deep detail: `docs/path-b-memory.md`,
 > `docs/RAG-vs-GraphRAG.md`.
 >
 > **Open risk:** Kuzu, the embedded graph store, was archived upstream in 2025-10 — tracked as §11 **R10**

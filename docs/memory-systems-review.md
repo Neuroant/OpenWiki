@@ -9,7 +9,7 @@ code and docs, not its marketing, and measured against the same yardstick.
 path) · time and contradictions · consolidation · forgetting and hygiene · identity and procedural memory ·
 agent writes · surfaces and sharing · evaluation.
 
-**The summary** of the series — all thirteen at a glance, what separates them, where they agree, where OpenWiki
+**The summary** of the series — all fourteen at a glance, what separates them, where they agree, where OpenWiki
 stands, and the plan — is in [`agent-memory-summary.md`](agent-memory-summary.md).
 
 ## Contents
@@ -28,6 +28,7 @@ stands, and the plan — is in [`agent-memory-summary.md`](agent-memory-summary.
 13. [A design report: predictive world models through transfer entropy](#13-a-design-report-predictive-world-models-through-transfer-entropy)
     (reviewed 2026-10-04 — a proposal, not a system)
 14. [HippoRAG 2](#14-hipporag-2) (reviewed 2026-10-08 — first of the brain-inspired shortlist)
+15. [The Missing Knowledge Layer](#15-the-missing-knowledge-layer) (reviewed 2026-10-08)
 - [Across the series — what it suggests for OpenWiki](#across-the-series--what-it-suggests-for-openwiki)
 - [Candidates — world models and CoALA](#candidates--world-models-and-coala)
 
@@ -1494,13 +1495,106 @@ link the question to facts first.
 
 ---
 
+## 15. The Missing Knowledge Layer
+
+*Sources: "The Missing Knowledge Layer in Cognitive Architectures for AI Agents" (Michaël Roynard,
+[arXiv 2604.11364](https://arxiv.org/abs/2604.11364), v2 2026-06-12), a position paper; its companion implementations
+[github.com/dutiona/knowledge-base](https://github.com/dutiona/knowledge-base) at `8fa69bd` (2026-07-23; Python, about
+11,000 lines) and [github.com/dutiona/memory-engine](https://github.com/dutiona/memory-engine) at `b59f9ee` (2026-07-23;
+Rust, about 25,000 lines), both MIT / Apache-2.0. The second review from the brain-inspired part of the
+[shortlist](#candidates--world-models-and-coala).*
+
+**What it is.** An argument about persistence. CoALA names semantic memory but gives it the persistence of episodic
+memory; JEPA has no knowledge layer at all. The paper proposes four layers that persist differently:
+**knowledge** — "what is true about the world": indefinite, superseded with provenance, never decayed;
+**memory** — "what happened, what I was told": bi-temporal, Ebbinghaus decay; **wisdom** — "what works": durable,
+revised only on evidence (a prediction from one episode, *core* after three or more sessions, *anchor* after ten cycles
+without contradiction); **intelligence** — reasoning, ephemeral. Its litmus: decay is a *storage-level* mechanism for
+experience, recency a *query-time* heuristic. A system that decays facts in storage "forgets what it should remember"
+(NornicDB: a 69-day half-life for semantic memory); one that keeps everything "remembers what it should forget"
+(Hindsight).
+
+### How its memory works — the implementations
+- **knowledge-base** — a Python MCP server (46 tools) over SQLite with FTS5 and sqlite-vec: documents and papers,
+  extraction of methods, datasets, metrics and entities, and research **conclusions** the agent records with a
+  confidence and source chunks and supersedes explicitly (`supersede_conclusion` — a `superseded_by` chain). Its
+  "prediction errors" log searches whose best hit is weak — a retrieval-failure signal, not stale knowledge. Local by
+  default: bge-m3 and qwen3.5:27b through Ollama.
+- **memory-engine** — a Rust crate (SQLite, FTS5 + vectors fused by RRF, optional HNSW, an in-memory graph): an
+  append-only event log, bi-temporal facts with four timestamps, three fact types (episodic, semantic, procedural) and
+  forgetting by an importance score — 0.3 × Ebbinghaus recency (half-life 69 days) + 0.2 × access frequency + 0.3 ×
+  graph degree + 0.2 × a base prior; below 0.1 a fact is soft-deleted. Semantic and procedural facts are exempt from
+  the recency term: "applying decay to them is the category error the four-layer model exists to prevent". Retrieval
+  has no recency term at all. The engine makes no model calls — embedder, summarizer, conflict arbiter, persistence
+  classifier and reranker are the consumer's.
+- **Wisdom** is designed, not built ("Phase 5 … implementation pending").
+- **Evaluation:** a pilot on BEAM's 100K split, two categories, 80 questions: typed routing 46.3 % vs a flat store 33.4 %
+  (McNemar p = 0.035) — with the paper's own caveats: no ablation of routing against store semantics, full-text
+  retrieval only, one local 26B model answering and judging.
+
+### Side by side
+
+| | The Missing Knowledge Layer + its implementations | OpenWiki |
+|---|---|---|
+| Layers | knowledge (superseded), memory (decays), wisdom (evidence-gated), intelligence | a document wiki; one fact store, superseded by valid time (B4 / B7); themes and lessons derived; the agent |
+| Fact types | episodic / semantic / procedural, set by the consumer | untyped (a source tag); volatile kinds as a review list (v0.109) |
+| Time | four timestamps per fact | valid + transaction time (B7) |
+| Forgetting | importance below a threshold — episodic facts age, the rest are exempt | policy-based archiving of one-off events (`sleep`); facts never decay; usage edges do |
+| Recency in retrieval | none in the engine — "a query-time heuristic" for the consumer | a bounded factor (≥ 0.9) — since v0.113 for the kinds of fact that go stale only |
+| Supersession | conclusions superseded by the agent | the merge closes rivals by valid time; the agent's `wiki_remember` replaces |
+| Evaluation | a BEAM pilot (80 questions) | own sets, LoCoMo, judged real prompts |
+
+### Against OpenWiki's data
+The shortlist put the challenge as "facts are superseded, never decayed — a challenge to our recency factor in
+recall". OpenWiki already passes the litmus: facts are superseded and never decayed in storage, and recency is a
+query-time factor, bounded at 0.9 since LoCoMo (§13.7). The open question was whether the factor earns its place — and
+for which facts (`path-b-memory.md` §13.31):
+1. **LoCoMo** (1,540 questions, offline — the gold answer's words among the top 20 facts): without recency 0.461
+   against 0.456 shipped (73 questions better, 56 worse; n.s.); a stronger factor (floor 0.8) 0.436.
+2. **The live path** (the dev memory, 267 real prompts, recall as the inject hook does it; the 352 hand labels of
+   §13.26): without recency the 16 facts change for 217 prompts — older facts come in (median 54 vs 21 days) but no
+   more stale ones per prompt (27 more, 24 fewer), and a blind judge finds them as helpful (11.2 vs 9.4 %).
+3. **Recency only for the kinds that go stale** — plans, counts, gaps, versions, running states, stale 37 % of the
+   time among labeled facts against 7 % for the rest: LoCoMo 0.461, as without recency; on the live path fewer
+   stale-labeled facts in 67 prompts and more in 6 (p ≈ 4·10⁻¹⁴), judged helpfulness 14.6 vs 11.9 %; temporal set 13/13,
+   cue-trigger set 8/8 cues in context. **Adopted in v0.113** (ADR-49).
+4. **Wisdom's corroboration gate:** 1,483 of our 1,486 facts were never re-affirmed — the capture rephrases — and
+   grouped by attribute (B9), facts said in three or more sessions were stale more often (3 of 7 labeled) than facts
+   said once (14 %). In a coding memory, what recurs across sessions is the state that changes.
+
+### What we learn
+1. **Storage time versus query time is the right litmus,** and a cheap one to check. OpenWiki passes it: facts are
+   superseded, never decayed; recency lives in the query.
+2. **Type-appropriate decay becomes type-appropriate recency.** Whether a fact's truth depends on time is a property
+   of its kind, not of every fact: recency for volatile kinds keeps old versions, counts and plans out of the live
+   context, and lets old decisions and descriptions compete on relevance — the benchmark doesn't notice.
+3. **Corroboration needs a semantic notion of "the same fact".** Exact re-affirmation almost never happens with a
+   capture that rephrases; and session counts reward the facts that keep changing.
+4. **Conclusions superseded on the record** — knowledge-base's `supersede_conclusion` is our `wiki_remember` with
+   `replaces`, arrived at independently.
+
+### What we would not adopt
+- **Ebbinghaus decay of experience in storage:** LoCoMo asks about months-old events, and decay halved accuracy there
+  (ADR-34); our forgetting stays policy-based.
+- **Routing by fact types from a model's classification:** the local model's typing was unreliable (ADR-45); the
+  pilot's +12.8 points rest on 80 questions in two categories, unablated.
+- **Wisdom tiers by session counts** — see 4 above.
+
+**In short.** A clear position paper with real code behind it: knowledge is superseded, experience decays, wisdom
+needs evidence, reasoning is ephemeral — and recency is a query-time heuristic, not a storage-level fate. OpenWiki had
+kept its facts out of decay already; the paper's litmus sharpened one thing. Recall's recency now applies only to the
+kinds of fact whose truth changes with time, which keeps stale versions, counts and plans out of the live context at
+no measurable cost.
+
+---
+
 ## Across the series — what it suggests for OpenWiki
 
-Thirteen systems — six in a first round, then Hindsight, MIRIX, AriGraph, Nemori and memory-champ from the world-model
-shortlist, Hermes Agent on request and HippoRAG 2 from the brain-inspired part — read from their source in October 2026,
-plus one design report (§13). Where OpenWiki stands out: a real time model (only Graphiti matches it; Hindsight has event and
+Fourteen systems — six in a first round, then Hindsight, MIRIX, AriGraph, Nemori and memory-champ from the world-model
+shortlist, Hermes Agent on request, HippoRAG 2 and The Missing Knowledge Layer from the brain-inspired part — read from
+their source in October 2026, plus one design report (§13). Where OpenWiki stands out: a real time model (only Graphiti matches it; Hindsight has event and
 mention time; Mem0 keeps time-aware retrieval on its hosted platform; Cognee has a query-time window),
-deterministic hygiene against poisoning (of the thirteen, only Hermes Agent has a comparable policy — a threat-pattern
+deterministic hygiene against poisoning (of the fourteen, only Hermes Agent has a comparable policy — a threat-pattern
 scan on memory writes), policy-based forgetting,
 local-first operation on a 30B model, and audited measurement. Where it lags, the same gaps recur — and Hindsight
 shows how large the distance can be (83.6 % on LongMemEval with a 20B open model):
@@ -1522,7 +1616,7 @@ shows how large the distance can be (83.6 % on LongMemEval with a 20B open model
 | Multi-hop recall by expansion | AriGraph (semantic BFS over triplets), Graphiti (BFS from entities), Hindsight (graph links), Cognee (graph completion), HippoRAG 2 (PageRank from the facts a question links to) | **measured, not adopted** (path-b §13.20, §13.30): linked facts lost to the ranking's own next candidates; HippoRAG 2's walk stayed below dense recall even with its LLM filter (multi-hop 0.474 vs 0.482) | expansion through shared subjects / objects, words or embeddings, depth 1–2 — offline, worse when swapped in and when added; PageRank over facts replicated on MuSiQue (+7.7 Recall@5), not on our memory or wiki | — |
 | Typed memory | waku (facts / episodes / skills / persona), Letta (core / deferred / skills), Hindsight (world / experience), MIRIX (six purpose types), memory-champ (episodic / semantic / procedural, per-type write gates) | one untyped fact store (`source` tags only) | a type tag at capture, per-type recall budgets | small–medium |
 | Procedural memory from errors | Mem0 plugin (failed commands with fixes), MIRIX (tool errors → skills), Hermes (skills from corrections and fixes — never negative tool claims or unresolved failures) | **done in v0.111 as a review list** (path-b §13.28): `owiki sessions lessons` — lessons learned on two or more days from resolved failures, with the guardrails; the model alone called 121 of 122 failures a lesson | recorded by a person where the agent always sees them | — |
-| Staleness by volatility | memory-champ (stable / slow / volatile facts, rechecked after 365 / 90 / 14 days) | stale "current" facts persist until restated or corrected via `wiki_remember` (D12) | **measured in v0.109** (path-b §13.26): out of sample the phrasing rule's flags were 25 % stale — a review list (`analyze memory --review`), not a "possibly outdated" label; refined rules and the local model's tags did worse | — | — |
+| Staleness by volatility | memory-champ (stable / slow / volatile facts, rechecked after 365 / 90 / 14 days), the Missing Knowledge Layer (decay by fact type — semantic and procedural facts exempt) | stale "current" facts persist until restated or corrected via `wiki_remember` (D12) | **measured in v0.109** (path-b §13.26): out of sample the phrasing rule's flags were 25 % stale — a review list (`analyze memory --review`), not a "possibly outdated" label; refined rules and the local model's tags did worse; **changed in v0.113** (path-b §13.31): recall's recency applies only to volatile kinds — fewer stale facts in 67 of 267 real prompts, more in 6; LoCoMo unchanged | — | — |
 | Unicode evasion of the policy | Hermes (NFKC folding, invisible and bidirectional characters) | **fixed in v0.99** — before, the regexes matched the raw text | NFKC, zero-width characters removed, bidirectional overrides refused — done | — |
 | Unresolved conflicts shown | MIRIX (keep both, note the discrepancy), memory-champ (surfaced, never resolved) | the merge closes or keeps silently | a "disputed" mark in the context | small |
 | Learning from use | the transfer-entropy report (§13: directed, decaying edges from activity), Hermes (skill usage counts drive the curator) | **done in v0.112** (path-b §13.29): `CO_CHANGED` edges from git for code corpora — online, 51 % of a commit's specific files in the top 10 vs 36 % by embedding similarity | facts an answer uses; a learning-from-use method only on top of such a signal | — |
@@ -1560,7 +1654,7 @@ ground-truth tier, consolidation as a sleep cycle, perception from many sources)
    graph, multi-cue retrieval; a streaming LongMemEval evaluation (475 sessions, ~540 K turns).
 8. **[The Missing Knowledge Layer in Cognitive Architectures](https://arxiv.org/abs/2604.11364)** — argues CoALA lacks
    a knowledge layer with its own persistence: facts are superseded, never decayed; applying decay to factual claims
-   is a category error — a challenge to our recency factor in recall.
+   is a category error — a challenge to our recency factor in recall. → [§15](#15-the-missing-knowledge-layer)
 9. **[OpenCog Hyperon](https://arxiv.org/abs/2310.18318)** + **[Hyperon-MCP](https://glama.ai/mcp/servers/amiroussama/Hyperon-MCP)**
    — a symbolic metagraph world model with probabilistic logic inference; symbolic memory with inference for coding
    agents.

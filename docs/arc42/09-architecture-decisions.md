@@ -9,7 +9,7 @@
 > (ADR-25, Direction I), a **capability-complete web UI** (ADR-26, Direction J), graph connectivity as
 > **reader overlays** (ADR-28), and — Path B+ — **bi-temporal** memory (ADR-27, B7) and **fact identity** (ADR-29,
 > B9); Path B++ adds **memory hygiene** (ADR-30), **cue-trigger recall** (ADR-31), **forgetting** in a nightly
-> `sleep` pass (ADR-32), **agent-recorded state** (ADR-33), **recency as a tie-breaker**, set by LoCoMo (ADR-34),
+> `sleep` pass (ADR-32), **agent-recorded state** (ADR-33), **recency as a tie-breaker**, set by LoCoMo (ADR-34) and limited to the kinds of fact that go stale (ADR-49),
 > and a **live context sized by measurement** on its own path (ADR-35).
 
 ## ADR index
@@ -997,6 +997,22 @@ changes.** *(v0.102; builds on [ADR-16](#adr-16); mitigates R10)*
   + No model, one `git log` (0.2 s). − Only for code corpora with git history; commits mixing code and docs make docs
   frequent partners. − A refresh needs a writable graph.
 
+### ADR-49
+**Recency only for the kinds of fact that go stale.** *(v0.113; refines [ADR-34](#adr-34))*
+- **Context:** recall multiplies a fact's score by a bounded recency factor (floor 0.9, ADR-34). *The Missing Knowledge
+  Layer* (review §15) calls decay of factual claims a category error — recency is a query-time heuristic, for where it
+  matters. On LoCoMo recency-neutral recall had already scored slightly better (§13.7); recency stayed as a guard
+  against stale facts on the live path.
+- **Decision:** the factor applies only to facts of a volatile kind (`memory.volatile_kind`: plans, counts, gaps,
+  versions, running states); every other fact is timeless in recall (`store.RECENCY_ALL_KINDS = False`).
+- **Alternatives:** no recency — neutral on LoCoMo and on stale exposure, but gives up the guard where it works; a
+  stronger factor (floor 0.8) — LoCoMo −2.0 points; decay of experience in storage (the paper's memory layer) — LoCoMo
+  asks about months-old events (ADR-34); recency by a typed capture — the local model's typing is unreliable (ADR-45).
+- **Consequences:** + on 267 real prompts, fewer stale-labeled facts in the context in 67, more in 6 (p ≈ 4·10⁻¹⁴),
+  judged helpfulness unchanged; LoCoMo coverage +0.5 (n.s.); temporal 13/13, cue-trigger 8/8. − It rests on the
+  phrasing rule (25 % precision as a stale label, ADR-45): a current version or count is ranked as if it might be
+  stale, and a stale description gets no recency penalty.
+
 ---
 *Chapter complete. The Path-B agent-memory direction landed via ADR-14/15/16/17/18/19; the graph then
 deepened (ADR-22 typed relations + relation-aware GraphRAG, ADR-23 entity resolution), gained
@@ -1015,6 +1031,7 @@ writers (ADR-38), **portable memory** — a COGX export / import, a Markdown vie
 **episodes** next to facts, measured on the benchmark first (ADR-42), and memory injected **once per stretch**
 (ADR-43), the raw sessions kept **searchable** by full text (ADR-44), volatile kinds as a **review list**, not a
 label (ADR-45), an opt-in **approval step** for agent writes (ADR-46), **lessons from failures** learned twice,
-listed for a person (ADR-47), and **git co-changes** as a use signal for code corpora (ADR-48). §11
+listed for a person (ADR-47), and **git co-changes** as a use signal for code corpora (ADR-48), and recall's **recency only where truth
+changes with time** (ADR-49). §11
 debts D1/D2/D6 are resolved. Deep designs in `docs/path-b-memory.md` and `docs/RAG-vs-GraphRAG.md`. New significant
 decisions should be appended here with the next id.*

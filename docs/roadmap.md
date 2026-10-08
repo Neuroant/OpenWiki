@@ -931,6 +931,14 @@ The **genuine gaps**, measure-first as always:
   set (paired, 2 captures, no probes) the cue reached the context 8/16 → 16/16 and the constraint was applied
   7/16 → 12/16 (+5 / −0). Adopted: `[memory] context_k` (default 16) + `context_budget` 2,000 → 3,000; facts may
   use theme budget the themes don't need. `path-b-memory.md` §13.12.
+- **Recency only where truth changes with time (v0.113).** The second review from the shortlist's brain-inspired
+  part, *The Missing Knowledge Layer* (`memory-systems-review.md` §15): decay belongs to experience in storage,
+  recency to the query — decaying factual claims is a category error. OpenWiki passed that litmus already; measured,
+  recall's recency factor now applies only to the kinds of fact that go stale (plans, counts, gaps, versions, running
+  states). LoCoMo coverage 0.456 → 0.461, as with no recency at all; on 267 real prompts against the dev memory,
+  fewer stale-labeled facts in 67 prompts and more in 6 (p ≈ 4·10⁻¹⁴), judged helpfulness unchanged; temporal 13/13,
+  cue-trigger 8/8. The paper's corroboration gate (three sessions) would reward the facts that keep changing.
+  ADR-49, `docs/path-b-memory.md` §13.31.
 - **HippoRAG 2 — replicated on its benchmark, not adopted.** The first review from the shortlist's brain-inspired
   part (`memory-systems-review.md` §14): retrieval as a PageRank walk from the facts a question links to, with an LLM
   filter in between. Rebuilt from its code with our local models, on its own MuSiQue setting (1,000 questions, its

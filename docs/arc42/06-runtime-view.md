@@ -188,7 +188,7 @@ sequenceDiagram
   Note over U,GS: recall (read-only graph, a later session)
   U->>GS: recall(query, embedder, k, as_of, known_at)
   GS->>E: embed_query(query)
-  GS-->>U: facts valid now (or at as_of, as believed at known_at): cosine x confidence x bounded recency
+  GS-->>U: facts valid now (or at as_of, as believed at known_at): cosine x confidence x bounded recency (volatile kinds)
 ```
 
 A doc rebuild preserves these assertions — validity columns + `SUPERSEDES` provenance edges included

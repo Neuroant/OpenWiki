@@ -54,6 +54,7 @@ Scenarios are written as *stimulus → expected response* so they can be checked
 | QS-18 | Usefulness (memory noise) | should | After `openwiki sleep`, the facts injected for real prompts contain no one-off session events ("vX was pushed and tagged", commit hashes), and no fact a person would keep was removed — forgotten facts stay in the graph (ADR-32). |
 | QS-21 | Efficiency (prompt context) | should | Every prompt of a coding session gets the assembled memory injected → its size stays within `[memory] context_budget` (3,000 chars ≈ 750 tokens; measured mean ≈ 710 tokens over 335 real prompts) while recalling `[memory] context_k` facts (16), and both are project settings a user can lower; a change to either is measured on the live path — cost, usefulness of the facts, effect on answers — before it ships (ADR-35). |
 | QS-22 | Usability (continuity) | should | A new Claude Code session starts in a repository whose last session wrote a handoff → before the first prompt the agent has the next steps and what changed since (commits, memory, environment), within 6,000 chars; a stale handoff says so (new commits, "already resumed"); a handoff line that would weaken security or address AI assistants never reaches it (ADR-36). |
+| QS-30 | Relevance (staleness) | should | A request touches a topic on which memory holds an old version, count or plan → recall ranks such facts of kinds that go stale below current ones, while an old decision or description competes by relevance alone; measured on real prompts — fewer stale-labeled facts in the context, judged helpfulness unchanged (ADR-49). |
 | QS-29 | Governance (memory writes) | could | With `[memory] approve_writes`, an agent's memory write → lands only after a person approves it (terminal or web UI), closes exactly the facts that were reviewed, counts as valid from when it was staged and as recorded when approved; a rejected write never lands and stays in an audit log (ADR-46). |
 | QS-28 | Recall (detail) | should | A later session asks for a detail an earlier one stated — an error, a number, a command, a reason → session search returns the turn that said it, verbatim and dated, with credentials redacted and instruction-like sentences withheld; nothing is injected unless the agent asks (ADR-44). |
 | QS-27 | Efficiency (repeated context) | should | Later prompts of a coding session → the hook injects only facts, themes and identity the session has not been given since its last compaction or `/clear`; after one, the next prompt gets everything again; a fact the budget cut is not counted as given (ADR-43). |
@@ -66,7 +67,7 @@ Scenarios are written as *stimulus → expected response* so they can be checked
 
 ## 10.3 Current evidence & gaps
 
-- **Met:** QS-2 (the suite — **680 tests** — runs offline, and in **CI** on every push across Python
+- **Met:** QS-2 (the suite — **713 tests** — runs offline, and in **CI** on every push across Python
   3.11–3.13 + a Docker build, ADR-24); QS-5 (four findings in `docs/RAG-vs-GraphRAG.md`, incl. hybrid
   winning on a code corpus); QS-11 by the metrics collector (ADR-20 — per-call latency/tokens in the CLI,
   System tab, and per-build-stage); QS-13 by the world-model analysis toolkit (ADR-25, §8.19 — `owiki
@@ -95,7 +96,8 @@ Scenarios are written as *stimulus → expected response* so they can be checked
   dogfooding session — 2,757 → 1,405 characters per prompt (49 % fewer), later prompts still judged to get 3–4
   useful new facts (ADR-43); QS-28 by LoCoMo's evidence turns — full text found them in the top 5 ±1 turn for 68 % of
   the questions — and 47 generated questions about coding-session details: the answer in the fact context 8 times, in
-  the session excerpts 41 (ADR-44). All on small, hand-labeled sets (one annotator) — direction checks, not benchmarks.
+  the session excerpts 41 (ADR-44); QS-30 by recall's recency limited to volatile kinds — fewer stale-labeled facts in
+  67 of 267 real prompts, more in 6, judged helpfulness and LoCoMo coverage unchanged (ADR-49). All on small, hand-labeled sets (one annotator) — direction checks, not benchmarks.
 - **Measured externally (memory):** LoCoMo (`owiki eval --locomo`, ADR-34) — all 10 conversations, 1,986 questions,
   a local 30B answering + judging: overall J **50.0 %** (multi-hop 54.3, temporal 34.0, open-domain 34.4, single-hop
   56.5; adversarial 89.2). Mem0 reports ≈ 67 % with GPT-4o-mini — a reference point, not a like-for-like comparison.

@@ -26,7 +26,7 @@ switches a project from *Wiki* mode (documents only) to *Second Brain* mode.
 | Capture | One chat call turns a transcript into S-P-O facts, each with `valid_from` (a stated or relative date, resolved against the session date — D13), `cardinality` and `source` (user / assistant / material); a source-independent policy drops instructions to AI assistants, security weakening and standing authorizations (P0) | `memory.capture_session_detailed` · B2, §13.1, §13.8 |
 | Merge | Re-affirming a fact raises its confidence; paraphrased attributes join one key (B9); a coexistence check decides whether a new value replaces the old; the bi-temporal plan closes, retracts or files it into history by valid time (B7) | `GraphStore.remember`, `temporal.plan_merge` · B3, B4, §12.1, §12.3 |
 | Store | Reified `Assertion`s under `Session`s with `SUPERSEDES` provenance; memory survives document rebuilds (B0); read-only processes queue writes to a journal that the next writer folds in (B1) | `builder` snapshot/restore, `journal.py` · B0, B1 |
-| Recall | cosine × confidence × bounded recency (floor 0.9) × 0.75 for facts from discussed material; current, `as_of`, `known_at` or full timeline; optional constraint probes for implicit circumstances | `recall`, `recall_probed`, `timeline` · B6, §12.1, §13.2, §13.7 |
+| Recall | cosine × confidence × bounded recency for the kinds that go stale (floor 0.9) × 0.75 for facts from discussed material; current, `as_of`, `known_at` or full timeline; optional constraint probes for implicit circumstances | `recall`, `recall_probed`, `timeline` · B6, §12.1, §13.2, §13.7 |
 | Consolidate | Warm-start Louvain over the current facts → LLM-summarized themes; unchanged themes reuse their summary; `--budget` spreads a large first run | `consolidate` · B5, §13.3 |
 | Maintain | `sleep`: fold the journal → forget by policy (one-off session events, unsafe facts — archived, not deleted) → re-consolidate → decay | `sleep` · §13.3 |
 | Assemble | Identity + the top facts + their themes within a char budget — 16 facts in 3,000 chars, ≈ 710 tokens per prompt | `context_for` · B6, §13.12 |
@@ -1369,6 +1369,51 @@ The largest single step so far ("Not mentioned" on single-hop 219 → 178). **Ad
 the live context — the hooks assemble k = 8 within a 2,000-character budget, a per-prompt token cost; the finding
 suggests trying a larger k there, measured on that path (→ §13.12). LoCoMo now: **overall J 60.7 %** with a local
 30B (Mem0 reports ≈ 67 % with GPT-4o-mini — and both are generous-judge numbers).
+
+### 13.31 Recency only where truth changes with time (v0.113)
+
+After the plan: the second review from the shortlist's brain-inspired part, *The Missing Knowledge Layer*
+(`memory-systems-review.md` §15), calls decay applied to factual claims a category error — decay belongs to experience,
+in storage; recency is a query-time heuristic, for where it matters. OpenWiki passes that litmus already: facts are
+superseded, never decayed, and recall's recency is a bounded query-time factor (floor 0.9 since §13.7). So the check was
+whether the factor earns its place, and for which facts.
+
+**LoCoMo** (offline: the gold answer's words among the top 20 facts, categories 1–4, production recall otherwise):
+
+| recall's recency | multi-hop | temporal | open-domain | single-hop | all | vs shipped |
+|---|---|---|---|---|---|---|
+| floor 0.9 on every fact (shipped) | 0.501 | **0.195** | 0.211 | 0.568 | 0.456 | |
+| none | 0.511 | 0.194 | **0.224** | **0.572** | **0.461** | 73 better / 56 worse |
+| floor 0.8 on every fact | 0.460 | 0.181 | 0.207 | 0.550 | 0.436 | 43 / 109 |
+| floor 0.9 on volatile kinds only | **0.513** | **0.195** | 0.221 | 0.571 | **0.461** | 75 / 57 |
+
+As on conversation 1 in §13.7 (recency-neutral 55.9 % J against 52.6 %), the benchmark prefers no recency — its
+questions ask about past events.
+
+**The live path** — the dev memory, 267 real prompts, recall as the inject hook does it (16 facts, BM25 aid, time
+window); the 352 hand labels of §13.26 (stale / current / past / unclear); a blind judge on 80 changed prompts:
+
+| against shipped | prompts changed | prompts with more / fewer stale-labeled facts | distinct facts in: stale / current | out: stale / current | judged helpful, in vs out |
+|---|---|---|---|---|---|
+| no recency | 217 | 27 / 24 (p = 0.78) | 10 / 39 | 11 / 46 | 11.2 vs 9.4 % (12 / 7 prompts) |
+| recency for volatile kinds only | 230 | **6 / 67** (p ≈ 4·10⁻¹⁴) | 7 / 47 | 20 / 60 | 14.6 vs 11.9 % (18 / 11) |
+
+Without recency older facts come in (median 54 against 21 days) but no more stale ones; keeping recency only for the
+volatile kinds — plans, counts, gaps, versions, running states, stale 37 % of the time among labeled facts against 7 %
+for the rest — lets old decisions and descriptions compete on relevance alone and keeps old versions, counts and plans
+out. Neither change costs judged helpfulness.
+
+**Adopted:** recall's recency factor (floor 0.9) applies to facts of a volatile kind only (`memory.volatile_kind`);
+every other fact is timeless in recall (`store.RECENCY_ALL_KINDS = False`). Regression sets: temporal **13/13**;
+cue-trigger (k 16) cue in context **8/8**, constraint applied 7/8 (the miss had the cue in view).
+
+**Wisdom's corroboration, checked.** The paper promotes a pattern to *core* after three or more sessions. In our memory
+1,483 of 1,486 facts were never re-affirmed — the capture rephrases — and grouped by attribute (B9), facts said in three
+or more sessions were stale more often (3 of 7 labeled) than facts said once (14 %): in a coding memory what recurs
+across sessions is the state that changes.
+
+*Caveats:* the labels cover 352 of 1,486 facts and oversample volatile kinds (the rule chose half of the first set); the
+judge saw no loss of helpfulness but cannot see staleness.
 
 ### 13.30 HippoRAG 2 — PageRank over remembered facts, measured, not adopted
 

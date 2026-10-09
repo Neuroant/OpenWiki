@@ -931,6 +931,12 @@ The **genuine gaps**, measure-first as always:
   set (paired, 2 captures, no probes) the cue reached the context 8/16 → 16/16 and the constraint was applied
   7/16 → 12/16 (+5 / −0). Adopted: `[memory] context_k` (default 16) + `context_budget` 2,000 → 3,000; facts may
   use theme budget the themes don't need. `path-b-memory.md` §13.12.
+- **Session excerpts on the live path — measured, not adopted.** Session search's open question (§13.25): inject
+  the best-matching excerpts next to the 16 facts? 412 real prompts replayed at their own time on a snapshot of the
+  dev memory, excerpts from turns older than 6 hours against the same characters of extra facts, a blind judge and
+  a hand audit. Most excerpts matched a prompt's recurring phrasing ("push and tag", "run it in the foreground") —
+  genuinely useful 11 of 48 (two excerpts, ±1 turn) and 8 of 35 (one assistant turn), fewer than the extra facts in
+  both variants. Session search stays pulled. No code. `docs/path-b-memory.md` §13.36.
 - **Fix (v0.113.1): `openwiki status` and repo / URL sources.** The source list checked `is_file()`, so a code
   repository — a directory — always showed `MISSING`, and a web source crashed the command (`source_paths()` returns
   a URL as a `str`, which has no `is_relative_to`). Now a directory or file counts as present (`source_exists`, as the

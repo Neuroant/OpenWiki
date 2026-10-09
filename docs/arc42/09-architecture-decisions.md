@@ -941,6 +941,12 @@ changes.** *(v0.102; builds on [ADR-16](#adr-16); mitigates R10)*
   − Adversarial questions 83.9 → 76.9 % with excerpts in the context; episodes keep the temporal edge (64.2 vs
   58.3 %). − Sentences the policy flags are withheld (27 of 3,249 in the dogfooding transcript's matching turns —
   discussions of the poisoning set). − The agent has to ask; the tool description says when.
+- **Addendum (2026-10-09, excerpts on the live path):** injecting the best-matching excerpts into each prompt,
+  measured on 412 real prompts replayed at their own time against the same characters spent on more facts: the
+  excerpts mostly matched a prompt's recurring phrasing (another "push and tag", "run it in the foreground", an
+  earlier task notification), some with an outdated state; a hand audit found 11 of 48 judged-helpful excerpts
+  genuinely useful (two excerpts, ±1 turn) and 8 of 35 (one assistant turn) — fewer useful items than the extra facts
+  in both variants. Not adopted; pulled stays the decision (`path-b-memory.md` §13.36).
 
 ### ADR-45
 **No "possibly outdated" label — volatile kinds feed a review list.** *(v0.109; refines [ADR-33](#adr-33))*

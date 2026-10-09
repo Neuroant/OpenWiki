@@ -194,8 +194,10 @@ already have, then changes that only real sessions can judge. Each names where i
     v0.108:** `wiki_sessions` / `owiki sessions` — BM25 over every turn of the transcripts, verbatim dated excerpts,
     redacted and screened. On LoCoMo 5 excerpts next to the facts took J 62.9 → 78.2 % (+276 / −41), ahead of
     episodes of the same size (74.7 %); on coding-session detail questions the facts held the answer 8 / 47 times, the
-    excerpts 41 / 47 (`path-b-memory.md` §13.25). Pulled by the agent; injecting excerpts is measured on the live path
-    first.
+    excerpts 41 / 47 (`path-b-memory.md` §13.25). Pulled by the agent. Injecting them was then measured on the live
+    path and **not adopted**: on real prompts replayed at their own time, most excerpts matched a prompt's recurring
+    phrasing ("push and tag", "run it in the foreground"), and the same characters spent on more facts gave more
+    genuinely useful context (hand audit: 8 vs 14 with one short excerpt, 11 vs ≈ 44 with two) (§13.36).
 12. **Typed facts with a volatility class** — volatile facts marked "possibly outdated" after some weeks (MIRIX,
     memory-champ). First evidence: a volatile-phrasing rule caught 12 of the 14 labeled stale facts while flagging
     10 % of memory (written after seeing them — confirm on a fresh labeled set); co-change dependencies were at

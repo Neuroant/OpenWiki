@@ -466,7 +466,9 @@ stored in the graph. Coding agents get it as the MCP tool **`wiki_sessions`** (`
 `[memory] enabled`. **Measured** (`docs/path-b-memory.md` §13.25, arc42 ADR-44): on LoCoMo full text found a question's
 evidence turns more often than the embedding (top 5 ±1 turn: 68 % vs 59 %), and 5 excerpts next to the facts took
 overall J 62.9 → **78.2 %** (+276 / −41; single-hop 68.6 → 89.8 %) — ahead of same-size episodes (74.7 %); on
-coding-session detail questions the facts held the answer 8 / 47 times, the excerpts 41 / 47. Pulled, not injected.
+coding-session detail questions the facts held the answer 8 / 47 times, the excerpts 41 / 47. Pulled, not injected —
+injecting excerpts into each prompt was measured on replayed real prompts and not adopted: they mostly matched a
+prompt's recurring phrasing, and the same characters of extra facts gave more useful context (§13.36).
 **Lessons from failures (v0.111):** `openwiki sessions lessons` — the resolved tool failures in the transcripts
 (`sessions.failure_episodes`: a later call of the same tool that resembles the failed one; outages, bare exit codes,
 failing test runs and the file tools' own rules left out), one lesson each from the local model

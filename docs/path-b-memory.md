@@ -1370,6 +1370,39 @@ the live context — the hooks assemble k = 8 within a 2,000-character budget, a
 suggests trying a larger k there, measured on that path (→ §13.12). LoCoMo now: **overall J 60.7 %** with a local
 30B (Mem0 reports ≈ 67 % with GPT-4o-mini — and both are generous-judge numbers).
 
+### 13.36 Session excerpts on the live path — measured, not adopted
+
+Session search (§13.25, v0.108) left one question open: excerpts next to the facts gave LoCoMo its largest gain
+(62.9 → 78.2 % J), so should the inject hook add them to every prompt? Measured as §13.32 does: the real prompts of this
+repository's transcript (412 in range), each replayed at its own time on a snapshot of the dev memory (2,205 facts) —
+the production recall's 16 facts with `as_of` = prompt time − 6 h, and the best full-text matches among transcript turns
+older than the same 6 hours, formatted as `wiki_sessions` returns them (redacted, screened). Against them, **the same
+characters spent on more facts** (ranks 17 onwards). One blind judge call per prompt marked the helpful items among all
+three groups; a second asked whether a helpful excerpt gives anything the 16 facts don't. Then a hand audit of what the
+judge called helpful — the criterion: would it help with *this* request at that time?
+
+| per prompt (excerpts vs equal-cost extra facts) | 2 excerpts, ±1 turn | 1 assistant turn, no context |
+|---|---|---|
+| characters added (excerpts / extra facts) | 1,674 / 1,729 | 296 / 346 |
+| prompts judged | 76 | 78 (task notifications left out) |
+| judged helpful per item: excerpts / extra facts / the 16 facts | 31.6 % / 9.6 % / 22.4 % | 44.9 % / 11.9 % / 22.7 % |
+| prompts helped only by the excerpts / only by the extra facts | 9 / 20 | 24 / 12 |
+| helpful excerpts that add what the 16 facts don't | 45 / 48 | 34 / 35 |
+| **hand audit: genuinely useful, excerpts / extra facts** | **11 of 48** / 16 of 48 sampled (≈ 44 of 132) | **8 of 35** / **14 of 34** |
+
+A prompt is not a query. Most excerpts match its recurring phrasing — another "push and tag vX", "run it in the
+foreground", "ok, wait for the results and show me", an earlier task notification — from other work, some with a state
+that no longer holds ("sync arc42 docs" → a to-do list from two weeks before; "what are the next steps" → an outdated
+answer). Restricting matches to assistant turns removed the repeated user phrasings but not the pattern ("Both commits
+pushed. Now tag v0.9.0", "Server stopped."), and a few would nudge the agent toward pushing or tagging unasked. The
+useful excerpts are real — the RAG-vs-GraphRAG numbers a write-up needed, the design of the same feature from the evening
+before, the earlier stdout encoding fix when fixing stdin — but at equal cost more facts delivered more useful context in
+both variants, and a strong BM25 match did not mark the useful ones (the top third by score was judged helpful least
+often). **Not adopted**; session search stays pulled — `wiki_sessions`, where the agent asks a question with intent (the
+coding-detail questions of §13.25: excerpts 41 / 47). The judge's verdicts were genuinely useful 23 % of the time for
+excerpts and 33–41 % for facts: the local judge rewards text that resembles the request, so its absolute helpful rates
+overstate usefulness; the earlier live-path comparisons set facts against facts and stay relative.
+
 ### 13.35 Importance and reflection — measured, not adopted
 
 The last review from the shortlist, Generative Agents (`memory-systems-review.md` §19), ranks memories by recency +

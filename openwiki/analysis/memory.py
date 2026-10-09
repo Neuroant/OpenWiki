@@ -123,14 +123,18 @@ def analyze_memory(graph, now: "int | None" = None, half_life: "float | None" = 
     }
 
     # -- growth (facts per session, oldest session first) -----------------
+    # A session's date is the one its id carries (a backfilled day, an agent session), else when its first fact
+    # was recorded — recording order alone put a re-captured old day after the days it precedes.
+    from ..graph.temporal import session_date
     per_session: dict = {}
     first_seen: dict = {}
     for f in facts:
         sid = f.get("session_id") or "?"
         per_session[sid] = per_session.get(sid, 0) + 1
         first_seen[sid] = min(first_seen.get(sid, f["created_at"]), f["created_at"])
-    growth = [{"session_id": sid, "facts": per_session[sid]}
-              for sid in sorted(per_session, key=lambda s: (first_seen.get(s, 0), s))]
+    dated = {sid: session_date(sid) or first_seen.get(sid, 0) for sid in per_session}
+    growth = [{"session_id": sid, "facts": per_session[sid], "date": dated[sid]}
+              for sid in sorted(per_session, key=lambda s: (dated[s], s))]
 
     # -- review: current facts of a kind that goes stale (plans, counts, gaps, versions, running states) — the
     # list to check against the project and correct with wiki_remember; each line is in the form `replaces` matches

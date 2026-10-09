@@ -90,6 +90,8 @@ an empty required field → **400**; any other exception → **500**; the body i
 | `GET /api/metrics?limit=` | — | the observability snapshot (recent events + aggregates, ADR-20) |
 | `GET /api/analyze?k=&method=` · `/api/analyze/gaps` · `/api/analyze/memory` | query params | coupling fingerprint + 2-D map · gap candidates · memory dynamics (ADR-25); `available: false` + `reason` without index/graph |
 | `GET /api/memory` | — | `{available, mode, identity, has_embedder, stats:{sessions, assertions, superseded, retracted, planned, forgotten, themes, pending_themes}, themes, assertions, staged:[{id, t, session, facts, closes}]}` (Path B) |
+| `GET /api/memory/facts?q=&status=&source=&session=&kind=&theme=&sort=&offset=&limit=` | query params | `{total, offset, limit, facts:[…]}` — every fact filtered + paged server-side (`status=` empty = all states; `limit` ≤ 500); **503** without a graph |
+| `GET /api/memory/fact/{id}` | — | `{fact, group:[…], supersedes, superseded_by, theme, said:{at, available, in_window, excerpts}}` — one fact, its attribute's history and the session excerpts where it was said; **404** unknown id · **503** without a graph |
 | `POST /api/memory/approve` · `POST /api/memory/reject` | `{ids:[…]}` or `{all:true}` | `{approved:[…], folding}` · `{rejected:[…]}` — the approval step (ADR-46); **400** without `ids` / `all` |
 | `POST /api/recall` | `{query, k?, include_superseded?, as_of?, known_at?}` | `{query, k, facts:[…]}` (B7 point-in-time) |
 | `POST /api/context` | `{query, as_of?}` | `{query, context, identity, budget}` — the B6 three-tier context (probed when `[memory] probes`) |

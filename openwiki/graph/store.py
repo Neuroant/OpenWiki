@@ -1636,6 +1636,38 @@ class GraphStore:
         out.sort(key=lambda a: -(a["last_seen"] or a["created_at"]))
         return out[:limit]
 
+    _DETAIL_FIELDS = _A_BASE + _A_CONF + _A_B7 + _A_P0 + _A_SLEEP + ("status",)
+
+    def fact_detail(self, fact_id: str, now: Optional[int] = None) -> Optional[dict]:
+        """One remembered fact for the Memory tab's detail view (Direction K, M3): the fact in its B7 view (+ its
+        volatile kind), every record of its attribute — the B9 group, in valid-time order: the history the validity
+        bars draw —, the facts it superseded and those that superseded it (``SUPERSEDES``), and its theme.
+        ``None`` for an unknown id. Read-only."""
+        recs = self._load_assertions()
+        self._view(recs, int(now if now is not None else time.time()))
+        by_id = {r["id"]: r for r in recs}
+        fact = by_id.get(fact_id)
+        if fact is None:
+            return None
+
+        def pick(r: dict) -> dict:
+            out = {c: r.get(c) for c in self._DETAIL_FIELDS}
+            out["confidence"] = round(float(r.get("confidence") or 1.0), 2)
+            return out
+
+        key = _key_of(fact)
+        group = sorted((pick(r) for r in recs if _key_of(r) == key),
+                       key=lambda x: (x["valid_from"] if x["valid_from"] is not None else x["created_at"],
+                                      x["created_at"]))
+        edges = self._supersedes_edges()
+        theme_id = self.concept_assignment().get(fact_id)
+        theme = next((c for c in self.memory_concepts(include_pending=True) if c["id"] == theme_id), None)
+        return {"fact": dict(pick(fact), kind=volatile_kind(fact)),
+                "group": group,
+                "supersedes": [pick(by_id[old]) for new, old in edges if new == fact_id and old in by_id],
+                "superseded_by": [pick(by_id[new]) for new, old in edges if old == fact_id and new in by_id],
+                "theme": theme}
+
     # -- sleep: forgetting (archive what the memory policy says not to keep) -----
 
     def forget_candidates(self) -> list:

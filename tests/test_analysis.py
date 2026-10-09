@@ -315,6 +315,17 @@ def test_analyze_memory_growth_is_oldest_first():
     assert growth[0]["session_id"] == "s2"                        # s2 has the oldest fact (−120d)
 
 
+def test_analyze_memory_growth_orders_dated_sessions_by_their_date():
+    """A day re-captured later (a backfill) still sorts by the date its id carries, not by when it was recorded."""
+    from openwiki.analysis import analyze_memory
+    from openwiki.graph.temporal import parse_date
+    facts = [_mf("d1", "x", "is", "1", "claude-2026-09-05", _NOW - 1 * _DAY),       # recorded last, dated earlier
+             _mf("d2", "y", "is", "2", "claude-2026-09-20", _NOW - 9 * _DAY)]
+    growth = analyze_memory(_FakeMemGraph(facts, [], {}), now=_NOW)["growth"]
+    assert [g["session_id"] for g in growth] == ["claude-2026-09-05", "claude-2026-09-20"]
+    assert growth[0]["date"] == int(parse_date("2026-09-05"))
+
+
 def test_analyze_memory_review_lists_the_kinds_that_go_stale():
     from openwiki.analysis import analyze_memory
     facts = [_mf("v1", "OpenWiki", "is versioned", "0.2.0", "s1", _NOW - 60 * _DAY),

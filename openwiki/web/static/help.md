@@ -285,8 +285,17 @@ zusätzlich einen **Gedächtnis-Tier**: Fakten, die aus Sitzungen *erinnert* wer
   (Gültigkeitszeit, `recall --as-of`); **Wissensstand vom** — was OpenWiki an diesem Tag
   *gespeichert hatte*, vor späteren Korrekturen (Transaktionszeit, `recall --known-at`);
   „heute" setzt beide zurück;
-- **Themen-Karten** (konsolidierte Konzepte) und eine durchsuchbare **Faktentabelle**
-  (mit **Gültig**-Spalte, Konfidenz und Status);
+- die **Fakten** — alle, nicht nur die ersten: ein Suchfeld (jedes Wort muss vorkommen) und Filter
+  für Status (aktuell / alle / überholt / zurückgezogen / geplant / vergessen), Quelle (Nutzer /
+  Assistent / Material), Sitzung und Art (die Arten, die von selbst veralten: Pläne, Zahlen, Lücken,
+  Versionen, laufende Zustände), dazu Sortierung und Blättern;
+- die **Themen** als kompakte, durchsuchbare Liste — ein Klick auf ein Thema zeigt nur seine Fakten
+  (✕ hebt den Filter auf), „▸" klappt die Zusammenfassung auf;
+- ein Klick auf einen Fakt öffnet seine **Details**: der **Verlauf dieses Attributs** als Balken auf
+  einer Zeitachse (jeder Wert mit seinem Gültigkeitsintervall, die Linie markiert heute), Quelle,
+  Konfidenz, wann zuletzt gesagt, Art, Sitzung und Thema (ein Klick zeigt nur deren Fakten), was er
+  ersetzt hat und wodurch er ersetzt wurde (beides anklickbar) und **wo es gesagt wurde** — die passendsten Stellen der Sitzungen um diesen Zeitpunkt,
+  wörtlich, Zugangsdaten geschwärzt. **Esc** schließt;
 - **Zur Freigabe** — mit `approve_writes = true` unter `[memory]` legt der Agent seine Schreibvorgänge
   (`wiki_remember`) nur vor: was er hinzufügen (+) und was er schließen (−) will. **Freigeben** lässt den
   Vorgang ins Gedächtnis (gültig ab dem Zeitpunkt, an dem der Agent ihn vorgelegt hat), **Verwerfen** legt

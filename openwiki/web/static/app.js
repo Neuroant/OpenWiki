@@ -341,6 +341,7 @@ async function renderSystem() {
 const AN_KINDS = [
   { key: "references",    label: "REFERENCES",    color: "#ffa94d", on: true },
   { key: "relation",      label: "RELATED_TO",    color: "#da77f2", on: true },
+  { key: "co_changed",    label: "CO_CHANGED",    color: "#5c940d", on: true },   // git co-changes (code corpora, v0.112)
   { key: "shared_entity", label: "shared-entity", color: "#adb5bd", on: false },
   { key: "similar",       label: "SIMILAR_TO",    color: "#4dabf7", on: false },
   { key: "child_of",      label: "CHILD_OF",      color: "#63e6be", on: false },
@@ -359,7 +360,7 @@ function analyseUnavailable(data) {
 
 function analyseMetrics(c) {
   const prof = c.edge_profile || {}, ov = c.neighbor_overlap || {};
-  const order = ["similar", "references", "shared_entity", "relation", "child_of", "next"];
+  const order = ["similar", "references", "shared_entity", "relation", "co_changed", "child_of", "next"];
   const rows = order.map((k) => {
     const p = prof[k] || {};
     const ovs = ov[k] == null ? "—" : ov[k].toFixed(2);
@@ -377,7 +378,7 @@ function analyseMetrics(c) {
   const r = c.graph_reach || {};
   let headline;
   if (r.non_semantic_fraction == null) {
-    headline = `<p class="muted">Keine Nicht-Ähnlichkeitskanten (REFERENCES/shared-entity/RELATED_TO) —
+    headline = `<p class="muted">Keine Nicht-Ähnlichkeitskanten (REFERENCES/shared-entity/RELATED_TO/CO_CHANGED) —
       baue Entitäten/Relationen (<code>graph-build --relations</code>) für die Reichweiten-Kennzahl.</p>`;
   } else {
     headline = `<div class="an-big">${Math.round(r.non_semantic_fraction * 100)}%</div>
@@ -612,7 +613,7 @@ function dynamicsLayout(d) {
   const tops = (b.top_predicates || []).map((p) => `${escapeHtml(p.predicate)}×${p.count}`).join(", ");
   const peak = Math.max(1, ...(d.growth || []).map((g) => g.facts));
   const growth = (d.growth || []).map((g) =>
-    `<div class="gap-row"><span class="gap-metric">${escapeHtml(g.session_id)}</span>` +
+    `<div class="gap-row"><span class="gap-metric" title="${escapeHtml(g.session_id)}">${g.date ? memDate(g.date) + " · " : ""}${escapeHtml(g.session_id.length > 24 ? g.session_id.slice(0, 12) + "…" : g.session_id)}</span>` +
     `<span class="grow-bar" style="width:${Math.max(4, Math.round(140 * g.facts / peak))}px"></span> ${g.facts}</div>`).join("") ||
     `<p class="muted">—</p>`;
   return `<div class="an-head"><strong>Gedächtnis-Dynamik</strong> ` +
@@ -811,7 +812,7 @@ function memFactRow(f) {
   if (f.source === "material") badges.push(MEM_MATERIAL_BADGE);
   const sc = (f.score != null) ? `<span class="mem-score" title="Relevanz (cos ${f.cos})">${f.score}</span>` : "";
   const when = memInterval(f);
-  return `<div class="mem-fact${out ? " is-sup" : ""}">${sc}
+  return `<div class="mem-fact mem-click${out ? " is-sup" : ""}" data-fact="${escapeHtml(f.id || "")}" title="Details">${sc}
     <span class="mem-triple"><b>${escapeHtml(f.subject)}</b> ${escapeHtml(f.predicate)} <b>${escapeHtml(f.object)}</b></span>
     ${when ? `<span class="mem-when">${when}</span>` : ""}
     <span class="mem-src">[${escapeHtml(f.session_id || "?")}]</span> ${badges.join(" ")}</div>`;
@@ -823,7 +824,7 @@ function memTimelineHtml(groups) {
   return groups.map((g) => `
     <div class="mem-tl"><div class="mem-tl-h"><b>${escapeHtml(g.subject)}</b> ${escapeHtml(g.predicate)} …
       <span class="muted">· Treffer ${g.cos}</span></div>
-      ${g.records.map((r) => `<div class="mem-tl-row st-${r.status}">
+      ${g.records.map((r) => `<div class="mem-tl-row mem-click st-${r.status}" data-fact="${escapeHtml(r.id || "")}" title="Details">
         <span class="mem-tl-mark" title="${r.status}">${mark[r.status] || "?"}</span>
         <span class="mem-tl-when">${memInterval(r) || "?"}</span>
         <b class="mem-tl-obj">${escapeHtml(r.object)}</b>
@@ -862,21 +863,7 @@ function renderMemoryView(data) {
     <div id="mem-out" class="mem-out" hidden></div>`
     : `<p class="muted">Kein Suchindex geladen — Abruf und Kontext sind nicht verfügbar (starte den Server mit <code>-i</code>).</p>`;
 
-  const themes = (data.themes || []).length ? `
-    <h3 class="mem-h3">Themen (Konsolidierung)</h3>
-    <div class="mem-themes">${data.themes.map((t) => `
-      <div class="mem-theme"><div class="mem-theme-h">${escapeHtml(t.label || "Thema " + t.id)}
-        <span class="muted">· ${t.size} Fakten</span></div>
-        <div class="mem-theme-s">${escapeHtml(t.summary || "")}</div></div>`).join("")}</div>` : "";
-
-  const rows = (data.assertions || []).map((f) => `
-    <tr class="${f.superseded ? "sup" : ""}">
-      <td><b>${escapeHtml(f.subject)}</b></td><td>${escapeHtml(f.predicate)}</td>
-      <td><b>${escapeHtml(f.object)}</b></td><td class="m-when">${memInterval(f)}</td>
-      <td class="m-name">${escapeHtml(f.session_id || "")}</td>
-      <td class="num">${f.confidence}</td>
-      <td>${memStatusBadge(f.status || (f.superseded ? "past" : ""))}${f.source === "material" ? " " + MEM_MATERIAL_BADGE : ""}</td></tr>`).join("");
-
+  memState.themes = data.themes || [];
   const staged = data.staged || [];
   const stagedBox = staged.length || data.approve_writes ? `
     <h3 class="mem-h3"><span>Zur Freigabe <span class="muted">· ${staged.length} ${staged.length === 1 ? "Schreibvorgang" : "Schreibvorgänge"} des Agenten</span></span>
@@ -891,18 +878,251 @@ function renderMemoryView(data) {
         ${w.closes.map((f) => `<div class="mem-staged-del">− ${escapeHtml(f.replace(/^- /, ""))}</div>`).join("")}</div>`).join("")
       : `<p class="muted">Keine Schreibvorgänge warten auf Freigabe.</p>`}` : "";
 
-  return `<div class="mem-head"><strong>Gedächtnis</strong>
+  return `<div id="mem-root"><div class="mem-head"><strong>Gedächtnis</strong>
       <span class="muted">Path B · Second Brain — was frühere Sitzungen hinterlassen haben</span></div>
     ${identity}${chips}
     ${stagedBox}
     <h3 class="mem-h3">Abruf &amp; Kontext</h3>
     ${recallBox}
-    ${themes}
-    <h3 class="mem-h3">Erinnerte Fakten
-      <label class="mem-toggle"><input type="checkbox" id="mem-show-sup" /> überholte zeigen</label></h3>
-    <table class="mem-table" id="mem-table"><thead><tr>
-      <th>Subjekt</th><th>Prädikat</th><th>Objekt</th><th>Gültig</th><th>Sitzung</th><th>Konfidenz</th><th></th></tr></thead>
-      <tbody>${rows || `<tr><td colspan="7" class="muted">—</td></tr>`}</tbody></table>`;
+    <h3 class="mem-h3" id="mf-anchor">Fakten <span class="muted" id="mf-count"></span></h3>
+    ${memBrowseControls()}
+    <div id="mf-theme"></div>
+    <div id="mf-list"><p class="muted">Wird geladen…</p></div>
+    <div id="mf-pager" class="mf-pager"></div>
+    ${memThemesBlock(memState.themes)}
+    <div id="mem-detail" class="mem-detail" hidden></div></div>`;
+}
+
+// -- Memory · facts browser, themes, fact detail (Direction K, M2-M3) -------
+
+const memState = { q: "", status: "current", source: "", kind: "", sort: "recent", theme: null, session: "",
+                   offset: 0, limit: 50, themes: [], timer: 0 };
+const MF_STATUS = [["current", "aktuell"], ["", "alle"], ["past", "überholt"], ["retracted", "zurückgezogen"],
+                   ["future", "geplant"], ["forgotten", "vergessen"]];
+const MF_SOURCE = [["", "alle Quellen"], ["user", "vom Nutzer"], ["assistant", "vom Assistenten"],
+                   ["material", "aus Material"]];
+const MF_KIND = [["", "alle Arten"], ["volatile", "veränderlich"], ["timeless", "zeitlos"]];
+const MF_SORT = [["recent", "zuletzt gesagt"], ["valid", "gültig seit"], ["subject", "Subjekt A–Z"],
+                 ["confidence", "Konfidenz"]];
+const MF_KIND_LABEL = { plan: "Plan", count: "Anzahl", gap: "Lücke", version: "Version", state: "Zustand" };
+const MF_SOURCE_LABEL = { user: "vom Nutzer — Entscheidung oder Wunsch", assistant: "vom Assistenten — festgestellt",
+                          material: "aus besprochenem Material — keine Entscheidung" };
+
+function memOptions(list, cur) {
+  return list.map(([v, l]) => `<option value="${v}"${v === cur ? " selected" : ""}>${l}</option>`).join("");
+}
+
+function memBrowseControls() {
+  return `<div class="mf-ctl">
+    <input id="mf-q" type="search" placeholder="Fakten durchsuchen — alle Wörter…" value="${escapeHtml(memState.q)}">
+    <select id="mf-status" title="Status">${memOptions(MF_STATUS, memState.status)}</select>
+    <select id="mf-source" title="Herkunft">${memOptions(MF_SOURCE, memState.source)}</select>
+    <select id="mf-kind" title="Veränderliche Arten (Pläne, Anzahlen, Lücken, Versionen, Zustände) veralten von selbst">${memOptions(MF_KIND, memState.kind)}</select>
+    <select id="mf-sort" title="Sortierung">${memOptions(MF_SORT, memState.sort)}</select></div>`;
+}
+
+function memThemesBlock(themes) {
+  if (!themes.length) return "";
+  return `<h3 class="mem-h3">Themen <span class="muted">· ${themes.length} — Konsolidierung; ein Klick zeigt die Fakten des Themas</span></h3>
+    <input id="mt-q" class="mt-q" type="search" placeholder="Themen filtern…">
+    <div class="mt-list">${themes.map((t) => `
+      <div class="mt-row" data-text="${escapeHtml(((t.label || "") + " " + (t.summary || "")).toLowerCase())}">
+        <button class="mt-name linkish" data-tid="${t.id}">${escapeHtml(t.label || "Thema " + t.id)}</button>
+        <span class="muted">${t.size} Fakten</span>
+        <button class="mt-more linkish" title="Zusammenfassung zeigen">▸</button>
+        <div class="mt-sum" hidden>${escapeHtml(t.summary || "")}</div></div>`).join("")}</div>`;
+}
+
+async function fetchFacts() {
+  if (!$("#mf-list")) return;
+  const p = new URLSearchParams({ q: memState.q, status: memState.status, source: memState.source,
+                                  kind: memState.kind, session: memState.session, sort: memState.sort,
+                                  offset: memState.offset, limit: memState.limit });
+  if (memState.theme != null) p.set("theme", memState.theme);
+  let d;
+  try {
+    d = await getJSON("/api/memory/facts?" + p);
+  } catch (e) {
+    if ($("#mf-list")) $("#mf-list").innerHTML = `<p class="muted">Fehler: ${escapeHtml(e.message)}</p>`;
+    return;
+  }
+  if ($("#mf-list")) renderFactList(d);
+}
+
+function renderFactList(d) {
+  const theme = memState.themes.find((t) => t.id === memState.theme);
+  $("#mf-theme").innerHTML = (memState.theme == null ? "" :
+    `<span class="mf-chip">Thema: ${escapeHtml((theme && theme.label) || "#" + memState.theme)}
+      <button class="linkish" id="mf-theme-x" title="Themenfilter entfernen">✕</button></span> `) +
+    (memState.session ? `<span class="mf-chip">Sitzung: <code>${escapeHtml(memState.session)}</code>
+      <button class="linkish" id="mf-session-x" title="Sitzungsfilter entfernen">✕</button></span>` : "");
+  $("#mf-count").textContent = `· ${d.total}`;
+  const rows = d.facts.map((f) => `
+    <tr class="mem-click st-${f.status}" data-fact="${escapeHtml(f.id)}" title="Details">
+      <td><b>${escapeHtml(f.subject)}</b></td><td>${escapeHtml(f.predicate)}</td><td><b>${escapeHtml(f.object)}</b></td>
+      <td class="m-when">${memInterval(f)}</td>
+      <td>${f.kind ? `<span class="mem-badge kind" title="veränderliche Art — kann von selbst veralten">${MF_KIND_LABEL[f.kind] || f.kind}</span>` : ""}</td>
+      <td>${memStatusBadge(f.status)}${f.source === "material" ? " " + MEM_MATERIAL_BADGE : ""}</td></tr>`).join("");
+  $("#mf-list").innerHTML = d.total
+    ? `<table class="mem-table mf-table"><thead><tr><th>Subjekt</th><th>Prädikat</th><th>Objekt</th>
+        <th>Gültig</th><th>Art</th><th></th></tr></thead><tbody>${rows}</tbody></table>`
+    : `<p class="muted">Keine Fakten für diese Auswahl.</p>`;
+  const from = d.total ? d.offset + 1 : 0, to = Math.min(d.offset + d.limit, d.total);
+  $("#mf-pager").innerHTML = d.total > d.limit ? `
+    <button class="secondary" id="mf-prev" ${d.offset ? "" : "disabled"}>‹ zurück</button>
+    <span class="muted">${from}–${to} von ${d.total}</span>
+    <button class="secondary" id="mf-next" ${to < d.total ? "" : "disabled"}>weiter ›</button>` : "";
+}
+
+// Filter the facts by a theme (key "theme", id or null) or a session (key "session", id or "") — both span states.
+function memSetFilter(key, value) {
+  memState[key] = value;
+  memState.offset = 0;
+  if (value != null && value !== "") { memState.status = ""; const st = $("#mf-status"); if (st) st.value = ""; }
+  fetchFacts();
+  const a = $("#mf-anchor");
+  if (a) a.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+// The validity of every record of a fact's attribute (B9 group) on one time axis — when each value held, when it
+// changed, which was retracted — the selected record outlined.
+function memBars(group, selected) {
+  if (!group.length) return "";
+  const now = Date.now() / 1000;
+  const start = (r) => (r.valid_from != null ? r.valid_from : r.created_at);
+  const end = (r) => (r.valid_to != null ? r.valid_to : now);
+  const t0 = Math.min(...group.map(start));
+  let t1 = Math.max(now, ...group.map(end), ...group.map(start));
+  if (t1 - t0 < 86400) t1 = t0 + 86400;
+  const W = 600, L = 200, P = W - L - 12, H = 22;
+  const x = (t) => L + ((t - t0) / (t1 - t0)) * P;
+  const rows = group.map((r, i) => {
+    const y = 6 + i * H, s = start(r), w = Math.max(3, x(end(r)) - x(s));
+    const label = r.object.length > 30 ? r.object.slice(0, 29) + "…" : r.object;
+    const tip = `${r.object} · ${memInterval(r) || "?"} · ${r.status}`;
+    return `<g class="mb-row${r.id === selected ? " mb-sel" : ""}" data-fact="${escapeHtml(r.id)}">
+      <title>${escapeHtml(tip)}</title>
+      <text x="${L - 8}" y="${y + 14}" text-anchor="end" class="mb-label">${escapeHtml(label)}</text>
+      <rect x="${x(s).toFixed(1)}" y="${y + 3}" width="${w.toFixed(1)}" height="${H - 8}" rx="3" class="mb-bar mb-${r.status}"/></g>`;
+  }).join("");
+  const h = 6 + group.length * H + 22, xn = x(now);
+  return `<svg class="mb-svg" viewBox="0 0 ${W} ${h}" width="100%" role="img" aria-label="Gültigkeit der Werte">
+    ${rows}
+    <line x1="${xn.toFixed(1)}" y1="2" x2="${xn.toFixed(1)}" y2="${h - 18}" class="mb-now"/>
+    <text x="${L}" y="${h - 4}" class="mb-axis">${memDate(t0)}</text>
+    <text x="${W - 12}" y="${h - 4}" text-anchor="end" class="mb-axis">${t1 > now + 86400 ? memDate(t1) : "heute"}</text></svg>
+    <div class="muted mb-legend"><span class="mb-key mb-current"></span>aktuell <span class="mb-key mb-past"></span>überholt
+      <span class="mb-key mb-future"></span>geplant <span class="mb-key mb-retracted"></span>zurückgezogen
+      <span class="mb-key mb-forgotten"></span>vergessen</div>`;
+}
+
+function memExcerptsHtml(said) {
+  if (!said || !said.available)
+    return `<p class="muted">Die Sitzungssuche ist hier nicht verfügbar — sie braucht ein Projekt im Second-Brain-Modus.</p>`;
+  if (!said.excerpts.length) return `<p class="muted">Keine passende Stelle in den Transkripten gefunden.</p>`;
+  const note = said.in_window
+    ? `Beste Treffer der Sitzungssuche um ${memDate(said.at)} — wörtlich, Zugangsdaten geschwärzt.`
+    : `Kein Treffer um ${memDate(said.at)} — die besten Treffer aus allen Sitzungen.`;
+  return `<div class="muted md-note">${note}</div>` + said.excerpts.map((e) => `
+    <div class="md-ex"><div class="md-ex-h muted">${escapeHtml((e.ts || "").slice(0, 16).replace("T", " "))} · ${escapeHtml(String(e.session || "").slice(0, 12))}</div>
+      ${e.turns.map((t) => `<div class="md-turn${t.hit ? " hit" : ""}"><b>${escapeHtml(t.speaker || "")}:</b> ${escapeHtml(t.text)}</div>`).join("")}</div>`).join("");
+}
+
+function memLinkList(items) {
+  return items.map((r) => `<div class="mem-click md-link" data-fact="${escapeHtml(r.id)}"><b>${escapeHtml(r.subject)}</b>
+    ${escapeHtml(r.predicate)} <b>${escapeHtml(r.object)}</b> <span class="mem-when">${memInterval(r)}</span>
+    ${memStatusBadge(r.status)}</div>`).join("");
+}
+
+function memDetailHtml(d) {
+  const f = d.fact;
+  const row = (k, v) => (v ? `<dt>${k}</dt><dd>${v}</dd>` : "");
+  const dl = [
+    row("Gültig", memInterval(f) || "—"),
+    row("Erfasst", memDate(f.created_at) + (f.expired_at != null ? ` · zurückgezogen ${memDate(f.expired_at)}` : "")),
+    row("Zuletzt gesagt", memDate(f.last_seen)),
+    row("Konfidenz", f.confidence > 1 ? `${f.confidence} — mehrfach bestätigt` : String(f.confidence)),
+    row("Quelle", MF_SOURCE_LABEL[f.source] || "—"),
+    row("Art", f.kind ? `${MF_KIND_LABEL[f.kind] || f.kind} — veraltet von selbst; im Abruf zählt hier die Aktualität`
+                      : "zeitlos — im Abruf zählt nur die Relevanz"),
+    row("Sitzung", f.session_id
+      ? `<button class="linkish" data-session="${escapeHtml(f.session_id)}" title="Nur die Fakten dieser Sitzung zeigen"><code>${escapeHtml(f.session_id)}</code></button>`
+      : "?"),
+    f.forgotten_at != null ? row("Vergessen", `${memDate(f.forgotten_at)} · ${escapeHtml(f.forgotten || "")}`) : "",
+    d.theme ? row("Thema", `<button class="linkish md-theme" data-tid="${d.theme.id}">${escapeHtml(d.theme.label || "Thema")}</button>
+      <span class="muted">· ${d.theme.size} Fakten</span>`) : "",
+  ].join("");
+  const links = (d.supersedes.length ? `<h4>Hat ersetzt</h4>${memLinkList(d.supersedes)}` : "") +
+    (d.superseded_by.length ? `<h4>Ersetzt durch</h4>${memLinkList(d.superseded_by)}` : "");
+  return `<div class="md-head"><div class="md-title"><b>${escapeHtml(f.subject)}</b> ${escapeHtml(f.predicate)}
+      <b>${escapeHtml(f.object)}</b> ${memStatusBadge(f.status)}${f.source === "material" ? " " + MEM_MATERIAL_BADGE : ""}</div>
+      <button class="linkish md-close" title="Schließen (Esc)">✕</button></div>
+    <dl class="md-dl">${dl}</dl>
+    <h4>Verlauf dieses Attributs <span class="muted">· ${d.group.length} ${d.group.length === 1 ? "Wert" : "Werte"}</span></h4>
+    ${memBars(d.group, f.id)}
+    ${links}
+    <h4>Wo es gesagt wurde</h4>${memExcerptsHtml(d.said)}`;
+}
+
+async function openFact(id) {
+  const box = $("#mem-detail");
+  if (!box || !id) return;
+  box.hidden = false;
+  box.innerHTML = `<p class="muted">Wird geladen…</p>`;
+  try {
+    box.innerHTML = memDetailHtml(await getJSON("/api/memory/fact/" + encodeURIComponent(id)));
+  } catch (e) {
+    box.innerHTML = `<button class="linkish md-close">✕</button><p class="muted">Fehler: ${escapeHtml(e.message)}</p>`;
+  }
+  box.scrollTop = 0;
+}
+
+function closeFact() {
+  const box = $("#mem-detail");
+  if (box) box.hidden = true;
+}
+
+function wireMemoryBrowse() {
+  const root = $("#mem-root");
+  if (!root) return;
+  root.addEventListener("click", (e) => {
+    const t = e.target;
+    if (t.closest(".md-close")) return closeFact();
+    const theme = t.closest("[data-tid]");             // not data-theme: <html data-theme> is the colour scheme
+    if (theme) { closeFact(); return memSetFilter("theme", Number(theme.dataset.tid)); }
+    const session = t.closest("[data-session]");
+    if (session) { closeFact(); return memSetFilter("session", session.dataset.session); }
+    if (t.closest("#mf-theme-x")) return memSetFilter("theme", null);
+    if (t.closest("#mf-session-x")) return memSetFilter("session", "");
+    if (t.closest("#mf-prev")) { memState.offset = Math.max(0, memState.offset - memState.limit); return fetchFacts(); }
+    if (t.closest("#mf-next")) { memState.offset += memState.limit; return fetchFacts(); }
+    const more = t.closest(".mt-more");
+    if (more) {
+      const sum = more.parentElement.querySelector(".mt-sum");
+      sum.hidden = !sum.hidden;
+      more.textContent = sum.hidden ? "▸" : "▾";
+      return;
+    }
+    const fact = t.closest("[data-fact]");
+    if (fact && fact.dataset.fact) openFact(fact.dataset.fact);
+  });
+  const q = $("#mf-q");
+  q.addEventListener("input", () => {
+    clearTimeout(memState.timer);
+    memState.timer = setTimeout(() => { memState.q = q.value.trim(); memState.offset = 0; fetchFacts(); }, 250);
+  });
+  for (const [sel, key] of [["#mf-status", "status"], ["#mf-source", "source"], ["#mf-kind", "kind"], ["#mf-sort", "sort"]])
+    $(sel).addEventListener("change", (e) => { memState[key] = e.target.value; memState.offset = 0; fetchFacts(); });
+  const tq = $("#mt-q");
+  if (tq) tq.addEventListener("input", () => {
+    const v = tq.value.trim().toLowerCase();
+    root.querySelectorAll(".mt-row").forEach((r) => { r.hidden = v && !r.dataset.text.includes(v); });
+  });
+  if (!memState.keyWired) {                       // once per page: Esc closes the detail
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeFact(); });
+    memState.keyWired = true;
+  }
+  fetchFacts();
 }
 
 async function renderMemory() {
@@ -938,9 +1158,7 @@ function wireMemory() {
     }
     renderMemory();
   }));
-  const table = $("#mem-table");
-  const sup = $("#mem-show-sup");
-  if (sup && table) sup.addEventListener("change", () => table.classList.toggle("show-sup", sup.checked));
+  wireMemoryBrowse();
   const q = $("#mem-q");
   const out = $("#mem-out");
   if (!q) return;

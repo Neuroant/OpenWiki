@@ -1032,6 +1032,11 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   community summaries, `/api/metrics?limit=` = the runtime observability snapshot
   (`WikiWebApp.metrics()` → `metrics.COLLECTOR.snapshot()`), `/api/memory` = the Path B
   memory-tier overview (`memory_info()`: identity + counts + themes + browsable assertions),
+  `/api/memory/facts?q=&status=&source=&session=&kind=&theme=&sort=&offset=&limit=` = the **facts browser**
+  (`memory_facts` → `memory_browse.filter_facts` over every fact; `status=` empty = all states),
+  `/api/memory/fact/{id}` = one **fact's detail** (`memory_fact` → `GraphStore.fact_detail`: the attribute's history,
+  supersedes / superseded-by, kind, theme — plus `said`, the session excerpts around when it was said, via the
+  `SessionCorpus` `serve` passes in; 404 for an unknown id),
   `/api/recall` (POST) = decay-weighted `recall` (B7 `as_of`/`known_at`), `/api/context` (POST) = the
   assembled three-tier `context_for` (`as_of`), `/api/timeline` (POST) = B7 fact history
   (`memory_timeline` → `GraphStore.timeline`), `/api/analyze?k=&method=` = the world-model coupling analysis +
@@ -1077,11 +1082,16 @@ tab** (`renderMemory` → `/api/memory`) surfaces **Path B** in the browser: the
 (DNA) + stat chips (Sitzungen / Fakten / überholt / zurückgezogen / geplant / Themen), a
 **recall/context box** (`/api/recall` decay-weighted facts, `/api/context` the assembled three-tier
 context, **Verlauf** = `/api/timeline` the B7 history) with two **B7 date pickers** — *Stand am*
-(valid time → `as_of`) and *Wissensstand vom* (transaction time → `known_at`) — `MemoryConcept`
-**theme cards**, and a browsable **assertion table** (a **Gültig** validity column + status badges
-überholt / zurückgezogen / geplant; superseded rows via a toggle, with confidence). Read-only + graceful empty states (no graph / Wiki mode /
-no sessions / no index). Backed by `GraphStore.memory_overview()` + `list_assertions()`
-(browse) reusing `recall`/`context_for`/`memory_concepts`. The **System tab** (`renderSystem`
+(valid time → `as_of`) and *Wissensstand vom* (transaction time → `known_at`) — a server-side **facts
+browser** (Direction K M2, v0.114: word search, status / source / session / volatile-kind filters, sort, paging over
+every fact — `/api/memory/facts`), the `MemoryConcept` **themes** as a compact searchable list whose rows filter the
+facts, and a **fact detail drawer** (M3, `openFact` → `/api/memory/fact/{id}`: hand-rolled SVG validity bars for the
+attribute's whole history with a "today" line, source, confidence, last seen, kind, session and theme (a click
+filters the facts by either), what it replaced / what replaced it — each clickable — and the verbatim session
+excerpts where it was said; Esc closes). Read-only + graceful
+empty states (no graph / Wiki mode / no sessions / no index). Backed by `GraphStore.memory_overview()` +
+`list_assertions()` + `fact_detail()` (`openwiki/memory_browse.py`: pure `filter_facts` / `said_at`) reusing
+`recall`/`context_for`/`memory_concepts`. The **System tab** (`renderSystem`
 → `/api/metrics`) is the **observability** surface: per-kind summary cards (chat / embed /
 http — count, p50/p95, total time, token in/out) + a live recent-events table, polled every
 2 s while active; agent chat replies also carry a `⏱ latency · tokens · tok/s` line

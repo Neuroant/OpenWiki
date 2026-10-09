@@ -36,9 +36,11 @@ _CONTENT_TYPES = {
 class WikiWebApp:
     def __init__(self, wiki_dir, index: Optional[SemanticIndex] = None,
                  agent: Optional[WikiAgent] = None, tools: Optional[WikiTools] = None,
-                 graph=None, dry_run: bool = False, project=None, on_approved=None) -> None:
+                 graph=None, dry_run: bool = False, project=None, on_approved=None, sessions=None) -> None:
         self.wiki_dir = Path(wiki_dir)
         self.on_approved = on_approved   # v0.110: starts a fold after staged memory writes were approved
+        self.sessions = sessions         # a sessions.SessionCorpus: where a fact was said (Memory tab, M3)
+        self._sess_lock = threading.Lock()
         self.index = index
         self.tools = tools or WikiTools(wiki_dir, index=index, dry_run=dry_run)
         self.agent = agent
@@ -660,6 +662,51 @@ class WikiWebApp:
             "staged": self.memory_staged(),
         }
 
+    def memory_facts(self, q: str = "", status: str = "current", source: str = "", session: str = "",
+                     kind: str = "", theme=None, sort: str = "recent", offset: int = 0, limit: int = 50) -> dict:
+        """The Memory tab's facts browser (Direction K, M2): every remembered fact, searched, filtered, sorted and
+        paged server-side (``memory_browse.filter_facts``). Read-only."""
+        if self.graph is None:
+            raise RuntimeError("no graph")
+        from ..memory_browse import filter_facts
+        rows = self.graph.list_assertions(limit=10 ** 9)
+        return filter_facts(rows, q=q, status=status, source=source, session=session, kind=kind,
+                            theme=None if theme in (None, "") else int(theme),
+                            assignment=self.graph.concept_assignment(), sort=sort, offset=offset, limit=limit)
+
+    def memory_fact(self, fact_id: str) -> dict:
+        """One fact's detail (Direction K, M3): ``GraphStore.fact_detail`` — the fact, its attribute's history,
+        supersession links, its theme — plus the session turns it was most likely said in: a full-text search
+        for the fact among the turns around when it was said, else anywhere (``in_window`` false). KeyError for
+        an unknown id. Read-only."""
+        if self.graph is None:
+            raise RuntimeError("no graph")
+        detail = self.graph.fact_detail(fact_id)
+        if detail is None:
+            raise KeyError(f"unknown fact: {fact_id}")
+        detail["said"] = self._fact_said(detail["fact"])
+        return detail
+
+    def _fact_said(self, fact: dict) -> dict:
+        from ..memory_browse import fact_text, said_at
+        when = said_at(fact)
+        out = {"at": when, "available": self.sessions is not None, "in_window": False, "excerpts": []}
+        if self.sessions is None:
+            return out
+        iso = lambda t: time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(t))   # noqa: E731
+        try:
+            with self._sess_lock:                  # the corpus re-reads growing transcripts — one reader at a time
+                index = self.sessions.index()
+            text = fact_text(fact)
+            if when is not None:
+                out["excerpts"] = index.search(text, k=2, context=1, since=iso(when - 86400), until=iso(when + 2 * 86400))
+                out["in_window"] = bool(out["excerpts"])
+            if not out["excerpts"]:
+                out["excerpts"] = index.search(text, k=2, context=1)
+        except Exception:                          # fail-soft: the detail works without its excerpts
+            out["available"] = False
+        return out
+
     def _graph_db_path(self):
         path = getattr(self.graph, "db_path", None)
         if path is None and self.project is not None:
@@ -919,6 +966,25 @@ def make_handler(app: WikiWebApp):
                     return self._json(app.metrics(limit))
                 if path == "/api/memory":
                     return self._json(app.memory_info())
+                if path == "/api/memory/facts":
+                    # keep blanks: status= is "every state", not the default (current)
+                    query = parse_qs(urlparse(self.path).query, keep_blank_values=True)
+                    arg = lambda name, default="": query.get(name, [default])[0]   # noqa: E731
+                    try:
+                        return self._json(app.memory_facts(
+                            q=arg("q"), status=arg("status", "current"), source=arg("source"),
+                            session=arg("session"), kind=arg("kind"), theme=arg("theme") or None,
+                            sort=arg("sort", "recent"), offset=int(arg("offset", "0")),
+                            limit=int(arg("limit", "50"))))
+                    except RuntimeError as exc:  # no graph loaded
+                        return self._json({"error": str(exc)}, 503)
+                if path.startswith("/api/memory/fact/"):
+                    try:
+                        return self._json(app.memory_fact(unquote(path[len("/api/memory/fact/"):])))
+                    except KeyError as exc:
+                        return self._json({"error": str(exc)}, 404)
+                    except RuntimeError as exc:  # no graph loaded
+                        return self._json({"error": str(exc)}, 503)
                 if path == "/api/communities":
                     return self._json({"communities": app.communities()})
                 if path == "/api/analyze":

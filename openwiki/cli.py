@@ -4522,8 +4522,13 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     chat = OllamaChat(model=args.model, host=args.host, temperature=args.temperature)
     agent = WikiAgent(chat, tools, wiki_summary=summarize_wiki(args.wiki))
     project = getattr(args, "project_obj", None)
+    sessions = None
+    if project is not None and project.memory_enabled:   # the Memory tab shows where a fact was said (M3)
+        from .sessions import SessionCorpus
+        sessions = SessionCorpus(_session_files(project))
     app = WikiWebApp(args.wiki, index=index, agent=agent, tools=tools, graph=graph, project=project,
-                     on_approved=(lambda: _spawn_worker(project, "fold")) if project is not None else None)
+                     on_approved=(lambda: _spawn_worker(project, "fold")) if project is not None else None,
+                     sessions=sessions)
 
     graph_feat = ("graph+sync" if graph and getattr(graph, "writable", False) else
                   ("graph (read-only, concurrent)" if graph else None))

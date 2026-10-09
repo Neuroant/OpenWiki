@@ -470,6 +470,30 @@ The CLI/back-end outran the browser; this direction closes the gap.
   appends deltas live and finalizes into markdown + seed/+Graph chips + stats. The Agent (tool/editing)
   mode stays blocking. **Direction J (web UI) is complete (U1–U11).**
 
+### Direction K — inspecting the memory in the browser (M1–M8)
+
+A critical review on 2026-10-09 against the dev memory (1,739 current facts, 172 themes, 35 sessions): the memory
+backend is strong and fast (every call < 0.6 s), but the browser barely lets a person inspect it. The Gedächtnis
+tab was 38,900 px tall: 27 screens of theme cards before a facts table that showed the first 200 of 2,205 facts
+with no search, filter or paging; a fact had no detail view, no provenance and no history on a time axis;
+recall showed a single score; the Dynamik view was a snapshot; and much of what matters lived only in the CLI
+(the review list, forgetting candidates, session search, lessons, injection state). Three bugs: co-change edges
+missing from the coupling table and map, sessions in the growth list ordered by when they were recorded, and the
+chat placeholder asking about "das Handbuch" on any corpus.
+
+- **M1 — the three bugs. ✅ (v0.114)**
+- **M2 — a facts browser:** search, filters (status, source, session, volatile kind, theme), sort and paging over
+  all facts, server-side; themes as a compact, searchable list that filters the facts. **✅ (v0.114)**
+- **M3 — a fact's detail:** validity bars for its attribute's history, source, confidence, last seen, kind, theme,
+  what it replaced or was replaced by, and the session excerpt where it was said. **✅ (v0.114)**
+- **M4 — recall explained:** the parts of each hit's score (relevance, confidence, recency for volatile kinds,
+  the BM25 and time-window boosts, the material discount) and a "what the hook would inject now" mode.
+- **M5 — memory over time:** facts learned, closed and forgotten per day as a dated chart.
+- **M6 — a memory map:** facts projected in 2-D, coloured by theme, clickable into M3.
+- **M7 — a maintenance panel:** the stale-kinds review list, forgetting candidates and the approval queue
+  together, with one-click close or forget through the journal.
+- **M8 — sessions in the browser:** a session list and full-text search, linked from facts.
+
 ### If you pick one thing next
 **Direction A's re-ranking pass** is the smallest change with an immediately measurable
 payoff — the eval harness will tell you within one run whether it beats the current
@@ -931,6 +955,18 @@ The **genuine gaps**, measure-first as always:
   set (paired, 2 captures, no probes) the cue reached the context 8/16 → 16/16 and the constraint was applied
   7/16 → 12/16 (+5 / −0). Adopted: `[memory] context_k` (default 16) + `context_budget` 2,000 → 3,000; facts may
   use theme budget the themes don't need. `path-b-memory.md` §13.12.
+- **Inspecting the memory in the browser — M1–M3 of Direction K. ✅ (v0.114).** The Gedächtnis tab is rebuilt
+  around the facts: a server-side **facts browser** (`GET /api/memory/facts` — words, status, source, session,
+  volatile kind, theme, sort, paging; `openwiki/memory_browse.py`, pure) over every fact instead of the first 200;
+  the themes as a compact, searchable list whose rows filter the facts; and a **fact detail** drawer (`GET
+  /api/memory/fact/{id}` → `GraphStore.fact_detail`): validity bars for its attribute's whole history on a time axis,
+  source, confidence, last seen, kind, theme, what it replaced and what replaced it, and the session excerpts where it
+  was said (session search around the time it was said — `memory_browse.said_at`; `serve` hands the project's
+  sessions to the web app). On the dev memory the tab shrank from 38,900 to 6,800 px with the facts 400 px from the
+  top; a facts page loads in 0.2 s, a detail in 0.1–0.7 s (2 s while the session index is first built). The three
+  bugs: co-change edges in the coupling table and map, the growth list ordered by each session's own date, and the
+  chat placeholder without "das Handbuch". Found by the browser check: an empty `status=` (all states) was dropped by
+  `parse_qs` and fell back to current facts — kept now, with an HTTP round-trip test.
 - **The LadybugDB move — scoped.** `docs/ladybugdb-move.md`: the gaps re-checked on LadybugDB 0.21.2 — OpenSSL
   still missing from the Windows wheels, the vector extension still an `INSTALL`, prepared statements still stale
   after `ALTER`, and a reader now opens under a writer as well (the suite passes 710 / 714 through a shim); five

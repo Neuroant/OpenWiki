@@ -365,6 +365,66 @@ header {
 .mem-table tr.sup { display: none; }
 .mem-table.show-sup tr.sup { display: table-row; opacity: .6; }
 
+/* -- Memory: facts browser, themes, fact detail (Direction K, M2-M3) ------ */
+#mem-root .linkish { border: none; background: none; color: var(--accent); font: inherit; cursor: pointer; padding: 0; }
+.mem-click { cursor: pointer; }
+.mem-click:hover { background: var(--accent-soft); }
+.mf-ctl { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.mf-ctl input { flex: 1; min-width: 240px; padding: 7px 11px; border: 1px solid var(--line); border-radius: 8px;
+  font: inherit; font-size: 13.5px; background: var(--panel); color: var(--ink); }
+.mf-ctl select { padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; font: inherit; font-size: 13px;
+  background: var(--panel); color: var(--ink); }
+.mf-chip { display: inline-flex; gap: 8px; align-items: center; background: var(--accent-soft); border-radius: 999px;
+  padding: 3px 12px; font-size: 12.5px; margin-bottom: 8px; }
+.mf-table tr.st-past td, .mf-table tr.st-retracted td, .mf-table tr.st-forgotten td { opacity: .6; }
+.mf-table tr.st-retracted td:nth-child(3) { text-decoration: line-through; }
+.mf-pager { display: flex; align-items: center; gap: 12px; justify-content: center; margin: 10px 0 4px; font-size: 13px; }
+.mf-pager button { padding: 4px 12px; border: 1px solid var(--accent); background: var(--panel); color: var(--accent);
+  border-radius: 7px; cursor: pointer; font: inherit; }
+.mf-pager button:disabled { opacity: .4; cursor: default; }
+.mem-badge.kind { background: #fff4e6; color: #a35a00; }
+.mt-q { width: 100%; max-width: 360px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px;
+  font: inherit; font-size: 13px; margin-bottom: 8px; background: var(--panel); color: var(--ink); }
+.mt-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 2px 18px; }
+.mt-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; padding: 3px 0; font-size: 13px;
+  border-bottom: 1px solid var(--line); }
+.mt-row[hidden] { display: none; }
+.mt-name { text-align: left; font-weight: 600; }
+.mt-sum { flex-basis: 100%; color: var(--muted); font-size: 12.5px; padding: 2px 0 6px; }
+.mem-detail { position: fixed; top: 56px; right: 0; bottom: 0; width: min(660px, 94vw); z-index: 40; overflow-y: auto;
+  background: var(--panel); border-left: 1px solid var(--line); box-shadow: -8px 0 24px rgba(0, 0, 0, .12);
+  padding: 16px 20px 24px; }
+.mem-detail[hidden] { display: none; }
+.md-head { display: flex; gap: 12px; align-items: flex-start; justify-content: space-between; margin-bottom: 10px; }
+.md-title { font-size: 15px; line-height: 1.45; }
+.md-close { font-size: 18px; }
+.md-dl { display: grid; grid-template-columns: 130px 1fr; gap: 4px 12px; font-size: 13px; margin: 0 0 6px; }
+.md-dl dt { color: var(--muted); }
+.md-dl dd { margin: 0; }
+.mem-detail h4 { margin: 16px 0 6px; font-size: 13.5px; }
+.md-link { font-size: 13px; padding: 3px 4px; border-radius: 6px; }
+.md-note { font-size: 12px; margin-bottom: 6px; }
+.md-ex { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; font-size: 12.5px; }
+.md-ex-h { font-size: 11.5px; margin-bottom: 4px; }
+.md-turn { padding: 2px 0; white-space: pre-wrap; word-break: break-word; }
+.md-turn:not(.hit) { color: var(--muted); }
+.mb-svg { display: block; margin: 4px 0; }
+.mb-svg text { fill: var(--ink); }
+.mb-label { font-size: 11px; }
+.mb-axis { font-size: 10.5px; fill: var(--muted) !important; }
+.mb-row { cursor: pointer; }
+.mb-bar.mb-current, .mb-key.mb-current { fill: var(--accent); background: var(--accent); }
+.mb-bar.mb-past, .mb-key.mb-past { fill: #adb5bd; background: #adb5bd; }
+.mb-bar.mb-future, .mb-key.mb-future { fill: #91a7ff; background: #91a7ff; }
+.mb-bar.mb-forgotten, .mb-key.mb-forgotten { fill: #dee2e6; background: #dee2e6; }
+.mb-bar.mb-retracted { fill: none; stroke: #7b3fb0; stroke-dasharray: 4 3; }
+.mb-key.mb-retracted { border: 1px dashed #7b3fb0; }
+.mb-sel .mb-bar { stroke: var(--ink); stroke-width: 2; }
+.mb-sel .mb-label { font-weight: 700; }
+.mb-now { stroke: var(--muted); stroke-dasharray: 2 3; }
+.mb-legend { font-size: 11px; display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; }
+.mb-key { display: inline-block; width: 14px; height: 8px; border-radius: 2px; margin-left: 6px; }
+
 /* -- Analyse tab: world-model coupling ------------------------------------ */
 .an-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 12px; }
 .an-head strong { font-size: 15px; }

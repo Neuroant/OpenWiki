@@ -931,6 +931,11 @@ The **genuine gaps**, measure-first as always:
   set (paired, 2 captures, no probes) the cue reached the context 8/16 → 16/16 and the constraint was applied
   7/16 → 12/16 (+5 / −0). Adopted: `[memory] context_k` (default 16) + `context_budget` 2,000 → 3,000; facts may
   use theme budget the themes don't need. `path-b-memory.md` §13.12.
+- **Fix (v0.113.1): `openwiki status` and repo / URL sources.** The source list checked `is_file()`, so a code
+  repository — a directory — always showed `MISSING`, and a web source crashed the command (`source_paths()` returns
+  a URL as a `str`, which has no `is_relative_to`). Now a directory or file counts as present (`source_exists`, as the
+  Projekt tab already did) and a URL is listed as `url`. Found while maintaining the dogfooding project, whose one
+  source is this repository; a regression test covers a file, a repo, a URL and a missing file.
 - **Generative Agents — measured, not adopted.** The last review from the shortlist (`memory-systems-review.md`
   §19): the archetype — a memory stream, retrieval by recency, importance and relevance, reflections into insights.
   Its released code weighs relevance ×3, importance ×2, recency ×0.5 (the paper: all 1), and its recency term points

@@ -1542,8 +1542,11 @@ def _cmd_status(args: argparse.Namespace) -> int:
                      else ""))
     print("  sources:")
     for src in sources:
+        if is_url(src):                      # a URL stays a str; it is fetched at build time, not checked here
+            print(f"    url      {src}")
+            continue
         rel = src.relative_to(project.root) if src.is_relative_to(project.root) else src
-        print(f"    {'ok     ' if src.is_file() else 'MISSING'}  {rel}")
+        print(f"    {'ok     ' if source_exists(src) else 'MISSING'}  {rel}")   # a code repo is a directory
     if not sources:
         print("    (none — add [[sources]] to openwiki.toml)")
     session_paths = project.session_paths()

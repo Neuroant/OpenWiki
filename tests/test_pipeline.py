@@ -168,6 +168,30 @@ def test_status_reports_missing_before_build(tmp_path, capsys):
     assert "ingest" in out and "graph" in out
 
 
+def test_status_reports_each_source_kind(tmp_path, capsys):
+    """A repo directory is present, a URL is shown as a URL (not checked, never a crash), and only a source that
+    doesn't exist is MISSING."""
+    root = tmp_path / "p"
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (root / "sources").mkdir(parents=True)
+    (root / "sources" / "m.pdf").write_bytes(b"%PDF-1.4 hello")
+    (root / MANIFEST).write_text(render_manifest(name="p", sources=[
+        {"type": "pdf", "path": "sources/m.pdf"},
+        {"type": "code", "path": str(repo)},
+        {"type": "web", "path": "https://example.org/page"},
+        {"type": "pdf", "path": "sources/gone.pdf"},
+    ]), encoding="utf-8")
+    ns = argparse.Namespace(command="status", project_obj=Project.load(root))
+    assert cli._cmd_status(ns) == 0
+    lines = {line.split()[-1]: line.split()[0] for line in capsys.readouterr().out.splitlines()
+             if line.startswith("    ") and len(line.split()) == 2}
+    assert lines[str(Path("sources") / "m.pdf")] == "ok"
+    assert lines[str(repo)] == "ok"
+    assert lines["https://example.org/page"] == "url"
+    assert lines[str(Path("sources") / "gone.pdf")] == "MISSING"
+
+
 def test_build_requires_project(capsys):
     ns = argparse.Namespace(command="build", project_obj=None, only=None, force=False, verbose=False)
     assert cli._cmd_build(ns) == 2

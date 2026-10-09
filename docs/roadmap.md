@@ -931,6 +931,12 @@ The **genuine gaps**, measure-first as always:
   set (paired, 2 captures, no probes) the cue reached the context 8/16 → 16/16 and the constraint was applied
   7/16 → 12/16 (+5 / −0). Adopted: `[memory] context_k` (default 16) + `context_budget` 2,000 → 3,000; facts may
   use theme budget the themes don't need. `path-b-memory.md` §13.12.
+- **The LadybugDB move — scoped.** `docs/ladybugdb-move.md`: the gaps re-checked on LadybugDB 0.21.2 — OpenSSL
+  still missing from the Windows wheels, the vector extension still an `INSTALL`, prepared statements still stale
+  after `ALTER`, and a reader now opens under a writer as well (the suite passes 710 / 714 through a shim); five
+  work packages (an engine adapter, an OpenWiki reader/writer lock, `graph-migrate`, packaging, docs), gates G1–G5,
+  the risks. Recommendation: prepare — report the gaps upstream, keep a periodic `memory export --full` — and move
+  when a trigger fires (Python 3.14 needed, Kuzu 0.11 failing to install, or the gaps fixed upstream).
 - **Session excerpts on the live path — measured, not adopted.** Session search's open question (§13.25): inject
   the best-matching excerpts next to the 16 facts? 412 real prompts replayed at their own time on a snapshot of the
   dev memory, excerpts from turns older than 6 hours against the same characters of extra facts, a blind judge and

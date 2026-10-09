@@ -1437,6 +1437,8 @@ http — count, p50/p95, total time, token in/out) + a live recent-events table,
   file"); Kuzu's `EXPORT DATABASE` (0.5 s) → LadybugDB's `IMPORT DATABASE` (2.8 s, file 87 → 23 MB), or `graph-build`
   + `memory import`, gives identical counts, memory, recall, contexts, neighbourhoods and paths; only approximate HNSW
   search differs (top-1 20/20, top-5 overlap 99/100). Not adopted yet (`docs/path-b-memory.md` §13.17, arc42 R10).
+  Re-checked with 0.21.2 (2026-10-09): the gaps persist, and a reader now also opens under a writer; the move is
+  scoped — triggers, work packages, gates — in `docs/ladybugdb-move.md`.
 - `find_path` uses Kuzu's shortest-path syntax:
   `p = (a)-[:CHILD_OF|NEXT|SIMILAR_TO|REFERENCES* SHORTEST 1..N]-(b)` (restricted to
   Page↔Page rels so it never routes through `Chunk`), and reads results with

@@ -28,10 +28,13 @@ The system is a straight, staged pipeline built around an intermediate represent
     was true vs. when it was learned — so an out-of-order backfill lands in history and a correction is
     distinguishable from a change), paraphrases resolved onto one attribute (**fact identity**), kept clean
     by **policy** (no security-sensitive or injected instructions; one-off session events **forgotten** by a
-    nightly **`sleep`** pass that also re-consolidates the **themes**), corrected by the coding agent itself
-    when it changes something (**`wiki_remember`**), and assembled as **three-tier context** (identity +
-    activation + attractors — optionally probed for the user's implicit constraints) for every new prompt
-    via Claude Code **host hooks**; gated by a per-project **Wiki vs Second Brain mode** (`[memory] enabled`).
+    nightly **`sleep`** pass that also re-consolidates the **themes**; credentials redacted wherever text enters),
+    corrected by the coding agent itself when it changes something (**`wiki_remember`**, optionally held for a
+    person's approval), and assembled as **three-tier context** (identity + activation + attractors — optionally
+    probed for the user's implicit constraints) for new prompts via Claude Code **host hooks** (none for chore
+    prompts, each fact once per stretch); the raw sessions stay **searchable** by full text, each session hands
+    over to the next (**handoff**), and the memory **exports** losslessly (COGX) and as a readable Markdown view;
+    gated by a per-project **Wiki vs Second Brain mode** (`[memory] enabled`).
 
 Stages 1–9 run in **Wiki Mode** (documents only, the default); stage 10 adds the remembered tier in
 **Second Brain Mode** — the two coexist as tiers of one substrate (§8.15, ADR-14).
@@ -40,7 +43,7 @@ These stages run inside a **project** — an `openwiki.toml` folder that is the 
 grouping sources, artifacts, settings, and build state, so several knowledge bases coexist and
 persist between commands (the key organizing concept — §8.14; deep design in `docs/projects.md`).
 
-Core use cases (each maps to a runtime scenario in §6):
+Core use cases (most map to a runtime scenario in §6, the rest to their decision in §9):
 
 | # | Use case | Entry point | Runtime scenario |
 |---|---|---|---|
@@ -55,6 +58,10 @@ Core use cases (each maps to a runtime scenario in §6):
 | U9 | Keep memory clean + consolidated overnight | `sleep` (schedulable) | §6.9 |
 | U10 | The coding agent records a new state when it changes something | MCP `wiki_remember` | §6.10 |
 | U11 | The next session picks up where the last one stopped | `handoff prepare` / `resume`, the `SessionStart` hook, MCP `wiki_handoff` | §6.11 |
+| U12 | Look up the exact wording, numbers or errors of an earlier session | `sessions search`, MCP `wiki_sessions` | read-only, pulled by the agent (ADR-44) |
+| U13 | Review the agent's memory writes before they land | `memory pending` / `approve` / `reject`, the Gedächtnis tab | §6.10 (ADR-46) |
+| U14 | Back up the memory, or move it to another engine | `memory export` / `import` (COGX), the Markdown view at `sleep` | ADR-39 |
+| U15 | Turn recurring tool failures into lessons a person records | `sessions lessons` | ADR-47 |
 
 ## 1.2 Quality Goals
 
@@ -76,7 +83,7 @@ See §10 for the quality tree + concrete quality scenarios.
 |---|---|
 | **Learner / maintainer** (primary) | Small, readable, well-boundaried code; each stage understandable in isolation; fast offline tests. |
 | **End user** (CLI / browser) | Build a KB from their docs and get grounded answers + exploration, fully offline. |
-| **AI coding agent** (via MCP + hooks) | Grounded, read-only access to the wiki as MCP tools (`wiki_ask`, `wiki_global`, `wiki_memory`, …); memory injected into every prompt by host hooks; opt-in **write** access to memory (`wiki_remember`) to record what it changed. |
+| **AI coding agent** (via MCP + hooks) | Grounded, read-only access to the wiki and earlier sessions as MCP tools (`wiki_ask`, `wiki_global`, `wiki_memory`, `wiki_sessions`, …); memory injected by host hooks (none for chore prompts, each fact once per stretch) and a handoff brief at session start; opt-in **write** access to memory (`wiki_remember`) to record what it changed — optionally held for a person's approval. |
 | **Evaluator** | Reproduce the RAG-vs-GraphRAG-vs-Global findings on their own corpus. |
 | **Future contributor** | Clear extension points and decision records (§9) to build on — e.g. Path B agent memory. |
 

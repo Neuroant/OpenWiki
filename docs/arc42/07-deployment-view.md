@@ -19,7 +19,7 @@ flowchart TB
       ollama["Ollama service\n(:11434)"]
     end
     subgraph disk["Filesystem"]
-      proj["project dir/\n openwiki.toml, sources/,\n output/wiki, output/index,\n output/graph (+ .journal/.usage.jsonl),\n .openwiki/state.json, hook.log,\n handoff/, memory/"]
+      proj["project dir/\n openwiki.toml, sources/,\n output/wiki, output/index,\n output/graph (+ journal / usage /\n staged / rejected .jsonl),\n .openwiki/ (state, capture + inject\n state, lessons, hook.log),\n handoff/, memory/"]
       home["~/.openwiki/\n config.toml, registry.toml"]
     end
   end
@@ -42,8 +42,8 @@ flowchart TB
 | **Web server** | `owiki serve --port 8137` binds `127.0.0.1` by default; the SPA is served from `web/static/`. |
 | **MCP server** | `owiki mcp` is **spawned by the coding agent** over stdio (config via `owiki claude-code` / `owiki opencode` scaffolders, or for a code repo that feeds a separate memory project: `claude mcp add --scope local openwiki -- <venv python> -m openwiki mcp --project <memory project>` — machine-local, never committed). |
 | **Host hooks (Second Brain)** | `owiki claude-code --hooks` (a project's `.claude/settings.json`) or `--hooks --into DIR` (any repo's machine-local `.claude/settings.local.json`, bound to a memory project with `--project` and **pinned to the installing interpreter** — a stale `owiki` on PATH would fail on new arguments). Capture runs as a **detached worker**, logging to `<project>/.openwiki/hook.log`. |
-| **Nightly maintenance** | `owiki sleep --project <dir>` — e.g. Windows `schtasks /Create /SC DAILY /ST 03:30 /TN "OpenWiki sleep" /TR "<venv>\Scripts\python.exe -m openwiki sleep --project <dir>"`, or cron `30 3 * * * cd <dir> && owiki sleep >> .openwiki/sleep.log 2>&1`. Schedule it when no agent session holds the graph (below); `--budget N` bounds its LLM work. |
-| **State** | Per-project under `<project>/output` + `.openwiki/state.json` (+ the hook capture's `capture-state.json` watermarks) the session handoff under `<project>/handoff/` and the readable memory view under `<project>/memory/` (ADR-39); user-global under `~/.openwiki/` (override `$OPENWIKI_HOME`). |
+| **Nightly maintenance** | `owiki sleep --project <dir>` — e.g. Windows `schtasks /Create /SC DAILY /ST 03:30 /TN "OpenWiki sleep" /TR "<venv>\Scripts\python.exe -m openwiki sleep --project <dir>"`, or cron `30 3 * * * cd <dir> && owiki sleep >> .openwiki/sleep.log 2>&1`. Schedule it for a quiet hour: agent sessions no longer hold the graph (§7.2), but `sleep` keeps the write lock across its consolidation calls, so readers wait while it runs; `--budget N` bounds its LLM work. |
+| **State** | Per-project under `<project>/output` + `.openwiki/` — `state.json` (build provenance), the hook capture's `capture-state.json` watermarks, `inject-state.json` (what each session was given this stretch, ADR-43), `lessons.jsonl` (the distilled-lesson cache, ADR-47); next to the graph its JSONL sidecars — the journal, the usage log and, with the approval step, `graph.staged.jsonl` / `graph.rejected.jsonl` (ADR-46); the session handoff under `<project>/handoff/` and the readable memory view under `<project>/memory/` (ADR-39); user-global under `~/.openwiki/` (override `$OPENWIKI_HOME`). |
 | **Docker** | `docker build -t owiki .` → the `owiki` CLI as entrypoint (`python:3.13-slim`; the sample PDF/tests never enter the image). Ollama stays **external** (`--host http://host.docker.internal:11434`); `docker-compose.yml` serves a mounted project. CI builds + smoke-tests the image (ADR-24). |
 | **Distribution / PyPI** | Distribution name **`owiki`** (import package stays `openwiki`; `openwiki` is taken on PyPI). Builds clean (`python -m build` → sdist + wheel, `twine check`); a **manual** OIDC trusted-publishing workflow exists but publishing is **license-gated** — not yet on PyPI (ADR-24). |
 | **CI** | GitHub Actions (`.github/workflows/ci.yml`) runs the offline test suite (Python 3.11–3.13) + the Docker build on every push/PR to `main` (ADR-24). |
@@ -95,8 +95,8 @@ Because there is **no authentication or authorization** on either the web API (w
 is **localhost only**. Binding to `0.0.0.0` or reverse-proxying it exposes unauthenticated
 read *and edit* access to anyone who can reach the port — do not do this without adding
 authN/authZ first (tracked as §11 R1). The MCP server is stdio-only (no network surface); its only
-write path (`wiki_remember`) is opt-in, screened by the memory policy and journaled (§11 R9), so it does not
-carry this risk.
+write path (`wiki_remember`) is opt-in, screened by the memory policy, journaled and optionally held for a person's
+approval (§11 R9), so it does not carry this risk.
 
 ---
 *Chapter complete. Cross-refs: process behaviour → §6.12 (concurrency/fallback); the

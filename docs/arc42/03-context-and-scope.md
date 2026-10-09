@@ -14,8 +14,9 @@ flowchart LR
   user["CLI user"] -->|commands| OW
   browser["Browser user"] -->|HTTP/JSON| OW
   agent["Coding agent<br>(Claude Code / OpenCode)"] -->|MCP stdio| OW
-  hooks["Claude Code host hooks<br>(prompt / session end)"] -->|"event JSON on stdin"| OW
-  history["Claude Code history<br>(transcripts JSONL)"] -->|backfill| OW
+  hooks["Claude Code host hooks<br>(prompt / session start / compaction / end)"] -->|"event JSON on stdin"| OW
+  history["Claude Code history<br>(transcripts JSONL)"] -->|"backfill / session search"| OW
+  gitrepo["Git repository<br>(files + history)"] -->|"ls-files / log"| OW
 
   subgraph OW["OpenWiki"]
     direction TB
@@ -25,19 +26,22 @@ flowchart LR
   src["Source documents<br>(PDF / MD / HTML / URL / code repo)"] -->|ingest| OW
   OW <-->|"embed / chat (HTTP)"| ollama["Ollama<br>(local LLM + embeddings)"]
   OW <-->|read/write| fs[("Filesystem<br>wiki + index + graph")]
+  OW <-->|"export / import"| cogx[("COGX archive<br>(portable memory)")]
 ```
 
 | Neighbor | Direction | What crosses the boundary |
 |---|---|---|
-| **CLI user** | in | Commands (`build`, `ask`, `serve`, `communities`, `eval`, `remember`/`recall`/`context`, `consolidate`, `sleep`, `backfill`, …) |
-| **Browser user** | in/out | HTTP requests → JSON + static SPA (browse, search, chat/edit, graph, eval) |
-| **Coding agent** | in/out | MCP JSON-RPC (stdio): `wiki_ask`, `wiki_global`, `wiki_search`, graph tools, `wiki_memory`, `wiki_handoff` (session handoff); opt-in **write** `wiki_remember` (queued to the journal) |
+| **CLI user** | in | Commands (`build`, `ask`, `serve`, `communities`, `eval`, `remember`/`recall`/`context`, `consolidate`, `sleep`, `backfill`, `handoff`, `sessions`, `memory export`/`import`/`approve`, …) |
+| **Browser user** | in/out | HTTP requests → JSON + static SPA (browse, search, chat/edit, graph, eval, memory — incl. approving staged agent writes) |
+| **Coding agent** | in/out | MCP JSON-RPC (stdio): `wiki_ask`, `wiki_global`, `wiki_search`, graph tools, `wiki_memory`, `wiki_sessions` (session search), `wiki_handoff` (session handoff); opt-in **write** `wiki_remember` (journaled and applied within seconds — or staged for a person's approval) |
 | **Claude Code host hooks** | in/out | `UserPromptSubmit` → the assembled memory context on stdout (injected into the prompt); `SessionEnd` / `PreCompact` → the transcript path, captured by a detached worker (§6.8); `SessionStart` → the last session handoff's brief on stdout (§6.11) |
-| **Claude Code history** | in | Transcript JSONL files imported by `backfill` as one dated session per day (§6.8) |
+| **Claude Code history** | in | Transcript JSONL files imported by `backfill` as one dated session per day (§6.8), searched verbatim by `sessions search` / `wiki_sessions` (ADR-44) and mined for lessons by `sessions lessons` (ADR-47) |
 | **Source documents** | in | PDF, Markdown/text, HTML file, `http(s)` URL, or a code-repo directory |
+| **Git repository** | in | Read-only: `git ls-files` selects a code corpus's files, `git log` yields its co-change edges (ADR-48), and the handoff reads branch, HEAD and recent commits (ADR-36) |
 | **Session transcripts** | in | A conversation transcript (`type = "session"` source) captured into the memory tier — Path B, Second Brain mode (§8.15) |
+| **COGX archives** | in/out | `memory export` writes the remembered tier in Cognee's exchange format (and a Markdown view at `sleep`); `memory import` restores an archive into an empty memory or merges one (ADR-39) |
 | **Ollama** | in/out | Embedding requests (`/api/embed`) and chat requests (`/api/chat`) |
-| **Filesystem** | in/out | Project layout: `sources/`, `output/wiki`, `output/index`, `output/graph`, `openwiki.toml` |
+| **Filesystem** | in/out | Project layout: `sources/`, `output/wiki`, `output/index`, `output/graph`, `openwiki.toml`, `.openwiki/`, `handoff/`, `memory/` (§7) |
 
 ## 3.2 Technical Context
 
@@ -48,8 +52,10 @@ flowchart LR
 | **CLI** | `argparse` subcommands, stdout/stderr | `openwiki/cli.py` | Project-aware (flags > manifest > global config > defaults) |
 | **Web API** | HTTP/1.1 + JSON over `http.server` | `openwiki/web/server.py` | Localhost by default; **no auth** |
 | **Web UI** | Static HTML/CSS/JS SPA | `openwiki/web/static/` | No-build vanilla JS; client-side Markdown |
-| **MCP** | JSON-RPC 2.0 over stdio (newline-delimited) | `openwiki/mcp_server.py` | Read tools + one opt-in write tool (`wiki_remember`, journaled); dependency-free |
+| **MCP** | JSON-RPC 2.0 over stdio (newline-delimited) | `openwiki/mcp_server.py` | Read tools + one opt-in write tool (`wiki_remember`, journaled — or staged for approval); dependency-free |
 | **Host hooks** | Claude Code hook event JSON on stdin → context on stdout | `cli._cmd_hook` | **Always exits 0** (a non-zero exit would block the prompt); capture runs detached |
+| **Git** | the `git` CLI via `subprocess`, read-only | `code_parser.py`, `graph/cochange.py`, `handoff.py` | Optional: without git a code corpus is a directory walk, with no co-change edges |
+| **COGX archive** | a directory or `.cogx.tar.gz`: `manifest.json` + one JSONL file per record kind | `memory_export.py` | Redacted per field on the way out; unpacked member by member on the way in (absolute / `..` / link members refused) |
 | **Ollama — embeddings** | HTTP POST `/api/embed` (JSON) | `openwiki/embeddings.py` | `OllamaEmbedder`; default `bge-m3` |
 | **Ollama — chat** | HTTP POST `/api/chat` (JSON) | `openwiki/llm.py` | `OllamaChat`; default `qwen3:30b-…`; supports tool calls |
 | **Persistence** | Files: `.json`, `.md`, `.npy`, Kuzu DB | `models`, `wiki`, `search`, `graph/*` | See §7 |
@@ -83,7 +89,8 @@ an empty required field → **400**; any other exception → **500**; the body i
 | `POST /api/ask` · `POST /api/ask/stream` | `{question, graph?, hybrid?, rerank?, k?, expand_k?}` | `{question, answer, cited, sources:[{marker, slug, title, kind, score}], stats}` · SSE: `sources`, `delta`…, `done` (ADR-26) |
 | `GET /api/metrics?limit=` | — | the observability snapshot (recent events + aggregates, ADR-20) |
 | `GET /api/analyze?k=&method=` · `/api/analyze/gaps` · `/api/analyze/memory` | query params | coupling fingerprint + 2-D map · gap candidates · memory dynamics (ADR-25); `available: false` + `reason` without index/graph |
-| `GET /api/memory` | — | `{available, mode, identity, has_embedder, stats:{sessions, assertions, superseded, retracted, planned, forgotten, themes, pending_themes}, themes, assertions}` (Path B) |
+| `GET /api/memory` | — | `{available, mode, identity, has_embedder, stats:{sessions, assertions, superseded, retracted, planned, forgotten, themes, pending_themes}, themes, assertions, staged:[{id, t, session, facts, closes}]}` (Path B) |
+| `POST /api/memory/approve` · `POST /api/memory/reject` | `{ids:[…]}` or `{all:true}` | `{approved:[…], folding}` · `{rejected:[…]}` — the approval step (ADR-46); **400** without `ids` / `all` |
 | `POST /api/recall` | `{query, k?, include_superseded?, as_of?, known_at?}` | `{query, k, facts:[…]}` (B7 point-in-time) |
 | `POST /api/context` | `{query, as_of?}` | `{query, context, identity, budget}` — the B6 three-tier context (probed when `[memory] probes`) |
 | `POST /api/timeline` | `{query, groups?}` | `{query, groups:[{subject, predicate, cos, records:[…]}]}` (B7 history) |
@@ -102,10 +109,13 @@ Newline-delimited JSON-RPC 2.0 over **stdio** (the coding agent spawns `owiki mc
 
 Read tools: `wiki_ask`, `wiki_global`, `wiki_search`, `wiki_read_page`, `wiki_list_pages`,
 `wiki_graph_neighbors`, `wiki_find_path`, `wiki_find_entity`, `wiki_memory` (the B6 three-tier memory
-context, `as_of`, in Second Brain mode). Write tool, **opt-in** (`[memory] agent_writes`):
+context, `as_of`, in Second Brain mode), `wiki_sessions(query, k, context, since, until)` (verbatim, dated
+excerpts of earlier sessions by full text — redacted and screened; ADR-44). Write tool, **opt-in** (`[memory] agent_writes`):
 `wiki_remember(facts, replaces, source)` — the agent records facts / a new state and names the remembered
 facts it makes outdated (matched exactly at call time; unmatched lines return the closest facts). The server
-keeps the graph read-only: the call **queues** one journal op that the next writable pass folds (ADR-33).
+keeps the graph read-only: the call **queues** one journal op and spawns a detached fold worker that applies it
+within seconds (ADR-33/38); with `[memory] approve_writes` the op is **staged** instead and waits for a person
+(`openwiki memory approve`, the Gedächtnis tab — no MCP tool approves; ADR-46).
 `wiki_handoff(mode, note, repo)` — the session handoff (§6.11, ADR-36): `resume` and `preview` read; `prepare` writes
 the project's `handoff/` and is gated like the write tool (`[memory] agent_writes`).
 
@@ -129,5 +139,5 @@ Both via stdlib `urllib`, no API key; a `URLError`/`HTTPError` becomes a `Runtim
 
 ---
 *Chapter complete. Payload shapes verified against `web/server.py`, `mcp_server.py`,
-`embeddings.py`, `llm.py` (re-checked for v0.90). Cross-refs: interfaces used at runtime → §6; error handling →
+`embeddings.py`, `llm.py` (re-checked for v0.113). Cross-refs: interfaces used at runtime → §6; error handling →
 §6.12/§8.*

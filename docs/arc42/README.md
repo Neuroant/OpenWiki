@@ -37,11 +37,13 @@ quality, and risks.
 > list** rather than a label, measured out of sample (ADR-45) — and an opt-in **approval step** for agent writes
 > (ADR-46, QS-29) — and **lessons from failures**, only those learned twice, listed for a person (ADR-47) — and **git
 > co-changes** as a use signal for code corpora (ADR-48) — and recall's **recency only for the kinds of fact that go
-> stale** (ADR-49, QS-30). Deep detail: `docs/path-b-memory.md`,
+> stale** (ADR-49, QS-30); the other ideas from the reviewed memory systems were measured on OpenWiki's own data and
+> recorded as *not adopted* (addenda to ADR-21/42/47/48/49). Deep detail: `docs/path-b-memory.md`,
 > `docs/RAG-vs-GraphRAG.md`.
 >
 > **Open risk:** Kuzu, the embedded graph store, was archived upstream in 2025-10 — tracked as §11 **R10**
-> (pinned to 0.11; a memory export and a LadybugDB spike are the planned mitigations).
+> (pinned to 0.11; since v0.102 the memory exports losslessly to COGX, and a LadybugDB spike found the three changes
+> a move needs — the vector extension, a fresh statement cache after DDL, and a writer lock of our own).
 
 ## Audience & relationship to the other docs
 
@@ -52,7 +54,8 @@ quality, and risks.
 | `docs/roadmap.md` | Anyone | What was built (history) + prioritized future directions |
 | `docs/RAG-vs-GraphRAG.md` | Evaluators | The measured findings behind the graph design |
 | `docs/projects.md` | Architects, users | Deep design of the **project** concept (§8.14): manifest, discovery, registry, layout, multi-source merge |
-| `docs/path-b-memory.md` | Architects | **Path B (agent memory)** design + staged plan — realized by ADR-15/16/17/18/19, resolving §11 D1/D2/D6 (B0–B6 + concurrency landed); §12 = Path B+ (B7 → ADR-27, B9 → ADR-29); §13 = Path B++ (hygiene, cue-trigger, sleep + forgetting, stale facts, `wiki_remember` → ADR-30–33, incl. the measured negative results) |
+| `docs/path-b-memory.md` | Architects | **Path B (agent memory)** design + staged plan — realized by ADR-15/16/17/18/19, resolving §11 D1/D2/D6 (B0–B6 + concurrency landed); §12 = Path B+ (B7 → ADR-27, B9 → ADR-29); §13 = Path B++ (hygiene, cue-trigger, sleep + forgetting, stale facts, `wiki_remember`, LoCoMo, handoff, redaction, short locks, portable memory, recall aids, session search, approvals, lessons, co-change, recency → ADR-30–49, incl. the measured negative results) |
+| `docs/memory-systems-review.md` + `docs/agent-memory-summary.md` | Architects | Eighteen other agent-memory systems read from their source and checked against OpenWiki's data; the summary holds the ranked plan behind ADR-37–48 and what was measured and not adopted |
 | `docs/coding-agents.md` | Users | MCP / OpenCode / Claude Code setup |
 
 The arc42 docs and `CLAUDE.md` overlap by design (both describe the architecture); this doc

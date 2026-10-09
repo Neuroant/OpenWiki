@@ -10,7 +10,12 @@
 > **reader overlays** (ADR-28), and — Path B+ — **bi-temporal** memory (ADR-27, B7) and **fact identity** (ADR-29,
 > B9); Path B++ adds **memory hygiene** (ADR-30), **cue-trigger recall** (ADR-31), **forgetting** in a nightly
 > `sleep` pass (ADR-32), **agent-recorded state** (ADR-33), **recency as a tie-breaker**, set by LoCoMo (ADR-34) and limited to the kinds of fact that go stale (ADR-49),
-> and a **live context sized by measurement** on its own path (ADR-35).
+> and a **live context sized by measurement** on its own path (ADR-35); then a **session handoff** (ADR-36),
+> **credential redaction** (ADR-37), **short locks** — per-call readers, two-phase writers (ADR-38), **portable
+> memory** (ADR-39), **recall aids** — BM25 and the question's time window (ADR-40/41), **episodes** kept to the
+> benchmark (ADR-42), injection **once per stretch** (ADR-43), **session search** (ADR-44), **review lists** for a
+> person (ADR-45/47), an **approval step** (ADR-46) and **git co-changes** (ADR-48). Ideas from the reviewed
+> memory systems that were measured and not adopted are recorded as addenda (ADR-21/42/47/48/49).
 
 ## ADR index
 
@@ -49,7 +54,7 @@
 | [31](#adr-31) | Cue-trigger recall: fact-shaped constraint probes, personal-only slots, opt-in | Accepted (Path B++ / P1) | correctness |
 | [32](#adr-32) | Forgetting as policy-based archiving in a nightly `sleep` pass | Accepted (Path B++ / P1) | correctness, Q5 |
 | [33](#adr-33) | Stale state fixed by the writer that makes the change (`wiki_remember`, journaled, exact `replaces`) | Accepted (Path B++ / P2) | correctness, security |
-| [34](#adr-34) | Recency in recall is a tie-breaker (floor 0.9), set by the LoCoMo benchmark | Accepted (Path B++ / P2) | correctness, Q5 |
+| [34](#adr-34) | Recency in recall is a tie-breaker (floor 0.9), set by the LoCoMo benchmark | Accepted (Path B++ / P2); refined by [ADR-49](#adr-49) | correctness, Q5 |
 | [35](#adr-35) | The live memory context recalls 16 facts within 3,000 chars — sized by measurement on the live path | Accepted (Path B++) | efficiency, correctness, Q5 |
 | [36](#adr-36) | A session hands over to the next through a handoff OpenWiki derives and the agent annotates | Accepted (Path B++) | usability (continuity) |
 | [37](#adr-37) | Credentials are redacted wherever text enters memory; the instruction policy matches normalized text | Accepted (Path B++) | security |
@@ -57,7 +62,14 @@
 | [39](#adr-39) | The remembered tier is portable — a COGX archive and a Markdown view; LadybugDB is the migration target after three changes | Accepted (Path B++) | portability (R10) |
 | [40](#adr-40) | Hybrid recall: BM25 as a recall aid within the dense pool, the dense order kept | Accepted (Path B++) | relevance, Q5 |
 | [41](#adr-41) | The question's time window: facts from the period a question names may enter recall | Accepted (Path B++) | relevance, Q5 |
-| [42](#adr-42) | Episodes next to facts — measured on LoCoMo, the live path measured before it gets them | Accepted (Path B++) | correctness, efficiency, Q5 |
+| [42](#adr-42) | Episodes next to facts — measured on LoCoMo, the live path measured before it gets them | Accepted (Path B++); harness only — not adopted on the live path | correctness, efficiency, Q5 |
+| [43](#adr-43) | Inject on every non-chore prompt, but each fact once per stretch | Accepted (Path B++); refines [ADR-35](#adr-35) | efficiency, Q5 |
+| [44](#adr-44) | The raw sessions stay searchable — by full text, pulled by the agent | Accepted (Path B++) | correctness, Q5 |
+| [45](#adr-45) | No "possibly outdated" label — volatile kinds feed a review list | Accepted (Path B++); refines [ADR-33](#adr-33) | correctness, Q5 |
+| [46](#adr-46) | An opt-in approval step for agent writes; no always-present core | Accepted (Path B++); refines [ADR-33](#adr-33) | security, correctness |
+| [47](#adr-47) | Procedural lessons from failures: only what was learned twice, listed for a person | Accepted (Path B++) | correctness, Q5 |
+| [48](#adr-48) | A use signal first: git co-changes as edges for code corpora | Accepted | Q4, Q5 |
+| [49](#adr-49) | Recency only for the kinds of fact that go stale | Accepted (Path B++); refines [ADR-34](#adr-34) | correctness, Q5 |
 
 ---
 
@@ -877,6 +889,13 @@ changes.** *(v0.102; builds on [ADR-16](#adr-16); mitigates R10)*
   rule detects. LoCoMo's narratives invent too — the misattributions behind adversarial losses. A memory injected into
   every prompt must not be wrong one time in ten; verbatim session excerpts are the next candidate
   (`path-b-memory.md` §13.23).
+- **Addendum (2026-10-09, Generative Agents' reflection):** higher-level insights synthesized from the facts, kept as
+  memories and retrieved next to them, measured on the dev memory with the paper's own prompts: they hardly invent (1 %
+  of their specific terms missing from their evidence), but 95 % of what they cite is earlier reflections and 74 %
+  repeat an earlier one; competing for the 16 slots on 339 real prompts replayed at their own time, no better per prompt
+  than the facts they displaced (19 / 18), and 7 of the 70 judged helpful were wrong or outdated — nothing closes a
+  reflection when its facts move on. Not adopted, no code; the themes stay recomputed from the current facts
+  (`path-b-memory.md` §13.35).
 
 ### ADR-43
 **Inject on every prompt, but each fact once per stretch.** *(v0.107; refines [ADR-35](#adr-35))*
@@ -979,6 +998,10 @@ changes.** *(v0.102; builds on [ADR-16](#adr-16); mitigates R10)*
 - **Consequences:** + four of the five lessons listed on the dogfooding transcript were worth keeping; the three
   strongest now sit in the host's memory. + No schema, no prompt cost. − Small: the lessons would have covered 6
   failures in 38 days. − A first run costs one model call per resolved failure (104 s for 44).
+- **Addendum (2026-10-08, MemOS):** recalling the earlier fix when a step fails (MemOS's coding-agent plugin), checked
+  on the transcript's 47 resolved failures: an earlier fix genuinely applied to 10 of 46 (hand audit; the local judge
+  said 32), and at a strict similarity bar 4 of 5 suggestions were right — about four useful recalls in 70 days, all
+  recurring pitfalls this list already surfaces. Not adopted, no code (`path-b-memory.md` §13.34).
 
 ### ADR-48
 **A use signal first: git co-changes as edges for code corpora.** *(v0.112; follows [ADR-25](#adr-25))*
@@ -996,6 +1019,10 @@ changes.** *(v0.102; builds on [ADR-16](#adr-16); mitigates R10)*
   in the top 10, embedding similarity 36 %, popularity 35 %; 76 % of co-change partners are not embedding neighbours.
   + No model, one `git log` (0.2 s). − Only for code corpora with git history; commits mixing code and docs make docs
   frequent partners. − A refresh needs a writable graph.
+- **Addendum (2026-10-08, OpenCog Hyperon):** an import-derived blast radius (Hyperon-MCP's probabilistic inference over
+  the import graph), measured on the same 549 queries: recall@10 0.04 for the files a commit changed, against 0.53 for
+  co-change; against its own import graph precision 0.30. Inference over captured facts had nothing to chain (809
+  predicates in 1,187 facts → two two-hop chains). Not adopted, no code (`path-b-memory.md` §13.33).
 
 ### ADR-49
 **Recency only for the kinds of fact that go stale.** *(v0.113; refines [ADR-34](#adr-34))*
@@ -1013,6 +1040,11 @@ changes.** *(v0.102; builds on [ADR-16](#adr-16); mitigates R10)*
   phrasing rule (25 % precision as a stale label, ADR-45): a current version or count is ranked as if it might be
   stale, and a stale description gets no recency penalty. **Checked by replay** at prompt time (`path-b-memory.md`
   §13.32): with a capture lag of 6 hours or a day judged alike to recency on every fact (14 / 11, 9 / 11 prompts).
+- **Addendum (2026-10-09, Generative Agents' importance):** a 1–10 importance rating per fact (the paper's prompt, the
+  local 30B) as a third ranking term: LoCoMo coverage 0.449 → 0.363 when the paper's formula adds it (production
+  0.461), +0.1 to −1.2 points as a small aid; on real prompts replayed at their own time the facts it lifted were judged
+  less helpful than those they displaced (14.0 vs 18.5 %, 17 / 33 prompts). A fixed rating lifts core facts into
+  prompts they don't bear on. Not adopted, no code (`path-b-memory.md` §13.35).
 
 ---
 *Chapter complete. The Path-B agent-memory direction landed via ADR-14/15/16/17/18/19; the graph then
@@ -1033,6 +1065,9 @@ writers (ADR-38), **portable memory** — a COGX export / import, a Markdown vie
 (ADR-43), the raw sessions kept **searchable** by full text (ADR-44), volatile kinds as a **review list**, not a
 label (ADR-45), an opt-in **approval step** for agent writes (ADR-46), **lessons from failures** learned twice,
 listed for a person (ADR-47), and **git co-changes** as a use signal for code corpora (ADR-48), and recall's **recency only where truth
-changes with time** (ADR-49). §11
+changes with time** (ADR-49). The six reviews of brain-inspired memory systems around v0.113 changed that one
+thing (ADR-49, from *The Missing Knowledge Layer*) and otherwise left addenda — HippoRAG 2 (ADR-21), the
+human-inspired architecture's replay check (ADR-49), OpenCog Hyperon (ADR-48), MemOS (ADR-47), Generative Agents
+(ADR-42, ADR-49) — each idea measured on OpenWiki's own data before anything was adopted. §11
 debts D1/D2/D6 are resolved. Deep designs in `docs/path-b-memory.md` and `docs/RAG-vs-GraphRAG.md`. New significant
 decisions should be appended here with the next id.*

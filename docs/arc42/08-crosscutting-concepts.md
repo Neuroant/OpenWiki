@@ -116,7 +116,7 @@ The system assumes a **trusted local host** (§3.3, §11 R1):
   resolved path outside `pages/` (`_page_path`), so `read/edit/create` can't escape the wiki.
 - **MCP reads; memory writes are opt-in** — coding-agent tools never edit the wiki (`edit`/`create` aren't
   exposed); the one write tool, `wiki_remember` (`[memory] agent_writes`), only queues memory facts to the journal.
-- **Memory hygiene** — memory is injected into every prompt, so it is a persistence path for injected
+- **Memory hygiene** — memory is injected into the agent's prompts, so it is a persistence path for injected
   instructions. A **source-independent** policy (ADR-30) drops security-sensitive facts on *every* write path
   (capture, `remember`, the journal, `wiki_remember`), and `sleep` re-applies it to older facts (ADR-32); it matches
   NFKC-normalized text, so full-width or invisible characters can't slip an instruction past it (ADR-37). Session

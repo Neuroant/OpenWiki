@@ -81,3 +81,13 @@ def said_at(f: dict) -> Optional[int]:
     if day is not None and (valid < day - DAY or valid > day + 2 * DAY):
         return day + DAY // 2
     return valid
+
+
+def learned_at(f: dict) -> Optional[int]:
+    """When the memory learned a fact, on the axis of when things were said (Memory over time, M5): ``said_at``, but
+    never after the fact was recorded — an agent write without a valid time defaults to midday of its session's day,
+    which can lie a few hours after it was written. A backfilled day keeps its own date (said weeks before recorded)."""
+    said, recorded = said_at(f), f.get("created_at")
+    if said is None:
+        return recorded
+    return min(said, recorded) if recorded is not None else said

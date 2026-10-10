@@ -560,6 +560,17 @@ class WikiWebApp:
         from ..analysis.memory import analyze_memory
         return analyze_memory(self.graph)
 
+    def memory_period(self, start, bucket: str = "day") -> dict:
+        """The facts behind one period of the Dynamik chart (`/api/analyze/memory/period`, M5): learned in it, or
+        closed / retracted / forgotten in it — ``start`` an epoch (the period's first second), ``bucket`` ``day`` or
+        ``week``. Read-only."""
+        if self.graph is None:
+            raise RuntimeError("no graph loaded")
+        from ..analysis.memory import DAY, period_events
+        start = int(start)
+        facts = self.graph.list_assertions(limit=10**9, include_superseded=True)
+        return dict(period_events(facts, start, start + (7 if bucket == "week" else 1) * DAY), bucket=bucket)
+
     def ask_stream(self, question: str, use_graph: bool = True, hybrid: bool = False,
                    rerank: bool = False, k: int = 5, expand_k: int = 3):
         """Streaming Ask (RAG) for `/api/ask/stream` — a generator of SSE event dicts:
@@ -1021,6 +1032,15 @@ def make_handler(app: WikiWebApp):
                     return self._json(app.analyze_gaps(top=int(query.get("top", ["15"])[0])))
                 if path == "/api/analyze/memory":
                     return self._json(app.analyze_memory())
+                if path == "/api/analyze/memory/period":
+                    query = parse_qs(urlparse(self.path).query)
+                    try:
+                        return self._json(app.memory_period(int(query.get("start", ["0"])[0]),
+                                                            query.get("bucket", ["day"])[0]))
+                    except ValueError:
+                        return self._json({"error": "start must be an epoch"}, 400)
+                    except RuntimeError as exc:  # no graph loaded
+                        return self._json({"error": str(exc)}, 503)
                 if path == "/api/entities":
                     query = parse_qs(urlparse(self.path).query)
                     return self._json(app.entities(

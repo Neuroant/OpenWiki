@@ -630,7 +630,114 @@ function dynamicsLayout(d) {
     `<div class="m-row"><span>Wiederbestätigt (&gt;1)</span><b>${(t.reaffirmed_fraction * 100).toFixed(0)}%</b></div></div></div>` +
     `<div class="gap-panel"><h3>Breite</h3><div class="muted">${b.distinct_subjects} Subjekte · ${b.distinct_predicates} Prädikate` +
     `${tops ? " · top: " + tops : ""}</div></div>` +
-    `<div class="gap-panel"><h3>Wachstum <span class="muted">(Fakten je Sitzung, älteste zuerst)</span></h3>${growth}</div>`;
+    memOverTimePanel(d.over_time) +
+    `<details class="gap-panel"><summary><b>Wachstum je Sitzung</b> <span class="muted">(Fakten je Sitzung, älteste zuerst)</span></summary>${growth}</details>`;
+}
+
+// -- Analyse · Dynamik · memory over time (Direction K, M5) -----------------
+// Per day (per week over a long span): facts learned above the line, facts that stopped being current below it —
+// closed (the world changed), retracted (corrected), forgotten — and the current facts as a line (right axis).
+// The days are when things were said (a backfilled day keeps its date), not when they were recorded.
+
+const OT_CAUSES = [["closed", "geschlossen", "die Welt hat sich geändert (Gültigkeit beendet)"],
+                   ["retracted", "zurückgezogen", "korrigiert — war nie wahr"],
+                   ["forgotten", "vergessen", "vom Schlaf-Durchlauf archiviert"]];
+
+function memOverTimePanel(ot) {
+  if (!ot || !(ot.periods || []).length) return "";
+  const t = ot.totals, unit = ot.bucket === "week" ? "Woche" : "Tag";
+  return `<div class="gap-panel"><h3>Gedächtnis über die Zeit <span class="muted">(je ${unit}, nach dem Zeitpunkt, an dem es gesagt wurde)</span></h3>
+    <div class="muted an-note">${t.learned} gelernt · ${t.closed} geschlossen · ${t.retracted} zurückgezogen · ${t.forgotten} vergessen
+      → ${t.current} aktuell. Ein Klick auf einen ${unit} zeigt seine Fakten.</div>
+    ${memOverTimeSvg(ot)}
+    <div class="ot-legend"><span class="ot-key ot-learn"></span>gelernt
+      ${OT_CAUSES.map(([k, l, title]) => `<span class="ot-key ot-${k}" title="${title}"></span><span title="${title}">${l}</span>`).join("")}
+      <span class="ot-key ot-line"></span>aktuelle Fakten (rechte Achse)</div>
+    <div id="ot-period"></div></div>`;
+}
+
+function memOverTimeSvg(ot) {
+  const ps = ot.periods, n = ps.length;
+  const W = 860, H = 236, L = 44, R = 50, T = 10, B = 202;      // plot box: x L…W−R, y T…B
+  const up = Math.max(1, ...ps.map((p) => p.learned));
+  const down = Math.max(0, ...ps.map((p) => p.closed + p.retracted + p.forgotten));
+  const scale = (B - T) / (up + down), zero = T + up * scale;
+  const slot = (W - L - R) / n, bw = Math.max(1, Math.min(18, slot * 0.72));
+  const x = (i) => L + slot * i + (slot - bw) / 2;
+  const cmax = Math.max(1, ...ps.map((p) => p.current));
+  const cy = (c) => B - (c / cmax) * (B - T);
+  const bars = ps.map((p, i) => {
+    let s = `<rect class="ot-learn" x="${x(i).toFixed(1)}" y="${(zero - p.learned * scale).toFixed(1)}" width="${bw.toFixed(1)}" height="${(p.learned * scale).toFixed(1)}"/>`;
+    let y = zero;
+    for (const [k] of OT_CAUSES) {
+      if (!p[k]) continue;
+      s += `<rect class="ot-${k}" x="${x(i).toFixed(1)}" y="${y.toFixed(1)}" width="${bw.toFixed(1)}" height="${(p[k] * scale).toFixed(1)}"/>`;
+      y += p[k] * scale;
+    }
+    return s;
+  }).join("");
+  const line = ps.map((p, i) => `${(L + slot * (i + 0.5)).toFixed(1)},${cy(p.current).toFixed(1)}`).join(" ");
+  const every = ot.bucket === "week" ? 4 : 7;
+  const ticks = ps.map((p, i) => (i % every ? "" :
+    `<line class="ot-tick" x1="${(L + slot * (i + 0.5)).toFixed(1)}" x2="${(L + slot * (i + 0.5)).toFixed(1)}" y1="${B}" y2="${B + 4}"/>
+     <text class="ot-ax" x="${(L + slot * (i + 0.5)).toFixed(1)}" y="${B + 16}" text-anchor="middle">${p.label.slice(5)}</text>`)).join("");
+  const hits = ps.map((p, i) => `<rect class="ot-hit" data-t="${p.t}" x="${(L + slot * i).toFixed(1)}" y="${T}" width="${slot.toFixed(1)}" height="${B - T}">
+    <title>${p.label}${ot.bucket === "week" ? " (Woche)" : ""} · +${p.learned} gelernt · ${p.closed} geschlossen · ${p.retracted} zurückgezogen · ${p.forgotten} vergessen · ${p.current} aktuell</title></rect>`).join("");
+  return `<svg class="ot-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Gedächtnis über die Zeit">
+    <line class="ot-zero" x1="${L}" x2="${W - R}" y1="${zero.toFixed(1)}" y2="${zero.toFixed(1)}"/>
+    <text class="ot-ax" x="${L - 6}" y="${T + 8}" text-anchor="end">+${up}</text>
+    <text class="ot-ax" x="${L - 6}" y="${(zero + 4).toFixed(1)}" text-anchor="end">0</text>
+    ${down ? `<text class="ot-ax" x="${L - 6}" y="${B}" text-anchor="end">−${down}</text>` : ""}
+    <text class="ot-ax ot-ax-r" x="${W - R + 6}" y="${T + 8}">${cmax}</text>
+    <text class="ot-ax ot-ax-r" x="${W - R + 6}" y="${B}">0</text>
+    ${bars}<polyline class="ot-cur" points="${line}"/>${ticks}${hits}</svg>`;
+}
+
+function memPeriodHtml(d) {
+  const range = d.bucket === "week" ? `Woche ab ${memDate(d.start)}` : memDate(d.start);
+  const group = (key, title, note) => {
+    const rows = d[key] || [], total = d.counts[key];
+    if (!total) return "";
+    return `<h4 class="mem-h4">${title} <span class="muted">· ${total}${note ? " — " + note : ""}${total > rows.length ? ` (die ersten ${rows.length})` : ""}</span></h4>
+      <div class="ot-list">${rows.map((f) => `<div class="ot-fact mem-click" data-fact="${escapeHtml(f.id)}" title="Details im Reiter Gedächtnis">
+        <b>${escapeHtml(f.subject)}</b> ${escapeHtml(f.predicate)} <b>${escapeHtml(f.object)}</b>
+        <span class="mem-when">${memInterval(f)}</span> ${memStatusBadge(f.status)}${f.source === "material" ? " " + MEM_MATERIAL_BADGE : ""}</div>`).join("")}</div>`;
+  };
+  const any = d.counts.learned + d.counts.closed + d.counts.retracted + d.counts.forgotten;
+  return `<div class="ot-period-h"><b>${range}</b> <button class="linkish" id="ot-close" title="Schließen">✕</button></div>` + (any
+    ? group("learned", "Gelernt", "") + OT_CAUSES.map(([k, l, note]) => group(k, l[0].toUpperCase() + l.slice(1), note)).join("")
+    : `<p class="muted">Nichts gelernt oder beendet.</p>`);
+}
+
+async function loadPeriod(t, bucket) {
+  const box = $("#ot-period");
+  if (!box) return;
+  document.querySelectorAll(".ot-hit").forEach((r) => r.classList.toggle("sel", r.dataset.t === String(t)));
+  box.innerHTML = `<p class="muted">Wird geladen…</p>`;
+  try {
+    box.innerHTML = memPeriodHtml(await getJSON(`/api/analyze/memory/period?start=${t}&bucket=${bucket}`));
+  } catch (e) {
+    box.innerHTML = `<p class="muted">Fehler: ${escapeHtml(e.message)}</p>`;
+  }
+}
+
+function wireOverTime(ot) {
+  const host = $("#an-view");
+  if (!host || !ot) return;
+  analyse.otBucket = ot.bucket;
+  if (host.dataset.otWired) return;           // #an-view outlives the sub-views: one listener per element
+  host.dataset.otWired = "1";
+  host.addEventListener("click", (e) => {
+    const hit = e.target.closest(".ot-hit");
+    if (hit) return loadPeriod(hit.dataset.t, analyse.otBucket);
+    if (e.target.closest("#ot-close")) {
+      $("#ot-period").innerHTML = "";
+      document.querySelectorAll(".ot-hit.sel").forEach((r) => r.classList.remove("sel"));
+      return;
+    }
+    const fact = e.target.closest(".ot-fact[data-fact]");
+    if (fact) { memState.pendingFact = fact.dataset.fact; activateTab("memory"); }   // the detail lives in Gedächtnis
+  });
 }
 
 async function renderDynamics() {
@@ -651,6 +758,7 @@ async function renderDynamics() {
     return;
   }
   $("#an-view").innerHTML = dynamicsLayout(d);
+  wireOverTime(d.over_time);
 }
 
 // -- Begriffe (entity / concept browser) ------------------------------------
@@ -1218,6 +1326,10 @@ async function renderMemory() {
   content.innerHTML = renderMemoryView(data);
   wireMemory();
   content.scrollTop = 0;
+  if (memState.pendingFact) {                 // a fact clicked elsewhere (the Dynamik chart) opens here
+    openFact(memState.pendingFact);
+    memState.pendingFact = null;
+  }
 }
 
 function wireMemory() {

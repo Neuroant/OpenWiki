@@ -489,7 +489,7 @@ chat placeholder asking about "das Handbuch" on any corpus.
 - **M4 — recall explained:** the parts of each hit's score (relevance, confidence, recency for volatile kinds,
   the BM25 and time-window boosts, the material discount) and a "what the hook would inject now" mode.
   **✅ (v0.115)**
-- **M5 — memory over time:** facts learned, closed and forgotten per day as a dated chart.
+- **M5 — memory over time:** facts learned, closed and forgotten per day as a dated chart. **✅ (v0.116)**
 - **M6 — a memory map:** facts projected in 2-D, coloured by theme, clickable into M3.
 - **M7 — a maintenance panel:** the stale-kinds review list, forgetting candidates and the approval queue
   together, with one-click close or forget through the journal.
@@ -956,6 +956,16 @@ The **genuine gaps**, measure-first as always:
   set (paired, 2 captures, no probes) the cue reached the context 8/16 → 16/16 and the constraint was applied
   7/16 → 12/16 (+5 / −0). Adopted: `[memory] context_k` (default 16) + `context_budget` 2,000 → 3,000; facts may
   use theme budget the themes don't need. `path-b-memory.md` §13.12.
+- **Memory over time — M5 of Direction K. ✅ (v0.116).** The Dynamik view gained a dated chart: per day the facts
+  learned (above the line) and those that stopped being current (below: closed — the world changed —, retracted,
+  forgotten), with the current facts as a line; a click on a day lists its facts, each opening the M3 detail
+  (`analysis.memory.memory_over_time` / `period_events`, `GET /api/analyze/memory/period`). The days are when things
+  were said, not recorded: on the dev memory 1,313 of 1,446 backfilled facts were recorded more than three days
+  after they were said (up to 56 days), while live captures and agent writes stay within days — so a backfill keeps
+  its history instead of piling onto the day it ran (`memory_browse.learned_at`; capped at the record time, since an
+  agent write's midday default can lie hours ahead of it). The series ends at today's count of current facts
+  (1,790 of 2,285 learned; 462 closed, 33 forgotten) and takes 10 ms. It shows the August phases, the pause from
+  08-18 to 09-04, the B9 replay's 74 closings on 09-23 and the sleep pass's 27 forgotten facts on 09-26.
 - **Recall explained — M4 of Direction K. ✅ (v0.115).** "Abrufen" in the Gedächtnis tab shows each fact's score
   as its formula — cos × confidence × recency (only for the kinds that go stale) × provenance — with the BM25 and
   time-window boosts, its dense rank, "hereingeholt" when an aid swapped it into the top k, and the facts the aids

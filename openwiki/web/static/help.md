@@ -260,7 +260,13 @@ Namen — Kandidaten für `--resolve-entities`). Seitenverweise sind anklickbar.
 
 **Dynamik** — die **Gedächtnis-Dynamik** (nur im Second-Brain-Modus mit erfassten
 Sitzungen): Revision (überschriebene Fakten), Konsolidierung (Anteil in Themen),
-Temperatur (heiß/warm/kalt nach Aktualität + Konfidenz), Breite und Wachstum je Sitzung.
+Temperatur (heiß/warm/kalt nach Aktualität + Konfidenz), Breite — und **Gedächtnis über die Zeit**:
+je Tag die gelernten Fakten (über der Nulllinie) und die, die nicht mehr aktuell sind (darunter:
+geschlossen — die Welt hat sich geändert; zurückgezogen — korrigiert; vergessen — vom Schlaf-Durchlauf
+archiviert), dazu als Linie die Zahl der aktuellen Fakten. Die Tage sind die, an denen etwas *gesagt*
+wurde — ein nachträglich erfasster Tag behält sein Datum. Ein Klick auf einen Tag listet seine Fakten;
+ein Klick auf einen Fakt öffnet ihn im Reiter **Gedächtnis**. Über mehr als 120 Tage zeigt das
+Diagramm Wochen. Darunter, eingeklappt: das Wachstum je Sitzung.
 
 Dieselben Auswertungen gibt es auf der Kommandozeile: `openwiki analyze [coupling|gaps|memory]`
 und `analyze --compare` (zwei Wissensstände vergleichen). Die Kohärenz-Kennzahl und die

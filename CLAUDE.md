@@ -545,6 +545,12 @@ the current facts of kinds that go stale on their own (`memory.volatile_kind` �
 states; the stale-fact analysis's rule, unchanged), which `analyze memory --review` lists as `wiki_remember` `replaces`
 lines to check — a list, not a label: on blind labels 1 in 4 was stale (2½–9× the rest), a "possibly outdated" mark
 was measured and not adopted, refined rules and the local model's tags did worse (`docs/path-b-memory.md` §13.26).
+**Over time** (M5, v0.116): `memory_over_time(facts, now)` — facts learned, closed (the world changed: `valid_to`),
+retracted (`expired_at`) and forgotten (`forgotten_at`) per day, per week over more than `MAX_DAILY_DAYS` (120), with
+the current facts at the end of each (the last = today's current count); the days are when things were said
+(`memory_browse.learned_at`: `said_at`, never after the record — a backfilled day keeps its date), each fact counted
+once as learned and at most once as ending (`fact_events`, times clamped to `[learned, now]`); `period_events` lists
+one period's facts.
 Graph-only
 (no index/embeddings), gated on `has_memory()`, decay imported lazily so the analysis package stays light.
 
@@ -1050,7 +1056,9 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   `explain`), `/api/timeline` (POST) = B7 fact history
   (`memory_timeline` → `GraphStore.timeline`), `/api/analyze?k=&method=` = the world-model coupling analysis +
   2-D semantic map (`WikiWebApp.analyze()` → `analysis.analyze_coupling` + `project_2d`), `/api/analyze/gaps`
-  = P3 gap-mining (`analyze_gaps`), `/api/analyze/memory` = P4 memory-tier dynamics (`analyze_memory`),
+  = P3 gap-mining (`analyze_gaps`), `/api/analyze/memory` = P4 memory-tier dynamics (`analyze_memory`, incl.
+  `over_time`), `/api/analyze/memory/period?start=&bucket=day|week` = one period's facts (`memory_period` →
+  `period_events`, M5),
   `/api/entities?q=&type=` = the canonical-entity browser (`entities()` → `GraphStore.list_entities`),
   `/api/entity/{name}` = one entity's detail (`entity()` → `GraphStore.entity_detail`: description + aliases +
   pages + typed relations)) plus static files
@@ -1085,7 +1093,10 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   per-edge-type toggles, click a node → open the page); **Lücken** (`renderGaps` → `/api/analyze/gaps`) —
   the P3 improvement to-do list (missing cross-refs, near-duplicates, isolated pages, entity-merge
   candidates; page refs clickable); **Dynamik** (`renderDynamics` → `/api/analyze/memory`) — the P4
-  memory-tier dynamics (revision / consolidation / temperature bars / breadth / growth). Read-only +
+  memory-tier dynamics (revision / consolidation / temperature bars / breadth) and **memory over time** (M5,
+  v0.116: a hand-rolled SVG chart per day — learned above the zero line, closed / retracted / forgotten below it,
+  the current facts as a line on the right axis; a click on a day lists its facts (`loadPeriod`), each opening the
+  M3 detail in the Gedächtnis tab (`memState.pendingFact`); the per-session growth list folded below). Read-only +
   offline; graceful empty states (no index / no graph / no memory). The **Gedächtnis (Memory)
 tab** (`renderMemory` → `/api/memory`) surfaces **Path B** in the browser: the identity
 (DNA) + stat chips (Sitzungen / Fakten / überholt / zurückgezogen / geplant / Themen), a

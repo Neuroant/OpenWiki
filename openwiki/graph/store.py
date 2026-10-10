@@ -1668,7 +1668,7 @@ class GraphStore:
                         "status": r["status"], "valid_from": r["valid_from"],
                         "valid_to": r["valid_to"], "expired_at": r["expired_at"],
                         "cardinality": r["cardinality"], "source": r.get("source"),
-                        "forgotten": r.get("forgotten")})
+                        "forgotten": r.get("forgotten"), "forgotten_at": r.get("forgotten_at")})
         out.sort(key=lambda a: -(a["last_seen"] or a["created_at"]))
         return out[:limit]
 

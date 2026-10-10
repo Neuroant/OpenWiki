@@ -17,6 +17,9 @@ confidence), and consolidated into themes (B5). The metrics are its *dynamics*:
 - **review** — the current facts of a kind that goes stale on its own (plans, counts, gaps, versions,
   running states — ``graph.memory.volatile_kind``), most likely stale kinds first, each as the line
   ``wiki_remember``'s ``replaces`` matches: a list to check, not a verdict (1 in 4 was stale, v0.109).
+- **over time** — facts learned, closed (the world changed), retracted (corrected) and forgotten per day — per
+  week over a long span — on the axis of when things were said, with the current facts at the end of each
+  (``memory_over_time``, the Dynamik chart, M5); ``period_events`` lists one period's facts.
 
 Read-only. Pure over the data the ``GraphStore`` memory methods return; the decay math is
 imported lazily so importing :mod:`openwiki.analysis` never pulls in the graph/Kuzu layer.
@@ -25,6 +28,97 @@ imported lazily so importing :mod:`openwiki.analysis` never pulls in the graph/K
 from __future__ import annotations
 
 import time
+
+DAY = 86400
+MAX_DAILY_DAYS = 120          # memory over time: a longer span is shown per week
+PERIOD_LIMIT = 200            # facts listed per event kind for one period
+CAUSES = ("closed", "retracted", "forgotten")
+
+
+def fact_events(f: dict, now: int) -> "tuple | None":
+    """When a fact entered the memory and when — and why — it stopped being current, on the axis of when things
+    were said: ``(learned, current_from, ended, cause)``. ``learned`` = ``memory_browse.learned_at``;
+    ``current_from`` = when it became valid (not before it was learned), ``None`` for a fact not valid yet (planned);
+    ``ended`` / ``cause`` = the first of ``valid_to`` (``closed`` — the world changed; only once it has passed),
+    ``expired_at`` (``retracted`` — corrected) and ``forgotten_at`` (``forgotten``), or ``None``. Times are clamped
+    to ``[learned, now]``: a stated "until 1969" closes a fact on the day it was learned. At ``now`` a fact is current
+    exactly when ``temporal.status`` says so."""
+    from ..memory_browse import learned_at
+    learned = learned_at(f)
+    if learned is None:
+        return None
+    learned = min(int(learned), now)
+    ends = [(min(max(int(t), learned), now), cause)
+            for t, cause in ((f.get("valid_to"), "closed"), (f.get("expired_at"), "retracted"),
+                             (f.get("forgotten_at"), "forgotten"))
+            if t is not None and (cause != "closed" or t <= now)]
+    ended, cause = min(ends, key=lambda e: e[0]) if ends else (None, None)
+    valid = f.get("valid_from")
+    current_from = max(learned, int(valid)) if valid is not None else learned
+    return learned, (current_from if current_from <= now else None), ended, cause
+
+
+def _period_start(t: int, week: bool) -> int:
+    """The UTC day ``t`` falls on — or the Monday of its week (1970-01-01 was a Thursday)."""
+    day = t - t % DAY
+    return day - ((day // DAY + 3) % 7) * DAY if week else day
+
+
+def memory_over_time(facts, now: "int | None" = None, max_days: int = MAX_DAILY_DAYS) -> dict:
+    """Facts learned, closed, retracted and forgotten per period, and the current facts at the end of each — per
+    day, per week when the memory spans more than ``max_days``. ``{"bucket": "day" | "week", "periods": [{"t",
+    "label", "learned", "closed", "retracted", "forgotten", "current"}], "totals": {...}}``, oldest first; each fact
+    counts once as learned and at most once as ending (``fact_events``); the last period's ``current`` is today's
+    count of current facts."""
+    from ..graph.temporal import format_date
+    now = int(now if now is not None else time.time())
+    events = [e for e in (fact_events(f, now) for f in facts) if e is not None]
+    empty = {"learned": 0, **{c: 0 for c in CAUSES}, "current": 0}
+    if not events:
+        return {"bucket": "day", "periods": [], "totals": dict(empty)}
+    first = min(e[0] for e in events)
+    week = (now - first) / DAY > max_days
+    step = (7 if week else 1) * DAY
+    start = _period_start(first, week)
+    periods = [dict(empty, t=t, label=format_date(t))
+               for t in range(start, _period_start(now, week) + 1, step)]
+    delta = [0] * (len(periods) + 1)
+    for learned, current_from, ended, cause in events:
+        periods[(_period_start(learned, week) - start) // step]["learned"] += 1
+        if ended is not None:
+            periods[(_period_start(ended, week) - start) // step][cause] += 1
+        if current_from is not None and (ended is None or ended > current_from):
+            delta[(_period_start(current_from, week) - start) // step] += 1     # current from that period's end …
+            if ended is not None:
+                delta[(_period_start(ended, week) - start) // step] -= 1        # … not at the end of the one it ended in
+    running = 0
+    for p, d in zip(periods, delta):
+        running += d
+        p["current"] = running
+    totals = {"learned": len(events), **{c: sum(p[c] for p in periods) for c in CAUSES},
+              "current": periods[-1]["current"]}
+    return {"bucket": "week" if week else "day", "periods": periods, "totals": totals}
+
+
+def period_events(facts, start: int, end: int, now: "int | None" = None, limit: int = PERIOD_LIMIT) -> dict:
+    """The facts behind one period of ``memory_over_time`` (``start`` ≤ t < ``end``): those learned in it and those
+    that stopped being current in it, by cause — each list ordered by time, at most ``limit`` long, with its full
+    count in ``counts``."""
+    now = int(now if now is not None else time.time())
+    out: dict = {"learned": [], **{c: [] for c in CAUSES}}
+    for f in facts:
+        e = fact_events(f, now)
+        if e is None:
+            continue
+        brief = {k: f.get(k) for k in ("id", "subject", "predicate", "object", "status", "session_id",
+                                        "valid_from", "valid_to", "source")}
+        if start <= e[0] < end:
+            out["learned"].append((e[0], brief))
+        if e[2] is not None and start <= e[2] < end:
+            out[e[3]].append((e[2], brief))
+    counts = {k: len(v) for k, v in out.items()}
+    return {"start": start, "end": end, "counts": counts,
+            **{k: [b for _, b in sorted(v, key=lambda x: x[0])][:limit] for k, v in out.items()}}
 
 
 def _theme_size_stats(sizes: list) -> dict:
@@ -162,4 +256,5 @@ def analyze_memory(graph, now: "int | None" = None, half_life: "float | None" = 
         "breadth": breadth,
         "growth": growth,
         "review": review,
+        "over_time": memory_over_time(facts, now),
     }

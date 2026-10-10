@@ -212,10 +212,25 @@ der Projektname erscheint als Abzeichen (📁) oben in der Kopfzeile. Angezeigt 
   zusammen?"), die aus den Zusammenfassungen beantwortet wird — das kann die reine
   Abschnitts-Suche nicht.
 - **Registrierte Projekte** — alle per `openwiki project add` bekannten Projekte
-  (das aktive ist mit ★ markiert).
+  (das aktive ist mit ★ markiert); **öffnen** wechselt zu einem.
 
 Läuft der Server ohne Projekt (mit direkten `--wiki`/`--index`-Pfaden), weist der
-Reiter darauf hin und verweist auf `openwiki init`.
+Reiter darauf hin und bietet **Projekt öffnen…** an.
+
+**Projekt wechseln.** Ein Klick auf das Abzeichen (📁 Name ▾) oben öffnet die Liste der
+Projekte: das gerade gezeigte (✓), die registrierten und die, die neben einem bekannten
+Projekt liegen („gefunden" — im Elternordner und eine Ebene darüber, bis zu zwei Ebenen
+tief). Markiert ist, ob ein Projekt das Gedächtnis nutzt (**Second Brain**) und ob es noch
+**nicht gebaut** ist. Ein Klick wechselt; in das Feld darunter kann man jeden Ordner mit
+einer `openwiki.toml` eintragen. Mit **neue Projekte in der Projektliste merken** wird ein
+neues Projekt dabei registriert (`~/.openwiki/registry.toml`, unter einem freien Namen).
+Der Server lädt das andere Projekt — Wiki, Index, Graph, Gedächtnis und die Modelle aus
+dessen `openwiki.toml` — ohne Neustart; die Seite lädt danach neu. Der Wechsel gilt für
+den ganzen Server: ein anderes offenes Fenster zeigt oben einen Hinweis, dass es noch
+zum vorigen Projekt gehört (**neu laden**). Kommandozeile und Hooks bleiben unberührt,
+und der Port bleibt der, mit dem der Server gestartet wurde. Mit `serve --sync` (der
+Graph bleibt schreibend offen) geht kein Wechsel — dann den Server im anderen Projekt
+neu starten.
 
 ## Begriffe (Reiter „Begriffe")
 

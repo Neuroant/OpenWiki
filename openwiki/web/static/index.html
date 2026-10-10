@@ -15,7 +15,10 @@
     <button id="toggle-sidebar" class="panel-toggle" title="Seitenleiste ein/aus" aria-label="Seitenleiste">☰</button>
     <div class="brand">Open<span>Wiki</span></div>
     <div id="doc-title" class="doc-title"></div>
-    <div id="project-badge" class="project-badge" hidden></div>
+    <span class="project-wrap">
+      <button id="project-badge" class="project-badge" hidden title="Projekt wechseln" aria-haspopup="true" aria-controls="project-menu"></button>
+      <div id="project-menu" class="project-menu" hidden role="dialog" aria-label="Projekt wechseln"></div>
+    </span>
     <button id="toggle-chat" class="panel-toggle right" title="Agent/Ask-Panel ein/aus" aria-label="Agent-Panel">💬</button>
     <button id="theme-toggle" class="theme-toggle" title="Hell/Dunkel umschalten" aria-label="Design umschalten">🌙</button>
   </header>

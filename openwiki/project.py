@@ -291,6 +291,33 @@ class Project:
         return [self._resolve_path(s.path) for s in self.session_sources()]
 
 
+FIND_SKIP = frozenset({"node_modules", "output", "sources", "__pycache__", "venv", "site-packages", "dist", "build"})
+
+
+def find_projects(roots, depth: int = 2, limit: int = 2000) -> list:
+    """Project folders — those with an ``openwiki.toml`` — at or below ``roots``, at most ``depth`` levels down: the
+    web UI's project switcher offers them next to the registered ones. Dot-folders and build / dependency / data
+    folders (``FIND_SKIP``) are not entered, nor is a project's own inside; at most ``limit`` folders are looked at,
+    so a large tree stays fast. Resolved paths, sorted, no duplicates."""
+    found: dict = {}
+    seen = 0
+    queue = [(Path(r), 0) for r in roots if r]
+    while queue and seen < limit:
+        folder, level = queue.pop(0)
+        seen += 1
+        try:
+            if (folder / MANIFEST).is_file():
+                found[os.path.normcase(str(folder.resolve()))] = folder.resolve()
+                continue                                   # a project's subfolders are its own
+            if level >= depth:
+                continue
+            children = sorted(p for p in folder.iterdir() if p.is_dir())
+        except OSError:                                    # unreadable, vanished, not a folder
+            continue
+        queue += [(c, level + 1) for c in children if not c.name.startswith(".") and c.name not in FIND_SKIP]
+    return sorted(found.values(), key=lambda p: str(p).lower())
+
+
 def _toml_str(value: str) -> str:
     r"""Encode a Python string as a TOML basic string (quotes, backslashes)."""
     escaped = value.replace("\\", "\\\\").replace('"', '\\"')

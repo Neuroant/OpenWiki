@@ -15,7 +15,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Optional
-from urllib.parse import parse_qs, unquote, urlparse
+from urllib.parse import parse_qs, quote, unquote, urlparse
 
 from ..chat_agent import WikiAgent
 from ..search import SemanticIndex
@@ -1071,7 +1071,103 @@ def _turn_stats(events) -> Optional[dict]:
     }
 
 
-def make_handler(app: WikiWebApp):
+class AppHolder:
+    """The project the web UI serves — switchable from the browser (v0.120). Each request reads ``app`` once and
+    keeps it to its end, so a switch (the next project's app built first, then swapped in) never mixes two projects
+    within a request: requests in flight finish on the old one. ``factory(root, old_app)`` builds the next app —
+    ``None`` when this server can't switch (it holds its graph writable: ``serve --sync``)."""
+
+    def __init__(self, app, factory=None) -> None:
+        self.app = app
+        self.factory = factory
+        self._lock = threading.Lock()
+
+    def switch(self, root=None, name: str = "", remember: bool = False) -> dict:
+        """Serve another project from now on — by folder (``root``) or by its registered ``name``; ``remember``
+        registers it (``~/.openwiki/registry.toml``) under a name not yet taken. ``FileNotFoundError`` without an
+        ``openwiki.toml`` there (or an unknown name), ``RuntimeError`` when this server can't switch."""
+        from ..project import MANIFEST, Project
+        from ..userconfig import Registry
+        if self.factory is None:
+            raise RuntimeError("this server can't switch projects: it holds its graph writable (serve --sync) — "
+                               "restart it in the other project")
+        reg = Registry.load()
+        if name and not root:
+            root = reg.projects().get(name)
+            if root is None:
+                raise FileNotFoundError(f"no registered project {name!r}")
+        root = Path(str(root or "")).expanduser()
+        if not str(root).strip() or not (root / MANIFEST).is_file():
+            raise FileNotFoundError(f"no {MANIFEST} in {root}")
+        root = root.resolve()
+        project = Project.load(root)                     # a broken manifest fails here, before anything changes
+        with self._lock:                                 # one switch at a time
+            self.app = self.factory(root, self.app)
+        registered = _registered_name(reg, root)
+        if remember and registered is None:
+            registered = _free_name(reg, project.name)
+            reg.add(registered, root)
+        return {"name": project.name, "root": str(root), "registered": registered}
+
+    def projects(self) -> dict:
+        """The switcher's list: the project served now, the registered ones and those found next to them
+        (``project.find_projects`` — the parent and grandparent folders of each, two levels down; never a drive's
+        root or the home folder) — each ``{"name", "root", "current", "registered", "built", "memory", "sources",
+        "description"}`` (``error`` when its manifest can't be read). ``switchable`` false under ``--sync``."""
+        from ..project import Project, find_projects
+        from ..userconfig import Registry
+        cur = getattr(self.app, "project", None)
+        reg = Registry.load()
+        anchors = ([cur.root] if cur is not None else [Path.cwd()]) + [Path(p) for p in reg.projects().values()]
+        roots: list = []
+        for anchor in anchors:
+            folder = Path(anchor).resolve()
+            for up in (folder.parent, folder.parent.parent):
+                if up != Path(up.anchor) and up != Path.home() and up not in roots:
+                    roots.append(up)
+        paths: dict = {}
+        for p in ([cur.root] if cur is not None else []) + [Path(p) for p in reg.projects().values()] \
+                + find_projects(roots):
+            paths.setdefault(_path_key(p), Path(p))
+        out = []
+        for key, root in paths.items():
+            entry = {"root": str(root), "current": cur is not None and key == _path_key(cur.root),
+                     "registered": _registered_name(reg, root)}
+            try:
+                p = Project.load(root)
+                entry.update(name=p.name, description=p.description, memory=p.memory_enabled,
+                             sources=len(p.doc_sources()),
+                             built=(p.wiki_dir / "wiki.json").is_file() and (p.index_dir / "index.json").is_file())
+            except (OSError, ValueError) as exc:             # gone, or a manifest that doesn't parse
+                entry.update(name=entry["registered"] or root.name, error=str(exc))
+            out.append(entry)
+        out.sort(key=lambda e: (not e["current"], e["name"].lower(), e["root"].lower()))
+        return {"projects": out, "switchable": self.factory is not None}
+
+
+def _path_key(path) -> str:
+    import os
+    return os.path.normcase(str(Path(path).resolve()))
+
+
+def _registered_name(reg, root) -> Optional[str]:
+    key = _path_key(root)
+    return next((name for name, p in reg.projects().items() if _path_key(p) == key), None)
+
+
+def _free_name(reg, name: str) -> str:
+    taken = reg.projects()
+    if name not in taken:
+        return name
+    n = 2
+    while f"{name}-{n}" in taken:
+        n += 1
+    return f"{name}-{n}"
+
+
+def make_handler(app):
+    holder = app if isinstance(app, AppHolder) else AppHolder(app)
+
     class Handler(BaseHTTPRequestHandler):
         server_version = "OpenWiki"
 
@@ -1086,6 +1182,9 @@ def make_handler(app: WikiWebApp):
             self.send_response(status)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
+            # the project that answered — an open page notices when another one switched the server (v0.120)
+            served = getattr(getattr(self, "_app", None), "project", None)
+            self.send_header("X-OpenWiki-Project", quote(served.name if served is not None else "", safe=""))
             self.end_headers()
             self.wfile.write(body)
 
@@ -1118,6 +1217,7 @@ def make_handler(app: WikiWebApp):
         def do_GET(self):
             t0 = time.perf_counter()
             self._status = 200
+            app = self._app = holder.app          # one project for the whole request, even if it switches meanwhile
             path = urlparse(self.path).path
             try:
                 if path == "/":
@@ -1128,6 +1228,8 @@ def make_handler(app: WikiWebApp):
                     return self._json(app.manifest())
                 if path == "/api/project":
                     return self._json(app.project_info())
+                if path == "/api/projects":
+                    return self._json(holder.projects())
                 if path == "/api/eval-sets":
                     return self._json({"sets": app.eval_sets(), "default": "eval.jsonl"})
                 if path == "/api/eval":
@@ -1264,6 +1366,7 @@ def make_handler(app: WikiWebApp):
             """Server-Sent-Events stream for POST /api/ask/stream (bypasses the JSON path):
             emit `data: {event}` lines as the RAG answer generates. Fail-soft on a dropped
             client (BrokenPipe)."""
+            app = self._app
             path = "/api/ask/stream"
             try:
                 data = self._body_json()
@@ -1292,11 +1395,23 @@ def make_handler(app: WikiWebApp):
         def do_POST(self):
             t0 = time.perf_counter()
             self._status = 200
+            app = self._app = holder.app          # one project for the whole request, even if it switches meanwhile
             path = urlparse(self.path).path
             if path == "/api/ask/stream":
                 return self._stream_ask(t0)
             try:
                 data = self._body_json()
+                if path == "/api/projects/switch":
+                    # JSON only: a cross-site form can't send it without a CORS preflight this server never grants
+                    if not (self.headers.get("Content-Type") or "").startswith("application/json"):
+                        return self._json({"error": "send JSON (Content-Type: application/json)"}, 415)
+                    try:
+                        return self._json({"switched": holder.switch(data.get("root"), str(data.get("name") or ""),
+                                                                     bool(data.get("remember")))})
+                    except FileNotFoundError as exc:      # no manifest there / unknown name
+                        return self._json({"error": str(exc)}, 400)
+                    except RuntimeError as exc:           # this server can't switch (--sync)
+                        return self._json({"error": str(exc)}, 409)
                 if path == "/api/search":
                     query = (data.get("query") or "").strip()
                     return self._json(app.search(query, int(data.get("k", 8)), bool(data.get("hybrid", False)))
@@ -1394,7 +1509,8 @@ def _observe_request(method: str, path: str, status: int, ms: float) -> None:
         pass
 
 
-def serve(app: WikiWebApp, host: str = "127.0.0.1", port: int = 8000) -> None:
+def serve(app, host: str = "127.0.0.1", port: int = 8000) -> None:
+    """Serve ``app`` — a ``WikiWebApp``, or an ``AppHolder`` whose project the browser can switch."""
     httpd = ThreadingHTTPServer((host, port), make_handler(app))
     url = f"http://{host}:{port}"
     print(f"OpenWiki web UI running at {url}   (Ctrl+C to stop)")

@@ -7,6 +7,7 @@ const WRITE_TOOLS = new Set(["create_page", "edit_page", "append_section"]);
 
 async function getJSON(url) {
   const r = await fetch(url);
+  noticeProject(r);
   const data = await r.json().catch(() => ({ error: r.statusText }));
   if (!r.ok) throw new Error(data.error || r.statusText);
   return data;
@@ -17,9 +18,29 @@ async function postJSON(url, body) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
+  noticeProject(r);
   const data = await r.json().catch(() => ({ error: r.statusText }));
   if (!r.ok) throw new Error(data.error || r.statusText);
   return data;
+}
+
+// Every API answer names the project that gave it (v0.120). If another window switched the server, this page still
+// shows the old project — say so instead of mixing two projects.
+let servedProject = null;
+function noticeProject(r) {
+  const h = r.headers.get("X-OpenWiki-Project");
+  if (h == null) return;
+  let name = h;
+  try { name = decodeURIComponent(h); } catch (_) { /* keep raw */ }
+  if (servedProject === null) { servedProject = name; return; }
+  if (name === servedProject || document.getElementById("proj-changed")) return;
+  const bar = document.createElement("div");
+  bar.id = "proj-changed";
+  bar.className = "proj-changed";
+  bar.innerHTML = `Der Server zeigt jetzt das Projekt <b>${escapeHtml(name || "ohne Projekt")}</b> — diese Seite gehört noch zum vorigen.
+    <button id="proj-reload">neu laden</button>`;
+  document.body.prepend(bar);
+  bar.querySelector("#proj-reload").addEventListener("click", () => { location.href = "/"; });
 }
 function escapeHtml(s) { const d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
 
@@ -1877,17 +1898,99 @@ function wireRunActions() {
 // -- project tab (manifest, sources, build status, registry) ---------------
 
 async function loadProjectBadge() {
+  const badge = $("#project-badge");
+  if (!badge.dataset.wired) {                    // the badge opens the project switcher (v0.120)
+    badge.dataset.wired = "1";
+    badge.addEventListener("click", (e) => { e.stopPropagation(); openProjectMenu(); });
+    wireProjectMenu();
+  }
   try {
     const data = await getJSON("/api/project");
-    const badge = $("#project-badge");
-    if (data && data.project) {
-      badge.textContent = "📁 " + data.project.name;
-      badge.title = data.project.root;
-      badge.hidden = false;
-    } else {
-      badge.hidden = true;
-    }
-  } catch (_) { /* no project / older server — ignore */ }
+    badge.textContent = data && data.project ? "📁 " + data.project.name + " ▾" : "📁 Projekt öffnen… ▾";
+    badge.title = (data && data.project ? data.project.root + " — " : "") + "Projekt wechseln";
+    badge.hidden = false;
+  } catch (_) { /* older server — ignore */ }
+}
+
+// -- project switcher (v0.120) -----------------------------------------------
+// The header badge lists the projects — the one served now, the registered ones and those found next to them — and
+// takes any folder with an openwiki.toml. A switch builds the server's app for that project (index, graph, models from
+// its manifest); the page then reloads, since everything it shows belongs to the old one.
+
+async function openProjectMenu(force) {
+  const menu = $("#project-menu");
+  if (!menu) return;
+  if (!menu.hidden && !force) { menu.hidden = true; return; }
+  menu.hidden = false;
+  menu.innerHTML = `<p class="muted">Projekte werden gesucht…</p>`;
+  let d;
+  try {
+    d = await getJSON("/api/projects");
+  } catch (e) {
+    menu.innerHTML = `<p class="muted">Fehler: ${escapeHtml(e.message)}</p>`;
+    return;
+  }
+  menu.innerHTML = projectMenuHtml(d);
+  const input = $("#pm-path");
+  if (input && !d.projects.length) input.focus();
+}
+
+function projectMenuHtml(d) {
+  const tag = (cls, text, title) => `<span class="mem-badge ${cls}" title="${escapeHtml(title)}">${text}</span>`;
+  const rows = d.projects.map((p) => {
+    const tags = [p.memory ? tag("plan", "Second Brain", "das Gedächtnis ist an ([memory] enabled)") : "",
+                  p.error ? tag("sup", "fehlerhaft", p.error)
+                    : !p.built ? tag("kind", "nicht gebaut", "noch kein Wiki oder Index — im Projektordner: owiki build") : "",
+                  p.registered ? "" : tag("cut", "gefunden", "nicht registriert — neben einem bekannten Projekt gefunden")].join("");
+    const off = p.current || p.error || !d.switchable;
+    return `<button class="pm-row${p.current ? " current" : ""}" data-root="${escapeHtml(p.root)}" ${off ? "disabled" : ""}
+        title="${p.current ? "wird gerade gezeigt" : "zu diesem Projekt wechseln"}">
+      <span class="pm-top"><span class="pm-name">${p.current ? "✓ " : ""}${escapeHtml(p.name)}</span>${tags}</span>
+      <span class="pm-path">${escapeHtml(p.root)}${p.sources != null ? ` · ${p.sources} ${p.sources === 1 ? "Quelle" : "Quellen"}` : ""}</span></button>`;
+  }).join("");
+  return `<div class="pm-h"><b>Projekt wechseln</b><button class="linkish pm-close" title="Schließen (Esc)">✕</button></div>
+    ${d.switchable ? "" : `<p class="muted pm-note">Dieser Server hält seinen Graphen schreibend (<code>serve --sync</code>) und kann nicht wechseln — starte ihn im anderen Projekt neu.</p>`}
+    <div class="pm-list">${rows || `<p class="muted pm-note">Keine Projekte bekannt — öffne einen Ordner:</p>`}</div>
+    <form id="pm-open" class="pm-open">
+      <input id="pm-path" type="text" spellcheck="false" placeholder="Ordner mit openwiki.toml, z. B. G:\\Projekte\\mein-wiki" ${d.switchable ? "" : "disabled"}>
+      <button type="submit" ${d.switchable ? "" : "disabled"}>Öffnen</button></form>
+    <label class="pm-remember"><input type="checkbox" id="pm-remember" checked> neue Projekte in der Projektliste merken
+      <span class="muted">(~/.openwiki/registry.toml)</span></label>
+    <p class="muted pm-note">Der Wechsel gilt für diesen Server und jedes offene Fenster; die Kommandozeile und die Hooks bleiben unberührt.</p>`;
+}
+
+async function switchProject(root) {
+  const menu = $("#project-menu");
+  const remember = !!($("#pm-remember") ? $("#pm-remember").checked : true);
+  menu.hidden = false;
+  menu.innerHTML = `<p class="muted">Projekt wird geöffnet… (Index laden, wartende Schreibvorgänge übernehmen)</p>`;
+  try {
+    await postJSON("/api/projects/switch", { root, remember });
+  } catch (e) {
+    menu.innerHTML = `<div class="pm-h"><b>Wechsel fehlgeschlagen</b><button class="linkish pm-close">✕</button></div>
+      <p class="pm-note">${escapeHtml(e.message)}</p><button class="linkish" id="pm-back">← zur Liste</button>`;
+    return;
+  }
+  location.href = "/";                           // everything this page loaded belongs to the old project
+}
+
+function wireProjectMenu() {
+  const menu = $("#project-menu");
+  menu.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const t = e.target;
+    if (t.closest(".pm-close")) { menu.hidden = true; return; }
+    if (t.closest("#pm-back")) { openProjectMenu(true); return; }
+    const row = t.closest(".pm-row");
+    if (row && !row.disabled) switchProject(row.dataset.root);
+  });
+  menu.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const path = ($("#pm-path").value || "").trim();
+    if (path) switchProject(path);
+  });
+  document.addEventListener("click", () => { menu.hidden = true; });      // a click elsewhere closes it
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") menu.hidden = true; });
 }
 
 async function renderProject() {
@@ -1898,8 +2001,10 @@ async function renderProject() {
     if (!data.project) {
       content.innerHTML = `<div class="project-view"><h2>Kein Projekt aktiv</h2>` +
         `<p class="muted">Der Server läuft ohne OpenWiki-Projekt (direkte Pfade). ` +
-        `Starte <code>openwiki serve</code> in einem Projektordner (mit <code>openwiki.toml</code>) ` +
-        `oder erstelle eines mit <code>openwiki init</code>.</p></div>`;
+        `Öffne ein Projekt (einen Ordner mit <code>openwiki.toml</code>) — ` +
+        `<button class="linkish" id="proj-switch-open">Projekt öffnen…</button> — ` +
+        `oder erstelle eines mit <code>owiki init</code>.</p></div>`;
+      $("#proj-switch-open").addEventListener("click", (e) => { e.stopPropagation(); openProjectMenu(true); });
       content.scrollTop = 0;
       return;
     }
@@ -1993,7 +2098,8 @@ async function renderProject() {
       </div>` : "";
 
     const registry = (data.registry || []).map((r) =>
-      `<li>${r.active ? "★" : "•"} <code>${esc(r.name)}</code> <span class="muted">${esc(r.path)}</span></li>`
+      `<li>${r.active ? "★" : "•"} <code>${esc(r.name)}</code> <span class="muted">${esc(r.path)}</span>
+        <button class="linkish" data-switch-root="${esc(r.path)}" title="zu diesem Projekt wechseln">öffnen</button></li>`
     ).join("") || `<li class="muted">(keine registrierten Projekte)</li>`;
 
     content.innerHTML = `<div class="project-view">
@@ -2021,8 +2127,12 @@ async function renderProject() {
 
       <h3>Semantischer Index</h3>${indexHtml}
 
-      <h3>Registrierte Projekte</h3><ul class="proj-list">${registry}</ul>
+      <h3>Registrierte Projekte <button class="linkish" id="proj-switch-open">Projekt wechseln…</button></h3>
+      <ul class="proj-list">${registry}</ul>
     </div>`;
+    content.querySelectorAll("[data-switch-root]").forEach((b) =>
+      b.addEventListener("click", () => switchProject(b.dataset.switchRoot)));
+    $("#proj-switch-open").addEventListener("click", (e) => { e.stopPropagation(); openProjectMenu(true); });
     const askBtn = $("#global-ask-btn");
     if (askBtn) {
       askBtn.addEventListener("click", runGlobalAsk);

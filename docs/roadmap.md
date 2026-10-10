@@ -958,6 +958,17 @@ The **genuine gaps**, measure-first as always:
   set (paired, 2 captures, no probes) the cue reached the context 8/16 → 16/16 and the constraint was applied
   7/16 → 12/16 (+5 / −0). Adopted: `[memory] context_k` (default 16) + `context_budget` 2,000 → 3,000; facts may
   use theme budget the themes don't need. `path-b-memory.md` §13.12.
+- **Switching projects in the web UI. ✅ (v0.120).** The header badge (📁 name ▾) opens a list of projects — the one
+  served, the registered ones and those found next to them (`project.find_projects`: the parent and grandparent
+  folders, two levels down; on this machine it finds both projects in 0.13 s although the registry is empty) — plus a
+  field for any folder with an `openwiki.toml`. The server swaps projects without a restart: `cli._serve_app` builds
+  the next app from the flags as given (paths excepted) and the target's manifest (wiki, index, graph, memory,
+  models), the old project's queued writes are folded in the background and the current one's at shutdown
+  (`_project_switcher`); `web.AppHolder` hands every request one app, so none mixes two projects. Every JSON answer
+  names its project (`X-OpenWiki-Project`); an open page whose project changed shows a reload banner instead of
+  mixing them. "Merken" registers a new project under a free name. The switch endpoint accepts JSON only (a
+  cross-site form gets 415); `serve --sync` can't switch. Found on the way: `serve` never passed `--dry-run` to the
+  web app, so the M7 maintenance panel stayed writable under it — it does now.
 - **Sessions in the browser — M8 of Direction K. ✅ (v0.119).** The conversations behind the facts in the
   Gedächtnis tab. On the dev project the corpus is one transcript — this whole development history, 4,449 turns
   from 07-31 to 10-10 — while the memory holds 36 sessions (35 dated backfill / agent days and the live captures,

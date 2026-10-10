@@ -72,6 +72,9 @@ an empty required field → **400**; any other exception → **500**; the body i
 | `GET /api/wiki` | — | `{title, pages:[{slug, title, parent, children}]}` |
 | `GET /api/pages/{slug}` | — | `{slug, markdown}` — **404** if unknown |
 | `GET /api/project` | — | `{project:{name, root, sources, stages, settings, ontology, index, graph, communities}|null, registry:[…]}` |
+| `GET /api/projects` | — | `{projects:[{name, root, current, registered, built, memory, sources, description, error?}], switchable}` — the project switcher's list: the served, the registered and the nearby projects (v0.120) |
+| `POST /api/projects/switch` | `{root}` or `{name}`, `remember?` | `{switched:{name, root, registered}}` — the server serves that project from now on, without a restart (v0.120); **415** unless `Content-Type: application/json` (no cross-site form can switch it) · **400** no `openwiki.toml` / unknown name · **409** `serve --sync` |
+| *every JSON answer* | — | header `X-OpenWiki-Project: <URL-encoded name>` — the project that answered; an open page whose project changed offers a reload (v0.120) |
 | `GET /api/communities` | — | `{communities:[{id, label, summary, size}]}` |
 | `GET /api/graph/{slug}` | — | `{root, nodes:[{id, kind, label, community?, …}], edges:[{source, target, type, score?}]}` — **404**/**503** |
 | `GET /api/eval-sets` | — | `{sets:[…], default:"eval.jsonl"}` |

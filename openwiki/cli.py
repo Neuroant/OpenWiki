@@ -14,6 +14,7 @@ See ``docs/projects.md``.
 from __future__ import annotations
 
 import argparse
+import copy
 import glob
 import json
 import logging
@@ -21,6 +22,7 @@ import os
 import re
 import shutil
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Optional, Sequence
@@ -4513,7 +4515,10 @@ def _fold_pending_usage(graph) -> None:
         pass
 
 
-def _cmd_serve(args: argparse.Namespace) -> int:
+def _serve_app(args: argparse.Namespace) -> tuple:
+    """The web app for the project ``args`` were filled from — at serve start and when the browser switches project
+    (v0.120). Folds the project's queued writes first (a read-only serve), as a start always did. → ``(app, graph,
+    embedder, sync)``."""
     index = None
     if (args.index / "index.json").is_file():
         index = SemanticIndex.load(args.index)
@@ -4553,19 +4558,52 @@ def _cmd_serve(args: argparse.Namespace) -> int:
         sessions = SessionCorpus(_session_files(project))
     app = WikiWebApp(args.wiki, index=index, agent=agent, tools=tools, graph=graph, project=project,
                      on_approved=(lambda: _spawn_worker(project, "fold")) if project is not None else None,
-                     sessions=sessions)
+                     sessions=sessions, dry_run=args.dry_run)
+    return app, graph, embedder, sync
 
+
+def _project_switcher(args: argparse.Namespace, current: dict, folds: list):
+    """The browser's project switch for ``serve`` (v0.120) → ``switch(root, old_app)``: the next project's app, built
+    from the flags as given — paths excepted, they belong to the project they were given for — and that project's
+    manifest. The old project's queued writes (read-path usage, agent edits' re-syncs) are folded in the background
+    (``folds`` holds the threads); ``current`` follows the project served, whose graph ``serve`` folds at shutdown."""
+    def switch(root, old) -> WikiWebApp:
+        target = Project.load(root)
+        nargs = copy.copy(getattr(args, "raw_args", None) or args)
+        for attr in ("wiki", "index", "graph"):
+            setattr(nargs, attr, None)
+        nargs.project_obj = target
+        _apply_project(nargs, target, UserConfig.load())
+        new, _, new_embedder, _ = _serve_app(nargs)
+        done = threading.Thread(target=_transient_fold, args=(current["graph"], current["embedder"]))
+        done.start()                                  # the switch shouldn't wait for the old project's fold
+        folds.append(done)
+        current.update(graph=nargs.graph, embedder=new_embedder)
+        print(f"[openwiki] switched to project '{target.name}'  ({target.root})", file=sys.stderr)
+        return new
+    return switch
+
+
+def _cmd_serve(args: argparse.Namespace) -> int:
+    from .web.server import AppHolder
+    app, graph, embedder, sync = _serve_app(args)
     graph_feat = ("graph+sync" if graph and getattr(graph, "writable", False) else
                   ("graph (read-only, concurrent)" if graph else None))
-    features = ["search" if index else None, "chat", graph_feat]
+    features = ["search" if app.index else None, "chat", graph_feat]
     print(f"Serving wiki '{args.wiki}' — {', '.join(f for f in features if f)}.", file=sys.stderr)
+    current = {"graph": args.graph, "embedder": embedder}    # the project served now — folded at shutdown
+    folds: list = []
+    # --sync holds the graph writable for the whole run: no switching
+    holder = AppHolder(app, factory=None if sync else _project_switcher(args, current, folds))
     try:
-        serve(app, host=args.bind, port=args.port)
+        serve(holder, host=args.bind, port=args.port)
     finally:
         if graph is not None:
             graph.close()
+        for t in folds:
+            t.join()
         if not sync:
-            _transient_fold(args.graph, embedder)   # fold what accumulated this session
+            _transient_fold(current["graph"], current["embedder"])   # fold what accumulated this session
     return 0
 
 
@@ -4683,6 +4721,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if project is not None and args.command != "project":
         print(f"[openwiki] project '{project.name}'  ({project.root})", file=sys.stderr)
     args.project_obj = project
+    if args.command == "serve":        # the browser's project switch re-applies another project to the flags as given
+        args.raw_args = copy.copy(args)
     _apply_project(args, project, UserConfig.load())
 
     handler = _DISPATCH.get(args.command)

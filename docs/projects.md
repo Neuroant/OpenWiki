@@ -125,6 +125,10 @@ under a synthetic top-level outline node (its name) so slugs don't collide.
   - [x] `~/.openwiki/config.toml` cross-project defaults (slots between manifest and built-in defaults)
   - [x] registry: `openwiki project list` / `use` / `add` / `remove`
   - [x] `project add-source` (surgical `[[sources]]` append — preserves comments, no full re-emit)
+  - [x] switching in the web UI (v0.120): the header badge lists the served, the registered and the nearby projects
+    (`project.find_projects`) and takes any folder; `serve` swaps its app without a restart (`web.AppHolder`, the
+    next app built from the flags as given and the target's manifest — `cli._project_switcher`); every API answer
+    names its project (`X-OpenWiki-Project`), so another open page notices; `--sync` can't switch
 - [x] **Phase 4 — multi-source merge**
   - [x] `combine_documents` (page/table/image offset + synthetic per-source top node; single source = passthrough)
   - [x] per-source cross-references (`extract_references_multi`, resolved within each source's span via retained per-source IR)

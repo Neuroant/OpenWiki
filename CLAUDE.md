@@ -567,7 +567,14 @@ a second reader — and writers (captures, folds, `sleep`) — run **concurrentl
 (Kuzu is reader-XOR-writer — see the concurrency note); agent edits write page files immediately
 and their graph re-sync is **deferred** to the write-ahead journal, folded at serve start &
 shutdown. `--sync` restores the old exclusive-writable mode (live graph sync, but blocks other
-graph access).
+graph access). **Switching projects in the browser (v0.120):** the header badge (📁 name ▾) lists the served
+project, the registered ones and those found next to them (`project.find_projects`: parent + grandparent folders, two
+levels down) and takes any folder with an `openwiki.toml`; the server swaps projects **without a restart** — the next
+app built from the flags as given (paths excepted) and the target's manifest (`cli._serve_app` /
+`_project_switcher`), the old project's queued writes folded in the background, the new one's at shutdown. Requests
+read the app once (`web.AppHolder`), so none mixes two projects; every JSON answer names its project in an
+`X-OpenWiki-Project` header and an open page whose project changed shows a reload banner. "Merken" registers a new
+project (`~/.openwiki/registry.toml`, a free name). `--sync` can't switch (409); the port stays the one started with.
 
 **MCP server (for coding agents)** — exposes RAG+GraphRAG as stdio MCP tools:
 ```
@@ -1018,6 +1025,9 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   `ThreadingHTTPServer` handler exposing a JSON API (`/api/wiki` — the page tree, each page tagged with
   its **`source`** (top-level-ancestor = the merged source file) + **`book`** (`sources/` subfolder, via
   `_annotate_provenance`; drives the sidebar source/book filter, U4),
+  `/api/projects` = the **project switcher**'s list (`AppHolder.projects`), `/api/projects/switch` (POST `{root |
+  name, remember}`, JSON only — 415 otherwise, a guard against cross-site forms; 400 no manifest, 409 under `--sync`)
+  = swap the served project (`AppHolder.switch`, v0.120),
   `/api/pages/{slug}`, `/api/related/{slug}` = the **"Verwandte Seiten"** panel (`WikiWebApp.related` →
   `GraphStore.neighborhood`: the graph connectivity the prose doesn't hyperlink — **Verweise** (REFERENCES)
   + **Erwähnt in** (backlinks) + **Verwandte Themen** (typed relations) + **Ähnliche Seiten** (SIMILAR_TO) +
@@ -1194,8 +1204,9 @@ http — count, p50/p95, total time, token in/out) + a live recent-events table,
   TOML but can't *write* it). `doc_sources()` vs `session_sources()` split the
   `[[sources]]` (a `type = "session"` source feeds the Path B memory tier, not the doc
   pipeline — `source_paths()` is doc-only, `session_paths()` the rest); `memory_enabled`
-  is the Wiki-vs-Second-Brain **mode** (`[memory] enabled`, default off). Only this
-  module + `cli.py` know about projects; the pipeline stays project-agnostic.
+  is the Wiki-vs-Second-Brain **mode** (`[memory] enabled`, default off). `find_projects(roots, depth, limit)` finds
+  project folders below given folders (the web UI's switcher, v0.120). Only this
+  module + `cli.py` (and the web UI's switcher) know about projects; the pipeline stays project-agnostic.
 - **`openwiki/pipeline.py`** — Phase 2 build orchestration *state*: a per-stage
   **fingerprint chain** (`compute_fingerprints`) over `STAGES` (ingest, wiki, index,
   graph, **memory**) + the `.openwiki/state.json` lockfile (`BuildState`) +

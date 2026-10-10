@@ -824,6 +824,12 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   next to the lexical boost — dense order again, each hit carries `in_window`. On by default (`[memory]
   temporal_weight`, `Project.temporal_weight`, `temporal.WINDOW_WEIGHT` = 0.1) wherever memory is recalled: LoCoMo's
   dated questions 46.2 → 56.2 % (+24 / −3); a question without a date recalls exactly as before (§13.19).
+  **Explained (M4, v0.115):** `recall(…, report=)` gives each hit `parts` — the factors of its score (`cos`,
+  `confidence`, `recency` + `kind` + `age_days`, `material`), its dense `rank`, the aids' `lexical_boost` /
+  `window_boost` / `selection`, `swapped_in` — and fills the report with the weights, the query's window, the
+  candidate count, the pool and the facts the aids `displaced`; the ranking is unchanged. `context_for(report=)`
+  passes it on as `recall` plus every recalled fact (`recalled`, before `exclude` and the budget) — the web UI's
+  hook preview.
   **Multi-hop expansion** (facts linked to the recalled ones by a shared subject / object, word or embedding, depth
   1–2) was measured offline and not adopted: swapped in it pushed out better facts, added it lost to the ranking's
   own next candidates (§13.20).
@@ -1037,8 +1043,11 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   `/api/memory/fact/{id}` = one **fact's detail** (`memory_fact` → `GraphStore.fact_detail`: the attribute's history,
   supersedes / superseded-by, kind, theme — plus `said`, the session excerpts around when it was said, via the
   `SessionCorpus` `serve` passes in; 404 for an unknown id),
-  `/api/recall` (POST) = decay-weighted `recall` (B7 `as_of`/`known_at`), `/api/context` (POST) = the
-  assembled three-tier `context_for` (`as_of`), `/api/timeline` (POST) = B7 fact history
+  `/api/recall` (POST) = decay-weighted `recall` (B7 `as_of`/`known_at`), **explained** (M4, v0.115: each hit's
+  `parts` + `explain` — `recall(report=)`), `/api/context` (POST) = the assembled three-tier `context_for`
+  (`as_of`) — in a project and for now the **hook preview** (M4: `cli.inject_context` / `hook_skips` /
+  `hook_probes`, the inject hook's own code; `chore`, `header`, every recalled fact with `shown` + `parts`, `themes`,
+  `explain`), `/api/timeline` (POST) = B7 fact history
   (`memory_timeline` → `GraphStore.timeline`), `/api/analyze?k=&method=` = the world-model coupling analysis +
   2-D semantic map (`WikiWebApp.analyze()` → `analysis.analyze_coupling` + `project_2d`), `/api/analyze/gaps`
   = P3 gap-mining (`analyze_gaps`), `/api/analyze/memory` = P4 memory-tier dynamics (`analyze_memory`),
@@ -1080,8 +1089,12 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   offline; graceful empty states (no index / no graph / no memory). The **Gedächtnis (Memory)
 tab** (`renderMemory` → `/api/memory`) surfaces **Path B** in the browser: the identity
 (DNA) + stat chips (Sitzungen / Fakten / überholt / zurückgezogen / geplant / Themen), a
-**recall/context box** (`/api/recall` decay-weighted facts, `/api/context` the assembled three-tier
-context, **Verlauf** = `/api/timeline` the B7 history) with two **B7 date pickers** — *Stand am*
+**recall/context box** (`/api/recall` decay-weighted facts, each with its score as a formula — cos × Konfidenz ×
+Aktualität (volatile kinds only) × Herkunft, + the BM25 / time-window boosts, its dense rank, "hereingeholt" when an aid
+swapped it in — plus the facts the aids displaced (M4, `memParts` / `memHitsHtml`); **Hook-Vorschau** = `/api/context`,
+what the inject hook would add to this prompt now: the chore verdict, the exact text with its header, characters vs
+budget, every recalled fact marked "im Text" / "gekürzt" (`memHookHtml`); **Verlauf** = `/api/timeline` the B7
+history) with two **B7 date pickers** — *Stand am*
 (valid time → `as_of`) and *Wissensstand vom* (transaction time → `known_at`) — a server-side **facts
 browser** (Direction K M2, v0.114: word search, status / source / session / volatile-kind filters, sort, paging over
 every fact — `/api/memory/facts`), the `MemoryConcept` **themes** as a compact searchable list whose rows filter the

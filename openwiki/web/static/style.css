@@ -425,6 +425,29 @@ header {
 .mb-legend { font-size: 11px; display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; }
 .mb-key { display: inline-block; width: 14px; height: 8px; border-radius: 2px; margin-left: 6px; }
 
+/* -- Memory: recall explained + hook preview (Direction K, M4) ------------ */
+.mem-hit { border-bottom: 1px solid var(--line); padding-bottom: 4px; }
+.mem-hit .mem-fact { border-bottom: 0; padding-bottom: 1px; }
+.mem-hit.is-cut { opacity: .6; }
+.mem-facts.is-displaced .mem-hit { opacity: .6; }
+.mem-parts { font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; padding-left: 50px;
+  display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: baseline; }
+.mem-parts b { color: var(--ink); font-weight: 600; }
+.mem-parts i { font-style: normal; }
+.mp-f.is-one { opacity: .55; }
+.mp-eq b { color: var(--accent); }
+.mp-aid { color: var(--accent); }
+.mp-rank { background: var(--code-bg); border-radius: 999px; padding: 0 6px; font-size: 10.5px; }
+.mp-rank.swapped { background: var(--accent-soft); color: var(--accent); font-weight: 700; }
+.mem-disp-h { margin-top: 10px; }
+.mem-h4 { font-size: 13px; margin: 14px 0 4px; }
+.mem-hdr { color: var(--muted); font-style: italic; }
+.mem-banner { border-left: 3px solid var(--accent); background: var(--accent-soft); padding: 6px 10px;
+  border-radius: 4px; font-size: 13px; margin-bottom: 8px; }
+.mem-badge.in { background: #e6f4ea; color: #1e7e34; }
+.mem-badge.cut { background: #eeeeee; color: #666666; }
+.mem-badge.probe { background: #e7f0fd; color: #2c5fb3; }
+
 /* -- Analyse tab: world-model coupling ------------------------------------ */
 .an-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 12px; }
 .an-head strong { font-size: 15px; }
@@ -552,6 +575,10 @@ header {
 :root[data-theme="dark"] .mem-badge.plan { background: #1a2a44; color: #8fb3f5; }
 :root[data-theme="dark"] .mem-badge.mat { background: #3a2c14; color: #e8b86a; }
 :root[data-theme="dark"] .mem-badge.fgt { background: #2a2a2a; color: #aaaaaa; }
+:root[data-theme="dark"] .mem-badge.kind { background: #3a2a14; color: #f0b46a; }
+:root[data-theme="dark"] .mem-badge.in { background: #173323; color: #7fd49a; }
+:root[data-theme="dark"] .mem-badge.cut { background: #2a2a2a; color: #aaaaaa; }
+:root[data-theme="dark"] .mem-badge.probe { background: #1a2a44; color: #8fb3f5; }
 
 /* -- Analyse map controls (projection + community focus, U11) ------------- */
 .an-mapctl { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-bottom: 8px; font-size: 12.5px; }

@@ -3946,12 +3946,17 @@ def _session_has_turns(transcript_path) -> bool:
     return re.search(r'"type"\s*:\s*"assistant"', tail) is not None
 
 
+def hook_skips(project: Project, prompt: str) -> Optional[str]:
+    """The chore kind the inject hook skips ``prompt`` for (``chore_kind`` with the project's ``skip_prompts``), or
+    ``None`` — also ``None`` with ``[memory] skip_chores = false``. An ``"ack"`` is skipped only once the session has
+    answered (``_skip_memory``)."""
+    return chore_kind(prompt or "", project.skip_prompts) if project.skip_chores else None
+
+
 def _skip_memory(project: Project, payload: dict) -> bool:
     """No memory for a chore prompt — except a bare acknowledgement that opens a session ("continue"
     after a restart is exactly when memory helps)."""
-    if not project.skip_chores:
-        return False
-    kind = chore_kind(payload.get("prompt") or "", project.skip_prompts)
+    kind = hook_skips(project, payload.get("prompt") or "")
     if kind is None:
         return False
     return kind != "ack" or _session_has_turns(payload.get("transcript_path"))
@@ -3992,6 +3997,29 @@ def _reset_injected(project: Project, session_id) -> None:
         _save_inject_state(project, state)
 
 
+INJECT_HEADER = ("Relevant memory from earlier sessions (OpenWiki Second Brain) — use if helpful; "
+                 "this is not the user's current message:\n\n")
+
+
+def hook_probes(project: Project, prompt: str) -> Optional[list]:
+    """P1 cue-trigger probes for the inject hook — ``None`` unless ``[memory] probes``; bounded so the 30 s hook still
+    injects (``_memory_probes``)."""
+    if not project.memory_probes:
+        return None
+    return _memory_probes(prompt, project.setting("models", "chat", DEFAULT_CHAT),
+                          project.setting("models", "host", DEFAULT_HOST))
+
+
+def inject_context(project: Project, graph, embedder, prompt: str, probes=None, exclude=None,
+                   report: Optional[dict] = None) -> str:
+    """The memory context the inject hook gives ``prompt``: ``context_for`` with the project's identity, fact count,
+    budget and recall aids. Shared with the web UI's hook preview (M4), so the preview shows what the hook does."""
+    return graph.context_for(prompt, embedder, identity=project.identity, k=project.context_k,
+                             max_chars=project.context_budget, probes=probes,
+                             lexical=project.lexical_weight, temporal=project.temporal_weight,
+                             exclude=exclude, report=report)
+
+
 def _hook_inject(project: Project, payload: dict) -> None:
     """UserPromptSubmit → assemble the three-tier memory context for the prompt and print
     it (Claude Code adds a hook's stdout to the prompt context). Chore prompts get none
@@ -4002,10 +4030,7 @@ def _hook_inject(project: Project, payload: dict) -> None:
     embedder = _hook_embedder(project) if prompt else None
     if not embedder or not project.graph_path.exists():
         return
-    probes = None
-    if project.memory_probes:           # P1 cue-trigger: bounded so the 30 s hook still injects
-        probes = _memory_probes(prompt, project.setting("models", "chat", DEFAULT_CHAT),
-                                project.setting("models", "host", DEFAULT_HOST))
+    probes = hook_probes(project, prompt)
     graph = _open_reader(project.graph_path, wait=5.0)   # a writer applies in seconds
     if graph is None:
         return
@@ -4016,10 +4041,8 @@ def _hook_inject(project: Project, payload: dict) -> None:
     given = state.get(sid) or {}
     used: dict = {}
     try:
-        context = graph.context_for(prompt, embedder, identity=project.identity, k=project.context_k,
-                                    max_chars=project.context_budget, probes=probes,
-                                    lexical=project.lexical_weight, temporal=project.temporal_weight,
-                                    exclude=given if given else None, report=used)
+        context = inject_context(project, graph, embedder, prompt, probes=probes,
+                                 exclude=given if given else None, report=used)
     finally:
         graph.close()
     if sid and not project.repeat_facts and (used.get("facts") or used.get("themes") or used.get("identity")):
@@ -4029,9 +4052,7 @@ def _hook_inject(project: Project, payload: dict) -> None:
                       "updated": int(time.time())}
         _save_inject_state(project, state)
     if context.strip():
-        sys.stdout.write(
-            "Relevant memory from earlier sessions (OpenWiki Second Brain) — use if helpful; "
-            "this is not the user's current message:\n\n" + context + "\n")
+        sys.stdout.write(INJECT_HEADER + context + "\n")
 
 
 HANDOFF_EMBED_TIMEOUT = 8.0   # s — the resume hook embeds the next task under a 30 s limit

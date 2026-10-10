@@ -1455,7 +1455,8 @@ class GraphStore:
     def recall(self, query: str, embedder, k: int = 5,
                half_life_days: float = DEFAULT_HALF_LIFE_DAYS, now: Optional[int] = None,
                include_superseded: bool = False, as_of: Optional[int] = None,
-               known_at: Optional[int] = None, lexical: float = 0.0, temporal: float = 0.0) -> list:
+               known_at: Optional[int] = None, lexical: float = 0.0, temporal: float = 0.0,
+               report: Optional[dict] = None) -> list:
         """B6 (activation tier) + **B7 point-in-time**: the remembered facts most relevant to
         ``query`` — cosine over assertion embeddings × confidence × a bounded recency factor for the kinds of
         fact that go stale (``memory.volatile_kind``; every other fact is timeless here). By default only the
@@ -1472,7 +1473,12 @@ class GraphStore:
         July 2023", "on May 3, 2023", "last week" — relative to ``now``): within the dense top
         ``TEMPORAL_POOL × k`` a fact whose ``valid_from`` falls in the window gains ``temporal ×
         window_match`` (tolerant at the edges), alongside the lexical boost; dense order again;
-        each hit carries ``in_window``. Read-only."""
+        each hit carries ``in_window``. ``report`` (a dict) **explains** the ranking (the web UI, M4):
+        each hit gains ``parts`` — the factors of its score (``cos × confidence × recency × material``,
+        recency only for a volatile ``kind``), its dense ``rank`` and the aids' boosts — and the report
+        receives the weights, the query's window, the number of candidates and the facts the aids
+        pushed out of the dense top ``k`` (``displaced``). Read-only."""
+        explain = report is not None
         if embedder is None:
             raise ValueError("recall needs an embedder.")
         recs = self._load_assertions(with_emb=True)   # [] on graphs built before this layer
@@ -1494,22 +1500,31 @@ class GraphStore:
             # And only for the kinds of fact that go stale on their own — plans, counts, gaps, versions,
             # running states (memory.volatile_kind): a decision or a description is no less true for its
             # age (§13.31 — fewer stale facts in the live context, LoCoMo unchanged)
-            decay = (effective_weight(1.0, ref, now, half_life_days)
-                     if RECENCY_ALL_KINDS or volatile_kind(r) else 1.0)
-            score = (cos * confidence_weight(r["confidence"])
-                     * (RECENCY_FLOOR + (1.0 - RECENCY_FLOOR) * decay))
-            if r.get("source") == "material":                      # P0: a claim, not a decision
-                score *= MATERIAL_WEIGHT
-            scored.append({"id": r["id"], "subject": r["subject"], "predicate": r["predicate"],
-                           "object": r["object"], "session_id": r["session_id"],
-                           "cos": round(cos, 3), "confidence": round(r["confidence"], 3),
-                           "score": round(score, 3), "_rank": score, "superseded": r["superseded"],
-                           "status": r["status"], "in_view": r["in_view"],
-                           "valid_from": r["valid_from"], "valid_to": r["valid_to"],
-                           "created_at": r["created_at"], "expired_at": r["expired_at"],
-                           "source": r.get("source")})
+            kind = volatile_kind(r)
+            decay = effective_weight(1.0, ref, now, half_life_days) if RECENCY_ALL_KINDS or kind else 1.0
+            conf = confidence_weight(r["confidence"])
+            recency = RECENCY_FLOOR + (1.0 - RECENCY_FLOOR) * decay
+            material = MATERIAL_WEIGHT if r.get("source") == "material" else 1.0   # P0: a claim, not a decision
+            score = cos * conf * recency * material
+            hit = {"id": r["id"], "subject": r["subject"], "predicate": r["predicate"],
+                   "object": r["object"], "session_id": r["session_id"],
+                   "cos": round(cos, 3), "confidence": round(r["confidence"], 3),
+                   "score": round(score, 3), "_rank": score, "superseded": r["superseded"],
+                   "status": r["status"], "in_view": r["in_view"],
+                   "valid_from": r["valid_from"], "valid_to": r["valid_to"],
+                   "created_at": r["created_at"], "expired_at": r["expired_at"],
+                   "source": r.get("source")}
+            if explain:
+                hit["parts"] = {"cos": round(cos, 3), "confidence": round(conf, 3), "kind": kind,
+                                "age_days": round((now - ref) / 86400, 1) if ref else None,
+                                "recency": round(recency, 3), "material": material, "score": round(score, 3)}
+            scored.append(hit)
         scored.sort(key=lambda x: -x["_rank"])     # the unrounded score — rounding made ties
         window = question_window(query, now) if temporal else None
+        pool, displaced = min(len(scored), k), []
+        if explain:
+            for n, x in enumerate(scored[:max(k, TEMPORAL_POOL * k)]):
+                x["parts"]["rank"] = n + 1
         if (lexical or window) and scored:
             # recall aids, not re-rankers: they may swap facts into the top k from the dense pool, never
             # reorder it. Unpooled, normalized BM25 lifted keyword matches from dense rank 100+ ("Melanie |
@@ -1525,18 +1540,38 @@ class GraphStore:
                 for n in range(min(pool, max(k, LEXICAL_POOL * k))):
                     scored[n]["lexical"] = round(float(lex[n]), 3)
                     boost[n] += lexical * float(lex[n])
+                    if explain:
+                        scored[n]["parts"]["lexical_boost"] = round(lexical * float(lex[n]), 3)
             if window:
                 for n in range(pool):
                     match = window_match(scored[n]["valid_from"], window)
                     scored[n]["in_window"] = round(match, 3)
                     boost[n] += temporal * match
+                    if explain:
+                        scored[n]["parts"]["window_boost"] = round(temporal * match, 3)
             chosen = sorted(range(pool), key=lambda n: (-(scored[n]["_rank"] + boost[n]), n))[:k]
+            if explain:
+                for n in range(pool):
+                    scored[n]["parts"]["selection"] = round(scored[n]["_rank"] + boost[n], 3)
+                displaced = [scored[n] for n in range(min(k, len(scored))) if n not in set(chosen)]
+            candidates = len(scored)
             scored = [scored[n] for n in sorted(chosen)]        # dense order among the chosen
-        for x in scored:
+        else:
+            candidates = len(scored)
+        for x in scored + displaced:
             x.pop("_rank", None)
+            if explain:
+                x["parts"]["swapped_in"] = x["parts"].get("rank", 0) > k   # in only because of an aid
+        if explain:
+            report.update({
+                "weights": {"lexical": lexical, "temporal": temporal, "half_life_days": half_life_days,
+                            "recency_floor": RECENCY_FLOOR, "material": MATERIAL_WEIGHT},
+                "window": ({"start": window[0], "end": window[1], "tolerance_days": round(window[2] / 86400, 1)}
+                           if window else None),
+                "candidates": candidates, "pool": pool, "k": k, "displaced": displaced})
         return scored[:k]
 
-    def recall_probed(self, query: str, embedder, probes, k: int = 5, **kw) -> list:
+    def recall_probed(self, query: str, embedder, probes, k: int = 5, report: Optional[dict] = None, **kw) -> list:
         """P1 cue-trigger recall: ``recall`` for ``query`` plus one reserved slot per constraint
         ``probe`` (``memory.constraint_probes``) — each probe's best hit not already present comes
         first, the query's hits fill the rest; the total stays ``k``. The probes reach the user's
@@ -1545,14 +1580,15 @@ class GraphStore:
         hits — else it stays empty: a topic fact ("client meetings are held in Room 4B") would take
         the slot it was meant to free, and a memory with no personal facts would be relabelled
         wholesale as "the user's circumstances" (measured: "we won't adopt SleepGate" became the
-        user's circumstance and the answer flipped to "yes, we are adopting it")."""
+        user's circumstance and the answer flipped to "yes, we are adopting it"). ``report`` explains the
+        query's recall (``recall``); a probe's hit carries the parts of its score for the probe."""
         probes = [p for p in (probes or []) if p]
-        base = self.recall(query, embedder, k=k, **kw)
+        base = self.recall(query, embedder, k=k, report=report, **kw)
         if not probes:
             return base
         picked, seen = [], set()
         for p in probes[:max(1, k // 2)]:
-            hit = next((h for h in self.recall(p, embedder, k=3, **kw)
+            hit = next((h for h in self.recall(p, embedder, k=3, report={} if report is not None else None, **kw)
                         if h["id"] not in seen and _is_personal(h)), None)
             if hit is not None:
                 picked.append(dict(hit, probe=p))
@@ -1982,18 +2018,22 @@ class GraphStore:
         constraints, shown first under "Keep in mind". ``exclude`` (``{"facts": ids, "themes": ids,
         "identity": bool}``) leaves out what the caller already gave this session — the inject hook
         injects each fact once per stretch (v0.107); ``report`` (a dict) receives what was assembled
-        (``facts``, ``themes``, ``identity``). Read-only + **fail-soft** (missing embedder / empty
-        memory → identity only, or ``""``)."""
+        (``facts``, ``themes``, ``identity``) and how: ``recalled`` (every recalled fact, its score
+        explained — before ``exclude`` and the budget), ``recall`` (the recall's report) and
+        ``theme_labels``. Read-only + **fail-soft** (missing embedder / empty memory → identity only,
+        or ``""``)."""
         from .memory import assemble_context
         facts = []
+        explained: Optional[dict] = {} if report is not None else None
         if embedder is not None:
             try:
                 facts = (self.recall_probed(query, embedder, probes, k=k, as_of=as_of, lexical=lexical,
-                                            temporal=temporal)
+                                            temporal=temporal, report=explained)
                          if probes else self.recall(query, embedder, k=k, as_of=as_of, lexical=lexical,
-                                                    temporal=temporal))
+                                                    temporal=temporal, report=explained))
             except Exception:      # never let a memory read break the caller
                 facts = []
+        recalled = list(facts)
         exclude = exclude or {}
         seen_facts, seen_themes = set(exclude.get("facts") or ()), set(exclude.get("themes") or ())
         facts = [f for f in facts if f["id"] not in seen_facts]
@@ -2006,7 +2046,8 @@ class GraphStore:
                                 max_chars=max_chars, report=shown)
         if report is not None:         # what the text holds — a fact the budget cut is not "given"
             report.update({"facts": [f["id"] for f in shown["facts"]], "themes": [t["id"] for t in shown["themes"]],
-                           "identity": shown["identity"]})
+                           "identity": shown["identity"], "recalled": recalled, "recall": explained or {},
+                           "theme_labels": {t["id"]: t.get("label") for t in themes}})
         return text
 
     def hybrid_search(self, vector, k: int = 5) -> list[dict]:

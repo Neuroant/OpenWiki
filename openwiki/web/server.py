@@ -758,7 +758,9 @@ class WikiWebApp:
                       as_of=None, known_at=None) -> dict:
         """The remembered facts most relevant to a query (decay-weighted, B6 activation tier),
         optionally at a point in time (B7 ``as_of`` valid time / ``known_at`` transaction time —
-        ISO dates or epochs). Needs a graph with memory + a search index. Read-only."""
+        ISO dates or epochs), each with the parts of its score (``parts``) and ``explain`` — the weights,
+        the query's time window, the facts the recall aids pushed out (M4). Needs a graph with memory +
+        a search index. Read-only."""
         embedder = self._memory_embedder()
         if self.graph is None or embedder is None:
             raise RuntimeError("Recall needs a graph with memory and a search index.")
@@ -767,10 +769,11 @@ class WikiWebApp:
             raise RuntimeError("empty query")
         k = max(1, min(int(k), 30))
         from ..graph.temporal import parse_date
+        explain: dict = {}
         facts = self.graph.recall(query, embedder, k=k, include_superseded=bool(include_superseded),
                                   as_of=parse_date(as_of), known_at=parse_date(known_at),
-                                  lexical=self._lexical_weight(), temporal=self._temporal_weight())
-        return {"query": query, "k": k, "facts": facts}
+                                  lexical=self._lexical_weight(), temporal=self._temporal_weight(), report=explain)
+        return {"query": query, "k": k, "facts": facts, "explain": explain}
 
     def _lexical_weight(self) -> float:
         """Hybrid recall's BM25 weight — the project's ``[memory] lexical_weight``, else the default."""
@@ -797,7 +800,11 @@ class WikiWebApp:
     def memory_context(self, query: str, as_of=None) -> dict:
         """The assembled three-tier session context for a query (identity + activation +
         attractors, B6), budgeted by the project's ``context_budget``; ``as_of`` (B7, ISO date)
-        assembles the memory as it was true then. Read-only."""
+        assembles the memory as it was true then. In a project and for now it is the **hook
+        preview** (M4): what the inject hook would add to this prompt at the start of a stretch —
+        the hook's own assembly (``cli.inject_context``), whether it skips the prompt as a chore
+        (``chore``), its header, and every recalled fact with its score explained and whether it
+        made it into the text (``shown``) or the budget cut it. Read-only."""
         embedder = self._memory_embedder()
         if self.graph is None or embedder is None:
             raise RuntimeError("Context needs a graph with memory and a search index.")
@@ -806,17 +813,34 @@ class WikiWebApp:
             raise RuntimeError("empty query")
         identity = self.project.identity if self.project is not None else ""
         budget = self.project.context_budget if self.project is not None else None
-        from ..graph.temporal import parse_date
-        probes = None
-        chat = getattr(self.agent, "chat", None)
-        if chat is not None and self.project is not None and self.project.memory_probes:
-            from ..graph.memory import constraint_probes
-            probes = constraint_probes(chat, query)          # P1 cue-trigger; fail-soft → []
         k = self.project.context_k if self.project is not None else 16
-        context = self.graph.context_for(query, embedder, identity=identity, k=k, max_chars=budget,
-                                         as_of=parse_date(as_of), probes=probes,
-                                         lexical=self._lexical_weight(), temporal=self._temporal_weight())
-        return {"query": query, "context": context, "identity": identity, "budget": budget}
+        from ..graph.temporal import parse_date
+        when = parse_date(as_of)
+        report: dict = {}
+        hook = self.project is not None and when is None      # the hook always assembles for now
+        chore, header = None, ""
+        if hook:
+            from ..cli import INJECT_HEADER, hook_probes, hook_skips, inject_context
+            chore, header = hook_skips(self.project, query), INJECT_HEADER
+            probes = hook_probes(self.project, query)        # P1 cue-trigger, as the hook calls it; fail-soft
+            context = inject_context(self.project, self.graph, embedder, query, probes=probes, report=report)
+        else:
+            probes = None
+            chat = getattr(self.agent, "chat", None)
+            if chat is not None and self.project is not None and self.project.memory_probes:
+                from ..graph.memory import constraint_probes
+                probes = constraint_probes(chat, query)      # P1 cue-trigger; fail-soft → []
+            context = self.graph.context_for(query, embedder, identity=identity, k=k, max_chars=budget,
+                                             as_of=when, probes=probes, lexical=self._lexical_weight(),
+                                             temporal=self._temporal_weight(), report=report)
+        shown = set(report.get("facts") or ())
+        labels = report.get("theme_labels") or {}
+        return {"query": query, "context": context, "identity": identity, "budget": budget, "k": k,
+                "hook": hook, "chore": chore, "header": header if context.strip() else "",
+                "recalled": [dict(f, shown=f["id"] in shown) for f in report.get("recalled") or ()],
+                "themes": [{"id": t, "label": labels.get(t)} for t in report.get("themes") or ()],
+                "identity_shown": bool(report.get("identity")), "probes": probes or [],
+                "explain": report.get("recall") or {}}
 
     def chat(self, message: str) -> dict:
         if self.agent is None:

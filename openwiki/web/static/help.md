@@ -277,10 +277,21 @@ zusätzlich einen **Gedächtnis-Tier**: Fakten, die aus Sitzungen *erinnert* wer
 
 - die **Identität** (DNA) des Projekts und Kennzahlen (Sitzungen / Fakten / überholt /
   zurückgezogen / geplant / vergessen / Themen);
-- ein **Recall/Kontext-Feld** — geben Sie eine Frage ein und sehen Sie die
-  gewichtsverfallenen relevanten Fakten bzw. den zusammengesetzten Drei-Tier-Kontext;
-  **Verlauf** zeigt die ganze Geschichte der passendsten Fakten (jedes Gültigkeitsintervall,
-  wann erfasst, aus welcher Sitzung);
+- ein **Recall/Kontext-Feld** — geben Sie eine Frage ein:
+  - **Abrufen** zeigt die relevantesten Fakten, jeden mit seiner **Bewertung** als Formel:
+    Ähnlichkeit (cos) × Konfidenz × Aktualität × Herkunft = Score. Die Aktualität zählt nur bei
+    Arten, die von selbst veralten (Pläne, Zahlen, Lücken, Versionen, laufende Zustände), sonst
+    ist sie 1; Material aus besprochenen Dokumenten zählt × 0,75. Dazu kommen die **Abrufhilfen**:
+    ein Stichwortabgleich (BM25) und der Zeitraum, den die Frage nennt — sie dürfen Fakten aus
+    den nächstbesten nach oben holen („hereingeholt · #13" = nach Score erst Platz 13), ändern
+    aber nie die Reihenfolge. Was dafür weichen musste, steht unter **Verdrängt**;
+  - **Hook-Vorschau** zeigt, was der Hook dieser Eingabe jetzt in den Prompt einfügen würde — den
+    Text samt Kopfzeile, Zeichen gegen das Budget, jeden abgerufenen Fakt mit „im Text" oder
+    „gekürzt" (Budget aufgebraucht) und seiner Bewertung. Bei einer Routine-Eingabe („push", ein
+    Slash-Befehl) sagt sie, dass der Hook nichts einfügt. Sie zeigt den Anfang einer Sitzung;
+    danach gibt der Hook jeden Fakt nur einmal;
+  - **Verlauf** zeigt die ganze Geschichte der passendsten Fakten (jedes Gültigkeitsintervall,
+    wann erfasst, aus welcher Sitzung);
 - zwei **Zeitpunkt-Felder**: **Stand am** — welche Fakten *galten* an diesem Tag
   (Gültigkeitszeit, `recall --as-of`); **Wissensstand vom** — was OpenWiki an diesem Tag
   *gespeichert hatte*, vor späteren Korrekturen (Transaktionszeit, `recall --known-at`);

@@ -93,8 +93,8 @@ an empty required field → **400**; any other exception → **500**; the body i
 | `GET /api/memory/facts?q=&status=&source=&session=&kind=&theme=&sort=&offset=&limit=` | query params | `{total, offset, limit, facts:[…]}` — every fact filtered + paged server-side (`status=` empty = all states; `limit` ≤ 500); **503** without a graph |
 | `GET /api/memory/fact/{id}` | — | `{fact, group:[…], supersedes, superseded_by, theme, said:{at, available, in_window, excerpts}}` — one fact, its attribute's history and the session excerpts where it was said; **404** unknown id · **503** without a graph |
 | `POST /api/memory/approve` · `POST /api/memory/reject` | `{ids:[…]}` or `{all:true}` | `{approved:[…], folding}` · `{rejected:[…]}` — the approval step (ADR-46); **400** without `ids` / `all` |
-| `POST /api/recall` | `{query, k?, include_superseded?, as_of?, known_at?}` | `{query, k, facts:[…]}` (B7 point-in-time) |
-| `POST /api/context` | `{query, as_of?}` | `{query, context, identity, budget}` — the B6 three-tier context (probed when `[memory] probes`) |
+| `POST /api/recall` | `{query, k?, include_superseded?, as_of?, known_at?}` | `{query, k, facts:[…], explain:{weights, window, candidates, pool, k, displaced}}` (B7 point-in-time) — each fact with `parts`: the factors of its score, its dense `rank`, the aids' boosts, `swapped_in` (M4) |
+| `POST /api/context` | `{query, as_of?}` | `{query, context, identity, budget, k, hook, chore, header, recalled:[…], themes, identity_shown, probes, explain}` — the B6 three-tier context (probed when `[memory] probes`); in a project without `as_of` the **hook preview**: the inject hook's own assembly, its chore verdict and header, each recalled fact `shown` or cut by the budget (M4) |
 | `POST /api/timeline` | `{query, groups?}` | `{query, groups:[{subject, predicate, cos, records:[…]}]}` (B7 history) |
 
 ### 3.2.3 MCP interface (`MCPStdioServer`)

@@ -804,18 +804,94 @@ function memStatusBadge(status) {
   return b ? `<span class="mem-badge ${b[0]}" title="${b[2]}">${b[1]}</span>` : "";
 }
 
-function memFactRow(f) {
+function memFactRow(f, extra = "") {
   const out = f.in_view === false || (f.in_view == null && f.superseded);   // outside the requested view
-  const badges = [];
+  const badges = extra ? [extra] : [];
   if (out) badges.push(memStatusBadge(f.status || "past"));
   if (f.confidence > 1) badges.push(`<span class="mem-badge conf" title="mehrfach bestätigt">×${f.confidence}</span>`);
   if (f.source === "material") badges.push(MEM_MATERIAL_BADGE);
-  const sc = (f.score != null) ? `<span class="mem-score" title="Relevanz (cos ${f.cos})">${f.score}</span>` : "";
+  const sc = (f.score != null) ? `<span class="mem-score" title="Relevanz (cos ${f.cos})">${memNum(f.score)}</span>` : "";
   const when = memInterval(f);
   return `<div class="mem-fact mem-click${out ? " is-sup" : ""}" data-fact="${escapeHtml(f.id || "")}" title="Details">${sc}
     <span class="mem-triple"><b>${escapeHtml(f.subject)}</b> ${escapeHtml(f.predicate)} <b>${escapeHtml(f.object)}</b></span>
     ${when ? `<span class="mem-when">${when}</span>` : ""}
     <span class="mem-src">[${escapeHtml(f.session_id || "?")}]</span> ${badges.join(" ")}</div>`;
+}
+
+// -- Memory · recall explained + the hook preview (Direction K, M4) ---------
+// A hit's score is cos × confidence × recency (only for the kinds that go stale) × provenance; BM25 and the
+// question's time window may then swap facts from the dense pool into the top k, never reorder them.
+
+function memNum(x, digits = 3) { return x == null ? "—" : Number(x).toFixed(digits); }
+
+function memParts(p, k, w) {
+  if (!p) return "";
+  const one = (v) => (v === 1 ? " is-one" : "");
+  const kind = p.kind ? MF_KIND_LABEL[p.kind] || p.kind : null;
+  const hl = w && w.half_life_days ? w.half_life_days : 30;
+  const terms = [
+    `<span class="mp-f" title="Ähnlichkeit von Anfrage und Fakt (Embedding)">cos <b>${memNum(p.cos)}</b></span>`,
+    `<span class="mp-f${one(p.confidence)}" title="mehrfach bestätigt → leicht höher (log-skaliert, ein Gleichstandsbrecher)">× Konfidenz <b>${memNum(p.confidence, 2)}</b></span>`,
+    kind
+      ? `<span class="mp-f" title="${kind}: eine Art, die von selbst veraltet — die Aktualität zählt (Halbwertszeit ${hl} Tage, mindestens 0.9)">× Aktualität <b>${memNum(p.recency)}</b> <i>${kind}, ${p.age_days != null ? `${Math.round(p.age_days)} ${Math.round(p.age_days) === 1 ? "Tag" : "Tage"}` : "?"} alt</i></span>`
+      : `<span class="mp-f is-one" title="zeitlos — das Alter zählt im Abruf nicht">× Aktualität <b>1</b> <i>zeitlos</i></span>`,
+    `<span class="mp-f${one(p.material)}" title="aus besprochenem Material (keine Entscheidung) → × 0.75">× Herkunft <b>${p.material === 1 ? "1" : memNum(p.material, 2)}</b></span>`,
+    `<span class="mp-eq">= <b>${memNum(p.score)}</b></span>`,
+  ];
+  if (p.lexical_boost) terms.push(`<span class="mp-aid" title="Stichwort-Treffer (BM25, 0–1) × Gewicht">+ BM25 <b>${memNum(p.lexical_boost)}</b></span>`);
+  if (p.window_boost) terms.push(`<span class="mp-aid" title="liegt im Zeitraum, den die Frage nennt (× Gewicht)">+ Zeitraum <b>${memNum(p.window_boost)}</b></span>`);
+  if (p.lexical_boost || p.window_boost) terms.push(`<span class="mp-eq" title="zählt nur für die Auswahl — die Reihenfolge bleibt die nach Score">→ Auswahl <b>${memNum(p.selection)}</b></span>`);
+  const rank = p.rank == null ? "" : p.swapped_in
+    ? `<span class="mp-rank swapped" title="nach Score erst Platz ${p.rank} — von den Abrufhilfen unter die ersten ${k} geholt">hereingeholt · #${p.rank}</span>`
+    : `<span class="mp-rank" title="Platz nach Score">#${p.rank}</span>`;
+  return `<div class="mem-parts">${rank}${terms.join(" ")}</div>`;
+}
+
+function memExplainHead(ex) {
+  if (!ex || !ex.weights) return "";
+  const w = ex.weights;
+  const aids = [w.lexical ? `Stichwörter (BM25) × ${w.lexical}` : "",
+                ex.window ? `Zeitraum der Frage <b>${memDate(ex.window.start)} – ${memDate(ex.window.end - 1)}</b> × ${w.temporal}` : ""]
+    .filter(Boolean);
+  return `<div class="mem-ctx-h muted">Score = cos × Konfidenz × Aktualität (nur bei Arten, die veralten) × Herkunft.
+    ${aids.length ? `Abrufhilfen: ${aids.join(" · ")} — sie tauschen nur unter den ersten ${ex.pool} nach Score aus, die Reihenfolge bleibt.`
+                  : "Keine Abrufhilfe hat gewirkt."} ${ex.candidates} Kandidaten.</div>`;
+}
+
+function memHitsHtml(facts, ex, k, extra) {
+  const w = (ex && ex.weights) || {};
+  const row = (f, more) => `<div class="mem-hit${f.shown === false ? " is-cut" : ""}">${memFactRow(f, more ? more(f) : "")}${memParts(f.parts, k, w)}</div>`;
+  const displaced = (ex && ex.displaced) || [];
+  return `<div class="mem-facts">${facts.map((f) => row(f, extra)).join("")}</div>` + (displaced.length
+    ? `<div class="mem-ctx-h muted mem-disp-h">Verdrängt — nach Score unter den ersten ${k}, von den Abrufhilfen ersetzt:</div>
+       <div class="mem-facts is-displaced">${displaced.map((f) => row(f)).join("")}</div>` : "");
+}
+
+const MEM_CHORE = { git: "eine Git-Routine (push, commit, tag …)", command: "ein Slash-Befehl",
+                    custom: "eine eigene Regel (<code>[memory] skip_prompts</code>)" };
+
+function memHookHtml(d) {
+  const recalled = d.recalled || [];
+  const shown = recalled.filter((f) => f.shown).length;
+  const len = (d.context || "").length;
+  let banner = "";
+  if (d.chore === "ack") banner = "Eine bloße Bestätigung bekommt nur als erste Eingabe einer Sitzung Gedächtnis — danach fügt der Hook nichts ein.";
+  else if (d.chore) banner = `Der Hook fügt hier <b>nichts</b> ein: ${MEM_CHORE[d.chore] || d.chore} braucht kein Gedächtnis. So sähe der Kontext sonst aus:`;
+  const counts = `${len}${d.budget ? " / " + d.budget : ""} Zeichen (≈ ${Math.round(len / 4)} Tokens) · ${recalled.length} Fakten abgerufen, ${shown} im Text`
+    + (recalled.length > shown ? `, ${recalled.length - shown} vom Budget gekürzt` : "")
+    + ` · ${(d.themes || []).length} Themen${d.identity_shown ? " · Identität" : ""}`;
+  const head = d.hook
+    ? `<div class="mem-ctx-h"><b>Was der Hook jetzt einfügt</b> <span class="muted">· ${counts}</span></div>
+       <div class="mem-ctx-h muted">Wie am Anfang einer Sitzung oder nach einer Verdichtung — danach gibt der Hook jeden Fakt, jedes Thema und die Identität nur einmal.</div>`
+    : `<div class="mem-ctx-h"><b>Zusammengesetzter Kontext</b> <span class="muted">· ${counts}</span></div>`;
+  const probes = (d.probes || []).length
+    ? `<div class="mem-ctx-h muted">Hinweis-Sonden: ${d.probes.map((p) => `„${escapeHtml(p)}“`).join(" · ")}</div>` : "";
+  const badge = (f) => (f.shown ? `<span class="mem-badge in" title="steht im eingefügten Text">im Text</span>`
+                                : `<span class="mem-badge cut" title="abgerufen, aber das Zeichenbudget war aufgebraucht">gekürzt</span>`)
+    + (f.probe ? ` <span class="mem-badge probe" title="über die Hinweis-Sonde „${escapeHtml(f.probe)}“ geholt">Sonde</span>` : "");
+  return (banner ? `<div class="mem-banner">${banner}</div>` : "") + head + probes
+    + `<pre class="mem-context">${d.header ? `<span class="mem-hdr">${escapeHtml(d.header)}</span>` : ""}${escapeHtml(d.context || "(leer)")}</pre>`
+    + (recalled.length ? `<h4 class="mem-h4">Abgerufene Fakten</h4>${memExplainHead(d.explain)}${memHitsHtml(recalled, d.explain, d.k, badge)}` : "");
 }
 
 function memTimelineHtml(groups) {
@@ -850,7 +926,7 @@ function renderMemoryView(data) {
     <div class="mem-recall">
       <input id="mem-q" type="text" placeholder="Woran soll ich mich erinnern? (z. B. welche Modelle nutzen wir?)" />
       <button id="mem-recall-btn">Abrufen</button>
-      <button id="mem-context-btn" class="secondary">Kontext bauen</button>
+      <button id="mem-context-btn" class="secondary" title="${data.mode ? "Was der Hook für diese Eingabe jetzt in den Prompt einfügen würde — mit den Einstellungen des Projekts" : "Den Drei-Stufen-Kontext für diese Anfrage zusammensetzen"}">${data.mode ? "Hook-Vorschau" : "Kontext bauen"}</button>
       <button id="mem-timeline-btn" class="secondary" title="Alle Gültigkeitsintervalle der passendsten Fakten">Verlauf</button>
     </div>
     <div class="mem-when-ctl">
@@ -1175,8 +1251,8 @@ function wireMemory() {
     try {
       if (mode === "context") {
         const d = await postJSON("/api/context", { query, as_of });
-        out.innerHTML = `<div class="mem-ctx-h muted">Zusammengesetzter Kontext${d.budget ? " · Budget " + d.budget + " Zeichen" : ""}${as_of ? " · gültig am " + as_of : ""}</div>
-          <pre class="mem-context">${escapeHtml(d.context || "(leer)")}</pre>`;
+        out.innerHTML = (as_of ? `<div class="mem-ctx-h muted">Zeitpunkt: gültig am ${as_of} — so hätte der Kontext damals ausgesehen</div>` : "")
+          + memHookHtml(d);
       } else if (mode === "timeline") {
         const d = await postJSON("/api/timeline", { query });
         out.innerHTML = memTimelineHtml(d.groups || []);
@@ -1184,7 +1260,7 @@ function wireMemory() {
         const d = await postJSON("/api/recall", { query, k: 8, as_of, known_at });
         const facts = d.facts || [];
         out.innerHTML = viewNote + (facts.length
-          ? `<div class="mem-facts">${facts.map(memFactRow).join("")}</div>`
+          ? memExplainHead(d.explain) + memHitsHtml(facts, d.explain, d.k)
           : `<p class="muted">Keine passenden Erinnerungen${view ? " zu diesem Zeitpunkt" : ""}.</p>`);
       }
     } catch (e) {

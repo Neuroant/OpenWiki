@@ -488,6 +488,7 @@ chat placeholder asking about "das Handbuch" on any corpus.
   what it replaced or was replaced by, and the session excerpt where it was said. **✅ (v0.114)**
 - **M4 — recall explained:** the parts of each hit's score (relevance, confidence, recency for volatile kinds,
   the BM25 and time-window boosts, the material discount) and a "what the hook would inject now" mode.
+  **✅ (v0.115)**
 - **M5 — memory over time:** facts learned, closed and forgotten per day as a dated chart.
 - **M6 — a memory map:** facts projected in 2-D, coloured by theme, clickable into M3.
 - **M7 — a maintenance panel:** the stale-kinds review list, forgetting candidates and the approval queue
@@ -955,6 +956,16 @@ The **genuine gaps**, measure-first as always:
   set (paired, 2 captures, no probes) the cue reached the context 8/16 → 16/16 and the constraint was applied
   7/16 → 12/16 (+5 / −0). Adopted: `[memory] context_k` (default 16) + `context_budget` 2,000 → 3,000; facts may
   use theme budget the themes don't need. `path-b-memory.md` §13.12.
+- **Recall explained — M4 of Direction K. ✅ (v0.115).** "Abrufen" in the Gedächtnis tab shows each fact's score
+  as its formula — cos × confidence × recency (only for the kinds that go stale) × provenance — with the BM25 and
+  time-window boosts, its dense rank, "hereingeholt" when an aid swapped it into the top k, and the facts the aids
+  pushed out (`recall(report=)`; the ranking itself is unchanged). "Kontext bauen" became the **hook preview**: what
+  the inject hook would add to this prompt now — the hook's own code (`cli.inject_context` / `hook_skips` /
+  `hook_probes`, shared with `_hook_inject`), its chore verdict, the exact text with its header, characters against
+  the budget, every recalled fact "im Text" or cut by the budget; a test checks the preview prints exactly what the
+  hook prints. On the dev memory the explanation showed at once what the scores had hidden: "what changed last week"
+  turns on the time window, whose +0.1 swapped three loosely related facts from the last two weeks (dense ranks 9,
+  13, 16) in for ranks 5–7.
 - **Inspecting the memory in the browser — M1–M3 of Direction K. ✅ (v0.114).** The Gedächtnis tab is rebuilt
   around the facts: a server-side **facts browser** (`GET /api/memory/facts` — words, status, source, session,
   volatile kind, theme, sort, paging; `openwiki/memory_browse.py`, pure) over every fact instead of the first 200;

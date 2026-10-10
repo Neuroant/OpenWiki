@@ -61,7 +61,8 @@ def test_context_for_leaves_out_what_was_given_and_reports_what_it_used(tmp_path
         again: dict = {}
         second = store.context_for("which port?", emb, identity="I am X.", k=2,
                                    exclude={"facts": used["facts"], "identity": True}, report=again)
-        assert second == "" and again == {"facts": [], "themes": [], "identity": False}
+        assert second == "" and {k: again[k] for k in ("facts", "themes", "identity")} == \
+            {"facts": [], "themes": [], "identity": False}
         partial = store.context_for("which port?", emb, identity="I am X.", k=2,
                                     exclude={"facts": used["facts"][:1]})
         assert partial.count("\n- ") == 1 and "I am X." in partial

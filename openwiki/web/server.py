@@ -750,6 +750,64 @@ class WikiWebApp:
             out["available"] = False
         return out
 
+    SESSION_WINDOW_MAX = 200     # turns per request of the session viewer (M8)
+
+    def _session_index(self):
+        if self.sessions is None:
+            raise RuntimeError("no session transcripts — session search belongs to Second Brain projects")
+        with self._sess_lock:                      # the corpus re-reads growing transcripts — one reader at a time
+            return self.sessions.index()
+
+    def sessions_overview(self) -> dict:
+        """The Memory tab's session list (Direction K, M8): the conversation by day (``sessions.session_days``) —
+        the turns said, how many by the user, the stretches of each transcript — with the facts learned that day
+        (``memory_browse.learned_at``, as the Dynamik chart counts them; a day with facts but no transcript, e.g.
+        an agent's writes, is listed too); undated sessions per file. ``available: false`` without session
+        transcripts. Read-only."""
+        if self.sessions is None:
+            return {"available": False}
+        from ..graph.temporal import format_date
+        from ..memory_browse import learned_at
+        from ..sessions import session_days
+        index = self._session_index()
+        out = session_days(index.turns)
+        learned: dict = {}
+        if self.graph is not None:
+            try:
+                for f in self.graph.list_assertions(limit=10 ** 9):
+                    t = learned_at(f)
+                    if t is not None:
+                        day = format_date(t)
+                        learned[day] = learned.get(day, 0) + 1
+            except Exception:                      # fail-soft: the list works without the fact counts
+                learned = {}
+        known = {d["day"] for d in out["days"]}
+        out["days"] += [{"day": day, "turns": 0, "user": 0, "ranges": []} for day in learned if day not in known]
+        for d in out["days"]:
+            d["facts"] = learned.get(d["day"], 0)
+        out["days"].sort(key=lambda d: d["day"], reverse=True)
+        return dict(out, available=True, turns=len(index), sessions=len(index.bounds))
+
+    def session_turns(self, session: str, start: int, end: int, full: bool = False) -> dict:
+        """A stretch of one session's turns for the session viewer (M8): ``start``…``end`` (at most
+        ``SESSION_WINDOW_MAX``), redacted and screened, long turns cut unless ``full``
+        (``SessionIndex.window``). ``KeyError`` for an unknown session. Read-only."""
+        index = self._session_index()
+        start, end = sorted((int(start), int(end)))
+        window = index.window(str(session), start, min(end, start + self.SESSION_WINDOW_MAX - 1), full=bool(full))
+        if window["first"] is None:
+            raise KeyError(f"unknown session {session!r}")
+        return window
+
+    def sessions_search(self, query: str, k: int = 8) -> dict:
+        """Full-text search over the session transcripts (M8, as ``openwiki sessions search``): the best turns
+        with one turn of context, verbatim and dated (``SessionIndex.search``). Read-only."""
+        query = (query or "").strip()
+        if not query:
+            raise ValueError("empty query")
+        index = self._session_index()
+        return {"query": query, "excerpts": index.search(query, k=max(1, min(int(k), 30)), context=1)}
+
     def _graph_db_path(self):
         path = getattr(self.graph, "db_path", None)
         if path is None and self.project is not None:
@@ -1104,6 +1162,30 @@ def make_handler(app: WikiWebApp):
                     except KeyError as exc:
                         return self._json({"error": str(exc)}, 404)
                     except RuntimeError as exc:  # no graph loaded
+                        return self._json({"error": str(exc)}, 503)
+                if path == "/api/sessions":
+                    return self._json(app.sessions_overview())
+                if path == "/api/sessions/turns":
+                    query = parse_qs(urlparse(self.path).query)
+                    try:
+                        return self._json(app.session_turns(query.get("session", [""])[0],
+                                                            int(query.get("from", ["0"])[0]),
+                                                            int(query.get("to", ["0"])[0]),
+                                                            full=query.get("full", [""])[0] == "1"))
+                    except ValueError:
+                        return self._json({"error": "from and to must be numbers"}, 400)
+                    except KeyError as exc:
+                        return self._json({"error": str(exc)}, 404)
+                    except RuntimeError as exc:  # no session transcripts
+                        return self._json({"error": str(exc)}, 503)
+                if path == "/api/sessions/search":
+                    query = parse_qs(urlparse(self.path).query)
+                    try:
+                        return self._json(app.sessions_search(query.get("q", [""])[0],
+                                                              int(query.get("k", ["8"])[0])))
+                    except ValueError as exc:     # empty query / bad k
+                        return self._json({"error": str(exc)}, 400)
+                    except RuntimeError as exc:   # no session transcripts
                         return self._json({"error": str(exc)}, 503)
                 if path == "/api/memory/map":
                     query = parse_qs(urlparse(self.path).query)

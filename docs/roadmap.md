@@ -493,7 +493,9 @@ chat placeholder asking about "das Handbuch" on any corpus.
 - **M6 — a memory map:** facts projected in 2-D, coloured by theme, clickable into M3. **✅ (v0.118)**
 - **M7 — a maintenance panel:** the stale-kinds review list, forgetting candidates and the approval queue
   together, with one-click close or forget through the journal. **✅ (v0.117)**
-- **M8 — sessions in the browser:** a session list and full-text search, linked from facts.
+- **M8 — sessions in the browser:** a session list and full-text search, linked from facts. **✅ (v0.119)**
+
+**Direction K is complete (M1–M8, v0.114–v0.119).**
 
 ### If you pick one thing next
 **Direction A's re-ranking pass** is the smallest change with an immediately measurable
@@ -956,6 +958,18 @@ The **genuine gaps**, measure-first as always:
   set (paired, 2 captures, no probes) the cue reached the context 8/16 → 16/16 and the constraint was applied
   7/16 → 12/16 (+5 / −0). Adopted: `[memory] context_k` (default 16) + `context_budget` 2,000 → 3,000; facts may
   use theme budget the themes don't need. `path-b-memory.md` §13.12.
+- **Sessions in the browser — M8 of Direction K. ✅ (v0.119).** The conversations behind the facts in the
+  Gedächtnis tab. On the dev project the corpus is one transcript — this whole development history, 4,449 turns
+  from 07-31 to 10-10 — while the memory holds 36 sessions (35 dated backfill / agent days and the live captures,
+  which carry the transcript's id). So the list is by **day**: per UTC day the turns, how many by the user, the
+  transcript stretches and the facts learned that day (M5's axis; `sessions.session_days`, `GET /api/sessions`).
+  A click opens the day in a **viewer** in the detail drawer (`SessionIndex.window`, `GET /api/sessions/turns`):
+  the turns as escaped plain text — never HTML, since a transcript holds pasted pages and mails — redacted and
+  screened like every excerpt, earlier / later turns on demand, long turns cut at 4,000 characters until asked,
+  the day's facts. Full-text search over every transcript is the recall box's **Sitzungen** button
+  (`GET /api/sessions/search`). Linked from facts: each "Wo es gesagt wurde" excerpt opens the viewer at its turn
+  ("← zurück zum Fakt" returns), a dated session links its day, and so does the Dynamik chart's day list. 43 days
+  listed in 1.8 s the first time (the 100+ MB transcript read once, then incrementally).
 - **A memory map — M6 of Direction K. ✅ (v0.118).** The facts browser gained a **Liste | Karte** toggle: every
   fact with an embedding laid out in 2-D by meaning, the facts the filters select coloured by theme, the other
   current facts as faint dots — the layout fixed, so a search or a theme shows *where* it lies; wheel zoom, drag pan,

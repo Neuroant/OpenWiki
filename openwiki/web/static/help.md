@@ -298,6 +298,17 @@ zusätzlich einen **Gedächtnis-Tier**: Fakten, die aus Sitzungen *erinnert* wer
     danach gibt der Hook jeden Fakt nur einmal;
   - **Verlauf** zeigt die ganze Geschichte der passendsten Fakten (jedes Gültigkeitsintervall,
     wann erfasst, aus welcher Sitzung);
+  - **Sitzungen** durchsucht die Protokolle früherer Sitzungen im Volltext — wörtlich, mit je einem
+    Beitrag davor und danach; **im Verlauf öffnen** zeigt das Gespräch an dieser Stelle;
+- **Sitzungen** (oben, aufklappbar) — das Gespräch hinter den Fakten, je Tag: wie viele Beiträge, wie
+  viele davon vom Nutzer, wie viele Fakten an dem Tag gelernt wurden. Ein Klick öffnet das Gespräch des
+  Tages rechts: Beitrag für Beitrag, mit **frühere / spätere Beiträge**, **ganz zeigen** für einen
+  gekürzten langen Beitrag und den an dem Tag gelernten Fakten. Alles wörtlich, aber Zugangsdaten
+  geschwärzt und anweisungsartige Sätze zurückgehalten, und als reiner Text (ein Protokoll kann
+  eingefügte Webseiten oder Mails enthalten). Auch ein Fakt führt dorthin: in seinen Details öffnet
+  **im Verlauf öffnen** die Stelle, an der er gesagt wurde (**← zurück zum Fakt** führt zurück), und
+  eine datierte Sitzung (`claude-…`, `agent-…`) hat **Gespräch dieses Tages**; ebenso die Tagesliste
+  unter Analyse → Dynamik;
 - zwei **Zeitpunkt-Felder**: **Stand am** — welche Fakten *galten* an diesem Tag
   (Gültigkeitszeit, `recall --as-of`); **Wissensstand vom** — was OpenWiki an diesem Tag
   *gespeichert hatte*, vor späteren Korrekturen (Transaktionszeit, `recall --known-at`);

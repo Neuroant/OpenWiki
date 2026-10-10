@@ -462,7 +462,8 @@ exact wording, numbers, commands, errors and reasons the remembered facts leave 
 `Project.transcripts`), the Claude Code folder of the repo (`--repo`, default the CWD) when its hooks are bound to this
 project, every session the capture hook has seen (`capture-state.json`), and the project's session sources; nothing is
 stored in the graph. Coding agents get it as the MCP tool **`wiki_sessions`** (`query`, `k`, `context`, `since`,
-`until`). Output is redacted (credentials) and screened — the sentences the P0 policy flags are withheld. Gated by
+`until`); people get it in the web UI's Gedächtnis tab (M8, v0.119: the **Sitzungen** list by day, a session viewer,
+the search button in the recall box, links from facts). Output is redacted (credentials) and screened — the sentences the P0 policy flags are withheld. Gated by
 `[memory] enabled`. **Measured** (`docs/path-b-memory.md` §13.25, arc42 ADR-44): on LoCoMo full text found a question's
 evidence turns more often than the embedding (top 5 ±1 turn: 68 % vs 59 %), and 5 excerpts next to the facts took
 overall J 62.9 → **78.2 %** (+276 / −41; single-hop 68.6 → 89.8 %) — ahead of same-size episodes (74.7 %); on
@@ -1051,6 +1052,12 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   match's id — the map), `/api/memory/map?method=auto|tsne|pca` = the **memory map** (M6, v0.118: every fact with an
   embedding in 2-D — `GraphStore.assertion_vectors` → `projection.project_2d(…, "tsne")`, `kept` =
   `neighbourhood_kept`, points via `memory_browse.map_points`; the layout cached per set of facts),
+  `/api/sessions` = the **session list** (M8, v0.119: `sessions_overview` → `sessions.session_days` — per UTC day the
+  turns, the user's turns, each transcript's stretch, and the facts learned that day via `learned_at`),
+  `/api/sessions/turns?session=&from=&to=&full=` = a stretch of one session for the **viewer** (`session_turns` →
+  `SessionIndex.window`: ≤ 200 turns, redacted + screened, long turns cut at 4,000 characters unless `full=1`; 404 for
+  an unknown session), `/api/sessions/search?q=&k=` = full-text session search (`sessions_search`, as `owiki sessions
+  search`),
   `/api/memory/fact/{id}` = one **fact's detail** (`memory_fact` → `GraphStore.fact_detail`: the attribute's history,
   supersedes / superseded-by, kind, theme — plus `said`, the session excerpts around when it was said, via the
   `SessionCorpus` `serve` passes in; 404 for an unknown id),
@@ -1127,7 +1134,13 @@ filters the facts by either), what it replaced / what replaced it — each click
 excerpts where it was said; Esc closes), and a collapsible **Pflege** (maintenance) panel near the top (M7,
 v0.117: the staged agent writes, the facts of kinds that go stale — "stimmt noch" re-affirms, "nicht mehr wahr"
 closes — and what the sleep pass would forget — "vergessen" / "alle vergessen"; each action goes through the
-journal and starts a fold, rows show "eingereiht" until it lands; `careHtml` / `loadCare` / `careAct`). Graceful
+journal and starts a fold, rows show "eingereiht" until it lands; `careHtml` / `loadCare` / `careAct`), and a
+collapsible **Sitzungen** list (M8, v0.119: the conversation by day — turns, the user's share, facts learned; a click
+opens the day in a **session viewer** in the same drawer: the turns as escaped plain text, never HTML — a transcript can
+hold pasted pages —, "frühere / spätere Beiträge", "ganz zeigen" for a cut turn, the day's facts; the recall box's
+**Sitzungen** button searches all transcripts; each "Wo es gesagt wurde" excerpt opens the viewer at its turn with
+"← zurück zum Fakt", a dated session links its day, and the Dynamik chart's day list "Gespräch dieses Tages";
+`loadSessions` / `openDay` / `openSessionAt` / `renderViewer`). Graceful
 empty states (no graph / Wiki mode / no sessions / no index). Backed by `GraphStore.memory_overview()` +
 `list_assertions()` + `fact_detail()` (`openwiki/memory_browse.py`: pure `filter_facts` / `said_at`) reusing
 `recall`/`context_for`/`memory_concepts`. The **System tab** (`renderSystem`
@@ -1320,6 +1333,9 @@ http — count, p50/p95, total time, token in/out) + a live recent-events table,
   (credentials redacted, the sentences the P0 policy flags withheld — `WITHHELD`); `SessionCorpus` (a project's
   session files; a growing transcript read from where the last read stopped, the index rebuilt only on change);
   `format_excerpts`. Used by `owiki sessions`, the MCP `wiki_sessions` tool and the LoCoMo harness (`--excerpts`).
+  **The browser (M8, v0.119):** `session_days(turns)` (the conversation by UTC day: turns, the user's turns, each
+  session's stretch `from`–`to`; undated sessions per file) and `SessionIndex.window(session, start, end, full)` (a
+  stretch for the viewer, `bounds` = each session's first / last turn).
   **Lessons (v0.111):** `FailureEpisode` + `failure_episodes(text, session)` (resolved tool failures of a Claude Code
   transcript, with Hermes' guardrails — `PROTOCOL_TOOLS`, `_OUTAGE`, `_bare_failure`, `_related`), `distill_lesson(chat,
   episode)` (`LESSON_SYSTEM`; redaction, `_NEGATIVE`, the P0 policy) and `recurring_lessons(items, vectors, threshold,

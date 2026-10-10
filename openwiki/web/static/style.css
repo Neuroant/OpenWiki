@@ -424,6 +424,18 @@ header {
 .md-ex-h { font-size: 11.5px; margin-bottom: 4px; }
 .md-turn { padding: 2px 0; white-space: pre-wrap; word-break: break-word; }
 .md-turn:not(.hit) { color: var(--muted); }
+/* Direction K, M8: sessions in the browser */
+.md-ex-open { font-size: 11.5px; margin-left: 6px; }
+.md-back { display: block; margin: 0 0 6px; font-size: 12.5px; }
+.sess-list { max-height: 360px; overflow-y: auto; }
+.sess-table td { font-size: 13px; }
+.sv-turns { margin: 6px 0; }
+.sv-turn { border-left: 3px solid var(--line); padding: 3px 0 5px 10px; margin: 6px 0; }
+.sv-turn.sv-user { border-left-color: var(--accent); }
+.sv-turn.hit { background: var(--accent-soft); border-left-color: var(--accent); }
+.sv-h { font-size: 11.5px; margin-bottom: 2px; }
+.sv-text { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; }
+.sv-more { display: block; margin: 6px auto; font-size: 12px; }
 .mb-svg { display: block; margin: 4px 0; }
 .mb-svg text { fill: var(--ink); }
 .mb-label { font-size: 11px; }

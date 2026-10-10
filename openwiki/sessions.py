@@ -132,6 +132,27 @@ class SessionIndex:
         self.turns = list(turns)
         self._bm = BM25([terms(t.line) for t in self.turns])
         self._at = {(t.session, t.n): i for i, t in enumerate(self.turns)}
+        self.bounds: dict = {}         # session → (first n, last n)
+        for t in self.turns:
+            lo, hi = self.bounds.get(t.session, (t.n, t.n))
+            self.bounds[t.session] = (min(lo, t.n), max(hi, t.n))
+
+    def window(self, session: str, start: int, end: int, full: bool = False, chars: int = 4000) -> dict:
+        """The turns ``start``…``end`` of one session as the browser shows them (the session viewer, M8): each
+        ``{"n", "ts", "speaker", "text", "chars", "cut"}``, text redacted and screened (``safe_text``) and — unless
+        ``full`` — cut after ``chars`` characters. ``first`` / ``last`` = the session's bounds (``None`` for an
+        unknown session)."""
+        first, last = self.bounds.get(session, (None, None))
+        out = []
+        for n in (range(max(start, first), min(end, last) + 1) if first is not None else ()):
+            j = self._at.get((session, n))
+            if j is None:
+                continue
+            t = self.turns[j]
+            text = t.text if full or len(t.text) <= chars else t.text[:chars]
+            out.append({"n": n, "ts": t.ts, "speaker": t.speaker, "text": safe_text(text), "chars": len(t.text),
+                        "cut": len(text) < len(t.text)})
+        return {"session": session, "first": first, "last": last, "turns": out}
 
     def __len__(self) -> int:
         return len(self.turns)
@@ -238,6 +259,31 @@ class SessionCorpus:
             out.append({"session": p.stem, "file": str(p), "turns": len(turns),
                         "first": min(dated) if dated else "", "last": max(dated) if dated else ""})
         return sorted(out, key=lambda s: s["last"])
+
+
+def session_days(turns: Iterable[Turn]) -> dict:
+    """The conversation by day — the Memory tab's session list (M8): ``{"days": [{"day", "turns", "user",
+    "ranges": [{"session", "from", "to", "turns"}]}], "undated": [{"session", "turns"}]}``, newest day first. A
+    range is a stretch of one session's consecutive turns on that (UTC) day — a long-running session spans many
+    days, and a backfilled memory session (``claude-YYYY-MM-DD``) is exactly one; ``user`` counts the turns whose
+    speaker is the user."""
+    days: dict = {}
+    undated: dict = {}
+    for t in turns:
+        day = (t.ts or "")[:10]
+        if len(day) != 10:
+            undated[t.session] = undated.get(t.session, 0) + 1
+            continue
+        d = days.setdefault(day, {"day": day, "turns": 0, "user": 0, "ranges": []})
+        d["turns"] += 1
+        d["user"] += t.speaker.lower() == "user"
+        last = next((r for r in reversed(d["ranges"]) if r["session"] == t.session), None)
+        if last is not None and last["to"] == t.n - 1:
+            last["to"], last["turns"] = t.n, last["turns"] + 1
+        else:
+            d["ranges"].append({"session": t.session, "from": t.n, "to": t.n, "turns": 1})
+    return {"days": sorted(days.values(), key=lambda d: d["day"], reverse=True),
+            "undated": [{"session": s, "turns": n} for s, n in sorted(undated.items())]}
 
 
 def format_excerpts(excerpts: Sequence[dict], header: bool = True) -> str:

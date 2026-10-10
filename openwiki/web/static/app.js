@@ -704,7 +704,9 @@ function memPeriodHtml(d) {
         <span class="mem-when">${memInterval(f)}</span> ${memStatusBadge(f.status)}${f.source === "material" ? " " + MEM_MATERIAL_BADGE : ""}</div>`).join("")}</div>`;
   };
   const any = d.counts.learned + d.counts.closed + d.counts.retracted + d.counts.forgotten;
-  return `<div class="ot-period-h"><b>${range}</b> <button class="linkish" id="ot-close" title="Schließen">✕</button></div>` + (any
+  const talk = d.bucket === "day"                // M8: the conversation of that day, in the Gedächtnis tab
+    ? ` <button class="linkish" data-goto-day="${memDate(d.start)}" title="das Gespräch dieses Tages im Reiter Gedächtnis öffnen">Gespräch dieses Tages</button>` : "";
+  return `<div class="ot-period-h"><span><b>${range}</b>${talk}</span> <button class="linkish" id="ot-close" title="Schließen">✕</button></div>` + (any
     ? group("learned", "Gelernt", "") + OT_CAUSES.map(([k, l, note]) => group(k, l[0].toUpperCase() + l.slice(1), note)).join("")
     : `<p class="muted">Nichts gelernt oder beendet.</p>`);
 }
@@ -737,6 +739,8 @@ function wireOverTime(ot) {
     }
     const fact = e.target.closest(".ot-fact[data-fact]");
     if (fact) { memState.pendingFact = fact.dataset.fact; activateTab("memory"); }   // the detail lives in Gedächtnis
+    const talk = e.target.closest("[data-goto-day]");
+    if (talk) { memState.pendingDay = talk.dataset.gotoDay; activateTab("memory"); }   // … and the session viewer
   });
 }
 
@@ -1036,6 +1040,7 @@ function renderMemoryView(data) {
       <button id="mem-recall-btn">Abrufen</button>
       <button id="mem-context-btn" class="secondary" title="${data.mode ? "Was der Hook für diese Eingabe jetzt in den Prompt einfügen würde — mit den Einstellungen des Projekts" : "Den Drei-Stufen-Kontext für diese Anfrage zusammensetzen"}">${data.mode ? "Hook-Vorschau" : "Kontext bauen"}</button>
       <button id="mem-timeline-btn" class="secondary" title="Alle Gültigkeitsintervalle der passendsten Fakten">Verlauf</button>
+      <button id="mem-sess-btn" class="secondary" title="Volltextsuche in den Protokollen früherer Sitzungen — wörtlich, mit dem Gespräch drumherum">Sitzungen</button>
     </div>
     <div class="mem-when-ctl">
       <label title="Welche Fakten galten an diesem Tag? (Gültigkeitszeit)">Stand am
@@ -1068,6 +1073,9 @@ function renderMemoryView(data) {
     <details id="mem-care" class="mem-care"${staged.length ? " open" : ""}>
       <summary><b>Pflege</b> <span class="muted" id="care-sum">${staged.length ? `· ${staged.length} zur Freigabe` : ""}</span></summary>
       ${stagedBox}<div id="care-review"></div><div id="care-forget"></div></details>
+    <details id="mem-sess" class="mem-care">
+      <summary><b>Sitzungen</b> <span class="muted" id="sess-sum"></span></summary>
+      <div id="sess-body"><p class="muted">Wird geladen…</p></div></details>
     <h3 class="mem-h3">Abruf &amp; Kontext</h3>
     ${recallBox}
     <h3 class="mem-h3" id="mf-anchor">Fakten <span class="muted" id="mf-count"></span>
@@ -1441,16 +1449,191 @@ function memBars(group, selected) {
       <span class="mb-key mb-forgotten"></span>vergessen</div>`;
 }
 
-function memExcerptsHtml(said) {
+function memExcerptHtml(e, back) {        // one session excerpt, with a link into the session viewer (M8)
+  const hit = (e.turns.find((t) => t.hit) || e.turns[0] || { n: 0 }).n;
+  return `<div class="md-ex"><div class="md-ex-h muted">${escapeHtml((e.ts || "").slice(0, 16).replace("T", " "))} · ${escapeHtml(String(e.session || "").slice(0, 12))}
+      <button class="linkish md-ex-open" data-open-session="${escapeHtml(String(e.session))}" data-open-n="${hit}"${back ? ` data-back="${escapeHtml(back)}"` : ""} title="das Gespräch an dieser Stelle öffnen">im Verlauf öffnen</button></div>
+    ${e.turns.map((t) => `<div class="md-turn${t.hit ? " hit" : ""}"><b>${escapeHtml(t.speaker || "")}:</b> ${escapeHtml(t.text)}</div>`).join("")}</div>`;
+}
+
+function memExcerptsHtml(said, back) {
   if (!said || !said.available)
     return `<p class="muted">Die Sitzungssuche ist hier nicht verfügbar — sie braucht ein Projekt im Second-Brain-Modus.</p>`;
   if (!said.excerpts.length) return `<p class="muted">Keine passende Stelle in den Transkripten gefunden.</p>`;
   const note = said.in_window
     ? `Beste Treffer der Sitzungssuche um ${memDate(said.at)} — wörtlich, Zugangsdaten geschwärzt.`
     : `Kein Treffer um ${memDate(said.at)} — die besten Treffer aus allen Sitzungen.`;
-  return `<div class="muted md-note">${note}</div>` + said.excerpts.map((e) => `
-    <div class="md-ex"><div class="md-ex-h muted">${escapeHtml((e.ts || "").slice(0, 16).replace("T", " "))} · ${escapeHtml(String(e.session || "").slice(0, 12))}</div>
-      ${e.turns.map((t) => `<div class="md-turn${t.hit ? " hit" : ""}"><b>${escapeHtml(t.speaker || "")}:</b> ${escapeHtml(t.text)}</div>`).join("")}</div>`).join("");
+  return `<div class="muted md-note">${note}</div>` + said.excerpts.map((e) => memExcerptHtml(e, back)).join("");
+}
+
+function memSessHitsHtml(excerpts) {
+  if (!excerpts.length) return `<p class="muted">Kein Beitrag einer früheren Sitzung passt.</p>`;
+  return `<div class="mem-ctx-h muted">Volltextsuche in den Sitzungsprotokollen — die besten Beiträge mit je einem Beitrag davor und danach, wörtlich, Zugangsdaten geschwärzt.</div>`
+    + excerpts.map((e) => memExcerptHtml(e, null)).join("");
+}
+
+// -- Memory · sessions in the browser (Direction K, M8) ----------------------
+// The conversations behind the facts, by day — what was said, how much by the user, the facts learned that day — and
+// a viewer for any stretch of a session. Redacted and screened like everything shown, and plain text: a transcript can
+// hold pasted web pages or mails, so nothing in it is rendered as HTML.
+
+const memSess = { data: null, loading: null, view: null };
+const SV_STEP = 40;                         // turns loaded per step in the viewer
+
+function svSpeaker(s) { return s === "User" ? "Nutzer" : s === "Assistant" ? "Assistent" : (s || "—"); }
+
+async function loadSessions() {
+  if (!$("#mem-sess")) return null;
+  try {
+    memSess.loading = memSess.loading || getJSON("/api/sessions");
+    memSess.data = await memSess.loading;
+  } catch (e) {
+    memSess.loading = null;
+    if ($("#sess-body")) $("#sess-body").innerHTML = `<p class="muted">Fehler: ${escapeHtml(e.message)}</p>`;
+    return null;
+  }
+  renderSessions();
+  return memSess.data;
+}
+
+function renderSessions() {
+  const d = memSess.data, body = $("#sess-body");
+  if (!body || !d) return;
+  if (!d.available) {
+    $("#sess-sum").textContent = "· keine Protokolle";
+    body.innerHTML = `<p class="muted">Keine Sitzungsprotokolle — die Sitzungssuche gehört zu Projekten im Second-Brain-Modus (die Claude-Code-Transkripte des Repos, <code>[memory] transcripts</code>, Sitzungsquellen).</p>`;
+    return;
+  }
+  const active = d.days.filter((x) => x.turns).length;
+  $("#sess-sum").textContent = `· ${d.turns} Beiträge an ${active} ${active === 1 ? "Tag" : "Tagen"} · ${d.sessions} ${d.sessions === 1 ? "Protokoll" : "Protokolle"}`;
+  const rows = d.days.map((x) => `<tr class="mem-click" data-day="${escapeHtml(x.day)}" title="${x.turns ? "das Gespräch dieses Tages öffnen" : "kein Protokoll an diesem Tag — die gelernten Fakten zeigen"}">
+      <td>${escapeHtml(x.day)}</td>
+      <td>${x.turns ? `${x.turns} <span class="muted">(${x.user} vom Nutzer)</span>` : `<span class="muted">—</span>`}</td>
+      <td>${x.facts || `<span class="muted">—</span>`}</td>
+      <td class="muted">${x.ranges.map((r) => escapeHtml(String(r.session).slice(0, 8))).join(", ")}</td></tr>`).join("");
+  const undated = (d.undated || []).map((s) => `<tr class="mem-click" data-open-session="${escapeHtml(s.session)}" data-open-n="0">
+      <td>ohne Datum</td><td>${s.turns}</td><td></td><td class="muted">${escapeHtml(String(s.session).slice(0, 24))}</td></tr>`).join("");
+  body.innerHTML = `<div class="muted an-note">Je Tag (UTC) die Beiträge aller Protokolle und die an diesem Tag gelernten Fakten; ein Klick öffnet das Gespräch. Die Volltextsuche über alle Protokolle: Feld „Abruf &amp; Kontext“, Knopf <b>Sitzungen</b>.</div>
+    <div class="sess-list"><table class="mem-table sess-table"><thead><tr><th>Tag</th><th>Beiträge</th><th>Fakten gelernt</th><th>Protokoll</th></tr></thead>
+      <tbody>${rows}${undated}</tbody></table></div>`;
+}
+
+function svTurnHtml(t, hit) {
+  return `<div class="sv-turn ${t.speaker === "User" ? "sv-user" : "sv-other"}${t.n === hit ? " hit" : ""}" id="sv-n-${t.n}">
+    <div class="sv-h"><b>${escapeHtml(svSpeaker(t.speaker))}</b> <span class="muted">${escapeHtml((t.ts || "").slice(11, 16))} · #${t.n}</span></div>
+    <div class="sv-text">${escapeHtml(t.text)}</div>
+    ${t.cut ? `<button class="linkish sv-full" data-n="${t.n}">ganz zeigen (${t.chars.toLocaleString("de-DE")} Zeichen)</button>` : ""}</div>`;
+}
+
+function renderViewer() {
+  const v = memSess.view, box = $("#mem-detail");
+  if (!v || !box) return;
+  const lo = v.turns.length ? v.turns[0].n : v.from, hi = v.turns.length ? v.turns[v.turns.length - 1].n : v.to;
+  const day = v.day || ((v.turns[0] && v.turns[0].ts) || "").slice(0, 10);
+  const others = (v.ranges || []).filter((r) => r.session !== v.session);
+  box.innerHTML = `<div class="md-head"><div class="md-title"><b>Gespräch</b>${day ? ` · ${escapeHtml(day)}` : ""}
+        <span class="muted">· Protokoll <code>${escapeHtml(String(v.session).slice(0, 12))}</code></span></div>
+      <button class="linkish md-close" title="Schließen (Esc)">✕</button></div>
+    ${v.back ? `<button class="linkish md-back" data-fact="${escapeHtml(v.back)}">← zurück zum Fakt</button>` : ""}
+    <div class="muted md-note">Beiträge ${lo}–${hi} von ${v.first}–${v.last} · wörtlich, Zugangsdaten geschwärzt, anweisungsartige Sätze zurückgehalten.</div>
+    ${v.day && v.facts ? `<button class="linkish" data-facts-day="${escapeHtml(v.day)}">${v.facts} an diesem Tag gelernte Fakten</button><div id="sv-facts"></div>` : ""}
+    ${others.length ? `<div class="muted md-note">Weitere Protokolle an diesem Tag: ${others.map((r) => `<button class="linkish" data-open-session="${escapeHtml(r.session)}" data-open-n="${r.from}">${escapeHtml(String(r.session).slice(0, 8))} (${r.turns})</button>`).join(" ")}</div>` : ""}
+    ${lo > v.first ? `<button class="secondary sv-more" data-dir="-1">↑ ${Math.min(SV_STEP, lo - v.first)} frühere Beiträge</button>` : ""}
+    <div class="sv-turns">${v.turns.map((t) => svTurnHtml(t, v.hit)).join("") || `<p class="muted">—</p>`}</div>
+    ${hi < v.last ? `<button class="secondary sv-more" data-dir="1">↓ ${Math.min(SV_STEP, v.last - hi)} spätere Beiträge</button>` : ""}`;
+}
+
+async function openSession(v) {
+  const box = $("#mem-detail");
+  if (!box) return;
+  markMapFact(null);
+  box.hidden = false;
+  box.innerHTML = `<p class="muted">Wird geladen…</p>`;
+  let w;
+  try {
+    w = await getJSON(`/api/sessions/turns?session=${encodeURIComponent(v.session)}&from=${v.from}&to=${v.to}`);
+  } catch (e) {
+    box.innerHTML = `<button class="linkish md-close">✕</button><p class="muted">Fehler: ${escapeHtml(e.message)}</p>`;
+    return;
+  }
+  memSess.view = Object.assign({}, v, { first: w.first, last: w.last, turns: w.turns });
+  renderViewer();
+  const hit = v.hit != null ? document.getElementById("sv-n-" + v.hit) : null;
+  if (hit) hit.scrollIntoView({ block: "center" }); else box.scrollTop = 0;
+}
+
+function openSessionAt(session, n, back) {
+  return openSession({ session, from: Math.max(0, n - 12), to: n + 12, hit: n, back: back || null });
+}
+
+async function openDay(day) {
+  const d = memSess.data || await loadSessions();
+  const box = $("#mem-detail");
+  if (!box || !d || !d.available) return;
+  const x = (d.days || []).find((y) => y.day === day) || { day, turns: 0, facts: 0, ranges: [] };
+  if (!x.ranges.length) {                   // facts learned that day, but no transcript of it
+    markMapFact(null);
+    memSess.view = null;
+    box.hidden = false;
+    box.innerHTML = `<div class="md-head"><div class="md-title"><b>${escapeHtml(day)}</b></div><button class="linkish md-close" title="Schließen (Esc)">✕</button></div>
+      <p class="muted">Kein Protokoll an diesem Tag${x.facts ? ` — aber ${x.facts} gelernte Fakten (etwa aus Schreibvorgängen des Agenten oder einem Tag, dessen Transkript fehlt)` : ""}.</p>
+      ${x.facts ? `<button class="linkish" data-facts-day="${escapeHtml(day)}">die gelernten Fakten zeigen</button><div id="sv-facts"></div>` : ""}`;
+    return;
+  }
+  const r = x.ranges[0];
+  return openSession({ session: r.session, from: r.from, to: Math.min(r.to, r.from + 2 * SV_STEP - 1), day,
+                       ranges: x.ranges, facts: x.facts });
+}
+
+async function svMore(dir) {
+  const v = memSess.view, box = $("#mem-detail");
+  if (!v || !v.turns.length || !box) return;
+  const lo = v.turns[0].n, hi = v.turns[v.turns.length - 1].n;
+  const [from, to] = dir < 0 ? [Math.max(v.first, lo - SV_STEP), lo - 1] : [hi + 1, Math.min(v.last, hi + SV_STEP)];
+  if (to < from) return;
+  let w;
+  try {
+    w = await getJSON(`/api/sessions/turns?session=${encodeURIComponent(v.session)}&from=${from}&to=${to}`);
+  } catch (e) {
+    alert(`Fehler: ${e.message}`);
+    return;
+  }
+  const anchor = dir < 0 ? box.querySelector(".sv-turn") : null;   // earlier turns go above: keep the view still
+  const top = anchor ? anchor.getBoundingClientRect().top : 0;
+  v.turns = dir < 0 ? w.turns.concat(v.turns) : v.turns.concat(w.turns);
+  renderViewer();
+  const again = anchor ? document.getElementById(anchor.id) : null;
+  if (again) box.scrollTop += again.getBoundingClientRect().top - top;
+}
+
+async function svFull(n) {
+  const v = memSess.view;
+  if (!v) return;
+  try {
+    const w = await getJSON(`/api/sessions/turns?session=${encodeURIComponent(v.session)}&from=${n}&to=${n}&full=1`);
+    const i = v.turns.findIndex((t) => t.n === n);
+    if (w.turns[0] && i >= 0) {
+      v.turns[i] = w.turns[0];
+      const el = document.getElementById("sv-n-" + n);
+      if (el) el.outerHTML = svTurnHtml(w.turns[0], v.hit);
+    }
+  } catch (e) {
+    alert(`Fehler: ${e.message}`);
+  }
+}
+
+async function svFacts(day) {
+  const box = $("#sv-facts");
+  if (!box) return;
+  if (box.innerHTML) { box.innerHTML = ""; return; }
+  try {
+    const d = await getJSON(`/api/analyze/memory/period?start=${Date.parse(day + "T00:00:00Z") / 1000}&bucket=day`);
+    box.innerHTML = `<div class="ot-list">${(d.learned || []).map((f) => `<div class="ot-fact mem-click" data-fact="${escapeHtml(f.id)}">
+      <b>${escapeHtml(f.subject)}</b> ${escapeHtml(f.predicate)} <b>${escapeHtml(f.object)}</b> ${memStatusBadge(f.status)}</div>`).join("")
+      || `<p class="muted">—</p>`}</div>`;
+  } catch (e) {
+    box.innerHTML = `<p class="muted">Fehler: ${escapeHtml(e.message)}</p>`;
+  }
 }
 
 function memLinkList(items) {
@@ -1472,6 +1655,8 @@ function memDetailHtml(d) {
                       : "zeitlos — im Abruf zählt nur die Relevanz"),
     row("Sitzung", f.session_id
       ? `<button class="linkish" data-session="${escapeHtml(f.session_id)}" title="Nur die Fakten dieser Sitzung zeigen"><code>${escapeHtml(f.session_id)}</code></button>`
+        + ((/\d{4}-\d{2}-\d{2}/.exec(f.session_id) || [])[0]   // a backfilled or agent day: its conversation (M8)
+          ? ` · <button class="linkish" data-day="${/\d{4}-\d{2}-\d{2}/.exec(f.session_id)[0]}" title="das Gespräch dieses Tages öffnen">Gespräch dieses Tages</button>` : "")
       : "?"),
     f.forgotten_at != null ? row("Vergessen", `${memDate(f.forgotten_at)} · ${escapeHtml(f.forgotten || "")}`) : "",
     d.theme ? row("Thema", `<button class="linkish md-theme" data-tid="${d.theme.id}">${escapeHtml(d.theme.label || "Thema")}</button>
@@ -1486,7 +1671,7 @@ function memDetailHtml(d) {
     <h4>Verlauf dieses Attributs <span class="muted">· ${d.group.length} ${d.group.length === 1 ? "Wert" : "Werte"}</span></h4>
     ${memBars(d.group, f.id)}
     ${links}
-    <h4>Wo es gesagt wurde</h4>${memExcerptsHtml(d.said)}`;
+    <h4>Wo es gesagt wurde</h4>${memExcerptsHtml(d.said, f.id)}`;
 }
 
 async function openFact(id) {
@@ -1518,6 +1703,16 @@ function wireMemoryBrowse() {
     const view = t.closest(".mf-view");
     if (view) return memSetView(view.dataset.view);
     if (t.closest(".md-close")) return closeFact();
+    const open = t.closest("[data-open-session]");      // the session viewer (M8): at a turn, a day, more turns
+    if (open) return openSessionAt(open.dataset.openSession, Number(open.dataset.openN || 0), open.dataset.back);
+    const day = t.closest("[data-day]");
+    if (day) return openDay(day.dataset.day);
+    const factsDay = t.closest("[data-facts-day]");
+    if (factsDay) return svFacts(factsDay.dataset.factsDay);
+    const svm = t.closest(".sv-more");
+    if (svm) return svMore(Number(svm.dataset.dir));
+    const svf = t.closest(".sv-full");
+    if (svf) return svFull(Number(svf.dataset.n));
     const theme = t.closest("[data-tid]");             // not data-theme: <html data-theme> is the colour scheme
     if (theme) { closeFact(); return memSetFilter("theme", Number(theme.dataset.tid)); }
     const session = t.closest("[data-session]");
@@ -1554,6 +1749,8 @@ function wireMemoryBrowse() {
   }
   memState.view = memStoredView();
   Object.assign(memMap, { data: null, loading: null, view: null, sel: null });   // fresh facts on each visit
+  Object.assign(memSess, { data: null, loading: null, view: null });
+  loadSessions();                                 // the session list's summary, in the background
   memApplyView();
   fetchFacts();
 }
@@ -1578,6 +1775,10 @@ async function renderMemory() {
   if (memState.pendingFact) {                 // a fact clicked elsewhere (the Dynamik chart) opens here
     openFact(memState.pendingFact);
     memState.pendingFact = null;
+  }
+  if (memState.pendingDay) {                  // "Gespräch dieses Tages" from the Dynamik chart (M8)
+    openDay(memState.pendingDay);
+    memState.pendingDay = null;
   }
 }
 
@@ -1618,6 +1819,9 @@ function wireMemory() {
       } else if (mode === "timeline") {
         const d = await postJSON("/api/timeline", { query });
         out.innerHTML = memTimelineHtml(d.groups || []);
+      } else if (mode === "sessions") {
+        const d = await getJSON(`/api/sessions/search?q=${encodeURIComponent(query)}&k=8`);
+        out.innerHTML = memSessHitsHtml(d.excerpts || []);
       } else {
         const d = await postJSON("/api/recall", { query, k: 8, as_of, known_at });
         const facts = d.facts || [];
@@ -1632,6 +1836,7 @@ function wireMemory() {
   $("#mem-recall-btn").addEventListener("click", () => run("recall"));
   $("#mem-context-btn").addEventListener("click", () => run("context"));
   $("#mem-timeline-btn").addEventListener("click", () => run("timeline"));
+  $("#mem-sess-btn").addEventListener("click", () => run("sessions"));
   $("#mem-when-clear").addEventListener("click", () => { asOf.value = ""; knownAt.value = ""; run("recall"); });
   q.addEventListener("keydown", (e) => { if (e.key === "Enter") run("recall"); });
 }

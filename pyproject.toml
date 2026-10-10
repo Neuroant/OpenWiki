@@ -8,7 +8,7 @@ build-backend = "setuptools.build_meta"
 # LICENSE file) before any public PyPI upload; the release workflow is manual for that reason.
 [project]
 name = "owiki"
-version = "0.117.0"
+version = "0.118.0"
 description = "OpenWiki — build agentic wikis: turn documents into a searchable, graph-linked, agent-editable knowledge base (local Ollama)."
 readme = "README.md"
 requires-python = ">=3.10,<3.14"
@@ -48,8 +48,9 @@ dev = [
     "twine>=5.0",
 ]
 # World-model analysis (`owiki analyze`). The core coupling metrics are pure NumPy; this
-# extra enriches them (community coherence: silhouette + ARI) and backs the forthcoming
-# 2D semantic map (projections). Opt-in — the base install stays lean (ADR-4/5).
+# extra enriches them (community coherence: silhouette + ARI) and backs the memory map's
+# t-SNE projection (without it: PCA, which keeps almost no neighbourhoods). Opt-in — the
+# base install stays lean (ADR-4/5).
 analysis = [
     "scikit-learn>=1.3",
 ]

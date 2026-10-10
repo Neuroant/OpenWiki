@@ -1070,11 +1070,13 @@ function renderMemoryView(data) {
       ${stagedBox}<div id="care-review"></div><div id="care-forget"></div></details>
     <h3 class="mem-h3">Abruf &amp; Kontext</h3>
     ${recallBox}
-    <h3 class="mem-h3" id="mf-anchor">Fakten <span class="muted" id="mf-count"></span></h3>
+    <h3 class="mem-h3" id="mf-anchor">Fakten <span class="muted" id="mf-count"></span>
+      <span class="mf-views" role="group" aria-label="Ansicht"><button class="mf-view" data-view="list" title="als Tabelle">Liste</button><button class="mf-view" data-view="map" title="alle Fakten als Karte — Nähe heißt ähnliche Bedeutung, Farbe das Thema">Karte</button></span></h3>
     ${memBrowseControls()}
     <div id="mf-theme"></div>
     <div id="mf-list"><p class="muted">Wird geladen…</p></div>
     <div id="mf-pager" class="mf-pager"></div>
+    <div id="mf-map" hidden></div>
     ${memThemesBlock(memState.themes)}
     <div id="mem-detail" class="mem-detail" hidden></div></div>`;
 }
@@ -1227,6 +1229,7 @@ async function fetchFacts() {
                                   kind: memState.kind, session: memState.session, sort: memState.sort,
                                   offset: memState.offset, limit: memState.limit });
   if (memState.theme != null) p.set("theme", memState.theme);
+  if (memState.view === "map") p.set("ids", "1");      // the map highlights every match, not one page
   let d;
   try {
     d = await getJSON("/api/memory/facts?" + p);
@@ -1234,7 +1237,141 @@ async function fetchFacts() {
     if ($("#mf-list")) $("#mf-list").innerHTML = `<p class="muted">Fehler: ${escapeHtml(e.message)}</p>`;
     return;
   }
-  if ($("#mf-list")) renderFactList(d);
+  if (!$("#mf-list")) return;
+  renderFactList(d);
+  if (memState.view === "map") renderMap(d.ids || []);
+}
+
+// -- Memory · map (Direction K, M6) -----------------------------------------
+// Every fact with an embedding, projected to 2-D: close means similar in meaning. t-SNE (scikit-learn) keeps about
+// half of each fact's 10 nearest neighbours; PCA, the fallback without it, almost none — the map says which it got.
+// The facts the browser's filters select are coloured by theme, the other current facts stay as faint dots; the
+// layout never moves with the filters.
+
+const memMap = { data: null, loading: null, ids: new Set(), view: null, dragged: false, sel: null };
+const MAP_W = 1000, MAP_H = 620, MAP_PAD = 14, MAP_R = 3.2;
+
+function themeColor(id) {    // golden-angle hues: 172 themes, neighbours rarely share a colour
+  return id == null ? "#adb5bd" : `hsl(${Math.round((id * 137.508) % 360)} 62% 50%)`;
+}
+
+function memStoredView() {
+  try { return localStorage.getItem("mf-view") === "map" ? "map" : "list"; } catch (e) { return "list"; }
+}
+
+function memApplyView() {
+  const map = memState.view === "map";
+  document.querySelectorAll(".mf-view").forEach((b) => b.classList.toggle("active", b.dataset.view === memState.view));
+  if ($("#mf-list")) $("#mf-list").hidden = map;
+  if ($("#mf-pager")) $("#mf-pager").hidden = map;
+  if ($("#mf-map")) $("#mf-map").hidden = !map;
+}
+
+function memSetView(view) {
+  memState.view = view === "map" ? "map" : "list";
+  try { localStorage.setItem("mf-view", memState.view); } catch (e) { /* a per-viewer convenience only */ }
+  memApplyView();
+  fetchFacts();
+}
+
+async function renderMap(ids) {
+  const box = $("#mf-map");
+  if (!box) return;
+  memMap.ids = new Set(ids);
+  if (!memMap.data) {
+    box.innerHTML = `<p class="muted">Karte wird berechnet… (beim ersten Mal einige Sekunden)</p>`;
+    try {
+      memMap.loading = memMap.loading || getJSON("/api/memory/map");
+      memMap.data = await memMap.loading;
+    } catch (e) {
+      memMap.loading = null;
+      if ($("#mf-map")) $("#mf-map").innerHTML = `<p class="muted">Fehler: ${escapeHtml(e.message)}</p>`;
+      return;
+    }
+  }
+  drawMap();
+}
+
+function drawMap() {
+  const box = $("#mf-map"), d = memMap.data;
+  if (!box || !d) return;
+  const pts = d.points || [];
+  if (!pts.length) { box.innerHTML = `<p class="muted">Keine Fakten mit Einbettung.</p>`; return; }
+  const v = memMap.view || (memMap.view = { x: 0, y: 0, w: MAP_W, h: MAP_H });
+  const r = MAP_R * v.w / MAP_W;
+  const labels = new Map(memState.themes.map((t) => [t.id, t.label]));
+  const sx = (x) => (MAP_PAD + x * (MAP_W - 2 * MAP_PAD)).toFixed(1);
+  const sy = (y) => (MAP_PAD + y * (MAP_H - 2 * MAP_PAD)).toFixed(1);
+  const ctx = [], on = [];
+  for (const p of pts) {
+    const hit = memMap.ids.has(p.id);
+    if (!hit && p.status !== "current") continue;           // closed / forgotten facts only when selected
+    const state = p.status !== "current" ? ` · ${(MEM_STATUS[p.status] || [0, p.status])[1]}` : "";
+    const title = `${p.subject} ${p.predicate} ${p.object} — ${p.theme != null ? "Thema: " + (labels.get(p.theme) || p.theme) : "ohne Thema"}${state}`;
+    const paint = !hit ? "" : p.status === "current" ? ` fill="${themeColor(p.theme)}"` : ` fill="none" stroke="${themeColor(p.theme)}"`;
+    (hit ? on : ctx).push(`<circle class="${hit ? "mp-on" : "mp-ctx"}${memMap.sel === p.id ? " sel" : ""}" data-fact="${escapeHtml(p.id)}"
+      cx="${sx(p.x)}" cy="${sy(p.y)}" r="${(hit ? r : r * 0.6).toFixed(2)}"${paint}><title>${escapeHtml(title)}</title></circle>`);
+  }
+  const pct = Math.round((d.kept || 0) * 100);
+  const how = d.method === "tsne"
+    ? `t-SNE — von den 10 nächsten Nachbarn eines Fakts liegen auf der Karte im Mittel ${pct} % wieder unter seinen 10 nächsten`
+    : `<b>PCA</b> — scikit-learn fehlt (<code>pip install openwiki[analysis]</code>): die Karte erhält nur ${pct} % der Nachbarschaften und taugt kaum zur Orientierung`;
+  box.innerHTML = `<div class="mem-ctx-h muted">${how}. ${on.length} von ${pts.length} Fakten gewählt — farbig nach Thema (grau: ohne Thema, hohl: nicht mehr aktuell), die übrigen aktuellen als blasse Punkte. Mausrad zoomt, Ziehen verschiebt, Doppelklick setzt zurück; ein Klick öffnet den Fakt.</div>
+    <svg id="mf-svg" class="mf-svg" viewBox="${v.x.toFixed(1)} ${v.y.toFixed(1)} ${v.w.toFixed(1)} ${v.h.toFixed(1)}" role="img" aria-label="Gedächtniskarte">${ctx.join("")}${on.join("")}</svg>`;
+  wireMap();
+}
+
+function setMapView() {
+  const svg = $("#mf-svg"), v = memMap.view;
+  if (!svg) return;
+  svg.setAttribute("viewBox", `${v.x.toFixed(1)} ${v.y.toFixed(1)} ${v.w.toFixed(1)} ${v.h.toFixed(1)}`);
+  const r = MAP_R * v.w / MAP_W;                          // points keep their size on screen at any zoom
+  svg.querySelectorAll("circle").forEach((c) => c.setAttribute("r", (c.classList.contains("mp-on") ? r : r * 0.6).toFixed(2)));
+}
+
+function wireMap() {
+  const svg = $("#mf-svg");
+  if (!svg) return;
+  const local = (e) => {
+    const b = svg.getBoundingClientRect(), v = memMap.view;
+    return [v.x + (e.clientX - b.left) / b.width * v.w, v.y + (e.clientY - b.top) / b.height * v.h];
+  };
+  svg.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    const [px, py] = local(e), v = memMap.view;
+    const w = Math.min(MAP_W, Math.max(MAP_W / 40, v.w * (e.deltaY < 0 ? 0.8 : 1.25))), h = w * MAP_H / MAP_W;
+    memMap.view = { x: px - (px - v.x) * w / v.w, y: py - (py - v.y) * h / v.h, w, h };
+    setMapView();
+  }, { passive: false });
+  let drag = null;
+  svg.addEventListener("pointerdown", (e) => {
+    memMap.dragged = false;
+    drag = { x: e.clientX, y: e.clientY, v: { ...memMap.view }, id: e.pointerId, on: false };
+  });
+  svg.addEventListener("pointermove", (e) => {
+    if (!drag) return;
+    const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+    if (!drag.on && Math.hypot(dx, dy) < 4) return;        // a click stays a click (it opens the fact)
+    if (!drag.on) { drag.on = true; svg.setPointerCapture(drag.id); svg.classList.add("dragging"); }
+    const b = svg.getBoundingClientRect();
+    memMap.view = { ...drag.v, x: drag.v.x - dx / b.width * drag.v.w, y: drag.v.y - dy / b.height * drag.v.h };
+    setMapView();
+  });
+  const end = () => { if (drag && drag.on) memMap.dragged = true; drag = null; svg.classList.remove("dragging"); };
+  svg.addEventListener("pointerup", end);
+  svg.addEventListener("pointercancel", end);
+  svg.addEventListener("dblclick", (e) => {
+    if (e.target.closest("[data-fact]")) return;
+    memMap.view = { x: 0, y: 0, w: MAP_W, h: MAP_H };
+    setMapView();
+  });
+}
+
+function markMapFact(id) {   // the fact open in the detail drawer, ringed on the map
+  memMap.sel = id;
+  document.querySelectorAll("#mf-svg circle.sel").forEach((c) => c.classList.remove("sel"));
+  const c = id ? document.querySelector(`#mf-svg circle[data-fact="${CSS.escape(id)}"]`) : null;
+  if (c) { c.classList.add("sel"); c.parentNode.appendChild(c); }
 }
 
 function renderFactList(d) {
@@ -1355,6 +1492,7 @@ function memDetailHtml(d) {
 async function openFact(id) {
   const box = $("#mem-detail");
   if (!box || !id) return;
+  markMapFact(id);
   box.hidden = false;
   box.innerHTML = `<p class="muted">Wird geladen…</p>`;
   try {
@@ -1368,6 +1506,7 @@ async function openFact(id) {
 function closeFact() {
   const box = $("#mem-detail");
   if (box) box.hidden = true;
+  markMapFact(null);
 }
 
 function wireMemoryBrowse() {
@@ -1375,6 +1514,9 @@ function wireMemoryBrowse() {
   if (!root) return;
   root.addEventListener("click", (e) => {
     const t = e.target;
+    if (memMap.dragged && t.closest("#mf-svg")) { memMap.dragged = false; return; }   // the end of a pan
+    const view = t.closest(".mf-view");
+    if (view) return memSetView(view.dataset.view);
     if (t.closest(".md-close")) return closeFact();
     const theme = t.closest("[data-tid]");             // not data-theme: <html data-theme> is the colour scheme
     if (theme) { closeFact(); return memSetFilter("theme", Number(theme.dataset.tid)); }
@@ -1410,6 +1552,9 @@ function wireMemoryBrowse() {
     document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeFact(); });
     memState.keyWired = true;
   }
+  memState.view = memStoredView();
+  Object.assign(memMap, { data: null, loading: null, view: null, sel: null });   // fresh facts on each visit
+  memApplyView();
   fetchFacts();
 }
 

@@ -1698,6 +1698,22 @@ class GraphStore:
         out.sort(key=lambda a: -(a["last_seen"] or a["created_at"]))
         return out[:limit]
 
+    def assertion_vectors(self) -> tuple:
+        """Every remembered fact's embedding — ``(ids, matrix n × dim)``, rows unit-length — for the memory map
+        (M6). Facts without an embedding, or of another dimension than most (an older embedder), are left out.
+        Read-only."""
+        recs = [r for r in self._load_assertions(with_emb=True) if r.get("emb") is not None]
+        if not recs:
+            return [], np.zeros((0, 0), dtype=np.float32)
+        dims: dict = {}
+        for r in recs:
+            dims[len(r["emb"])] = dims.get(len(r["emb"]), 0) + 1
+        dim = max(dims, key=dims.get)
+        recs = [r for r in recs if len(r["emb"]) == dim]
+        vecs = np.asarray([r["emb"] for r in recs], dtype=np.float32)
+        vecs /= np.linalg.norm(vecs, axis=1, keepdims=True) + 1e-12
+        return [r["id"] for r in recs], vecs
+
     _DETAIL_FIELDS = _A_BASE + _A_CONF + _A_B7 + _A_P0 + _A_SLEEP + ("status",)
 
     def fact_detail(self, fact_id: str, now: Optional[int] = None) -> Optional[dict]:

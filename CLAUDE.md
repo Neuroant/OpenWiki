@@ -1047,7 +1047,10 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   (`WikiWebApp.metrics()` → `metrics.COLLECTOR.snapshot()`), `/api/memory` = the Path B
   memory-tier overview (`memory_info()`: identity + counts + themes + browsable assertions),
   `/api/memory/facts?q=&status=&source=&session=&kind=&theme=&sort=&offset=&limit=` = the **facts browser**
-  (`memory_facts` → `memory_browse.filter_facts` over every fact; `status=` empty = all states),
+  (`memory_facts` → `memory_browse.filter_facts` over every fact; `status=` empty = all states; `ids=1` adds every
+  match's id — the map), `/api/memory/map?method=auto|tsne|pca` = the **memory map** (M6, v0.118: every fact with an
+  embedding in 2-D — `GraphStore.assertion_vectors` → `projection.project_2d(…, "tsne")`, `kept` =
+  `neighbourhood_kept`, points via `memory_browse.map_points`; the layout cached per set of facts),
   `/api/memory/fact/{id}` = one **fact's detail** (`memory_fact` → `GraphStore.fact_detail`: the attribute's history,
   supersedes / superseded-by, kind, theme — plus `said`, the session excerpts around when it was said, via the
   `SessionCorpus` `serve` passes in; 404 for an unknown id),
@@ -1114,7 +1117,10 @@ budget, every recalled fact marked "im Text" / "gekürzt" (`memHookHtml`); **Ver
 history) with two **B7 date pickers** — *Stand am*
 (valid time → `as_of`) and *Wissensstand vom* (transaction time → `known_at`) — a server-side **facts
 browser** (Direction K M2, v0.114: word search, status / source / session / volatile-kind filters, sort, paging over
-every fact — `/api/memory/facts`), the `MemoryConcept` **themes** as a compact searchable list whose rows filter the
+every fact — `/api/memory/facts`) with a **Liste | Karte** toggle (M6, v0.118: the map — hand-rolled SVG, every fact
+by meaning (t-SNE), the browser's selection coloured by theme (golden-angle hues), the other current facts as faint
+dots, the layout fixed; wheel zoom, drag pan, a click opens the detail, the open fact ringed; `renderMap` / `drawMap` /
+`wireMap`, the view remembered per browser), the `MemoryConcept` **themes** as a compact searchable list whose rows filter the
 facts, and a **fact detail drawer** (M3, `openFact` → `/api/memory/fact/{id}`: hand-rolled SVG validity bars for the
 attribute's whole history with a "today" line, source, confidence, last seen, kind, session and theme (a click
 filters the facts by either), what it replaced / what replaced it — each clickable — and the verbatim session
@@ -1275,8 +1281,11 @@ http — count, p50/p95, total time, token in/out) + a live recent-events table,
   `neighbor_overlap` (graph-vs-kNN Jaccard), `graph_reach` (the headline non-semantic-fraction), and
   `community_coherence` (silhouette + ARI — needs scikit-learn, the `[analysis]` extra; degrades to
   `{"available": False}` without it). `projection.py` (P2) is `project_2d(vecs, method)` — pure-NumPy
-  **PCA** (SVD, min-max to [0,1]) always available, **UMAP** via the extra (`method="auto"`/`"umap"`,
-  falls back to PCA). Read-only + additive (never mutates graph/index) + fake-testable
+  **PCA** (SVD, min-max to [0,1]) always available, **UMAP** if `umap-learn` is installed (`method="auto"`/`"umap"`,
+  falls back to PCA), **t-SNE** via the extra (`method="tsne"`, cosine, ≥ `TSNE_MIN_POINTS`; falls back to PCA — the
+  memory map's choice: on 1,794 dev facts PCA kept 4 % of a fact's 10 nearest neighbours and mixed the themes
+  (silhouette −0.48), t-SNE kept 51 %, themes +0.09 vs +0.14 in the full space) and `neighbourhood_kept(vecs, coords,
+  k)` (that share — random ≈ k/n). Read-only + additive (never mutates graph/index) + fake-testable
   (`tests/test_analysis.py`). `gaps.py` (P3) is the actionable half — `analyze_gaps(index, graph, top)`
   mines ranked, **offline** improvement candidates (`link_candidates`/`redundant_pages`/`isolated_pages`/
   `entity_merge_candidates`, the last via `difflib` + a `_numbered_siblings` precision guard) off the

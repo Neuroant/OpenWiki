@@ -29,14 +29,15 @@ def fact_text(f: dict) -> str:
 
 def filter_facts(rows, q: str = "", status: str = "current", source: str = "", session: str = "",
                  kind: str = "", theme: Optional[int] = None, assignment: Optional[dict] = None,
-                 sort: str = "recent", offset: int = 0, limit: int = 50) -> dict:
+                 sort: str = "recent", offset: int = 0, limit: int = 50, with_ids: bool = False) -> dict:
     """The facts browser over ``rows`` (as ``GraphStore.list_assertions`` returns them).
 
     ``q``: every word must occur in "subject predicate object" (case-insensitive); ``status``: one of
     ``STATUSES``, ``""`` = all; ``source``: ``user`` / ``assistant`` / ``material``; ``session``: a substring of the
     session id; ``kind``: ``volatile`` (any kind ``memory.volatile_kind`` names), ``timeless`` (none) or one kind;
     ``theme``: a theme id, matched through ``assignment`` (fact id → theme id). Each fact gains ``kind`` and
-    ``theme``. Sorted by ``sort`` (``SORTS``) and paged: ``{"total", "offset", "limit", "facts"}``."""
+    ``theme``. Sorted by ``sort`` (``SORTS``) and paged: ``{"total", "offset", "limit", "facts"}`` — with
+    ``with_ids`` also ``ids``, every matching fact's id (the memory map highlights the whole selection, M6)."""
     assignment = assignment or {}
     words = (q or "").lower().split()
     out = []
@@ -66,7 +67,27 @@ def filter_facts(rows, q: str = "", status: str = "current", source: str = "", s
     out.sort(key=_SORT_KEYS.get(sort, _SORT_KEYS["recent"]))
     offset = max(0, int(offset))
     limit = max(1, min(int(limit), MAX_LIMIT))
-    return {"total": len(out), "offset": offset, "limit": limit, "facts": out[offset:offset + limit]}
+    page = {"total": len(out), "offset": offset, "limit": limit, "facts": out[offset:offset + limit]}
+    if with_ids:
+        page["ids"] = [f.get("id") for f in out]
+    return page
+
+
+def map_points(rows, positions: dict, assignment: Optional[dict] = None) -> list:
+    """The memory map's points (M6): each fact that has a 2-D position (``positions``: fact id → ``(x, y)`` in
+    ``[0, 1]``; a fact without an embedding has none) with what the map colours and filters by — ``theme``,
+    ``status``, ``kind``, ``source`` — and its text."""
+    assignment = assignment or {}
+    out = []
+    for row in rows:
+        pos = positions.get(row.get("id"))
+        if pos is None:
+            continue
+        out.append({"id": row["id"], "x": round(float(pos[0]), 4), "y": round(float(pos[1]), 4),
+                    "theme": assignment.get(row["id"]), "status": row.get("status"), "kind": volatile_kind(row),
+                    "source": row.get("source"), "subject": row.get("subject"), "predicate": row.get("predicate"),
+                    "object": row.get("object")})
+    return out
 
 
 def review_queue(rows, offset: int = 0, limit: int = 20) -> dict:

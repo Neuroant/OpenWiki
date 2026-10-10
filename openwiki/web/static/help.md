@@ -305,7 +305,16 @@ zusätzlich einen **Gedächtnis-Tier**: Fakten, die aus Sitzungen *erinnert* wer
 - die **Fakten** — alle, nicht nur die ersten: ein Suchfeld (jedes Wort muss vorkommen) und Filter
   für Status (aktuell / alle / überholt / zurückgezogen / geplant / vergessen), Quelle (Nutzer /
   Assistent / Material), Sitzung und Art (die Arten, die von selbst veralten: Pläne, Zahlen, Lücken,
-  Versionen, laufende Zustände), dazu Sortierung und Blättern;
+  Versionen, laufende Zustände), dazu Sortierung und Blättern. **Liste | Karte** schaltet auf die
+  **Gedächtniskarte**: alle Fakten nach ihrer Bedeutung in zwei Dimensionen — nah beieinander heißt
+  ähnlich. Was die Filter wählen, ist farbig nach Thema (grau: ohne Thema, hohl: nicht mehr aktuell),
+  die übrigen aktuellen Fakten bleiben als blasse Punkte stehen; die Karte verschiebt sich nicht, wenn
+  die Filter wechseln. So sieht man, wo ein Suchbegriff oder ein Thema liegt — und ob ein Thema
+  zusammenhält oder einzelne Fakten weit abseits liegen. Mausrad zoomt, Ziehen verschiebt, Doppelklick
+  setzt zurück, ein Klick öffnet den Fakt. Über der Karte steht, wie viel sie von den echten
+  Nachbarschaften erhält (t-SNE: etwa die Hälfte der 10 nächsten Nachbarn eines Fakts). Ohne
+  scikit-learn (`pip install openwiki[analysis]`) bleibt nur PCA, und die Karte sagt, dass sie dann
+  kaum taugt;
 - die **Themen** als kompakte, durchsuchbare Liste — ein Klick auf ein Thema zeigt nur seine Fakten
   (✕ hebt den Filter auf), „▸" klappt die Zusammenfassung auf;
 - ein Klick auf einen Fakt öffnet seine **Details**: der **Verlauf dieses Attributs** als Balken auf

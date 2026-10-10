@@ -382,7 +382,23 @@ header {
 .mf-pager button { padding: 4px 12px; border: 1px solid var(--accent); background: var(--panel); color: var(--accent);
   border-radius: 7px; cursor: pointer; font: inherit; }
 .mf-pager button:disabled { opacity: .4; cursor: default; }
+.mf-pager[hidden] { display: none; }
 .mem-badge.kind { background: #fff4e6; color: #a35a00; }
+/* Direction K, M6: the memory map */
+.mf-views { display: inline-flex; margin-left: 12px; vertical-align: 2px; }
+.mf-view { font: inherit; font-size: 12px; font-weight: 600; padding: 2px 11px; cursor: pointer;
+  border: 1px solid var(--accent); background: var(--panel); color: var(--accent); }
+.mf-view:first-child { border-radius: 7px 0 0 7px; }
+.mf-view:last-child { border-radius: 0 7px 7px 0; border-left: 0; }
+.mf-view.active { background: var(--accent); color: #fff; }
+.mf-svg { width: 100%; height: auto; display: block; background: var(--panel); border: 1px solid var(--line);
+  border-radius: 8px; cursor: grab; touch-action: none; user-select: none; }
+.mf-svg.dragging { cursor: grabbing; }
+.mf-svg circle { vector-effect: non-scaling-stroke; }
+.mf-svg .mp-ctx { fill: var(--muted); opacity: .22; }
+.mf-svg .mp-on { opacity: .88; cursor: pointer; stroke-width: 1.2; }
+.mf-svg .mp-on:hover { stroke: var(--ink); stroke-width: 1.5; opacity: 1; }
+.mf-svg .sel { stroke: var(--ink); stroke-width: 2.5; opacity: 1; }
 .mt-q { width: 100%; max-width: 360px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px;
   font: inherit; font-size: 13px; margin-bottom: 8px; background: var(--panel); color: var(--ink); }
 .mt-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 2px 18px; }

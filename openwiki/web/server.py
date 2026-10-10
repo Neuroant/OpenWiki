@@ -42,6 +42,8 @@ class WikiWebApp:
         self.sessions = sessions         # a sessions.SessionCorpus: where a fact was said (Memory tab, M3)
         self.dry_run = dry_run           # no writes: agent edits are previewed, the maintenance panel is read-only
         self._sess_lock = threading.Lock()
+        self._map_lock = threading.Lock()    # the memory map's layout (M6): t-SNE takes seconds, computed once per set
+        self._map_cache = None
         self.index = index
         self.tools = tools or WikiTools(wiki_dir, index=index, dry_run=dry_run)
         self.agent = agent
@@ -675,16 +677,45 @@ class WikiWebApp:
         }
 
     def memory_facts(self, q: str = "", status: str = "current", source: str = "", session: str = "",
-                     kind: str = "", theme=None, sort: str = "recent", offset: int = 0, limit: int = 50) -> dict:
+                     kind: str = "", theme=None, sort: str = "recent", offset: int = 0, limit: int = 50,
+                     with_ids: bool = False) -> dict:
         """The Memory tab's facts browser (Direction K, M2): every remembered fact, searched, filtered, sorted and
-        paged server-side (``memory_browse.filter_facts``). Read-only."""
+        paged server-side (``memory_browse.filter_facts``); ``with_ids`` adds every match's id (the map, M6).
+        Read-only."""
         if self.graph is None:
             raise RuntimeError("no graph")
         from ..memory_browse import filter_facts
         rows = self.graph.list_assertions(limit=10 ** 9)
         return filter_facts(rows, q=q, status=status, source=source, session=session, kind=kind,
                             theme=None if theme in (None, "") else int(theme),
-                            assignment=self.graph.concept_assignment(), sort=sort, offset=offset, limit=limit)
+                            assignment=self.graph.concept_assignment(), sort=sort, offset=offset, limit=limit,
+                            with_ids=with_ids)
+
+    MAP_METHODS = ("auto", "tsne", "pca")
+
+    def memory_map(self, method: str = "auto") -> dict:
+        """The memory map (Direction K, M6): every fact with an embedding projected to 2-D — ``auto`` = t-SNE
+        (scikit-learn, the ``[analysis]`` extra), which keeps neighbourhoods; PCA, the fallback, does not
+        (measured on the dev memory: 51 % vs 4 % of a fact's 10 nearest neighbours kept). ``{"method", "kept",
+        "points"}`` — ``kept`` = ``projection.neighbourhood_kept``, each point with its theme, status, kind,
+        source and text (``memory_browse.map_points``). The layout is cached per set of facts and method (t-SNE
+        takes seconds); the attributes are read fresh. Read-only."""
+        if self.graph is None:
+            raise RuntimeError("no graph")
+        from ..analysis.projection import neighbourhood_kept, project_2d
+        from ..memory_browse import map_points
+        method = method if method in self.MAP_METHODS else "auto"
+        rows = self.graph.list_assertions(limit=10 ** 9)
+        key = (method, hash(frozenset(r["id"] for r in rows)))
+        with self._map_lock:
+            if self._map_cache is None or self._map_cache[0] != key:
+                ids, vecs = self.graph.assertion_vectors()
+                coords, used = project_2d(vecs, "tsne" if method == "auto" else method)
+                self._map_cache = (key, dict(zip(ids, coords.tolist())), used,
+                                   neighbourhood_kept(vecs, coords) if len(ids) else 0.0)
+            _, positions, used, kept = self._map_cache
+        return {"method": used, "kept": kept,
+                "points": map_points(rows, positions, self.graph.concept_assignment())}
 
     def memory_fact(self, fact_id: str) -> dict:
         """One fact's detail (Direction K, M3): ``GraphStore.fact_detail`` — the fact, its attribute's history,
@@ -1064,7 +1095,7 @@ def make_handler(app: WikiWebApp):
                             q=arg("q"), status=arg("status", "current"), source=arg("source"),
                             session=arg("session"), kind=arg("kind"), theme=arg("theme") or None,
                             sort=arg("sort", "recent"), offset=int(arg("offset", "0")),
-                            limit=int(arg("limit", "50"))))
+                            limit=int(arg("limit", "50")), with_ids=arg("ids") == "1"))
                     except RuntimeError as exc:  # no graph loaded
                         return self._json({"error": str(exc)}, 503)
                 if path.startswith("/api/memory/fact/"):
@@ -1072,6 +1103,12 @@ def make_handler(app: WikiWebApp):
                         return self._json(app.memory_fact(unquote(path[len("/api/memory/fact/"):])))
                     except KeyError as exc:
                         return self._json({"error": str(exc)}, 404)
+                    except RuntimeError as exc:  # no graph loaded
+                        return self._json({"error": str(exc)}, 503)
+                if path == "/api/memory/map":
+                    query = parse_qs(urlparse(self.path).query)
+                    try:
+                        return self._json(app.memory_map(query.get("method", ["auto"])[0]))
                     except RuntimeError as exc:  # no graph loaded
                         return self._json({"error": str(exc)}, 503)
                 if path == "/api/memory/maintenance":

@@ -490,7 +490,7 @@ chat placeholder asking about "das Handbuch" on any corpus.
   the BM25 and time-window boosts, the material discount) and a "what the hook would inject now" mode.
   **✅ (v0.115)**
 - **M5 — memory over time:** facts learned, closed and forgotten per day as a dated chart. **✅ (v0.116)**
-- **M6 — a memory map:** facts projected in 2-D, coloured by theme, clickable into M3.
+- **M6 — a memory map:** facts projected in 2-D, coloured by theme, clickable into M3. **✅ (v0.118)**
 - **M7 — a maintenance panel:** the stale-kinds review list, forgetting candidates and the approval queue
   together, with one-click close or forget through the journal. **✅ (v0.117)**
 - **M8 — sessions in the browser:** a session list and full-text search, linked from facts.
@@ -956,6 +956,16 @@ The **genuine gaps**, measure-first as always:
   set (paired, 2 captures, no probes) the cue reached the context 8/16 → 16/16 and the constraint was applied
   7/16 → 12/16 (+5 / −0). Adopted: `[memory] context_k` (default 16) + `context_budget` 2,000 → 3,000; facts may
   use theme budget the themes don't need. `path-b-memory.md` §13.12.
+- **A memory map — M6 of Direction K. ✅ (v0.118).** The facts browser gained a **Liste | Karte** toggle: every
+  fact with an embedding laid out in 2-D by meaning, the facts the filters select coloured by theme, the other
+  current facts as faint dots — the layout fixed, so a search or a theme shows *where* it lies; wheel zoom, drag pan,
+  a click opens the M3 detail with the fact ringed on the map. The projection was measured first, on the 1,794 current
+  dev facts: PCA kept 4.4 % of a fact's 10 nearest neighbours (random: 0.6 %) and mixed the themes (silhouette −0.48),
+  t-SNE (scikit-learn, already the `[analysis]` extra) kept 50.8 % and separated them about as well as the full space
+  (+0.09 vs +0.14) in 2.5 s — so the map uses t-SNE (`projection.project_2d(…, "tsne")`; `"auto"` stays as it was for
+  the Analyse tab), states the share it keeps (`neighbourhood_kept`), and with PCA says it hardly helps. On all 2,299
+  facts: 5 s the first time, cached per set of facts (0.04 s). A first look already showed what it is for: the 34
+  facts of "relation-aware GraphRAG implementation" form one tight cluster — and one lies far away.
 - **A maintenance panel — M7 of Direction K. ✅ (v0.117).** The Gedächtnis tab gathers what needs a person's look
   in one collapsible **Pflege** panel: the agent's staged writes (the approval step, moved in), the current facts of
   kinds that go stale — the `analyze memory --review` list, most likely stale kinds first and, within a kind, the

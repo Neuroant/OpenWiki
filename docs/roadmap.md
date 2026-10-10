@@ -492,7 +492,7 @@ chat placeholder asking about "das Handbuch" on any corpus.
 - **M5 — memory over time:** facts learned, closed and forgotten per day as a dated chart. **✅ (v0.116)**
 - **M6 — a memory map:** facts projected in 2-D, coloured by theme, clickable into M3.
 - **M7 — a maintenance panel:** the stale-kinds review list, forgetting candidates and the approval queue
-  together, with one-click close or forget through the journal.
+  together, with one-click close or forget through the journal. **✅ (v0.117)**
 - **M8 — sessions in the browser:** a session list and full-text search, linked from facts.
 
 ### If you pick one thing next
@@ -956,6 +956,17 @@ The **genuine gaps**, measure-first as always:
   set (paired, 2 captures, no probes) the cue reached the context 8/16 → 16/16 and the constraint was applied
   7/16 → 12/16 (+5 / −0). Adopted: `[memory] context_k` (default 16) + `context_budget` 2,000 → 3,000; facts may
   use theme budget the themes don't need. `path-b-memory.md` §13.12.
+- **A maintenance panel — M7 of Direction K. ✅ (v0.117).** The Gedächtnis tab gathers what needs a person's look
+  in one collapsible **Pflege** panel: the agent's staged writes (the approval step, moved in), the current facts of
+  kinds that go stale — the `analyze memory --review` list, most likely stale kinds first and, within a kind, the
+  least recently confirmed first — with **stimmt noch** (re-affirm: confidence reinforced, `last_seen` now, so the
+  fact moves to the end) and **nicht mehr wahr** (close: valid time ends now, kept as history), and what the sleep
+  pass would forget, with **vergessen** (archive, reason `reviewed`). Each action goes through the journal pinned
+  to the fact's id — a retire-only `remember` record, or the new `confirm` / `forget` ops (`journal.append_ids`,
+  `GraphStore.confirm`) — and starts a fold, so it lands in seconds; rows read "eingereiht" until then, and
+  `--dry-run` / Wiki mode keep the panel read-only. Checked on a copy of the dev memory (313 facts to review: 40
+  plans, 25 counts, 59 gaps, 180 versions, 9 states; no forgetting candidates left after the housekeeping): one
+  confirm and one close folded in 0.08 s of write lock, the confirmed plan moved from first to last among 39.
 - **Memory over time — M5 of Direction K. ✅ (v0.116).** The Dynamik view gained a dated chart: per day the facts
   learned (above the line) and those that stopped being current (below: closed — the world changed —, retracted,
   forgotten), with the current facts as a line; a click on a day lists its facts, each opening the M3 detail

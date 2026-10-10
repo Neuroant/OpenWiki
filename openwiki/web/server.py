@@ -38,8 +38,9 @@ class WikiWebApp:
                  agent: Optional[WikiAgent] = None, tools: Optional[WikiTools] = None,
                  graph=None, dry_run: bool = False, project=None, on_approved=None, sessions=None) -> None:
         self.wiki_dir = Path(wiki_dir)
-        self.on_approved = on_approved   # v0.110: starts a fold after staged memory writes were approved
+        self.on_approved = on_approved   # starts a fold after memory writes were queued (approvals; M7 maintenance)
         self.sessions = sessions         # a sessions.SessionCorpus: where a fact was said (Memory tab, M3)
+        self.dry_run = dry_run           # no writes: agent edits are previewed, the maintenance panel is read-only
         self._sess_lock = threading.Lock()
         self.index = index
         self.tools = tools or WikiTools(wiki_dir, index=index, dry_run=dry_run)
@@ -765,6 +766,59 @@ class WikiWebApp:
         done = reject_staged(staged_path(path), rejected_path(path), ids)
         return {"rejected": [r["id"] for r in done]}
 
+    MAINTAIN_ACTIONS = ("close", "confirm", "forget")
+
+    def memory_maintenance(self, offset: int = 0, limit: int = 20) -> dict:
+        """The Memory tab's maintenance panel (M7): what needs a person's look, together — ``staged`` agent
+        writes awaiting approval, ``review`` (current facts of a kind that goes stale, the most likely stale
+        kinds first, least recently confirmed first — ``memory_browse.review_queue``, paged), ``forget`` (what
+        the sleep pass would forget — ``forget_candidates``) and ``queued`` (ids already queued per action,
+        until the fold applies them). Read-only."""
+        path = self._graph_db_path()
+        if self.graph is None or path is None:
+            raise RuntimeError("no graph loaded")
+        from ..graph.journal import journal_path, queued_ids
+        from ..memory_browse import review_queue
+        rows = self.graph.list_assertions(limit=10**9, include_superseded=True)
+        status = {r["id"]: r["status"] for r in rows}
+        forget = [dict(c, status=status.get(c["id"])) for c in self.graph.forget_candidates()]
+        return {"staged": self.memory_staged(), "review": review_queue(rows, offset, limit),
+                "forget": forget, "queued": queued_ids(journal_path(path)),
+                "writable": not self.dry_run and (self.project is None or self.project.memory_enabled)}
+
+    def memory_maintain(self, action: str, ids) -> dict:
+        """Act on facts from the maintenance panel (M7): ``close`` (no longer true — its valid time ends now),
+        ``confirm`` (still true — re-affirmed as if said again) or ``forget`` (archived, reason ``reviewed``).
+        Each goes through the journal, pinned by id, and a fold is started (as after an approval), so it lands
+        in seconds. ``ValueError`` for an unknown action or no ids; ``RuntimeError`` without a graph, in a dry
+        run or in Wiki mode."""
+        if action not in self.MAINTAIN_ACTIONS:
+            raise ValueError(f"unknown action {action!r} (one of {', '.join(self.MAINTAIN_ACTIONS)})")
+        ids = [str(i).strip() for i in (ids or []) if str(i).strip()]
+        if not ids:
+            raise ValueError("name the facts (ids)")
+        path = self._graph_db_path()
+        if self.graph is None or path is None:
+            raise RuntimeError("no graph loaded")
+        if self.dry_run:
+            raise RuntimeError("dry run: the memory is not changed")
+        if self.project is not None and not self.project.memory_enabled:
+            raise RuntimeError("Wiki mode: the memory is off ([memory] enabled = false)")
+        from ..graph.journal import append_ids, append_remember, journal_path
+        journal = journal_path(path)
+        if action == "close":            # a retire-only record: the fold closes them at its time
+            append_remember(journal, f"review-{time.strftime('%Y-%m-%d', time.gmtime())}", [], retire=ids,
+                            agent=True)
+        else:
+            append_ids(journal, action, ids, reason="reviewed" if action == "forget" else None)
+        folding = False
+        if self.on_approved is not None:  # starts a fold worker — the same as after an approval
+            try:
+                folding = self.on_approved() is not False
+            except Exception:
+                folding = False
+        return {"action": action, "queued": ids, "folding": folding}
+
     def memory_recall(self, query: str, k: int = 8, include_superseded: bool = False,
                       as_of=None, known_at=None) -> dict:
         """The remembered facts most relevant to a query (decay-weighted, B6 activation tier),
@@ -1020,6 +1074,15 @@ def make_handler(app: WikiWebApp):
                         return self._json({"error": str(exc)}, 404)
                     except RuntimeError as exc:  # no graph loaded
                         return self._json({"error": str(exc)}, 503)
+                if path == "/api/memory/maintenance":
+                    query = parse_qs(urlparse(self.path).query)
+                    try:
+                        return self._json(app.memory_maintenance(int(query.get("offset", ["0"])[0]),
+                                                                 int(query.get("limit", ["20"])[0])))
+                    except ValueError:
+                        return self._json({"error": "offset and limit must be numbers"}, 400)
+                    except RuntimeError as exc:  # no graph loaded
+                        return self._json({"error": str(exc)}, 503)
                 if path == "/api/communities":
                     return self._json({"communities": app.communities()})
                 if path == "/api/analyze":
@@ -1165,6 +1228,13 @@ def make_handler(app: WikiWebApp):
                         return self._json({"error": "name the staged writes (ids) or pass all"}, 400)
                     return self._json(app.memory_decide(path.rsplit("/", 1)[1],
                                                         None if data.get("all") else [str(i) for i in ids]))
+                if path == "/api/memory/maintain":
+                    try:
+                        return self._json(app.memory_maintain(str(data.get("action") or ""), data.get("ids")))
+                    except ValueError as exc:     # unknown action / no ids
+                        return self._json({"error": str(exc)}, 400)
+                    except RuntimeError as exc:   # no graph / dry run / Wiki mode
+                        return self._json({"error": str(exc)}, 409)
                 if path == "/api/timeline":
                     query = (data.get("query") or "").strip()
                     if not query:

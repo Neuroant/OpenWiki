@@ -69,6 +69,28 @@ def filter_facts(rows, q: str = "", status: str = "current", source: str = "", s
     return {"total": len(out), "offset": offset, "limit": limit, "facts": out[offset:offset + limit]}
 
 
+def review_queue(rows, offset: int = 0, limit: int = 20) -> dict:
+    """The maintenance panel's review list (M7): the current facts of a kind that goes stale on its own
+    (``memory.volatile_kind`` — the ``analyze memory --review`` rule), the most likely stale kinds first
+    (``VOLATILE_KINDS``), within a kind the least recently said or confirmed first — so a fact a person confirms
+    moves to the end. ``{"count", "by_kind", "offset", "limit", "facts"}``; each fact gains ``kind``."""
+    from .graph.memory import VOLATILE_KINDS
+    rank = {k: i for i, k in enumerate(VOLATILE_KINDS)}
+    facts = []
+    for row in rows:
+        if row.get("status") != "current":
+            continue
+        kind = volatile_kind(row)
+        if kind is not None:
+            facts.append(dict(row, kind=kind))
+    facts.sort(key=lambda f: (rank[f["kind"]], f.get("last_seen") or f.get("created_at") or 0))
+    offset = max(0, int(offset))
+    limit = max(1, min(int(limit), MAX_LIMIT))
+    return {"count": len(facts), "by_kind": {k: n for k in VOLATILE_KINDS
+                                             if (n := sum(1 for f in facts if f["kind"] == k))},
+            "offset": offset, "limit": limit, "facts": facts[offset:offset + limit]}
+
+
 def said_at(f: dict) -> Optional[int]:
     """When a fact was most likely said — where to look for the turns it came from. Its ``valid_from`` (a captured
     window's first turn), unless that is a stated date more than a day away from the date the session id carries (a

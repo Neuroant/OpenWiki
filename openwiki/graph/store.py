@@ -1042,6 +1042,27 @@ class GraphStore:
                 n += len(rows)
         return n
 
+    def confirm(self, ids, at: Optional[int] = None) -> int:
+        """A person checked these facts still hold (the maintenance panel, M7, folded from the journal): re-affirm
+        them as if they were said again — confidence reinforced, ``last_seen`` = ``at`` (so recall's recency, which
+        counts for the kinds that go stale, starts afresh). Only believed facts (not closed, retracted or
+        forgotten). Writable; returns how many were confirmed."""
+        if not self.writable:
+            raise RuntimeError("GraphStore is read-only; open it writable to confirm facts.")
+        at = int(at if at is not None else time.time())
+        n = 0
+        with self._lock:
+            for aid in ids or []:
+                rows = self._rows("MATCH (a:Assertion {id:$id}) WHERE a.valid_to IS NULL AND a.expired_at IS NULL "
+                                  "AND a.forgotten_at IS NULL RETURN a.confidence, a.last_seen;", {"id": str(aid)})
+                if not rows:
+                    continue
+                conf = reinforced_weight(float(rows[0][0] if rows[0][0] is not None else 1.0), DEFAULT_BOOST)
+                self._exec("MATCH (a:Assertion {id:$id}) SET a.confidence=$c, a.last_seen=$t;",
+                           {"id": str(aid), "c": conf, "t": max(int(rows[0][1] or 0), at)})
+                n += 1
+        return n
+
     def queue_reindex(self, slug: str, text: str) -> int:
         """Append a `reindex` op (re-sync one page) to the journal — a read-only serve/chat
         defers an agent edit's graph sync here; a later writer folds it (``fold_journal``)."""
@@ -1071,7 +1092,7 @@ class GraphStore:
             return {"records": 0, "remembered": 0, "reindexed": 0}
         from .memory import MemoryFact
         now = int(now if now is not None else time.time())
-        remembered = reindexed = retired = 0
+        remembered = reindexed = retired = confirmed = forgotten = 0
         for rec in records:
             try:
                 if rec.get("op") == "remember":
@@ -1100,12 +1121,17 @@ class GraphStore:
                     if slug:
                         self.upsert_page(slug, rec.get("text") or "", embedder=embedder)
                         reindexed += 1
+                elif rec.get("op") == "confirm" and not dry_run:     # a person checked it still holds (M7)
+                    confirmed += self.confirm(rec.get("ids") or [], at=int(rec.get("t") or now))
+                elif rec.get("op") == "forget" and not dry_run:      # a person archived it (M7)
+                    forgotten += self.forget(rec.get("ids") or [], str(rec.get("reason") or "reviewed"),
+                                             now=int(rec.get("t") or now))
             except Exception:      # pragma: no cover - one bad op never aborts the fold
                 continue
         if not dry_run:
             clear_journal(self._journal_path)
         return {"records": len(records), "remembered": remembered, "reindexed": reindexed,
-                "retired": retired}
+                "retired": retired, "confirmed": confirmed, "forgotten": forgotten}
 
     # -- remembered tier (Path B: session memory) ----------------------
 

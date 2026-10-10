@@ -1065,7 +1065,9 @@ function renderMemoryView(data) {
   return `<div id="mem-root"><div class="mem-head"><strong>Gedächtnis</strong>
       <span class="muted">Path B · Second Brain — was frühere Sitzungen hinterlassen haben</span></div>
     ${identity}${chips}
-    ${stagedBox}
+    <details id="mem-care" class="mem-care"${staged.length ? " open" : ""}>
+      <summary><b>Pflege</b> <span class="muted" id="care-sum">${staged.length ? `· ${staged.length} zur Freigabe` : ""}</span></summary>
+      ${stagedBox}<div id="care-review"></div><div id="care-forget"></div></details>
     <h3 class="mem-h3">Abruf &amp; Kontext</h3>
     ${recallBox}
     <h3 class="mem-h3" id="mf-anchor">Fakten <span class="muted" id="mf-count"></span></h3>
@@ -1075,6 +1077,108 @@ function renderMemoryView(data) {
     <div id="mf-pager" class="mf-pager"></div>
     ${memThemesBlock(memState.themes)}
     <div id="mem-detail" class="mem-detail" hidden></div></div>`;
+}
+
+// -- Memory · maintenance panel (Direction K, M7) ----------------------------
+// What needs a person's look, together: the agent's staged writes (above), the facts of kinds that go stale
+// (confirm or close them) and what the sleep pass would forget. Every action goes through the journal, pinned to the
+// fact's id, and starts a fold — it lands in seconds.
+
+const careState = { offset: 0, limit: 15, timer: 0, staged: 0 };
+const CARE_REASON = { ephemeral: ["einmaliges Ereignis", "ein einmaliges Sitzungsereignis (gepusht, getaggt, ein Commit-Hash …)"],
+                      unsafe: ["Sicherheitsregel", "die Gedächtnis-Sicherheitsregel (P0) behält so etwas nicht"] };
+
+function careRow(f, actions, queued, writable, extra = "") {
+  const q = queued[f.id];
+  const acts = !writable ? "" : q
+    ? `<span class="mem-badge in" title="eingereiht — die Faltung wendet es in Sekunden an">eingereiht · ${q}</span>`
+    : actions.map(([act, label, cls, title]) => `<button class="care-btn${cls ? " " + cls : ""}" data-act="${act}" title="${title}">${label}</button>`).join("");
+  return `<div class="care-row${q ? " is-queued" : ""}" data-id="${escapeHtml(f.id)}">
+    <span class="care-fact mem-click" data-fact="${escapeHtml(f.id)}" title="Details"><b>${escapeHtml(f.subject)}</b> ${escapeHtml(f.predicate)} <b>${escapeHtml(f.object)}</b></span>
+    ${extra}<span class="care-act">${acts}</span></div>`;
+}
+
+function careHtml(d) {
+  const queued = {};
+  for (const [act, label] of [["close", "schließen"], ["confirm", "bestätigen"], ["forget", "vergessen"]])
+    for (const id of d.queued[act] || []) queued[id] = label;
+  const r = d.review, w = d.writable;
+  const kinds = Object.entries(r.by_kind || {}).map(([k, n]) => `${MF_KIND_LABEL[k] || k} ${n}`).join(" · ");
+  const review = r.count ? `
+    <h4 class="mem-h4">Zu prüfen <span class="muted">· ${r.count} — Arten, die von selbst veralten (${kinds}); die wahrscheinlich veralteten Arten zuerst, darin die am längsten nicht bestätigten</span></h4>
+    <div class="care-list">${r.facts.map((f) => careRow(f, [
+      ["confirm", "stimmt noch", "", "gilt weiter — als neu bestätigt merken (rückt ans Ende)"],
+      ["close", "nicht mehr wahr", "secondary", "gilt nicht mehr — die Gültigkeit endet jetzt; der Fakt bleibt als Geschichte"]], queued, w,
+      `<span class="mem-badge kind">${MF_KIND_LABEL[f.kind] || f.kind}</span> <span class="mem-when" title="zuletzt gesagt oder bestätigt">${memDate(f.last_seen || f.created_at)}</span>`)).join("")}</div>
+    ${r.count > r.limit ? `<div class="mf-pager"><button class="secondary" id="care-prev" ${r.offset ? "" : "disabled"}>‹ zurück</button>
+      <span class="muted">${r.offset + 1}–${Math.min(r.offset + r.limit, r.count)} von ${r.count}</span>
+      <button class="secondary" id="care-next" ${r.offset + r.limit < r.count ? "" : "disabled"}>weiter ›</button></div>` : ""}`
+    : `<h4 class="mem-h4">Zu prüfen <span class="muted">· nichts — keine aktuellen Fakten einer Art, die von selbst veraltet</span></h4>`;
+  const open = d.forget.filter((f) => !queued[f.id]);
+  const forget = d.forget.length ? `
+    <h4 class="mem-h4">Zum Vergessen <span class="muted">· ${d.forget.length} — was der Schlaf-Durchlauf (<code>owiki sleep</code>) vergäße; vergessen heißt archiviert, nicht gelöscht</span>
+      ${w && open.length > 1 ? `<button class="care-btn linkish" id="care-forget-all">alle vergessen</button>` : ""}</h4>
+    <div class="care-list">${d.forget.map((f) => careRow(f, [["forget", "vergessen", "secondary", "archivieren — verlässt Abruf, Kontext und Themen"]], queued, w,
+      `<span class="mem-badge fgt" title="${(CARE_REASON[f.reason] || ["", ""])[1]}">${(CARE_REASON[f.reason] || [f.reason])[0]}</span> ${memStatusBadge(f.status)}`)).join("")}</div>`
+    : `<h4 class="mem-h4">Zum Vergessen <span class="muted">· nichts</span></h4>`;
+  return { review, forget, note: w ? "" : `<p class="muted">Nur lesend — der Server läuft mit <code>--dry-run</code> oder das Gedächtnis ist aus (Wiki-Modus).</p>` };
+}
+
+async function loadCare() {
+  if (!$("#mem-care")) return;
+  let d;
+  try {
+    d = await getJSON(`/api/memory/maintenance?offset=${careState.offset}&limit=${careState.limit}`);
+  } catch (e) {
+    if ($("#care-review")) $("#care-review").innerHTML = `<p class="muted">Fehler: ${escapeHtml(e.message)}</p>`;
+    return;
+  }
+  if (!$("#mem-care")) return;
+  const h = careHtml(d);
+  $("#care-review").innerHTML = h.note + h.review;
+  $("#care-forget").innerHTML = h.forget;
+  const parts = [d.staged.length ? `${d.staged.length} zur Freigabe` : "", `${d.review.count} zu prüfen`,
+                 `${d.forget.length} zum Vergessen`].filter(Boolean);
+  $("#care-sum").textContent = "· " + parts.join(" · ");
+}
+
+async function careAct(action, ids, rows) {
+  rows.forEach((r) => r.querySelectorAll(".care-btn").forEach((b) => { b.disabled = true; }));
+  try {
+    const d = await postJSON("/api/memory/maintain", { action, ids });
+    rows.forEach((r) => {
+      r.classList.add("is-queued");
+      r.querySelector(".care-act").innerHTML = `<span class="mem-badge in">eingereiht${d.folding ? "" : " · beim nächsten Schreibdurchlauf"}</span>`;
+    });
+    clearTimeout(careState.timer);
+    careState.timer = setTimeout(loadCare, d.folding ? 9000 : 0);   // the fold lands in ~8 s
+  } catch (e) {
+    rows.forEach((r) => r.querySelectorAll(".care-btn").forEach((b) => { b.disabled = false; }));
+    alert(`Fehler: ${e.message}`);
+  }
+}
+
+function wireCare() {
+  const box = $("#mem-care");
+  if (!box) return;
+  careState.offset = 0;
+  box.addEventListener("click", (e) => {
+    const t = e.target;
+    if (t.closest("#care-prev")) { careState.offset = Math.max(0, careState.offset - careState.limit); return loadCare(); }
+    if (t.closest("#care-next")) { careState.offset += careState.limit; return loadCare(); }
+    if (t.closest("#care-forget-all")) {
+      const rows = [...box.querySelectorAll("#care-forget .care-row:not(.is-queued)")];
+      if (rows.length && confirm(`${rows.length} Fakten vergessen (archivieren)?`))
+        careAct("forget", rows.map((r) => r.dataset.id), rows);
+      return;
+    }
+    const btn = t.closest(".care-btn[data-act]");
+    if (btn) {
+      const row = btn.closest(".care-row");
+      careAct(btn.dataset.act, [row.dataset.id], [row]);
+    }
+  });
+  loadCare();
 }
 
 // -- Memory · facts browser, themes, fact detail (Direction K, M2-M3) -------
@@ -1347,6 +1451,7 @@ function wireMemory() {
     renderMemory();
   }));
   wireMemoryBrowse();
+  wireCare();
   const q = $("#mem-q");
   const out = $("#mem-out");
   if (!q) return;

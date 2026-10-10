@@ -393,7 +393,7 @@ instead of queueing it; a person reviews and decides:
 An approved write is valid from when it was staged (facts and the closing of what it replaces — the journal record's
 `valid_at`, which `fold_journal` uses for `retire`) and recorded when approved (`t`), so `--known-at` between the two
 leaves it out. Pinning by construction: replacements are fact ids, a fact's content never changes, `retire` skips closed
-facts. The Gedächtnis tab lists the staged writes under "Zur Freigabe" (`/api/memory` `staged`, POST
+facts. The Gedächtnis tab lists the staged writes under "Zur Freigabe" in its **Pflege** panel (`/api/memory` `staged`, POST
 `/api/memory/approve` / `reject`, `WikiWebApp(on_approved=)` starts the fold); `status` and the handoff brief count
 them. No MCP tool approves; captures are not staged. Judged on the dogfooding session: ~12 agent writes a day, so off
 by default; an always-present core was not built (no standing user conventions among the captured facts —
@@ -1008,7 +1008,9 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   reader-XOR-writer (no simultaneous read+write), so a read-only process queues its intended writes to a
   JSONL sidecar instead of failing — `usage.py` holds reinforce pairs (`fold_usage`), `journal.py` holds
   self-contained `remember`/`reindex` ops (`GraphStore.queue_remember`/`queue_reindex` append read-only;
-  `fold_journal(embedder)` drains + clears, writable). Both pure/dependency-free (no Kuzu); the CLI folds
+  `fold_journal(embedder)` drains + clears, writable) and — M7, v0.117 — ops on facts named by id (`append_ids`:
+  `confirm` → `GraphStore.confirm`, re-affirmed as if said again; `forget` → `GraphStore.forget`; `queued_ids` lists
+  what is pending per action). Both pure/dependency-free (no Kuzu); the CLI folds
   them at `serve`/`chat` start+shutdown, in `decay`, and on the next `remember`. See the concurrency note
   under *Conventions & gotchas*.
 - **`openwiki/web/`** — the web UI. `server.py` = `WikiWebApp` (state) + a
@@ -1049,6 +1051,10 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   `/api/memory/fact/{id}` = one **fact's detail** (`memory_fact` → `GraphStore.fact_detail`: the attribute's history,
   supersedes / superseded-by, kind, theme — plus `said`, the session excerpts around when it was said, via the
   `SessionCorpus` `serve` passes in; 404 for an unknown id),
+  `/api/memory/maintenance?offset=&limit=` = the **maintenance panel** (M7, v0.117: `staged`, `review` —
+  `memory_browse.review_queue`, `forget` — `forget_candidates`, `queued` — `journal.queued_ids`, `writable`),
+  `/api/memory/maintain` (POST `{action: close|confirm|forget, ids}`) = act on facts through the journal, pinned by id,
+  and start a fold (`memory_maintain`; 400 bad input, 409 no graph / `--dry-run` / Wiki mode),
   `/api/recall` (POST) = decay-weighted `recall` (B7 `as_of`/`known_at`), **explained** (M4, v0.115: each hit's
   `parts` + `explain` — `recall(report=)`), `/api/context` (POST) = the assembled three-tier `context_for`
   (`as_of`) — in a project and for now the **hook preview** (M4: `cli.inject_context` / `hook_skips` /
@@ -1112,7 +1118,10 @@ every fact — `/api/memory/facts`), the `MemoryConcept` **themes** as a compact
 facts, and a **fact detail drawer** (M3, `openFact` → `/api/memory/fact/{id}`: hand-rolled SVG validity bars for the
 attribute's whole history with a "today" line, source, confidence, last seen, kind, session and theme (a click
 filters the facts by either), what it replaced / what replaced it — each clickable — and the verbatim session
-excerpts where it was said; Esc closes). Read-only + graceful
+excerpts where it was said; Esc closes), and a collapsible **Pflege** (maintenance) panel near the top (M7,
+v0.117: the staged agent writes, the facts of kinds that go stale — "stimmt noch" re-affirms, "nicht mehr wahr"
+closes — and what the sleep pass would forget — "vergessen" / "alle vergessen"; each action goes through the
+journal and starts a fold, rows show "eingereiht" until it lands; `careHtml` / `loadCare` / `careAct`). Graceful
 empty states (no graph / Wiki mode / no sessions / no index). Backed by `GraphStore.memory_overview()` +
 `list_assertions()` + `fact_detail()` (`openwiki/memory_browse.py`: pure `filter_facts` / `said_at`) reusing
 `recall`/`context_for`/`memory_concepts`. The **System tab** (`renderSystem`

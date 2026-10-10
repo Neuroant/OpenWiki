@@ -313,10 +313,20 @@ zusätzlich einen **Gedächtnis-Tier**: Fakten, die aus Sitzungen *erinnert* wer
   Konfidenz, wann zuletzt gesagt, Art, Sitzung und Thema (ein Klick zeigt nur deren Fakten), was er
   ersetzt hat und wodurch er ersetzt wurde (beides anklickbar) und **wo es gesagt wurde** — die passendsten Stellen der Sitzungen um diesen Zeitpunkt,
   wörtlich, Zugangsdaten geschwärzt. **Esc** schließt;
-- **Zur Freigabe** — mit `approve_writes = true` unter `[memory]` legt der Agent seine Schreibvorgänge
-  (`wiki_remember`) nur vor: was er hinzufügen (+) und was er schließen (−) will. **Freigeben** lässt den
-  Vorgang ins Gedächtnis (gültig ab dem Zeitpunkt, an dem der Agent ihn vorgelegt hat), **Verwerfen** legt
-  ihn in ein Prüfprotokoll. Auf der Kommandozeile: `openwiki memory pending` / `approve` / `reject`.
+- **Pflege** (oben, aufklappbar; die Kopfzeile zählt, was wartet) — was einen Blick braucht, an einer Stelle:
+  - **Zur Freigabe** — mit `approve_writes = true` unter `[memory]` legt der Agent seine Schreibvorgänge
+    (`wiki_remember`) nur vor: was er hinzufügen (+) und was er schließen (−) will. **Freigeben** lässt den
+    Vorgang ins Gedächtnis (gültig ab dem Zeitpunkt, an dem der Agent ihn vorgelegt hat), **Verwerfen** legt
+    ihn in ein Prüfprotokoll. Auf der Kommandozeile: `openwiki memory pending` / `approve` / `reject`;
+  - **Zu prüfen** — die aktuellen Fakten der Arten, die von selbst veralten (Pläne, Zahlen, Lücken, Versionen,
+    laufende Zustände), die wahrscheinlich veralteten Arten zuerst, darin die am längsten nicht bestätigten.
+    **stimmt noch** merkt den Fakt als neu bestätigt (er rückt ans Ende), **nicht mehr wahr** beendet seine
+    Gültigkeit jetzt — er bleibt als Geschichte erhalten;
+  - **Zum Vergessen** — was der Schlaf-Durchlauf (`openwiki sleep`) vergessen würde: einmalige
+    Sitzungsereignisse und Fakten gegen die Sicherheitsregel. **vergessen** archiviert (nichts wird gelöscht).
+
+  Jede Aktion geht über das Journal und startet eine Faltung; die Zeile zeigt „eingereiht", bis sie nach
+  wenigen Sekunden angewendet ist. Mit `--dry-run` oder im Wiki-Modus ist die Pflege nur lesend.
 
 **Zeit im Gedächtnis (bitemporal).** Jeder Fakt kennt zwei Zeiten: *wann er in der Welt
 galt* (z. B. „seit 2025-09-16" — aus einem im Gespräch genannten Datum, sonst dem

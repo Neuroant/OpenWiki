@@ -115,6 +115,26 @@ def _remember_record(session_id, facts, now: Optional[int] = None, session_date:
     return rec
 
 
+ID_OPS = ("confirm", "forget")      # ops on facts named by id — the Memory tab's maintenance panel (M7)
+
+
+def append_ids(path, op, ids, now: Optional[int] = None, reason: Optional[str] = None) -> int:
+    """Queue an op on facts named by id: ``confirm`` (a person checked the fact still holds — the fold
+    re-affirms it, as if it were said again) or ``forget`` (archive it with ``reason``). Pinned by id like a
+    ``remember`` record's ``retire``: the fold touches exactly the facts the reviewer saw, and a fact's content
+    never changes. Returns how many ids were queued (0 → nothing)."""
+    if op not in ID_OPS:
+        raise ValueError(f"unknown op {op!r} (one of {', '.join(ID_OPS)})")
+    ids = [str(i).strip() for i in (ids or []) if str(i).strip()]
+    if not ids:
+        return 0
+    rec = {"op": op, "t": _now(now), "ids": ids}
+    if reason:
+        rec["reason"] = str(reason)
+    _append(path, rec)
+    return len(ids)
+
+
 def append_reindex(path, slug, text, now: Optional[int] = None) -> int:
     """Queue a ``reindex`` op — re-sync one page into the graph. The record carries the
     page text so the fold is self-contained. Returns 1 (queued) or 0 (empty slug)."""
@@ -140,9 +160,21 @@ def read_journal(path) -> list:
             obj = json.loads(line)
         except ValueError:
             continue
-        if isinstance(obj, dict) and obj.get("op") in ("remember", "reindex"):
+        if isinstance(obj, dict) and obj.get("op") in ("remember", "reindex") + ID_OPS:
             records.append(obj)
     return records
+
+
+def queued_ids(path) -> dict:
+    """The fact ids pending in the journal per action — ``close`` (a ``remember`` record's ``retire``),
+    ``confirm``, ``forget`` — until a fold applies them (the maintenance panel marks them queued)."""
+    out: dict = {"close": [], "confirm": [], "forget": []}
+    for rec in read_journal(path):
+        if rec.get("op") == "remember":
+            out["close"].extend(rec.get("retire") or [])
+        elif rec.get("op") in ID_OPS:
+            out[rec["op"]].extend(rec.get("ids") or [])
+    return out
 
 
 def clear_journal(path) -> None:

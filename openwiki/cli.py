@@ -3126,7 +3126,8 @@ def _cmd_decay(args: argparse.Namespace) -> int:
               f"({folded['reinforced']} reinforcement(s)).")
     if ops.get("records"):
         print(f"Folded in {ops['records']} queued op(s) "
-              f"({ops.get('remembered', 0)} fact(s), {ops.get('reindexed', 0)} page re-sync(s)).")
+              f"({ops.get('remembered', 0)} fact(s), {ops.get('reindexed', 0)} page re-sync(s), "
+              f"{ops.get('retired', 0)} closed, {ops.get('confirmed', 0)} confirmed, {ops.get('forgotten', 0)} forgotten).")
     print(f"Decayed {result['edges']} reinforced edge(s): "
           f"{result['decayed']} kept, {result['pruned']} pruned "
           f"(half-life {args.half_life}d, floor {args.floor}) → {args.graph}")
@@ -4485,8 +4486,11 @@ def _hook_fold(project: Project, payload: dict) -> None:
                       file=sys.stderr)
                 break
             folded = res.get("folded") or {}
+            reviewed = "".join(f", {folded[k]} {label}" for k, label in (("confirmed", "confirmed"),
+                                                                        ("forgotten", "forgotten"))
+                               if folded.get(k))
             print(f"openwiki hook: folded {folded.get('records', 0)} queued op(s) "
-                  f"({folded.get('remembered', 0)} fact(s) added, {folded.get('retired', 0)} closed) — "
+                  f"({folded.get('remembered', 0)} fact(s) added, {folded.get('retired', 0)} closed{reviewed}) — "
                   f"write lock held {res['lock_s']} s", file=sys.stderr)
     finally:
         try:

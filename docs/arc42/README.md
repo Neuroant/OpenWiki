@@ -56,6 +56,7 @@ quality, and risks.
 | `docs/projects.md` | Architects, users | Deep design of the **project** concept (§8.14): manifest, discovery, registry, layout, multi-source merge |
 | `docs/path-b-memory.md` | Architects | **Path B (agent memory)** design + staged plan — realized by ADR-15/16/17/18/19, resolving §11 D1/D2/D6 (B0–B6 + concurrency landed); §12 = Path B+ (B7 → ADR-27, B9 → ADR-29); §13 = Path B++ (hygiene, cue-trigger, sleep + forgetting, stale facts, `wiki_remember`, LoCoMo, handoff, redaction, short locks, portable memory, recall aids, session search, approvals, lessons, co-change, recency → ADR-30–49, incl. the measured negative results) |
 | `docs/memory-systems-review.md` + `docs/agent-memory-summary.md` | Architects | Eighteen other agent-memory systems read from their source and checked against OpenWiki's data; the summary holds the ranked plan behind ADR-37–48 and what was measured and not adopted |
+| `docs/second-brain-guide.md` | Users | The Second Brain from the user's side: architecture overview, a working day, CLI + web UI tutorials with real `openwiki-dev` output, cheat sheet |
 | `docs/coding-agents.md` | Users | MCP / OpenCode / Claude Code setup |
 
 The arc42 docs and `CLAUDE.md` overlap by design (both describe the architecture); this doc

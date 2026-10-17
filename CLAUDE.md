@@ -40,6 +40,8 @@ risks) is in `docs/arc42/`.
 A comparative review of eighteen other **agent-memory systems** is in
 `docs/memory-systems-review.md`; its summary — where they agree, where OpenWiki stands, and
 the ranked plan for Path B's next steps — is `docs/agent-memory-summary.md`.
+A **user guide to the Second Brain** — architecture, a working day, CLI + web UI tutorials with real
+`openwiki-dev` output and screenshots (`docs/img/second-brain/`), a cheat sheet — is `docs/second-brain-guide.md`.
 
 ## Environment & commands
 

@@ -371,7 +371,8 @@ subject) to track in git. Recall is **hybrid**: next to the embedding, BM25 over
 or file name pull in the facts that mention it, and a date in the question ("in July 2023", "last week") favours the
 facts from that time. Raw sessions stay **searchable**: `openwiki sessions search` (and the MCP tool
 `wiki_sessions`) finds the turns of earlier sessions by full text — the exact wording, numbers and reasons the facts
-leave out, quoted and dated. Design: **[docs/path-b-memory.md](docs/path-b-memory.md)**.
+leave out, quoted and dated. Design: **[docs/path-b-memory.md](docs/path-b-memory.md)**. A guide with real
+examples — architecture, a working day, the CLI and the web UI step by step: **[docs/second-brain-guide.md](docs/second-brain-guide.md)**.
 
 ### Web UI
 

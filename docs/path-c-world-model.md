@@ -4,8 +4,9 @@
 > no code and decides whether the rest is worth building. Path C builds on Path B ([`path-b-memory.md`](path-b-memory.md))
 > and the agent-memory review ([`memory-systems-review.md`](memory-systems-review.md),
 > [`agent-memory-summary.md`](agent-memory-summary.md)); for machines it pairs with the sibling project **Cognitive
-> Substrate** (`G:\Claude\Cognitive Substrate`). As with every earlier step, each stage names how it is measured and
-> when it stops.
+> Substrate** (`G:\Claude\Cognitive Substrate`). Its test playground is the working digital twin of Ableton Live in
+> the sibling project **Ableton Expert System** (§11.5). As with every earlier step, each stage names how it is
+> measured and when it stops.
 
 *References:* **PB §** points to [`path-b-memory.md`](path-b-memory.md), **MSR §** to
 [`memory-systems-review.md`](memory-systems-review.md); a plain § is a section of this document.
@@ -32,7 +33,7 @@ decided about it.
 8. [Predictions and surprise](#8-predictions-and-surprise)
 9. [The world slice](#9-the-world-slice)
 10. [Twins, the MCP contract and Cognitive Substrate](#10-twins-the-mcp-contract-and-cognitive-substrate)
-11. [The physical case — the LCU 9000](#11-the-physical-case--the-lcu-9000)
+11. [The physical case — the LCU 9000 and the Ableton playground](#11-the-physical-case--the-lcu-9000-and-the-ableton-playground)
 12. [Staged delivery plan (C0–C4)](#12-staged-delivery-plan-c0c4)
 13. [Evaluation strategy](#13-evaluation-strategy)
 14. [Risks & guardrails](#14-risks--guardrails)
@@ -245,6 +246,7 @@ Built-in types only: a manifest configures them but never adds a command.
 | `gpu` | total and free GPU memory (`nvidia-smi` with fixed arguments) | 12 GB | fast |
 | `pytest-collect` | the number of collected tests (`python -m pytest --collect-only -q`); opt-in, since it runs the project's test setup | the test count | slow (seconds) |
 | `opcua` (C4) | a node's value, read-only (asyncua) | the LCU 9000's coolant flow rate | fast |
+| `twin` (C2–C4) | a variable of another world model, through its MCP `state` verb (§10.1) | a track's volume in the Ableton twin (§11.5) | as fast as the twin |
 
 ### 6.2 Bindings
 
@@ -479,7 +481,7 @@ and moves it for the repository: built-in, local, read-only sensors are light en
 refines ADR-33: the writer that makes a change is no longer the only one who can record it; the world is a second
 writer.
 
-## 11. The physical case — the LCU 9000
+## 11. The physical case — the LCU 9000 and the Ableton playground
 
 ### 11.1 Variables and laws from the manual
 
@@ -521,6 +523,38 @@ conditions: (a) the manual's wiki only (RAG); (b) plus live state and history fr
 dependencies (`explain`). Scored against the injected fault — an exact label, no judge — together with the false-alarm
 rate of the law checks on fault-free runs.
 
+### 11.5 A working playground — the Ableton twin
+
+The LCU 9000 exists only as a manual and a mock web UI; its twin would start as a simulator. A working two-way twin
+already runs on this machine: the **Ableton Expert System** (`G:\Antigravity\ableton-expert-system`,
+`github.com/Neuroant/Ableton-Live-Expert-System`), a sibling project that models Ableton Live. A Max for Live extractor
+streams Live's state over OSC into an embedded Kùzu graph — song, tracks, devices, parameters, clips, notes — bound to
+a static model of 16 device classes, 57 parameter definitions with physical units and 248 manual sections; an injector
+executes a fixed set of 15 commands; a Gemini agent and a React UI work through two MCP servers. It uses OpenWiki's
+graph engine (Kùzu 0.11.3) and answers in seconds, with real sensors and real actions. That makes it Path C's test
+playground: each part can be tried on a system that answers back.
+
+| Path C part | On the Ableton twin |
+|---|---|
+| Sensors (§6) | its observers and snapshots, read through the twin contract — the `twin` sensor type calls the twin's `state` verb (§10.1) |
+| State with history (§5.1) | the twin keeps current values only; observed facts with valid time add "what was the bass level when we decided to cap it?" |
+| Laws (§7) | the Production Constitution (`0.85` = 0 dBFS unity), the mix-diagnostics rules, and the Ableton 12 manual — already ingested there — as their source; enforced as interlocks in the injector |
+| Predictions (§8) | every write predicts its effect ("track 1's volume becomes 0.82") and is resolved by reading the value back; a diagnostics fix predicts that its warning disappears |
+| Events (§8.3) | discrepancy (the twin vs. Live after a read-back), violation (a fader above unity), drift (a decision or a sound recipe that no longer matches the set) |
+| World slice (§9) | the tracks and devices a prompt names, their values in physical units, the rules on them, recent events, the producer's decisions and project notes |
+| Acting (§10.2) | the injector's whitelist, plus clamps, compare-before-write and approval |
+| The MCP contract (§10.1) | a thin adapter over its knowledge and action servers: `entities`, `state`, `history`, `laws`, `predict`, `explain`, `act` |
+
+**Before it can serve.** The review of 2026-10-18 (`docs/Digital_Twin_Review.md` in that repository) lists what has to
+change first: safety limits in code rather than in the prompt (its R1), stable object ids so that an observation and an
+action refer to the same thing (R2), a sync that knows whether it is complete (R4), and a read-back after every write
+(R6). Path C ranks an observation above a belief (§3.3), so a partial or misaddressed snapshot must never close
+anything: only a sync reported complete counts as an observation.
+
+**Safe to play with.** A dedicated test set, a limiter on the master, low monitor levels, and observation only until
+the clamps are in place. The twin's own agent uses Gemini; OpenWiki's side stays local (ADR-2) and meets the twin only
+through MCP.
+
 ## 12. Staged delivery plan (C0–C4)
 
 Each stage is shippable and measured on its own, and each can end Path C.
@@ -553,33 +587,43 @@ Each stage is shippable and measured on its own, and each can end Path C.
 ### C2 — Laws, drift and the world slice
 - **Goal:** rules and decisions become checkable, and the context is built around what a prompt touches.
 - **Build:** `Variable`, `Law`, `Event`; law extraction with review; checks at fold time; decisions recorded with their
-  preconditions; drift events; the world slice (§9); events in the Pflege panel and the handoff brief.
+  preconditions; drift events; the world slice (§9); events in the Pflege panel and the handoff brief. On the Ableton
+  playground (§11.5): its Production Constitution as the first interlocks, the Ableton manual as the first law source
+  outside this repository.
 - **Builds on:** entity extraction, the Pflege panel (M7), the handoff.
 - **Hard part:** false alarms — a law that fires wrongly teaches people to ignore events.
 - **Exit:** of drifts planted in a scratch copy (a changed constant, a desynchronized version pair, a changed GPU, an
   untagged release), at least 9 of 10 detected; at most one false alarm a week in real use; on replayed prompts that
   touch a governed variable, the world slice judged more helpful than today's context at equal size (paired,
-  significant).
+  significant); on the playground, every planted violation (a fader above unity, a value outside its range) raises an
+  event and the interlock refuses the write.
 
 ### C3 — Predict and verify changes
 - **Goal:** the model is judged by what it predicts.
 - **Build:** `Prediction`; companion-file and test-at-risk predictions; resolution by commits and test runs (a worktree
-  for the tests at risk); misses as events; scores per basis.
-- **Builds on:** `graph/cochange.py`, git, the test suite.
+  for the tests at risk); misses as events; scores per basis. On the Ableton playground: every write predicts its
+  effect and is resolved by reading the value back.
+- **Builds on:** `graph/cochange.py`, git, the test suite; the playground's read-back (its review's R6).
 - **Hard part:** test runs cost time — only the tests at risk, only when idle or on request.
 - **Exit:** online over the history (the PB §13.29 setup), companion files predicted from co-change plus laws beat
   co-change alone (0.51 top-10 recall of rarely-changed files); test-at-risk precision and recall reported; replayed,
-  injected misses judged helpful more often than the facts they displace.
+  injected misses judged helpful more often than the facts they displace; on the playground, every write's prediction
+  resolves within a second and every mismatch becomes an event.
 
 ### C4 — The physical twin
-- **Goal:** the same model for a machine, through federation.
-- **Build:** the LCU 9000 simulator (§11.2); the twin's MCP server — in Cognitive Substrate or standalone (§15); the
-  manual wiki's variables and laws with shared ids; the telemetry store; learned dependencies (§11.3); the diagnosis
-  benchmark (§11.4).
-- **Builds on:** Cognitive Substrate's Phase 11 design and its LCU 9000 mock; C1–C3.
-- **Hard part:** a simulator rich enough to make diagnosis non-trivial and simple enough to trust as ground truth.
-- **Exit:** diagnosis accuracy (c) > (b) > (a), paired and significant; learned dependencies recover the simulator's
-  causal edges more precisely than lagged correlation; no action executed (the twin is read-only in C4).
+- **Goal:** the same model for a working twin, then for a machine, through federation.
+- **Build:** the twin contract on the Ableton twin first (§11.5), once its review's R1, R2, R4 and R6 are in; then the
+  LCU 9000 simulator (§11.2) for faults with known causes; the LCU 9000 twin's MCP server — in Cognitive Substrate or
+  standalone (§15); the manual wikis' variables and laws with shared ids; the telemetry store; learned dependencies
+  (§11.3); the diagnosis benchmark (§11.4) on both.
+- **Builds on:** the Ableton Expert System's MCP servers; Cognitive Substrate's Phase 11 design and its LCU 9000 mock;
+  C1–C3.
+- **Hard part:** faults the twins can actually see — on the playground only after its observers cover device parameters
+  (its review's R5); a simulator rich enough to make diagnosis non-trivial and simple enough to trust as ground truth.
+- **Exit:** diagnosis accuracy (c) > (b) > (a), paired and significant, on faults planted in an Ableton test set (a fader
+  above unity, a muted track, a changed device setting) and on the simulator's; learned dependencies recover the
+  simulator's causal edges more precisely than lagged correlation; no write outside the clamps and approval — the LCU
+  9000 twin stays read-only.
 
 ### 12.1 Recommended first slice
 
@@ -631,12 +675,15 @@ kept; the cross-session and cue-trigger sets; LoCoMo overall J — LoCoMo has no
 
 **For the user**
 
-1. **The first environment:** the repository (measurable now) or the LCU 9000 (needs the simulator)? *Recommended:
-   the repository.*
+1. **The first environment:** the repository (measurable now), the Ableton twin (runs now; needs R1, R2, R4 and R6 of
+   its review), or the LCU 9000 (needs the simulator)? *Recommended: the repository for C0–C1, where the stale-fact
+   baseline is; the Ableton twin as the test playground from C2 on — laws, actions, predictions and diagnosis on a
+   system that answers back (§11.5).*
 2. **Where Path C lives:** inside OpenWiki, in Cognitive Substrate, or federated (§10.3)? *Recommended: the repository
    twin in OpenWiki, machines federated.*
 3. **Acting:** may twins act, or stay read-only? *Recommended: read-only through C4.*
-4. **Telemetry:** real hardware or an OPC UA server, or a simulator? *The plan assumes a simulator.*
+4. **Telemetry:** real hardware or an OPC UA server, or a simulator? *The plan starts with the Ableton twin's live
+   data and adds a simulator for faults with known causes.*
 
 **Technical**
 
@@ -677,6 +724,10 @@ kept; the cross-session and cue-trigger sets; LoCoMo overall J — LoCoMo has no
   schedule (MSR §11), which sensors do for real; the transfer-entropy report (MSR §13), rejected for a sparse memory and
   retested here on dense telemetry (§11.3); OpenCog Hyperon (MSR §17) — inference needs a curated vocabulary, which
   reviewed laws provide.
+- **Ableton Expert System.** A working two-way twin: classes and instances bound with physical units (a normalized
+  0.72 shown as 1,200 Hz), an injector restricted to a fixed set of commands, sound recipes as procedural memory
+  captured from state — and, in its review of 2026-10-18 (`docs/Digital_Twin_Review.md` there), the gaps a twin shows
+  without Path C's parts: no history, positional identity, safety in the prompt, no read-back (§11.5).
 - **Cognitive Substrate.** Tier write-authority, FunctionalVariable anchors, guarded and self-healing actions, and the
   capability ladder L1 predictor → L2 simulator → L3 evolver → L4 cross-domain inference → L5 test synthesis (its
   `docs/ROADMAP.md`). Path C's repository twin reaches L1–L2 for code — predicting a change's effects, then running it

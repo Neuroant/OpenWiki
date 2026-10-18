@@ -1268,8 +1268,27 @@ tests and local services record **observed** state as B7 facts that close stale 
 decisions and history (*laws*) are checked against the observations; predictions about changes are logged and
 resolved; discrepancies, violations, misses and drift become events; the context becomes a *world slice* around
 what a prompt touches. Repository first; machines (the LCU 9000 laser unit) federated with the sibling project
-Cognitive Substrate through one MCP contract. Staged C0 (an inventory, no code) → C4 (a simulated physical twin),
-each with a measured exit. Nothing built yet — design in **[`docs/path-c-world-model.md`](path-c-world-model.md)**.
+Cognitive Substrate through one MCP contract. Staged C0 (an inventory, no code) → C4 (a physical twin), each with a
+measured exit. Nothing built yet — design in **[`docs/path-c-world-model.md`](path-c-world-model.md)**.
+
+**Test playground — the Ableton Expert System** (`G:\Antigravity\ableton-expert-system`,
+`github.com/Neuroant/Ableton-Live-Expert-System`). A sibling project with a **working two-way digital twin** of Ableton
+Live: a Max for Live extractor streams Live's state over OSC into an embedded Kùzu graph (song, tracks, devices,
+parameters, clips, notes), bound to a static model of 16 device classes, 57 parameter definitions with physical units
+and 248 manual sections; an injector executes a fixed set of commands; a Gemini agent and a React UI work over MCP. It
+runs today on this machine, on the same graph engine (Kùzu 0.11.3), with real sensors, real actions and a loop of
+seconds — what the repository can't offer and the LCU 9000 simulator would have to fake. Path C's parts map onto it one
+by one (`path-c-world-model.md` §11.5):
+
+- **Sensors / state:** its observers and snapshots, read through the twin contract, become observed state with history.
+- **Laws:** its Production Constitution (`0.85` = 0 dBFS unity), its mix-diagnostics rules and the Ableton manual,
+  enforced as interlocks in the injector.
+- **Predictions:** every write predicts its effect and is resolved by reading the value back.
+- **Twin contract and diagnosis:** a thin adapter over its MCP servers; planted mix faults in a test set as the
+  diagnosis benchmark, before the LCU 9000 simulator.
+- **Prerequisites** from its review of 2026-10-18 (`docs/Digital_Twin_Review.md` in that repository): safety limits in
+  code (R1), stable object ids (R2), a sync that knows it is complete (R4), read-back after every write (R6). An
+  observation outranks a belief in Path C, so only a complete, correctly addressed snapshot may close anything.
 
 ## Related docs
 

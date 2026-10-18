@@ -43,7 +43,8 @@ the ranked plan for Path B's next steps — is `docs/agent-memory-summary.md`.
 A **user guide to the Second Brain** — architecture, a working day, CLI + web UI tutorials with real
 `openwiki-dev` output and screenshots (`docs/img/second-brain/`), a cheat sheet — is `docs/second-brain-guide.md`.
 A design **proposal** for **Path C — world models** (observed state from built-in sensors, laws, predictions, events,
-a world slice as context; the repository first, machines federated with Cognitive Substrate) is
+a world slice as context; the repository first, machines federated with Cognitive Substrate; the working Ableton Live
+twin of the sibling project `G:\Antigravity\ableton-expert-system` as its test playground) is
 `docs/path-c-world-model.md` — nothing built yet; C0 (an inventory, no code) is the next step.
 
 ## Environment & commands

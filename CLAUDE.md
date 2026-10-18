@@ -45,7 +45,8 @@ A **user guide to the Second Brain** — architecture, a working day, CLI + web 
 A design **proposal** for **Path C — world models** (observed state from built-in sensors, laws, predictions, events,
 a world slice as context; the repository first, machines federated with Cognitive Substrate; the working Ableton Live
 twin of the sibling project `G:\Antigravity\ableton-expert-system` as its test playground) is
-`docs/path-c-world-model.md` — nothing built yet; C0 (an inventory, no code) is the next step.
+`docs/path-c-world-model.md` — nothing built yet; its §2.1 is the **main architectural plan** (approved 2026-10-18,
+ADR-50: the world model as a dynamical system with two boundaries); C0 (an inventory, no code) is the next step.
 
 ## Environment & commands
 

@@ -70,6 +70,7 @@
 | [47](#adr-47) | Procedural lessons from failures: only what was learned twice, listed for a person | Accepted (Path B++) | correctness, Q5 |
 | [48](#adr-48) | A use signal first: git co-changes as edges for code corpora | Accepted | Q4, Q5 |
 | [49](#adr-49) | Recency only for the kinds of fact that go stale | Accepted (Path B++); refines [ADR-34](#adr-34) | correctness, Q5 |
+| [50](#adr-50) | Path C: the world model as a dynamical system with two boundaries — the main architectural plan | Accepted as the plan (2026-10-18); nothing built | correctness, Q4, Q5 |
 
 ---
 
@@ -1052,6 +1053,34 @@ changes.** *(v0.102; builds on [ADR-16](#adr-16); mitigates R10)*
   less helpful than those they displaced (14.0 vs 18.5 %, 17 / 33 prompts). A fixed rating lifts core facts into
   prompts they don't bear on. Not adopted, no code (`path-b-memory.md` §13.35).
 
+### ADR-50
+**Path C's world model is a dynamical system with two boundaries — the main architectural plan.** *(2026-10-18; a
+plan, nothing built; extends [ADR-14](#adr-14), [ADR-27](#adr-27), [ADR-33](#adr-33))*
+- **Context:** Path B is a reactive knowledge model: it changes only on stimuli (captures, agent writes, the nightly
+  `sleep`), perceives the world only through what is said, and its weak spot is state that changes unannounced — 12 of
+  14 labeled stale facts had no successor in memory (`path-b-memory.md` §13.4), and the local model can't judge
+  staleness (§13.1–13.5). `docs/path-c-world-model.md` proposes observed state, laws, predictions and events (Path C).
+- **Decision:** the world model is an internal dynamical system (`path-c-world-model.md` §2.1). Its state is explicit
+  and symbolic — values, beliefs, open predictions, events — with its trajectory kept (B7), slow parameters (laws,
+  co-change, method scores) and rarely changing structure (entities, variables, bindings). A forward step (persistence,
+  laws, co-change, sandbox runs) runs it ahead; an update (the merge — an observation outranks a belief, a mismatch
+  becomes an event) corrects it. It has two boundaries: **digital twins** toward the environment — sensors, actuators
+  and their own state, a stateful interface that can fail, reached through a typed `state` / `history` / `act` contract
+  — and a **language interface** toward agents and people (the world slice, MCP answers, the UI). The semantic space is
+  that interface's index, not the state. The model predicts and checks; the agent acts; the model never acts on its own.
+  Path C contains Path B: its beliefs are Path B's facts.
+- **Alternatives:** a learned world model (Dreamer / JEPA style) — needs data and model internals a local Ollama setup
+  lacks, and its state can't be read or corrected; the graph and the semantic space alone as the world model —
+  similarity isn't dynamics (76 % of co-changing files are not embedding neighbours, `path-b-memory.md` §13.29); a model
+  that acts on its own surprises — runaway loops, controllers fighting over one variable (`path-c-world-model.md`
+  §3.4.6–3.4.7); language between the twins and the model — values, ids and times must be compared exactly.
+- **Consequences:** + stale state is found by the world rather than waiting to be told — the lifetime of a stale belief
+  becomes the headline metric (`path-c-world-model.md` §13); predictions make the model falsifiable; every turn of the
+  loop is recorded and can be replayed. − New records (`Variable`, `Law`, `Prediction`, `Action`, `Event`) and a new
+  boundary to secure (sensor values are input; telemetry can be spoofed); twin synchronization is a new failure mode,
+  so only a complete, fresh snapshot may close a belief. Staged with go / no-go exits: C0, an inventory without code,
+  decides whether C1–C4 are built.
+
 ---
 *Chapter complete. The Path-B agent-memory direction landed via ADR-14/15/16/17/18/19; the graph then
 deepened (ADR-22 typed relations + relation-aware GraphRAG, ADR-23 entity resolution), gained
@@ -1075,5 +1104,6 @@ changes with time** (ADR-49). The six reviews of brain-inspired memory systems a
 thing (ADR-49, from *The Missing Knowledge Layer*) and otherwise left addenda — HippoRAG 2 (ADR-21), the
 human-inspired architecture's replay check (ADR-49), OpenCog Hyperon (ADR-48), MemOS (ADR-47), Generative Agents
 (ADR-42, ADR-49) — each idea measured on OpenWiki's own data before anything was adopted. §11
-debts D1/D2/D6 are resolved. Deep designs in `docs/path-b-memory.md` and `docs/RAG-vs-GraphRAG.md`. New significant
-decisions should be appended here with the next id.*
+debts D1/D2/D6 are resolved. Deep designs in `docs/path-b-memory.md` and `docs/RAG-vs-GraphRAG.md`. Path C's plan — the world model as a
+dynamical system with two boundaries — is ADR-50, accepted as a plan before any code (`docs/path-c-world-model.md` §2.1).
+New significant decisions should be appended here with the next id.*

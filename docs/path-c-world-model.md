@@ -1,7 +1,8 @@
 # Path C — World Models (design proposal)
 
-> **Status: proposal (2026-10-18, OpenWiki v0.120.0). Nothing is built.** The next step is C0, an inventory that needs
-> no code and decides whether the rest is worth building. Path C builds on Path B ([`path-b-memory.md`](path-b-memory.md))
+> **Status: proposal (2026-10-18, OpenWiki v0.120.0). Nothing is built.** **The main architectural plan is §2.1** —
+> the world model as a dynamical system with two boundaries, approved on 2026-10-18 (arc42 ADR-50). The next step is
+> C0, an inventory that needs no code and decides whether the rest is worth building. Path C builds on Path B ([`path-b-memory.md`](path-b-memory.md))
 > and the agent-memory review ([`memory-systems-review.md`](memory-systems-review.md),
 > [`agent-memory-summary.md`](agent-memory-summary.md)); for machines it pairs with the sibling project **Cognitive
 > Substrate** (`G:\Claude\Cognitive Substrate`). Its test playground is the working digital twin of Ableton Live in
@@ -25,7 +26,8 @@ rules that bind it, what surprised us lately, and what was decided about it.
 ## Contents
 
 1. [Motivation & main idea](#1-motivation--main-idea)
-2. [What "world model" means here](#2-what-world-model-means-here)
+2. [What "world model" means here](#2-what-world-model-means-here) — including
+   [2.1 The world model as a dynamical system — the architectural plan](#21-the-world-model-as-a-dynamical-system--the-architectural-plan)
 3. [Conceptual model](#3-conceptual-model) — including [3.4 The loop](#34-the-loop)
 4. [Target architecture](#4-target-architecture)
 5. [Proposed data model](#5-proposed-data-model)
@@ -116,6 +118,144 @@ observation only — and at a twin only where acting is explicitly allowed (§10
 **Terminology.** OpenWiki's *world-model analysis* (Direction I, `owiki analyze`, ADR-25) measures the structure of
 the gathered knowledge — where the graph and the embedding space agree. Path C models the *environment* that
 knowledge is about. In this document "world model" means the latter.
+
+The working definition is made precise in §2.1 — the plan the rest of this document details.
+
+### 2.1 The world model as a dynamical system — the architectural plan
+
+> **The main architectural plan for Path C, approved on 2026-10-18 (arc42 ADR-50).** The rest of this document details
+> it; where a later section seems to say otherwise, this section decides.
+
+**The definition.** A world model is an internal dynamical system with a state. Projected onto an interface —
+language, for agents and people — the state predicts the outside world. One step: an input arrives (an observation or
+a statement); the state changes if the input carries new information; the state is projected onto the interface; the
+output is a prediction and, through the agent, an action — whose effect arrives as the next input.
+
+**Path B and Path C, side by side.**
+
+*Path B — a knowledge model: what was said.*
+- **Behaviour:** reactive. Its state changes only on stimuli — a captured session, an agent's write, the nightly
+  `sleep`. Time only ages it: decay, recency for the kinds of fact that go stale, forgetting.
+- **Structure:**
+
+  ```
+  knowledge model (graph + semantic index) ↔ language interface (capture, recall, wiki_remember)
+      ↔ agents and people ↔ (the environment — only as described in words)
+  ```
+
+*Path C — a world model: what is, what follows, what was decided.*
+- **Behaviour:** internal dynamics — a forward step (persistence, laws, co-change, sandbox runs) and an update (the
+  merge; a mismatch becomes an event). Proactive in perceiving: on a schedule and without being asked, it keeps its
+  state in sync with the twins, checks its laws and its open predictions, and lets time carry expectations — deadlines,
+  settle times, persistence. Never proactive in acting: it proposes; the agent acts, checked by the model.
+- **Structure:**
+
+  ```
+  environment ↔ digital twins (sensors + actuators + their own state, kept in sync)
+      ↔ structured interface (state · history · act: typed values with time and quality)
+      ↔ world model (state · laws · predictions · beliefs, stored in the graph; the semantic space as its index)
+      ↔ language interface (world slice · MCP answers · UI)
+      ↔ agents and people (the policy: decide · act · approve)
+  ```
+
+- **Relation to Path B:** Path C contains it. Its beliefs are Path B's facts, linked to the state they are about.
+
+**The difference in one line:** Path B can only be told it is wrong; Path C finds out — because it keeps expecting
+things, and checks.
+
+**The architecture.**
+
+```
+                outside world: repository · runtime · Ableton set · machine
+                    ▲ actions (gated)                     │ observations
+                    │                                     ▼
+    ┌───────── twins: actuators + sensors (+ their own state) ───────────┐
+                    ▲                                     │
+                    │ act: checked against laws           │ state(variable), events
+                    │ and preconditions                   ▼
+    ┌──────────────── OpenWiki world model ──────────────────────────────┐
+    │ structure:  entities · variables · bindings         (rarely)       │
+    │ parameters: laws · co-change · method scores        (slowly)       │
+    │ state s(t): values · beliefs · predictions · events (fast)         │
+    │ trajectory: every value's interval (B7)                            │
+    │ forward F:  persistence · laws · co-change · sandbox runs          │
+    │ update U:   the merge (observation wins) · events · closures       │
+    └────────────────────────────────────────────────────────────────────┘
+                    ▲ parse: words → variables, intents   │ project: state → text
+                    │ (semantic space + BM25)             ▼ (world slice, MCP)
+                agents and people: the policy (decide · act · approve)
+```
+
+**Seven principles.**
+1. **Two dynamics.** A forward step runs the state ahead without input — every value persists unless an action
+   touches it (the null prediction, §3.4.3), the laws say what must follow (§7), co-change says which files move
+   together, and for code the real system runs in a sandbox (§8.1). An update corrects the state from an observation —
+   the merge, in which an observation outranks a remembered statement (§3.3, §6.4). An observation that matches the
+   prediction carries no news and only refreshes `last_seen`; only a mismatch changes the state and raises an event —
+   only the errors travel.
+2. **Three speeds of change, and the trajectory kept.** The *state* — current values, beliefs, open predictions and
+   events — changes per observation (the fast and the session loops); the *parameters* — laws, co-change weights,
+   method scores, settle times — change slowly (the nightly loop); the *structure* — which entities, variables, sensors
+   and twins exist — changes rarely, by a person (§3.4.2). And the state's history is kept: every value's interval
+   (B7), so any past state can be replayed.
+3. **The semantic space is the interface, not the state.** The state is symbolic — variables, values, intervals,
+   rules. The embeddings (and BM25) are the language interface's encoder and decoder: they find which variables a
+   prompt, a remembered fact or a manual sentence is about, and which part of the state to render as text (§9).
+   Similarity is not dynamics: 76 % of the files that change together are not each other's nearest embedding
+   neighbours (`path-b-memory.md` §13.29), and about a third of the graph's other connections are no closer in the
+   embedding space than a random pair (ADR-25).
+4. **Twins are the boundary — a stateful interface that can fail.** A twin is the sensor and the actuator for one
+   environment, often with its own state (the Ableton twin's own graph); the repository's "twin" is OpenWiki's own
+   sensors. The world model is composed: the shared part — beliefs, laws, predictions, relations across twins — in
+   OpenWiki's graph, each environment's detail in its twin, reached through one contract (§10.1). A twin's state is an
+   observation with a quality — complete or partial, fresh or old —, so a twin out of sync is the stale-fact problem one
+   level down: only a complete, fresh snapshot may close a belief (§3.3, §11.5).
+5. **The model predicts; the agent acts — and the model checks the action.** The world model outputs predictions,
+   explanations and proposals; the coding agent, with a person where approval is required, is the policy; before an
+   action reaches the world, the model checks its precondition (the same object as observed) and the laws as
+   interlocks (§10.2). The model never acts on its own surprises (§3.4.6).
+6. **Predict in the state space, speak in language.** A prediction is recorded structured — variable, expected value,
+   tolerance, deadline, basis — so the comparison is exact (§3.4.4); only then is it rendered as text for the agent.
+   Between twins and the model the interface is typed for the same reason.
+7. **Time carries expectations.** Every value is expected to persist, every prediction has a deadline, every action a
+   settle time. So "nothing happened" is information too: an expected change that doesn't come is a miss, a silent
+   sensor leaves predictions unresolved (§3.4.4).
+
+**One step, in the plan's terms.**
+
+| Step | In Path C | Mechanism |
+|---|---|---|
+| Input | an observation (a sensor, a twin) or a statement (a conversation, `wiki_remember`) | observed facts (§5.1), captured facts |
+| Compare with the expectation | the forward step predicted "stays as it is", or "becomes 0.82" | the null prediction, laws, predictions (§3.4.3, §7, §8) |
+| Change the state if the input is new information | re-affirm when it matches; update and raise an event when it doesn't | the merge (§6.4), events (§8.3) |
+| Project onto the interface | the world slice for a prompt, MCP answers for agents, the UI for people | `context_for`, the `state` / `explain` verbs (§9, §10.1) |
+| Output a prediction | structured first (variable, value, tolerance, deadline), then rendered as text | `Prediction` (§5.2) |
+| Output an action | the agent's decision, checked by the model before it reaches the world | preconditions, laws as interlocks, approval (§10.2) |
+| …and the next input | the action's effect is observed and compared | the loop (§3.4) |
+
+**In notation.**
+
+```
+state       s(t)   = values of the variables, beliefs, open predictions, open events
+parameters  θ      = laws, co-change weights, method scores, settle times
+forward     ŝ(t+Δ) = F_θ( s(t), a )          persistence · laws · co-change · sandbox runs
+observe     o      = H( world )              sensors and twins — complete? fresh?
+update      s(t+Δ) = U( ŝ(t+Δ), o )          observation outranks belief; a mismatch → an event
+learn       θ      ← θ + slow updates         method scores automatically; laws only by a person
+project     text   = g( s(t), question )      the world slice — semantic space + BM25 pick the part
+policy      a      = π( text, goal )          the agent, with approval where required — outside the model
+check       a ok?  = laws( ŝ after a ) ∧ precondition( a, s(t) )
+```
+
+**Why not a learned world model.** Learned world models (Dreamer, JEPA) learn a continuous, hidden state and its
+dynamics by gradient descent and imagine ahead. This plan's dynamical system is deliberately different: the state is
+explicit and symbolic — every value can be read, dated and corrected; the dynamics are mostly declared or counted
+(laws, co-change), because the memory's own history is too sparse to learn them from (MSR §13); for digital
+environments the simulator is the real system in a sandbox — the world as its own best model, in Rodney Brooks'
+phrase; and the language model is a prior, not the physics: it may propose predictions and explanations, which only the
+loop confirms (§3.2). What the plan gives up is imagination in unseen situations; what it gains is a model that can be
+checked, replayed and trusted around a codebase or a machine — and a regulator that contains a model of what it
+regulates, as Conant and Ashby put it (1970).
 
 ## 3. Conceptual model
 

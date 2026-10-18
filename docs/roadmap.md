@@ -1293,6 +1293,11 @@ facts. Design detail: `path-b-memory.md` §13.
 
 ## Path C — world models (proposal, 2026-10-18)
 
+**The main architectural plan** (approved 2026-10-18, arc42 ADR-50): the world model is an internal dynamical system —
+a symbolic state with a forward step and an update — with two boundaries: digital twins toward the environment (a
+stateful interface that can fail) and language toward agents and people; the model predicts and checks, the agent
+acts (`path-c-world-model.md` §2.1).
+
 Path B remembers what was *said*; its weak spot is state that changes without anyone saying so (versions, counts,
 running services, plans that got done). Path C lets the world write too: built-in sensors over git, files, code,
 tests and local services record **observed** state as B7 facts that close stale beliefs; rules from documents,

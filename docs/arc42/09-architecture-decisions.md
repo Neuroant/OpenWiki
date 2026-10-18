@@ -71,6 +71,7 @@
 | [48](#adr-48) | A use signal first: git co-changes as edges for code corpora | Accepted | Q4, Q5 |
 | [49](#adr-49) | Recency only for the kinds of fact that go stale | Accepted (Path B++); refines [ADR-34](#adr-34) | correctness, Q5 |
 | [50](#adr-50) | Path C: the world model as a dynamical system with two boundaries — the main architectural plan | Accepted as the plan (2026-10-18); nothing built | correctness, Q4, Q5 |
+| [51](#adr-51) | Digital twins are programs; language models at design time, code at run time | Accepted as the plan (2026-10-18); refines [ADR-50](#adr-50); keeps [ADR-2](#adr-2) | correctness, security, Q1 |
 
 ---
 
@@ -1081,6 +1082,33 @@ plan, nothing built; extends [ADR-14](#adr-14), [ADR-27](#adr-27), [ADR-33](#adr
   so only a complete, fresh snapshot may close a belief. Staged with go / no-go exits: C0, an inventory without code,
   decides whether C1–C4 are built.
 
+### ADR-51
+**Digital twins are programs; language models work at design time, code at run time.** *(2026-10-18; a plan,
+nothing built; refines [ADR-50](#adr-50); keeps [ADR-2](#adr-2))*
+- **Context:** ADR-50 makes digital twins the world model's boundary toward the environment. Their sensors, checks and
+  simulators are hard to write and consequential. The local 30B is unreliable as a judge of memory (`path-b-memory.md`
+  §13.1–13.5) but adequate for parsing and summarizing in bulk, and a frontier coding agent is already in the loop — the
+  host agent that records new states ([ADR-33](#adr-33)).
+- **Decision:** a twin is a program — the executable half of the world model (sensors, actuators, a state mirror, the
+  dynamics, laws as tests, a simulator, the loop) next to the knowledge model, its declarative half. It runs the
+  knowledge model's testable claims against the environment and consolidates the knowledge model from the results
+  (`path-c-world-model.md` §2.2). The coding agent programs the twins at design time; every change goes through a
+  reviewed commit (read-only sensors and checks may later land without review once their fixtures have proven them;
+  actuators never); laws are declarative first, with test functions only where an expression can't say it. The twin's
+  loop makes no language-model call. The local model reads and writes language at run time — capture, extraction,
+  summaries, answers — and the twin checks it wherever the content is testable. The generic twin machinery lives in
+  OpenWiki, each environment's twin code in its own repository. OpenWiki itself still makes no cloud call; the large
+  model works through the host agent, in sessions.
+- **Alternatives:** a language model inside the twin's loop (interpreting instead of compiling) — slow and costly per
+  run, not deterministic, and a judgment our audits found unreliable; twin code generated and run without review — code
+  execution on the user's machine, and checks written to pass; a cloud model building the knowledge model in the
+  background — private memory leaves the machine, while the twin already catches the local model's testable errors;
+  laws as code first — more code to maintain, laws harder to read.
+- **Consequences:** + the large model's judgment is spent once per change and frozen into tested code; the loop is fast,
+  deterministic, private and free per run; the better the twin, the cheaper the model that builds the knowledge model
+  can be; the testable share of the knowledge model becomes a measurable coverage. − Twin code to maintain in several
+  repositories; every check needs a failing fixture; review effort for each change to a twin.
+
 ---
 *Chapter complete. The Path-B agent-memory direction landed via ADR-14/15/16/17/18/19; the graph then
 deepened (ADR-22 typed relations + relation-aware GraphRAG, ADR-23 entity resolution), gained
@@ -1105,5 +1133,6 @@ thing (ADR-49, from *The Missing Knowledge Layer*) and otherwise left addenda �
 human-inspired architecture's replay check (ADR-49), OpenCog Hyperon (ADR-48), MemOS (ADR-47), Generative Agents
 (ADR-42, ADR-49) — each idea measured on OpenWiki's own data before anything was adopted. §11
 debts D1/D2/D6 are resolved. Deep designs in `docs/path-b-memory.md` and `docs/RAG-vs-GraphRAG.md`. Path C's plan — the world model as a
-dynamical system with two boundaries — is ADR-50, accepted as a plan before any code (`docs/path-c-world-model.md` §2.1).
+dynamical system with two boundaries — is ADR-50, accepted as a plan before any code (`docs/path-c-world-model.md` §2.1); ADR-51 adds that twins are programs
+and that language models work at design time, code at run time (§2.2).
 New significant decisions should be appended here with the next id.*

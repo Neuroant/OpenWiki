@@ -1296,7 +1296,9 @@ facts. Design detail: `path-b-memory.md` §13.
 **The main architectural plan** (approved 2026-10-18, arc42 ADR-50): the world model is an internal dynamical system —
 a symbolic state with a forward step and an update — with two boundaries: digital twins toward the environment (a
 stateful interface that can fail) and language toward agents and people; the model predicts and checks, the agent
-acts (`path-c-world-model.md` §2.1).
+acts (`path-c-world-model.md` §2.1). Twins are programs — the executable half of the world model, which runs the
+knowledge model's testable claims as tests —, written by the coding agent through reviewed commits and run without
+any language-model call; the local model builds and maintains the knowledge model (§2.2, ADR-51).
 
 Path B remembers what was *said*; its weak spot is state that changes without anyone saying so (versions, counts,
 running services, plans that got done). Path C lets the world write too: built-in sensors over git, files, code,

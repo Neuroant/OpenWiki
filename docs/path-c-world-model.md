@@ -1,7 +1,8 @@
 # Path C — World Models (design proposal)
 
 > **Status: proposal (2026-10-18, OpenWiki v0.120.0). Nothing is built.** **The main architectural plan is §2.1** —
-> the world model as a dynamical system with two boundaries, approved on 2026-10-18 (arc42 ADR-50). The next step is
+> the world model as a dynamical system with two boundaries, approved on 2026-10-18 (arc42 ADR-50); §2.2 adds that a
+> twin is a program and that language models work at design time while the twin runs as code (ADR-51). The next step is
 > C0, an inventory that needs no code and decides whether the rest is worth building. Path C builds on Path B ([`path-b-memory.md`](path-b-memory.md))
 > and the agent-memory review ([`memory-systems-review.md`](memory-systems-review.md),
 > [`agent-memory-summary.md`](agent-memory-summary.md)); for machines it pairs with the sibling project **Cognitive
@@ -28,6 +29,7 @@ rules that bind it, what surprised us lately, and what was decided about it.
 1. [Motivation & main idea](#1-motivation--main-idea)
 2. [What "world model" means here](#2-what-world-model-means-here) — including
    [2.1 The world model as a dynamical system — the architectural plan](#21-the-world-model-as-a-dynamical-system--the-architectural-plan)
+   and [2.2 Digital twins are programs — and where language models work](#22-digital-twins-are-programs--and-where-language-models-work)
 3. [Conceptual model](#3-conceptual-model) — including [3.4 The loop](#34-the-loop)
 4. [Target architecture](#4-target-architecture)
 5. [Proposed data model](#5-proposed-data-model)
@@ -40,7 +42,7 @@ rules that bind it, what surprised us lately, and what was decided about it.
 12. [Staged delivery plan (C0–C4)](#12-staged-delivery-plan-c0c4)
 13. [Evaluation strategy](#13-evaluation-strategy)
 14. [Risks & guardrails](#14-risks--guardrails)
-15. [Open decisions](#15-open-decisions)
+15. [Decisions](#15-decisions)
 16. [Relationship to the current code](#16-relationship-to-the-current-code)
 17. [Prior art](#17-prior-art)
 
@@ -119,7 +121,8 @@ observation only — and at a twin only where acting is explicitly allowed (§10
 the gathered knowledge — where the graph and the embedding space agree. Path C models the *environment* that
 knowledge is about. In this document "world model" means the latter.
 
-The working definition is made precise in §2.1 — the plan the rest of this document details.
+The working definition is made precise in §2.1 — the plan the rest of this document details —, and §2.2 says what a
+twin is and where language models work.
 
 ### 2.1 The world model as a dynamical system — the architectural plan
 
@@ -204,9 +207,10 @@ things, and checks.
    Similarity is not dynamics: 76 % of the files that change together are not each other's nearest embedding
    neighbours (`path-b-memory.md` §13.29), and about a third of the graph's other connections are no closer in the
    embedding space than a random pair (ADR-25).
-4. **Twins are the boundary — a stateful interface that can fail.** A twin is the sensor and the actuator for one
-   environment, often with its own state (the Ableton twin's own graph); the repository's "twin" is OpenWiki's own
-   sensors. The world model is composed: the shared part — beliefs, laws, predictions, relations across twins — in
+4. **Twins are the boundary — a stateful interface that can fail — and the executable half.** A twin is the sensor and
+   the actuator for one environment, often with its own state (the Ableton twin's own graph); the repository's "twin" is
+   OpenWiki's own sensors. And a twin is a program: besides the boundary it runs the dynamics, the laws as tests and the
+   loop (§2.2). The world model is composed: the shared part — beliefs, laws, predictions, relations across twins — in
    OpenWiki's graph, each environment's detail in its twin, reached through one contract (§10.1). A twin's state is an
    observation with a quality — complete or partial, fresh or old —, so a twin out of sync is the stale-fact problem one
    level down: only a complete, fresh snapshot may close a belief (§3.3, §11.5).
@@ -256,6 +260,113 @@ phrase; and the language model is a prior, not the physics: it may propose predi
 loop confirms (§3.2). What the plan gives up is imagination in unseen situations; what it gains is a model that can be
 checked, replayed and trusted around a codebase or a machine — and a regulator that contains a model of what it
 regulates, as Conant and Ashby put it (1970).
+
+### 2.2 Digital twins are programs — and where language models work
+
+> **Part of the plan, decided on 2026-10-18 (arc42 ADR-51).** It widens §2.1's fourth principle: a twin is not only
+> the boundary, it is the executable half of the world model.
+
+**Two halves.** The world model has a declarative and an executable half:
+- the **knowledge model** — the graph and the semantic index, holding facts, beliefs, laws as statements, predictions
+  and history: *what we know and believe*;
+- the **digital twin** — a program: sensors, actuators, a mirror of the environment's state, its dynamics, laws turned
+  into runnable checks, a simulator, and the loop that runs them: *what we can run*.
+
+The twin is to the knowledge model what a test suite is to a codebase. Every claim that can be tested becomes a test;
+the twin runs the tests against reality on a schedule, as continuous integration runs a codebase's tests on every
+change; a failure becomes an event; and the results consolidate the knowledge model.
+
+**The loop between the halves.**
+
+```
+            ┌───────────── knowledge model (declarative) ─────────────┐
+            │  graph + semantic index: facts · beliefs · laws as      │
+            │  statements · predictions · history                     │
+            └─────▲──────────────────────────────────────────┬────────┘
+  results become  │ observations · check results ·           │ knowledge becomes code:
+  knowledge       │ prediction outcomes (deterministic;      │ the large model writes it,
+                  │ text parsed by the local model)          │ review and tests accept it
+            ┌─────┴──────────────────────────────────────────▼────────┐
+            │  digital twin (executable): sensors · actuators ·       │
+            │  state mirror · dynamics · laws as tests · simulator ·  │
+            │  the loop runner                                        │
+            └─────▲──────────────────────────────────────────┬────────┘
+                  │ observe                                  │ act (gated)
+                                      environment
+```
+
+Two translations run in opposite directions. *Knowledge becomes code* — programming the twin: a law becomes a check, a
+binding a sensor, a decision a constraint, a dynamic a simulator. *Results become knowledge*: observations become
+facts, check results the laws' status, misses events, outcomes prediction scores.
+
+**What a twin program contains.**
+
+| Part | The repository twin | The Ableton twin (§11.5) |
+|---|---|---|
+| sensors | the version, the tags, the test count, Ollama's models | the extractor's snapshot and observers |
+| actuators | none — read-only | the injector's fixed set of commands |
+| state mirror | observed values with their history (§5.1) | the twin's own graph |
+| laws as tests | the two version files agree; every release has a tag | volume at most unity unless boosted; output at most the power limit |
+| simulator | the real code in a git worktree, with the tests at risk (§8.1) | a dry run, or a simple gain-staging calculation |
+| loop runner | scheduled sensor reads, deadline checks, the nightly pass | observers, read-back after each write, periodic sync |
+
+The Ableton review's six recommendations (R1–R6) are programming its twin in this sense: clamps, stable ids, a sync
+that knows it is complete, read-back, more observers.
+
+**Language models at design time, code at run time.** The large model's judgment is compiled into reviewed, tested
+code, and the twin's loop runs without any language-model call — fast, deterministic, local, private, free per run.
+- **Programming the twin — the large model.** Sensors, checks and simulators are hard to write and consequential: work
+  for a frontier coding agent, the one already in the loop (the host agent, ADR-33). It does not contradict §3.2's
+  rule: code is a proposal that can be verified by running it — a sensor that reads wrong disagrees with others, a check
+  is tested on planted violations, a simulator against the real outcome. Cognitive Substrate's self-healing skills work
+  the same way (its D17: the model proposes, Playwright validates, a failing skill is demoted). The large model is used
+  once per change to a twin, not once per turn of the loop; "constantly" applies to the twin running, not to its
+  programming, which happens in steps, in sessions, with review.
+- **Building and maintaining the knowledge model — the local model.** Language must be read and written at run time —
+  capture, extraction, summaries, answers: high volume, private, in the background. The local model is weak at
+  judgment (§3.2), and the twin catches its errors wherever the content is testable: when capture records "756 tests"
+  and the test-count sensor reads 770, the fact closes by itself. The better the twin, the cheaper the model that builds
+  the knowledge model can be. For what no twin can test — decisions, reasons, preferences — the existing guards stay:
+  the policy, the agent's `wiki_remember`, a person.
+- **Where the large model touches the knowledge model:** hard cases handed to the agent in a session — review lists,
+  explanations of surprises, proposed laws — and, an open decision (§15), opt-in one-off extraction from public
+  documents. No background pipeline sends private memory to a cloud model; OpenWiki itself makes no cloud call (ADR-2).
+
+| Work | Who | When | Verified by |
+|---|---|---|---|
+| programming the twin — sensors, laws as tests, simulators, the loop | the large model (the coding agent) | design time, in sessions | review, tests, planted violations, running it |
+| running the twin — observe, check, predict, compare | code, no language model | run time, on a schedule | cross-checks, fixtures |
+| building and maintaining the knowledge model — capture, extraction, summaries, embeddings | the local model (Ollama) | run time, in the background | the twin for testable content; the policy, the agent and people for the rest |
+| hard judgments — staleness, explanations, proposed laws | the large model (the agent) or a person | in sessions | the twin, where testable |
+
+**Four tiers.**
+
+| Tier | Who | Does |
+|---|---|---|
+| 0 — no language model | rules and code | the merge, the policy, forgetting, sensors, comparisons, law checks, interlocks, the world slice, the twin's loop |
+| 1 — local models | OpenWiki in the background (bge-m3, the 30B) | embeddings; capture; extraction; the narrow merge checks; summaries; answers in the wiki |
+| 2 — the frontier model in the loop | the coding agent, in sessions | programming the twins; decisions and actions; recording new states; explanations; proposed laws; review lists |
+| 3 — people | the user | accept laws, approve actions and twin code, confirm or close facts |
+
+**Decided on 2026-10-18.**
+1. **Where twin code lives.** The generic machinery — the built-in sensor types (§6.1), generic law checkers, the loop
+   runner, the twin contract (§10.1) — in OpenWiki; each environment's twin code in that environment's repository: the
+   repository twin's in OpenWiki, the Ableton twin's in the Ableton Expert System, the LCU 9000's in Cognitive
+   Substrate.
+2. **Every change to twin code goes through a reviewed commit.** Read-only sensors and checks may later be relaxed to
+   land without review, once their fixtures have proven them; actuators never.
+3. **Declarative first.** Laws are data with generic checkers (§7.2); a reviewed test function only where an
+   expression can't say it — less code to maintain, and the laws stay readable.
+
+**Who tests the tester.**
+- Every check must fail on a planted violation; a check that can't fail is reported, never trusted.
+- A variable measured twice is cross-checked — the two version files are such a pair.
+- Laws are mutation-tested in a scratch copy: change the value, and the check must fire.
+- A law whose text changed while its check didn't — or the reverse — raises a drift event.
+
+**Testable share — the knowledge model's test coverage.** The share of facts and laws a twin can test is a headline
+measure next to a stale belief's lifetime (§13): the larger it is, the more of the knowledge model is held to the
+world. C0's inventory (§12) is its first measurement.
 
 ## 3. Conceptual model
 
@@ -617,7 +728,8 @@ queued as an `observe` op for the next writer. The context is right at once; the
 ### 6.6 Safety
 
 - **No shell.** Built-in types only; file paths confined to the project's sources and repository; HTTP to localhost
-  only; OPC UA read-only.
+  only; OPC UA read-only. Twin code beyond the built-in types — sensors, checks, simulators — enters only through a
+  reviewed commit in the environment's repository (§2.2); at run time a manifest can't add a command.
 - **Values are input like any other.** Observed values pass credential redaction and the P0 policy (ADR-30, ADR-37):
   a config file can hold a token, a log line an injected instruction.
 - **`pytest-collect` is opt-in.** It runs the project's test setup; on a foreign repository that is code execution.
@@ -649,7 +761,9 @@ Every law has its text; a law that can be checked also has a check:
 | co-change | files A change ⇒ files B change | a change to `cli.py` also changes `CLAUDE.md` |
 | precondition | decision D holds while `V == v` | "embed in one phase first" holds while the GPU has 12 GB |
 
-A law without a check stays text; it still informs the world slice.
+A law without a check stays text; it still informs the world slice. Declarative first (§2.2): a check is a small
+expression for a generic checker, and a reviewed test function only where an expression can't say it. A check counts
+only after it has failed on a planted violation.
 
 ### 7.3 Extraction and review
 
@@ -938,8 +1052,8 @@ Each stage is shippable and measured on its own, and each can end Path C.
 ### C4 — The physical twin
 - **Goal:** the same model for a working twin, then for a machine, through federation.
 - **Build:** the twin contract on the Ableton twin first (§11.5), once its review's R1, R2, R4 and R6 are in; then the
-  LCU 9000 simulator (§11.2) for faults with known causes; the LCU 9000 twin's MCP server — in Cognitive Substrate or
-  standalone (§15); the manual wikis' variables and laws with shared ids; the telemetry store; learned dependencies
+  LCU 9000 simulator (§11.2) for faults with known causes; the LCU 9000 twin's MCP server — in Cognitive Substrate, the
+  LCU 9000's repository (§2.2); the manual wikis' variables and laws with shared ids; the telemetry store; learned dependencies
   (§11.3); the diagnosis benchmark (§11.4) on both.
 - **Builds on:** the Ableton Expert System's MCP servers; Cognitive Substrate's Phase 11 design and its LCU 9000 mock;
   C1–C3.
@@ -967,6 +1081,8 @@ labels wherever a judge would decide; the local judge treated as generous (PB §
 |---|---|---|
 | stale facts among injected facts in governed attributes | C0 (baseline), C1 | replayed prompts, hand labels |
 | **lifetime of a stale belief** — from the world's change to the belief's closing | C0 (baseline), C1 | observed changes against closings, on the replayed history |
+| **testable share** — the facts and laws a twin can test: the knowledge model's test coverage (§2.2) | C0 (baseline), C1–C3 | the inventory, then the bindings and checks in place |
+| check health — every check fails on its planted violation | C2, C3 | fixtures; mutation tests in a scratch copy |
 | review-list size and its stale share | C1 | `analyze memory --review`, blind labels |
 | inject-hook latency, p95 | C1 | the metrics collector |
 | drift detection: detected of planted, false alarms per week | C2 | planted drifts on a scratch copy; real use |
@@ -999,42 +1115,60 @@ kept; the cross-session and cue-trigger sets; LoCoMo overall J — LoCoMo has no
 - **False alarms.** Laws only after review, events resolvable by a person, the false-alarm rate an exit criterion (C2).
 - **Loops that run away or fight.** No automatic remediation, contested variables left alone, silence never taken as
   confirmation, skill scored against a baseline (§3.4.6, §3.4.7).
+- **Twin code written by a model.** Written by the coding agent, accepted only through reviewed commits, every check
+  proven on a planted violation; no change to a twin's code at run time (§2.2).
 - **Over-observation.** Sensors on things nobody asks about cost latency and add noise; bindings come from the C0
   inventory, not from what is easy to read.
 - **Volume.** No samples in the graph (§5.3).
 - **Engine.** Kuzu is archived (R10). The new tables follow the LadybugDB move's constraints
   ([`ladybugdb-move.md`](ladybugdb-move.md)), and the portable export must carry them.
 
-## 15. Open decisions
+## 15. Decisions
 
-**For the user**
+**Decided on 2026-10-18**
+
+- **The main architectural plan** — the world model as a dynamical system with two boundaries (§2.1, ADR-50).
+- **Where Path C lives** — the knowledge model and the generic twin machinery in OpenWiki; each environment's twin in
+  that environment's repository, federated through the twin contract (§2.2, §10.3). So the LCU 9000 twin's MCP server
+  lives in Cognitive Substrate, the LCU 9000's repository.
+- **Twin code is reviewed** — every change goes through a reviewed commit; read-only sensors and checks may later be
+  relaxed to land without review once their fixtures have proven them; actuators never (§2.2).
+- **Declarative first** — laws are data with generic checkers; a reviewed test function only where an expression can't
+  say it (§2.2, §7.2).
+- **Language models at design time, code at run time** — the coding agent programs the twins in sessions, the twin's
+  loop makes no language-model call, the local model builds and maintains the knowledge model; OpenWiki itself makes no
+  cloud call (§2.2, ADR-51, ADR-2).
+
+**Open — for the user**
 
 1. **The first environment:** the repository (measurable now), the Ableton twin (runs now; needs R1, R2, R4 and R6 of
    its review), or the LCU 9000 (needs the simulator)? *Recommended: the repository for C0–C1, where the stale-fact
    baseline is; the Ableton twin as the test playground from C2 on — laws, actions, predictions and diagnosis on a
    system that answers back (§11.5).*
-2. **Where Path C lives:** inside OpenWiki, in Cognitive Substrate, or federated (§10.3)? *Recommended: the repository
-   twin in OpenWiki, machines federated.*
-3. **Acting:** may twins act, or stay read-only? *Recommended: read-only through C4.*
-4. **Telemetry:** real hardware or an OPC UA server, or a simulator? *The plan starts with the Ableton twin's live
+2. **Acting:** may twins act, or stay read-only? *Recommended: read-only through C4.*
+3. **Telemetry:** real hardware or an OPC UA server, or a simulator? *The plan starts with the Ableton twin's live
    data and adds a simulator for faults with known causes.*
-5. **The action log:** record the coding agent's edits and commands as `Action`s through a `PostToolUse` hook — local,
+4. **The action log:** record the coding agent's edits and commands as `Action`s through a `PostToolUse` hook — local,
    and needed to tell the agent's changes from everyone else's (§3.4.3)? *Recommended: yes, from C3; git covers commits
    before that.*
-6. **What the loop may correct by itself** (§3.4.6): facts automatically, laws and decisions only by a person, never
+5. **What the loop may correct by itself** (§3.4.6): facts automatically, laws and decisions only by a person, never
    automatic remediation? *Recommended: as in §3.4.6.*
+6. **Direct cloud calls for public data only** — an amendment to ADR-2 for an opt-in benchmark judge or a one-off
+   extraction from a public manual? *Recommended: keep ADR-2 strict for now; a second judge for benchmarks is the first
+   case to revisit.*
+7. **A small local model** for features that run on every prompt (constraint probes)? *Recommended: measure before
+   adding one — the coexistence check proved sensitive to wording.*
 
-**Technical**
+**Open — technical**
 
-7. Agent predictions: stated explicitly through a tool (`wiki_predict`), or system-made only — persistence, co-change,
+8. Agent predictions: stated explicitly through a tool (`wiki_predict`), or system-made only — persistence, co-change,
    laws? *Recommended: system-made first; the tool once C3's scores show what the agent's own predictions would add.*
-8. Where the slow loop runs: inside `sleep`, or as its own `owiki world review`? *Recommended: inside `sleep`, like
+9. Where the slow loop runs: inside `sleep`, or as its own `owiki world review`? *Recommended: inside `sleep`, like
    forgetting and consolidation, with `owiki world review` for runs on demand.*
-9. Names of the world tools (`wiki_state` and siblings, or a `world_*` family).
-10. Bindings only in the manifest, or also proposed from memory (§6.2)?
-11. The telemetry store, SQLite or Parquet (C4).
-12. Whether a contradicting late belief is stored at all (§6.4, rule 5) or only reported.
-13. Where the LCU 9000 twin's MCP server lives.
+10. Names of the world tools (`wiki_state` and siblings, or a `world_*` family).
+11. Bindings only in the manifest, or also proposed from memory (§6.2)?
+12. The telemetry store, SQLite or Parquet (C4).
+13. Whether a contradicting late belief is stored at all (§6.4, rule 5) or only reported.
 14. How laws, predictions, actions and events travel in COGX (e.g. in `--full` metadata).
 15. A *Welt* (world) tab in the web UI, or panels inside Gedächtnis.
 
@@ -1052,6 +1186,7 @@ kept; the cross-session and cue-trigger sets; LoCoMo overall J — LoCoMo has no
 | the action log | the Claude Code hook installer (`claude_code_template.hooks_config`, adding `PostToolUse`), `cli._cmd_hook`, the journal |
 | events and their review | the Pflege panel (`/api/memory/maintenance`), `handoff.render_brief` |
 | world tools | `mcp_server.build_server` |
+| the generic twin machinery — built-in sensor types, generic law checkers, the loop runner, the twin contract | new in OpenWiki, on `handoff`'s probes, the journal and `mcp_server`; each environment's own twin code stays in its repository (§2.2) |
 | analysis | `analysis/memory.py`, extended by a model-versus-reality section: discrepancies, violations, calibration |
 
 ## 17. Prior art
@@ -1075,6 +1210,10 @@ kept; the cross-session and cue-trigger sets; LoCoMo overall J — LoCoMo has no
   schedule (MSR §11), which sensors do for real; the transfer-entropy report (MSR §13), rejected for a sparse memory and
   retested here on dense telemetry (§11.3); OpenCog Hyperon (MSR §17) — inference needs a curated vocabulary, which
   reviewed laws provide.
+- **Programs as models (§2.2).** Voyager keeps a library of code skills verified by running them in Minecraft;
+  Cognitive Substrate's self-healing skills (its D17) are proposed by a model, validated by Playwright and demoted when
+  they fail; property-based testing states laws as properties a test tries to violate; continuous integration runs the
+  tests on every change — the twin does the same for knowledge.
 - **Ableton Expert System.** A working two-way twin: classes and instances bound with physical units (a normalized
   0.72 shown as 1,200 Hz), an injector restricted to a fixed set of commands, sound recipes as procedural memory
   captured from state — and, in its review of 2026-10-18 (`docs/Digital_Twin_Review.md` there), the gaps a twin shows

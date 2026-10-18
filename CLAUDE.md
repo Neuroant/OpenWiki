@@ -46,7 +46,8 @@ A design **proposal** for **Path C — world models** (observed state from built
 a world slice as context; the repository first, machines federated with Cognitive Substrate; the working Ableton Live
 twin of the sibling project `G:\Antigravity\ableton-expert-system` as its test playground) is
 `docs/path-c-world-model.md` — nothing built yet; its §2.1 is the **main architectural plan** (approved 2026-10-18,
-ADR-50: the world model as a dynamical system with two boundaries); C0 (an inventory, no code) is the next step.
+ADR-50: the world model as a dynamical system with two boundaries), §2.2 adds that twins are programs and that
+language models work at design time while the twins run as code (ADR-51); C0 (an inventory, no code) is the next step.
 
 ## Environment & commands
 

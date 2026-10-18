@@ -33,6 +33,8 @@ stands, and the plan — is in [`agent-memory-summary.md`](agent-memory-summary.
 17. [OpenCog Hyperon and Hyperon-MCP](#17-opencog-hyperon-and-hyperon-mcp) (reviewed 2026-10-08)
 18. [MemOS](#18-memos) (reviewed 2026-10-08)
 19. [Generative Agents](#19-generative-agents) (reviewed 2026-10-09 — the last of the shortlist)
+20. [A survey: architectures of agentic second-brain systems](#20-a-survey-architectures-of-agentic-second-brain-systems)
+    (reviewed 2026-10-18 — a survey of the field, not a system)
 - [Across the series — what it suggests for OpenWiki](#across-the-series--what-it-suggests-for-openwiki)
 - [Candidates — world models and CoALA](#candidates--world-models-and-coala)
 
@@ -2001,12 +2003,139 @@ from the facts each time.
 
 ---
 
+## 20. A survey: architectures of agentic second-brain systems
+
+*Source: "Architectures of Agentic Second-Brain Systems: From Cognitive Language Agents and GraphRAG to Infinite
+Context Windows and Biophysical Brain Emulation" — a survey without author or date, shared on 2026-10-18, with 97
+references; checked against the systems this series read from source and against OpenWiki's own measurements. A survey,
+not a system: there is no code to read.*
+
+**What it is.** A broad map of the field on four levels — cognitive frameworks, graph-based retrieval, memory products
+and memory inside the model — plus whole-brain emulation as the far end of the scale. It describes each system in a
+paragraph or two and closes with five trajectories for "the next generation of agentic Second-Brain architectures"; it
+does not compare the systems on one yardstick or measure anything itself.
+
+**The sources.** Primary papers — CoALA, Complementary Learning Systems theory (McClelland, McNaughton & O'Reilly 1995;
+Kumaran, Hassabis & McClelland 2016), RAPTOR, PathRAG, HippoRAG 2, MemGraphRAG, GraphRAG-Bench
+([arXiv 2506.05690](https://arxiv.org/abs/2506.05690)), TTT, Titans, the State of Brain Emulation Report 2025 — next to
+secondary ones: five pages from Mem0's own website, a vendor comparison page, Medium posts, a Reddit thread, DeepWiki
+pages and a news listicle. It reads like an exported deep-research report: the formulas are stripped ("self-attention
+scales quadratically () in compute"), `[cite: 9]` tags are left in, and the reference list is headed "Referenzen".
+
+### What it covers
+
+| Level | Systems | In this series |
+|---|---|---|
+| Cognitive frameworks | CoALA; Complementary Learning Systems; sleep replay (sharp-wave ripples) | Path B's own frame (`path-b-memory.md` §1–2); CoALA as built by memory-champ (§11) |
+| Graph-based retrieval | GraphRAG, RAPTOR, LightRAG, MiniRAG, PathRAG, SLAG, PanoramaRAG, HippoRAG 2, REMINDRAG, MemGraphRAG, MemoRAG, R3Mem, HiMem | GraphRAG's ideas built (Path A, ADR-6); HippoRAG 2 reviewed and measured (§14); the rest new to the series |
+| Memory products | Letta, Mem0, Zep / Graphiti, Cognee, Khoj, Onyx, Pinchy | Zep, Mem0, Letta and Cognee reviewed (§2–§5); Khoj, Onyx and Pinchy new |
+| Memory inside the model | StreamingLLM, H2O, SnapKV, KIVI, multi-head latent attention, Infini-attention, test-time training (TTT), Titans | model internals — out of reach for a local Ollama model, as MemOS's KV and LoRA memory were (§18) |
+| Brain emulation | the State of Brain Emulation Report 2025 | out of scope |
+
+### The claims, checked
+
+**Confirmed by our measurements:**
+- **Plain vector retrieval equals or beats graph methods on simple fact questions; graphs earn their keep on global,
+  thematic ones** (from GraphRAG-Bench). OpenWiki's RAG-vs-GraphRAG finding: graph expansion lowered retrieval recall on
+  definitional and relational question sets alike, while Path A's community summaries exist for exactly the thematic
+  questions chunk retrieval can't answer (`ask --global`, scored by `eval --global`).
+- **Fast episodic recording plus slow offline consolidation** (Complementary Learning Systems): capture, then `sleep` —
+  forgetting by policy, themes, decay.
+- **Information consistent with an existing schema is absorbed fast; contradictions need the slow path** (Kumaran et
+  al. 2016): the merge — a fact that fits its attribute is merged deterministically (B7), and only a rival value calls
+  the model's coexistence check (B9, ADR-27/29).
+- **Bi-temporal facts and lexical search next to vector search** (Graphiti): B7's valid and transaction time with
+  as-of / known-at views; BM25 as a recall aid since v0.103 (ADR-40).
+- **Memory poisoning outlasts the session that planted it; skills load only when a task needs them:** the P0 policy,
+  credential redaction, the approval step for agent writes (ADR-30, ADR-37, ADR-46).
+- **A longer context window delays the problem and does not solve persistence** — the reason an external memory exists.
+
+**Outdated or wrong:**
+
+| The survey says | What we found |
+|---|---|
+| Mem0 resolves conflicts on every write (recency, explicitness, merging duplicates) | Mem0 dropped its model's UPDATE / DELETE decisions: single-pass, add-only extraction — "memories accumulate; nothing is overwritten" (§3) |
+| Cognee's graph store is NetworkX by default | it was Kuzu and is now LadybugDB (§5) — the move OpenWiki scoped for itself (R10) |
+| Letta is MemGPT's main / recall / archival paging | today memory blocks and files in git, curated by a "dreaming" reflection subagent (§4) |
+| HippoRAG 2 surpasses competing methods across factual, multi-hop and sense-making sets | it replicates on its own MuSiQue setting with our local models (Recall@5 54.2 → 61.9 %), but loses to dense retrieval on the informatik wiki (definitional MRR 0.595 vs 0.848) and stays below dense recall on our memory (§14); its own paper puts GraphRAG (49.6), RAPTOR (48.8) and LightRAG (6.6) below a strong dense retriever (57.0) on QA F1 |
+| PathRAG wins 59.93 % against GraphRAG and 57.09 % against LightRAG | LLM-judge win rates on generated answers, not retrieval metrics — the kind of score our audit found generous (`path-b-memory.md` §13.11) |
+| LightRAG retrieves in 11.052 s against HippoRAG's 1.586 s — and, in the table, has "much faster indexing than GraphRAG (11.052 s retrieval time)" | the survey contradicts itself; the 1.586 s belongs to the first HippoRAG, not to HippoRAG 2 |
+| Zep uses 1.6K tokens per retrieval against Mem0's 6.8K; Mem0 leads by "+22 accuracy points" | both from Mem0's own comparison page; the vendors dispute each other's benchmark numbers (§2–§3) |
+| Today's systems capture during sessions or with simple hooks at session end; sleep-like consolidation is the next generation | OpenWiki runs a nightly `sleep` pass since v0.88, and Letta its dreaming subagent |
+
+### Against OpenWiki's data
+
+The survey's five trajectories, against what exists:
+
+| Trajectory | OpenWiki |
+|---|---|
+| 1. Offline consolidation like sleep — replay, strengthen paths, prune contradictions, consolidate schemas into the base model's weights | `sleep`: forgetting by policy, re-consolidated themes, decay. The last step needs a trainable model and gives up what the memory is for: every fact, interval and closure can be read and corrected |
+| 2. Graph memory unified with test-time plasticity — Titans' surprise as the trigger for episode boundaries and the write filter of a bi-temporal graph | not reachable with a black-box local model; Path C's explicit prediction error (`path-c-world-model.md` §3.4) is the auditable counterpart |
+| 3. Verifiable governance against poisoning — signed mutation logs, permissions synchronized from the sources, bi-temporal rollback | the P0 policy, credential redaction, the approval step, provenance tags, as-of and known-at views; missing: a tamper-evident log |
+| 4. Foundation models that infer a brain's dynamics from its connectome | out of scope |
+| 5. Hardware convergence — KV compaction, neuromorphic chips, local-first runtimes | out of scope; OpenWiki is local-first already |
+
+Two of the five exist in OpenWiki, and the other three need control of the model or neuroscience beyond the project.
+What the survey adds are the graph structures this series hadn't measured: hierarchical summaries (RAPTOR), path-based
+expansion (PathRAG), topic-segmented episodes (HiMem) — and a benchmark for the wiki side.
+
+### What we learn
+1. **The fast and the slow path have a theory.** Kumaran et al.'s schema-consistent learning is the best support for
+   the merge's split: a consistent fact merges at once, a contradiction takes the slow, checked path.
+2. **Graph methods win by question type, not by default.** The survey's own benchmark source says so, HippoRAG 2's paper
+   ranks three graph methods below dense retrieval on answer F1, and our runs agree. The wiki side has never been
+   measured on an external benchmark the way LoCoMo measures the memory — **candidate 1**.
+3. **Two graph structures are untested here:** summaries at several levels, searched together (RAPTOR) —
+   **candidate 2** —, and only the paths between a question's entities instead of their whole neighbourhoods (PathRAG)
+   — **candidate 3**. Our graph expansion lost recall because neighbours displaced good hits; paths might not.
+4. **Episodes have boundaries.** HiMem segments a conversation where its topic shifts or a surprise occurs; OpenWiki
+   cuts capture windows by size and day — **candidate 4**.
+5. **A survey needs the same check as a system.** Four of its system descriptions were out of date against code this
+   series had read a fortnight earlier, and its numbers are vendor-reported or judged.
+6. **For Path C:** Titans keeps a surprise with momentum and a forgetting gate — a repeated surprise adds up, an old one
+   fades. The same rule fits the ranking of Path C's events: a variable's repeated misses gain salience, then decay.
+   HiMem's surprise boundaries point the same way: a miss is where one episode ends and the next begins.
+
+The four candidates are in the roadmap ([`roadmap.md` → Candidates from the second-brain survey](roadmap.md#candidates-from-the-second-brain-survey-msr-20)):
+
+| # | Candidate | Measured with | Cost |
+|---|---|---|---|
+| 1 | GraphRAG-Bench for the wiki side — fact retrieval, multi-hop reasoning, summarization, creative generation | `owiki eval` (retrieval, `--answers`, `--global`) | a dataset and a few hours of local runs |
+| 2 | Hierarchical summaries (RAPTOR) against one-level community summaries | `eval --global` on the thematic set, with `--judge` | one summary call per cluster and level |
+| 3 | Path-based expansion (PathRAG) against neighbourhood expansion | `owiki eval` on `eval_relational.jsonl`, plus answer quality | no model call at query time beyond entity linking |
+| 4 | Topic-aware capture windows (HiMem) against size-and-day windows | the dogfooding transcripts captured both ways into scratch graphs: junk and stale share, replay judge | small — an embedding change point, no model call |
+
+### What we would not adopt
+- **Memory inside the model** — KV compression, compressive attention, test-time training, Titans, trained memory models
+  (MemoRAG, R3Mem): they need control of the model's weights and attention, and an Ollama model is a black box (§18).
+- **Consolidation into the base model's weights** — irreversible and unauditable; it would undo the property every
+  other part of the memory was built for.
+- **Traversal memory (REMINDRAG) and usage reweighting (Cognee's `memify`)** — both need repeated graph queries, which a
+  coding workflow doesn't produce (§13: the empty `REINFORCES` edges).
+- **Date-aware embeddings** (Khoj's "Timely") — a model of their own; the rule-based time window took LoCoMo's dated
+  questions from 46.2 to 56.2 % (`path-b-memory.md` §13.19).
+- **Vendor-page numbers and LLM-judge win rates as evidence** — for anything adopted, the measurement comes from our
+  harnesses.
+- **Brain emulation** — out of scope. One sentence from it is worth keeping: Sandberg's information-bottleneck argument
+  (a text record cannot specify the brain that wrote it) says what a Second Brain is — a record of decisions and
+  states, not a model of a person.
+- **Not now:** a tamper-evident log (hash-chaining the journal and the approval log) — cheap, but of little value on a
+  single-user local machine; worth it once memory is shared (Direction F).
+
+**In short.** A useful map of the field — breadth, vocabulary, 97 pointers — and weak as evidence: secondary and vendor
+numbers, four outdated descriptions of systems this series read from source, one contradiction in its own figures. Of
+its five trajectories, OpenWiki has two (nightly consolidation; time-aware, screened, reviewable memory), and three
+need the model's internals or neuroscience out of scope. It mostly confirms the direction OpenWiki measured its way
+to, and adds four testable candidates — two of them for the wiki side, which has never had an external benchmark.
+
+---
+
 ## Across the series — what it suggests for OpenWiki
 
 Eighteen systems — six in a first round, then Hindsight, MIRIX, AriGraph, Nemori and memory-champ from the world-model
 shortlist, Hermes Agent on request, and HippoRAG 2, The Missing Knowledge Layer, a human-inspired architecture,
 OpenCog Hyperon, MemOS and Generative Agents from the brain-inspired part — read from their source in October 2026,
-plus one design report (§13). Where OpenWiki stands out: a real time model (only Graphiti matches it; Hindsight has event and
+plus one design report (§13) and one survey of the field (§20). Where OpenWiki stands out: a real time model (only Graphiti matches it; Hindsight has event and
 mention time; Mem0 keeps time-aware retrieval on its hosted platform; Cognee has a query-time window),
 deterministic hygiene against poisoning (of the eighteen, only Hermes Agent has a comparable policy — a threat-pattern
 scan on memory writes), policy-based forgetting,
@@ -2039,6 +2168,8 @@ shows how large the distance can be (83.6 % on LongMemEval with a 20B open model
 | Importance scoring | Generative Agents (a 1–10 rating per memory, a retrieval term), the human-inspired architecture (every event scored) | none — relevance, confidence and a bounded recency rank | **measured, not adopted** (path-b §13.35): LoCoMo coverage 0.449 → 0.363 when GA's formula adds it (production 0.461); on real prompts the facts it lifted were judged less helpful than those they displaced (14.0 vs 18.5 %, 17 / 33 prompts) | — |
 | Reflection into higher-level beliefs | Generative Agents (insights citing their evidence, recursively), Hindsight (observations over facts), Letta (a dreaming subagent) | themes over current facts (B5), recomputed at `sleep` | **measured, not adopted** (path-b §13.35): GA's reflections cited earlier reflections 95 % of the time and repeated each other (74 %); in recall no better per prompt than the facts they displaced (19 / 18) | — |
 | Memory writes documents | Hindsight (five knowledge pages per repository), Letta (memory as Markdown) | the wiki is built from documents only; memory writes no pages | "Decisions" / "Conventions" pages regenerated from facts at `sleep`; git history as a capture source | medium |
+| Wiki-side retrieval structures | the survey (§20): RAPTOR (summary trees searched together), PathRAG (only the paths between a question's entities), GraphRAG-Bench (an external benchmark by question type) | one level of community summaries; neighbourhood expansion, measured below dense retrieval — on our own corpora only | candidates 1–3 of §20 (roadmap) | small–medium |
+| Episode boundaries | HiMem (topic-shift and surprise segmentation), Nemori (topic segments) | capture windows cut by size (20,000 characters) and day | candidate 4 of §20 — an embedding change point, no model call (roadmap) | small |
 
 **The order** in which we take these up — deterministic fixes, then paired LoCoMo experiments, then changes judged in
 real sessions — is in the summary: [`agent-memory-summary.md` → What we will do](agent-memory-summary.md#what-we-will-do--in-order).

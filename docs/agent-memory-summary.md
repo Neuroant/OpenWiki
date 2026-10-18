@@ -2,7 +2,7 @@
 
 The summary of [`memory-systems-review.md`](memory-systems-review.md): eighteen agent-memory systems, read from their
 source code in October 2026 and compared with OpenWiki's memory tier (Path B, [`path-b-memory.md`](path-b-memory.md)),
-plus one design report. What each system is, what separates them, where they agree, where OpenWiki stands — and what
+plus one design report and one survey of the field. What each system is, what separates them, where they agree, where OpenWiki stands — and what
 we will do about it.
 
 **In one paragraph.** The field agrees on more than it seems: lexical search next to dense search, the raw record kept
@@ -270,3 +270,10 @@ internals, and its failure-time recall of past fixes helped about four times in 
 ([§19](memory-systems-review.md#19-generative-agents)) importance score lowered recall on LoCoMo and on real prompts, while its
 reflections turned into an echo of themselves. That completes the
 [shortlist](memory-systems-review.md#candidates--world-models-and-coala).
+
+A survey of the whole field ([§20](memory-systems-review.md#20-a-survey-architectures-of-agentic-second-brain-systems),
+2026-10-18) was checked the same way: four of its system descriptions were outdated against the code read here, its
+numbers were vendor-reported or judged, and two of its five trajectories — nightly consolidation, time-aware and
+screened memory — OpenWiki already has. It added four candidates for the roadmap: GraphRAG-Bench as an external
+benchmark for the wiki side, hierarchical summaries (RAPTOR), path-based expansion (PathRAG) and topic-aware capture
+windows (HiMem).

@@ -273,7 +273,9 @@ point it jumps to P0.</sub>
   retrieval stops being O(n).
 - **Revisit GraphRAG expansion**, now that it's measurable: entity-anchored expansion,
   multi-hop, learned/typed edge weighting — the open question is whether *any* graph
-  strategy beats spending the same budget on more semantic hits for *recall*.
+  strategy beats spending the same budget on more semantic hits for *recall*. Two concrete
+  candidates: path-based expansion (PathRAG) and hierarchical summaries (RAPTOR) — see
+  *Candidates from the second-brain survey* below.
 
 ### B — Deeper knowledge graph: relations (P0)
 - ✅ **Typed `Entity→Entity` relations landed (v0.63)** — a second per-page LLM call extracts
@@ -311,7 +313,8 @@ point it jumps to P0.</sub>
 
 ### C — Evaluation breadth & rigor (P1)
 - **A second/third corpus** + an **embedder bake-off** — does the RAG-vs-GraphRAG finding
-  generalize beyond German CS + bge-m3?
+  generalize beyond German CS + bge-m3? The external candidate: **GraphRAG-Bench**, by question
+  type (see *Candidates from the second-brain survey* below).
 - **Automated eval-set generation** — LLM drafts questions + ground-truth pages from graph
   page-pairs (human-reviewed), scaling past hand-written sets.
 - **Ablations** — which edge types and which `expand_k` the answer-quality win actually
@@ -496,6 +499,34 @@ chat placeholder asking about "das Handbuch" on any corpus.
 - **M8 — sessions in the browser:** a session list and full-text search, linked from facts. **✅ (v0.119)**
 
 **Direction K is complete (M1–M8, v0.114–v0.119).**
+
+### Candidates from the second-brain survey (MSR §20)
+
+A survey of the field, checked on 2026-10-18 (`memory-systems-review.md` §20), mostly confirmed the direction OpenWiki
+measured its way to — and named four structures this repository has not measured. Each has a harness already; each is
+adopted only if it beats what it would replace.
+
+1. **GraphRAG-Bench — an external benchmark for the wiki side** (Direction C). Four levels — fact retrieval, multi-hop
+   reasoning, contextual summarization, creative generation — scored at retrieval and at the answer
+   ([arXiv 2506.05690](https://arxiv.org/abs/2506.05690)). OpenWiki's RAG-vs-GraphRAG findings rest on its own corpora;
+   this would test them the way LoCoMo tests the memory. *Measured with* `owiki eval` (retrieval, `--answers`,
+   `--global`); *cost:* the dataset and a few hours of local runs, in chunks of at most ten minutes. *Decision:* results
+   per level; if graph methods win where the survey says (multi-hop, summarization), re-open Direction A's expansion
+   for those question types.
+2. **Hierarchical summaries — RAPTOR** (Direction A, global search). Summaries at several levels (chunks → pages →
+   communities), all levels searched together, against Path A's one level of community summaries. *Measured with*
+   `eval --global` on the thematic set, with `--judge`; *cost:* one summary call per cluster and level, bounded like
+   `communities`. HippoRAG 2's paper puts RAPTOR below dense retrieval on answer F1 (48.8 vs 57.0), so only the
+   thematic questions it claims are in scope.
+3. **Path-based expansion — PathRAG** (Direction A). Keep only the key paths between a question's entities, pruned by
+   flow, instead of the seeds' whole neighbourhoods. GraphRAG expansion lost recall because neighbours displaced good
+   hits; paths might not. *Measured with* `owiki eval` on `eval_relational.jsonl` and answer quality (`--answers
+   --judge`); *cost:* no model call at query time beyond entity linking. The evidence so far is LLM-judge win rates
+   only.
+4. **Topic-aware capture windows — HiMem** (Path B). Cut capture windows where the conversation changes topic — an
+   embedding change point, no model call — instead of fixed 20,000-character windows per day. *Measured with* the
+   dogfooding transcripts captured both ways into scratch graphs: the junk and stale share of the captured facts, and
+   the replay judge on recall (`path-b-memory.md` §13.32); *cost:* small.
 
 ### If you pick one thing next
 **Direction A's re-ranking pass** is the smallest change with an immediately measurable

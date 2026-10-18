@@ -17,15 +17,16 @@ observed is observed — by built-in sensors over git, files, code, tests and lo
 OPC UA — and recorded as facts the memory already knows how to merge (B7). What can't be observed — decisions,
 reasons, plans, preferences — stays remembered, now linked to the state it is about. Rules from documents and from
 history (*laws*) are checked against the observations; predictions about changes are logged and resolved;
-contradictions, violations and misses become first-class *events*. The agent's context becomes a slice of that
-model: what a prompt touches, its current state, the rules that bind it, what surprised us lately, and what was
-decided about it.
+contradictions, violations and misses become first-class *events*. At the centre is one loop — predict, act, observe,
+compare, correct (§3.4) — that turns every observation into a test of the model and corrects automatically only what
+is deterministic. The agent's context becomes a slice of that model: what a prompt touches, its current state, the
+rules that bind it, what surprised us lately, and what was decided about it.
 
 ## Contents
 
 1. [Motivation & main idea](#1-motivation--main-idea)
 2. [What "world model" means here](#2-what-world-model-means-here)
-3. [Conceptual model](#3-conceptual-model)
+3. [Conceptual model](#3-conceptual-model) — including [3.4 The loop](#34-the-loop)
 4. [Target architecture](#4-target-architecture)
 5. [Proposed data model](#5-proposed-data-model)
 6. [Sensors and observations](#6-sensors-and-observations)
@@ -149,14 +150,185 @@ without a sensor keep Path B's rules unchanged.
 
 ### 3.4 The loop
 
+The loop is what makes Path C a model rather than a shadow. Without it, observed facts would only sit next to
+remembered ones; with it, the model makes claims, the world answers them, and the model is corrected — every
+observation becomes a test. Every other part of Path C is a part of this loop: sensors perceive, the graph models,
+predictions predict, the agent and the twins act, sensors observe again, and the merge, the laws and the nightly pass
+correct.
+
 | Step | In OpenWiki terms | Today |
 |---|---|---|
 | Perceive | sensors (§6) and capture | capture only |
 | Model | the graph: entities, state, laws, beliefs | entities, beliefs |
-| Predict | predictions for changes (§8) | — |
-| Act | the coding agent; twin actions behind guards (§10.2) | the agent, unguarded by the memory |
-| Observe | sensors again, commits, test runs | — |
-| Correct | the merge closes stale beliefs (§6.4); `sleep` checks laws and resolves predictions | `sleep` forgets and summarizes |
+| Predict | predictions for changes (§8), the null prediction (§3.4.3), laws as standing predictions (§7) | — |
+| Act | the coding agent; twin actions behind guards (§10.2) — each recorded as an `Action` (§3.4.9) | the agent, unrecorded, unguarded by the memory |
+| Observe | sensors again, commits, test runs, a twin's read-back | — |
+| Compare | hit, partial, miss or unresolved (§3.4.4) | — |
+| Correct | within the limits of §3.4.6: the merge closes stale beliefs (§6.4), scores and rule results are updated, events are raised | `sleep` forgets and summarizes |
+
+#### 3.4.1 One turn, recorded
+
+```
+belief/intent ─▶ prediction ──▶ action ───▶ observation ──▶ comparison ──────▶ correction
+what we think    what should    what was    what the world  hit · partial ·    close a belief
+or want done     happen, by     done, by    says: sensor,   miss · unresolved  rescore a basis
+                 when, and why  whom        time, complete                     raise an event
+                                                                               ask a person
+```
+
+| Element | Holds | Recorded as |
+|---|---|---|
+| Belief or intent | what we think is true, or what someone wants done | a fact (Path B), or the task in the prompt |
+| Prediction | the target, the expected value or set, a tolerance, a deadline, the basis, a confidence, who made it | `Prediction` (§5.2) |
+| Action | the actor, the verb, the target, the arguments, the precondition, the approval, dry run or not, the confirmation | `Action` (§5.2) |
+| Observation | the value, the time, the sensor, whether the snapshot was complete | an observed fact (§5.1) |
+| Comparison | hit, partial, miss or unresolved, and the error | the prediction's outcome and score |
+| Correction | what changed in the model | closed beliefs (`SUPERSEDES`), basis scores, rule results, events (§3.4.6) |
+
+Every turn leaves a trace that can be followed in both directions, so *why the model changed its mind* always has an
+answer — and *why the world is in this state* can be traced back to an action or to an outside change.
+
+#### 3.4.2 Four loops, four speeds
+
+```
+┌─ slow loop · nightly (sleep) ────────────────────────────────────────────────┐
+│  laws re-checked · prediction bases re-scored · decisions whose reasons      │
+│  changed flagged                                                             │
+│  ┌─ session loop · per task / commit ─────────────────────────────────────┐  │
+│  │  plan → predict files and tests → work → commit → resolve → misses     │  │
+│  │  become events                                                         │  │
+│  │  ┌─ fast loop · per action (seconds) ───────────────────────────────┐  │  │
+│  │  │  check the precondition → act → read back → verify               │  │  │
+│  │  └──────────────────────────────────────────────────────────────────┘  │  │
+│  └────────────────────────────────────────────────────────────────────────┘  │
+└──────────────────────────────────────────────────────────────────────────────┘
+  human loop · as needed: review events, accept laws, approve actions (the Pflege panel)
+```
+
+| Loop | Closed by | Cadence | Repository | Ableton playground (§11.5) |
+|---|---|---|---|---|
+| Fast | the twin or a sensor | seconds | an edit → the tests at risk | a write → the value read back |
+| Session | the agent and the commit | minutes to hours | companion files and tests predicted, resolved by the commit | "make the bass punchier" → the diagnostics run again |
+| Slow | `sleep` | nightly | law results, basis scores, drift | the same, over the day's observations |
+| Human | a person | as needed | accept laws, confirm or close facts | approve actions, accept laws |
+
+The inner loops are cheap and frequent and correct only what is deterministic; the outer loops are rare and correct
+what needs judgment. This is the shape of MAPE-K from autonomic computing (monitor, analyze, plan, execute over shared
+knowledge — §17); Path C adds explicit predictions and a recorded history of every turn.
+
+#### 3.4.3 The null prediction
+
+Every observed variable carries an implicit prediction: **it stays as it is, unless an action targets it.** That turns
+every observation into a test:
+
+- **A change with a matching action** is expected; it verifies the action.
+- **A change without an action** is *exogenous* — a person, another program, or a dynamic the model doesn't know. It is
+  an attribution, not an error: a producer moving a fader is normal. It becomes an event only when it breaks a law or a
+  decision ("the bass fader is above the cap we decided").
+- **A variable that keeps changing exogenously** is marked *externally controlled*: the model stops expecting
+  persistence for it, and the agent stops acting on it without asking.
+
+Attribution needs identity (the same object in the action and in the observation — the Ableton review's R2) and time
+(actions with timestamps, a settle time per variable, §3.4.4). Before the action log exists (C3), git is the
+repository's own action log: a value that changed in a commit is attributed to that commit, and a change outside any
+commit — an uncommitted edit, a restarted service — counts as exogenous.
+
+#### 3.4.4 Comparing: hit, partial, miss, unresolved
+
+| Kind of prediction | Compared by | Outcome |
+|---|---|---|
+| a value ("the volume becomes 0.82") | the observed value within a tolerance | hit inside the tolerance; partial in the right direction outside it; miss otherwise |
+| a set ("these files change", "these tests fail") | precision and recall against the observed set | hit when both are at least 0.8; partial; miss when nothing predicted happened (starting thresholds, set in C3) |
+| a state ("the release has a tag") | match | hit or miss |
+| a law (a standing prediction, §7) | its check on each new observation | held or violated |
+
+- **Unresolved is not a hit.** A deadline that passes without an observation leaves the prediction unresolved, and
+  repeated unresolved predictions for one sensor raise a sensor-health event — silence never confirms anything.
+- **Settle time.** A prediction is compared only after the effect has had time to land: a read-back after a few hundred
+  milliseconds, a commit at once, a restarted service after seconds.
+- **Skill, not hit rate.** Each basis is scored against a baseline that needs no model — persistence for state, a file's
+  base rate of change for companion files — the way weather forecasts are scored against climatology. A basis that
+  doesn't beat its baseline is dropped (§8.2).
+
+#### 3.4.5 Explaining a surprise, from the bottom up
+
+A miss is explained by the cheapest rung that accounts for it:
+
+1. **The sensor.** Was the snapshot complete and fresh? A partial sync explains many misses (the Ableton review's R4).
+2. **The action.** Did it run, on the right object, and was it confirmed? A wrong target, a clamped value, an error.
+3. **Another actor.** Did a person or another program change the value in between (§3.4.3)?
+4. **The model.** Only now is the law or the prediction basis wrong — the one case that should teach the model.
+
+The `explain` verb (§10.1) walks this ladder and returns the first rung that accounts for the miss, with its evidence.
+The local model may propose hypotheses on the model rung, but a rung counts only when a check confirms it (§3.2).
+
+#### 3.4.6 What the loop may correct by itself
+
+| Correction | Who | Why |
+|---|---|---|
+| close a belief that a complete observation contradicts | automatic | deterministic; kept as history (§6.4) |
+| re-score a prediction basis; record a law's result | automatic | statistics only |
+| raise an event; mark a variable externally controlled | automatic, reversible | nothing is lost |
+| accept, change or retire a law | a person | laws are few and consequential (§7.3) |
+| change a decision | a person, or the agent through `wiki_remember` as today | decisions are beliefs |
+| **act on the world because of a surprise** | **never automatic** — propose, dry run, approve | runaway loops, fighting controllers (§3.4.7) |
+
+This line is the loop's learning rate: the inner loops adapt only what is deterministic, and everything that needs
+judgment waits for a person.
+
+#### 3.4.7 How a loop fails
+
+| Failure | Symptom | Guard |
+|---|---|---|
+| acting on a stale model | a write lands on the wrong object | every action carries its precondition — compare before write (§10.2) |
+| silence taken as confirmation | a sensor drops out; the deadline passes | unresolved is not a hit; a sensor-health event (§3.4.4) |
+| fighting another controller | a value flips between the agent's action and an outside change | a *contested* event; the agent stops acting on the variable |
+| runaway corrections | surprise → action → surprise | no automatic remediation (§3.4.6) |
+| self-confirming predictions | trivial hits, or the agent edits the test it predicted would pass | skill against a baseline, not hit rate (§3.4.4) |
+| gaming the score | only easy predictions are made | coverage (actions with a prediction) reported next to skill (§13) |
+| resolving too early | read before the effect has landed | a settle time per variable (§3.4.4) |
+
+#### 3.4.8 Two turns, end to end
+
+**The repository: "release v0.121.0".**
+- *Predict:* the companion files from co-change and the release law — `pyproject.toml`, `openwiki/__init__.py`,
+  `CLAUDE.md`, `docs/roadmap.md`, arc42 §10; the release variable becomes 0.121.0 at the commit; the convention "every
+  released version has a tag" gets a deadline.
+- *Act:* the agent edits and commits; each edit is recorded as an `Action` (C3: a `PostToolUse` hook; before that, the
+  commit itself).
+- *Observe:* the commit's files, the version in `pyproject.toml`, the tags.
+- *Compare:* the companion files by precision and recall; the version a hit; no tag by the deadline a violation.
+- *Correct:* the remembered v0.120.0 closes by itself — no `wiki_remember` needed; the co-change basis is re-scored;
+  the missing tag is an event. (The two releases of 2026-10-10 that stayed untagged for a week would have raised it on
+  their own.)
+
+**The Ableton playground: "make the bass punchier without clipping".**
+- *Precondition:* the last sync is complete; the device at that position is still the compressor (compare before
+  write).
+- *Predict:* the bass volume becomes 0.82 ± 0.005 within a second; the compressor's threshold reaches its target; the
+  gain-staging warning disappears.
+- *Law check:* 0.82 is at most unity (0.85) — no clamp needed.
+- *Act:* approved; the injector writes and replies with the value it set.
+- *Observe and compare:* the read-back and the observer's update — a hit.
+- *A minute later* the producer pushes the fader to 0.92. No action explains it: an exogenous change (§3.4.3), and a law
+  violation — above unity and above the cap the producer decided. One event; the agent offers a correction and does
+  not act.
+
+#### 3.4.9 How the loop grows through the stages
+
+- **C1 — half a loop:** observe and correct. Observations close contradicted beliefs; git attributes changes to commits;
+  the null prediction labels everything else exogenous.
+- **C2 — standing predictions:** laws are checked on every observation; violations, drift and exogenous changes that
+  break a law become events.
+- **C3 — the full loop on the repository:** the action log, explicit predictions with deadlines, resolution, misses as
+  events, skill per basis.
+- **The playground — the fast loop:** precondition, act, read back, verify on a system that answers in seconds.
+- **C4 — reading the loop backwards:** diagnosis walks the recorded turns through the ladder of §3.4.5.
+
+The loop needs two things the rest of the design doesn't: an **`Action` record** (§5.2) and a way to see actions — a
+`PostToolUse` hook for the coding agent's edits and commands, git for commits, a twin's confirmation for its writes.
+How well the loop works is measured by the lifetime of a stale belief, the closure rate, skill over the baseline and
+the time to detect a change (§13).
 
 ## 4. Target architecture
 
@@ -181,8 +353,9 @@ without a sensor keep Path B's rules unchanged.
 | **Observation merge** | store observations, close contradicted beliefs, raise events | the two-phase writer and the journal fold | `temporal.plan_merge`, `journal`, ADR-38 |
 | **Read-time overlay** | replace a stale recalled fact with the fresh observation | `context_for` (hook, `context`, `wiki_memory`) | B6 assembly |
 | **Laws** | hold rules with their check; evaluate them on new observations | the fold, `sleep`, `owiki world laws` | the wiki, entity extraction, co-change |
-| **Predictions** | log expected effects and resolve them | capture, handoff, `sleep`; worktree test runs | `graph/cochange.py`, git |
-| **Events** | discrepancies, violations, misses, drift | the world slice, the Pflege panel, the handoff brief | the Pflege panel (M7) |
+| **Action log** | record what the agent, a person or a twin did, with its precondition and confirmation (§3.4.1) | a `PostToolUse` hook (the agent's edits and commands), git (commits), a twin's write replies | the Claude Code hooks, `journal` |
+| **Predictions** | log expected effects and compare them with what happened (§3.4.4) | capture, handoff, `sleep`; worktree test runs | `graph/cochange.py`, git |
+| **Events** | discrepancies, violations, misses, drift, exogenous and contested changes, unresolved predictions | the world slice, the Pflege panel, the handoff brief | the Pflege panel (M7) |
 | **World slice** | assemble the context around what a prompt touches | the inject hook, `context`, `wiki_memory` | `assemble_context` budgets |
 | **World tools** | the MCP contract (§10.1) | `owiki mcp` | `mcp_server.build_server` |
 | **Twins** | other world models behind the same contract | separate MCP servers, e.g. Cognitive Substrate | — |
@@ -214,8 +387,9 @@ Always created, empty until used (ADR-7); added lazily to old graphs, like the m
 |---|---|---|---|
 | `Variable` | `id` (the attribute key), `label`, `subject`, `unit`, `sensor`, `kind` (state / setting / count / version) | `DESCRIBED_IN → Page` (the manual section, the code file) | yes |
 | `Law` | `id`, `text`, `kind` (equality, comparison, implication, convention, co-change, precondition), `check` (a small expression; empty when untestable), `origin` (page, fact or learned), `status` (proposed / accepted / rejected), `last_result`, `last_checked`, `emb` | `CONSTRAINS → Variable`, `FROM_PAGE → Page`, `FROM_FACT → Assertion` | yes — the review status is a person's work |
-| `Prediction` | `id`, `made_at`, `made_by` (rule, co-change, agent), `basis`, `target` (files, tests or a variable), `expected`, `due` (commits or a time), `resolved_at`, `outcome` (hit / partial / miss), `score` | `ABOUT → Variable` or `ABOUT_PAGE → Page` | yes |
-| `Event` | `id`, `kind` (discrepancy, violation, miss, drift), `at`, `detail`, `resolved_at`, `resolution` | `CONCERNS → Variable`, `FROM_LAW → Law`, `FROM_PREDICTION → Prediction`, `INVOLVES → Assertion` | yes |
+| `Action` | `id`, `at`, `actor` (agent, user, system, twin), `verb` (edit, command, commit, write, …), `target` (files or a variable), `args`, `precondition` (the identity or value expected before acting), `approved_by`, `dry_run`, `confirmed_at`, `result` (ok / refused / failed) | `TARGETS → Variable` or `TARGETS_PAGE → Page`; `IN_SESSION → Session` | yes |
+| `Prediction` | `id`, `made_at`, `made_by` (rule, co-change, agent), `basis`, `target` (files, tests or a variable), `expected`, `tolerance`, `due` (commits or a time), `settle_s`, `resolved_at`, `outcome` (hit / partial / miss / unresolved), `score`, `baseline_score` | `ABOUT → Variable` or `ABOUT_PAGE → Page`; `FOR_ACTION → Action`; `RESOLVED_BY → Assertion` | yes |
+| `Event` | `id`, `kind` (discrepancy, violation, miss, drift, exogenous, contested, unresolved), `at`, `detail`, `resolved_at`, `resolution` | `CONCERNS → Variable`, `FROM_LAW → Law`, `FROM_PREDICTION → Prediction`, `FROM_ACTION → Action`, `INVOLVES → Assertion` | yes |
 
 B0's snapshot / restore and the portable export (ADR-39) would need to carry the new tables; how COGX holds them is
 open (§15).
@@ -382,13 +556,14 @@ Start where the digital world can check itself exactly:
 
 ### 8.2 Resolution and calibration
 
-Each prediction has a deadline (a number of commits, or a time) and resolves to hit, partial or miss. Scores are kept
-per basis — "co-change, top 10: 0.51 of the companions" — so the model's own track record is visible and a weak basis
-can be dropped.
+Each prediction has a deadline (a number of commits, or a time) and a settle time, and is compared as §3.4.4 describes:
+hit, partial, miss — or unresolved when nothing was observed in time. Scores are kept per basis next to the basis's
+baseline — "co-change, top 10: 0.51 of the companions" against the files' base rates of change — so the model's own
+track record is visible and a basis without skill can be dropped.
 
 ### 8.3 Events
 
-Four kinds, all first-class and all resolvable by a person:
+Seven kinds, all first-class and all resolvable by a person:
 
 | Kind | Raised when |
 |---|---|
@@ -396,6 +571,9 @@ Four kinds, all first-class and all resolvable by a person:
 | violation | an accepted law's check fails on new observations |
 | miss | a prediction resolves as a miss |
 | drift | a decision's precondition changes, or the code leaves a decision (§7.4) |
+| exogenous | a change no action explains breaks a law or a decision (§3.4.3); other outside changes are only attributed |
+| contested | a variable flips between an action and an outside change (§3.4.7) |
+| unresolved | a sensor leaves predictions unresolved repeatedly (§3.4.4) |
 
 Events reach the world slice when a prompt touches their variable, the Pflege panel, and the handoff brief's "what
 changed since". This is the deterministic form of Nemori's predict–calibrate (MSR §10): what the
@@ -576,18 +754,20 @@ Each stage is shippable and measured on its own, and each can end Path C.
 - **Build:** the sensor types of §6.1 except `opcua`; bindings, with defaults for code sources; `source = "observed"`;
   the merge rules (§6.4); the read-time overlay (§6.5); the `observe` journal op; `owiki world status` and
   `owiki world observe` (subcommands, ADR-13); an "observed" badge in the Gedächtnis tab; governed attributes leave the
-  review list.
+  review list; each observed change attributed to the commit that made it, else exogenous — half of the loop
+  (§3.4.3, §3.4.9).
 - **Builds on:** B7 and B9, the journal and the two-phase writer (ADR-38), `handoff`'s probes, `assemble_context`.
 - **Hard part:** the governed attribute groups (B9's paraphrases) and the authority rule, without changing what B7
   decides elsewhere.
 - **Exit:** stale facts among the injected facts in governed attributes fall to near zero on the replayed prompts
-  (against C0's baseline); the review list shrinks by the governed share; the inject hook's p95 latency grows by at most
-  300 ms; the guards hold (§13).
+  (against C0's baseline); a stale belief in a governed attribute lives at most one sensor period (§13); the review list
+  shrinks by the governed share; the inject hook's p95 latency grows by at most 300 ms; the guards hold (§13).
 
 ### C2 — Laws, drift and the world slice
 - **Goal:** rules and decisions become checkable, and the context is built around what a prompt touches.
-- **Build:** `Variable`, `Law`, `Event`; law extraction with review; checks at fold time; decisions recorded with their
-  preconditions; drift events; the world slice (§9); events in the Pflege panel and the handoff brief. On the Ableton
+- **Build:** `Variable`, `Law`, `Event`; law extraction with review; checks at fold time — laws as standing predictions
+  (§3.4.4); decisions recorded with their preconditions; drift, exogenous and contested events (§3.4.3, §3.4.7); the
+  world slice (§9); events in the Pflege panel and the handoff brief. On the Ableton
   playground (§11.5): its Production Constitution as the first interlocks, the Ableton manual as the first law source
   outside this repository.
 - **Builds on:** entity extraction, the Pflege panel (M7), the handoff.
@@ -599,16 +779,21 @@ Each stage is shippable and measured on its own, and each can end Path C.
   event and the interlock refuses the write.
 
 ### C3 — Predict and verify changes
-- **Goal:** the model is judged by what it predicts.
-- **Build:** `Prediction`; companion-file and test-at-risk predictions; resolution by commits and test runs (a worktree
-  for the tests at risk); misses as events; scores per basis. On the Ableton playground: every write predicts its
-  effect and is resolved by reading the value back.
-- **Builds on:** `graph/cochange.py`, git, the test suite; the playground's read-back (its review's R6).
-- **Hard part:** test runs cost time — only the tests at risk, only when idle or on request.
+- **Goal:** the model is judged by what it predicts — the full loop on the repository (§3.4).
+- **Build:** `Action` and the action log (a `PostToolUse` hook for the agent's edits and commands; git for commits);
+  `Prediction`, linked to its action; companion-file and test-at-risk predictions; comparison with tolerances, settle
+  times and deadlines (§3.4.4); resolution by commits and test runs (a worktree for the tests at risk); misses and
+  unresolved predictions as events; scores per basis against their baselines; `explain` walking the ladder of §3.4.5.
+  On the Ableton playground: every write predicts its effect and is resolved by reading the value back.
+- **Builds on:** `graph/cochange.py`, git, the test suite, the Claude Code hooks; the playground's read-back (its
+  review's R6).
+- **Hard part:** test runs cost time — only the tests at risk, only when idle or on request; and attribution — an
+  observed change must find its action through identity and time (§3.4.3).
 - **Exit:** online over the history (the PB §13.29 setup), companion files predicted from co-change plus laws beat
-  co-change alone (0.51 top-10 recall of rarely-changed files); test-at-risk precision and recall reported; replayed,
-  injected misses judged helpful more often than the facts they displace; on the playground, every write's prediction
-  resolves within a second and every mismatch becomes an event.
+  co-change alone (0.51 top-10 recall of rarely-changed files); test-at-risk precision and recall reported; closure rate
+  and skill over the baseline reported per basis (§13); replayed, injected misses judged helpful more often than the
+  facts they displace; on the playground, every write's prediction resolves within a second and every mismatch becomes
+  an event.
 
 ### C4 — The physical twin
 - **Goal:** the same model for a working twin, then for a machine, through federation.
@@ -641,14 +826,21 @@ labels wherever a judge would decide; the local judge treated as generous (PB §
 | Metric | Stage | How |
 |---|---|---|
 | stale facts among injected facts in governed attributes | C0 (baseline), C1 | replayed prompts, hand labels |
+| **lifetime of a stale belief** — from the world's change to the belief's closing | C0 (baseline), C1 | observed changes against closings, on the replayed history |
 | review-list size and its stale share | C1 | `analyze memory --review`, blind labels |
 | inject-hook latency, p95 | C1 | the metrics collector |
 | drift detection: detected of planted, false alarms per week | C2 | planted drifts on a scratch copy; real use |
+| time to detect an exogenous change or a violation | C2 | planted changes on a scratch copy and on the playground |
 | world slice against today's context | C2 | blind judge at equal characters, paired |
+| usefulness of injected events and misses | C2, C3 | blind judge on replayed prompts, against the facts they displace |
 | companion-file recall@10; test-at-risk precision and recall | C3 | online over the history |
-| calibration per prediction basis | C3 | resolved predictions |
-| root-cause accuracy, (a) / (b) / (c) | C4 | simulator faults, exact labels |
+| **closure rate** — actions with a prediction and an outcome; coverage of actions | C3 | the action log |
+| **skill over the baseline**, per prediction basis | C3 | resolved predictions against persistence and base rates |
+| root-cause accuracy, (a) / (b) / (c) | C4 | planted faults on the playground, simulator faults; exact labels |
 | causal-edge recovery against the simulator's truth | C4 | precision and recall |
+
+The lifetime of a stale belief is the cleanest single number for whether Path C works: today it is unbounded — a stale
+fact lives until someone says otherwise —, with C1 it should not exceed one sensor period.
 
 **Guards** (must not move): the temporal set at 13 / 13; the poisoning set at 0 / 5 leaks with 8 / 8 legitimate facts
 kept; the cross-session and cue-trigger sets; LoCoMo overall J — LoCoMo has no sensors, so any change there is a bug.
@@ -665,6 +857,8 @@ kept; the cross-session and cue-trigger sets; LoCoMo overall J — LoCoMo has no
 - **Actuation.** Read-only by default; dry run, interlocks, approval and an audit trail for any action (§10.2);
   physical actuation never from OpenWiki.
 - **False alarms.** Laws only after review, events resolvable by a person, the false-alarm rate an exit criterion (C2).
+- **Loops that run away or fight.** No automatic remediation, contested variables left alone, silence never taken as
+  confirmation, skill scored against a baseline (§3.4.6, §3.4.7).
 - **Over-observation.** Sensors on things nobody asks about cost latency and add noise; bindings come from the C0
   inventory, not from what is easy to read.
 - **Volume.** No samples in the graph (§5.3).
@@ -684,16 +878,25 @@ kept; the cross-session and cue-trigger sets; LoCoMo overall J — LoCoMo has no
 3. **Acting:** may twins act, or stay read-only? *Recommended: read-only through C4.*
 4. **Telemetry:** real hardware or an OPC UA server, or a simulator? *The plan starts with the Ableton twin's live
    data and adds a simulator for faults with known causes.*
+5. **The action log:** record the coding agent's edits and commands as `Action`s through a `PostToolUse` hook — local,
+   and needed to tell the agent's changes from everyone else's (§3.4.3)? *Recommended: yes, from C3; git covers commits
+   before that.*
+6. **What the loop may correct by itself** (§3.4.6): facts automatically, laws and decisions only by a person, never
+   automatic remediation? *Recommended: as in §3.4.6.*
 
 **Technical**
 
-5. Names of the world tools (`wiki_state` and siblings, or a `world_*` family).
-6. Bindings only in the manifest, or also proposed from memory (§6.2)?
-7. The telemetry store, SQLite or Parquet (C4).
-8. Whether a contradicting late belief is stored at all (§6.4, rule 5) or only reported.
-9. Where the LCU 9000 twin's MCP server lives.
-10. How laws, predictions and events travel in COGX (e.g. in `--full` metadata).
-11. A *Welt* (world) tab in the web UI, or panels inside Gedächtnis.
+7. Agent predictions: stated explicitly through a tool (`wiki_predict`), or system-made only — persistence, co-change,
+   laws? *Recommended: system-made first; the tool once C3's scores show what the agent's own predictions would add.*
+8. Where the slow loop runs: inside `sleep`, or as its own `owiki world review`? *Recommended: inside `sleep`, like
+   forgetting and consolidation, with `owiki world review` for runs on demand.*
+9. Names of the world tools (`wiki_state` and siblings, or a `world_*` family).
+10. Bindings only in the manifest, or also proposed from memory (§6.2)?
+11. The telemetry store, SQLite or Parquet (C4).
+12. Whether a contradicting late belief is stored at all (§6.4, rule 5) or only reported.
+13. Where the LCU 9000 twin's MCP server lives.
+14. How laws, predictions, actions and events travel in COGX (e.g. in `--full` metadata).
+15. A *Welt* (world) tab in the web UI, or panels inside Gedächtnis.
 
 ## 16. Relationship to the current code
 
@@ -706,6 +909,7 @@ kept; the cross-session and cue-trigger sets; LoCoMo overall J — LoCoMo has no
 | candidate bindings | `memory.volatile_kind`, `analyze memory --review` |
 | laws from documents | the wiki, `graph/entities.py`, the section anchors of `graph/references.py` |
 | dynamics | `graph/cochange.py` |
+| the action log | the Claude Code hook installer (`claude_code_template.hooks_config`, adding `PostToolUse`), `cli._cmd_hook`, the journal |
 | events and their review | the Pflege panel (`/api/memory/maintenance`), `handoff.render_brief` |
 | world tools | `mcp_server.build_server` |
 | analysis | `analysis/memory.py`, extended by a model-versus-reality section: discrepancies, violations, calibration |
@@ -718,6 +922,13 @@ kept; the cross-session and cue-trigger sets; LoCoMo overall J — LoCoMo has no
   variables once C4 meets a real one; FMI / FMU co-simulation for physics models beyond a toy.
 - **Learned world models.** Ha & Schmidhuber, "World Models" (2018); DreamerV3 (Hafner et al., 2023); LeCun's JEPA
   proposal (2022); Genie (2024) — the sense Path C does not take (§2).
+- **Control loops (§3.4).** MAPE-K — monitor, analyze, plan, execute over shared knowledge (Kephart & Chess, "The
+  Vision of Autonomic Computing", 2003) — is the closest engineering pattern; OODA (Boyd) and PDCA (Shewhart, Deming)
+  are its decision and quality cousins. Forecast verification gives the yardstick: proper scores such as the Brier
+  score (1950) and skill against climatology or persistence. Control theory gives the failure modes: nested loops at
+  different speeds, settling time, two controllers fighting over one variable. Predictive processing and active
+  inference are inspiration only: Path C's loop reduces surprise by correcting the model or by asking a person, never
+  by acting on its own.
 - **The agent-memory review.** Hindsight keeps world facts apart from the agent's experiences (MSR §7); AriGraph builds the
   world model of a text game — the current state as a graph, its history as episodes (MSR §9); Nemori stores what memory
   failed to predict (MSR §10), of which §8.3's events are a deterministic form; memory-champ rechecks volatile facts on a

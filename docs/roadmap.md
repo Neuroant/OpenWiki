@@ -1267,7 +1267,9 @@ running services, plans that got done). Path C lets the world write too: built-i
 tests and local services record **observed** state as B7 facts that close stale beliefs; rules from documents,
 decisions and history (*laws*) are checked against the observations; predictions about changes are logged and
 resolved; discrepancies, violations, misses and drift become events; the context becomes a *world slice* around
-what a prompt touches. Repository first; machines (the LCU 9000 laser unit) federated with the sibling project
+what a prompt touches. At the centre is one loop — predict, act, observe, compare, correct, at four speeds (per action,
+per task, nightly, human) — that turns every observation into a test of the model and corrects automatically only
+what is deterministic (`path-c-world-model.md` §3.4). Repository first; machines (the LCU 9000 laser unit) federated with the sibling project
 Cognitive Substrate through one MCP contract. Staged C0 (an inventory, no code) → C4 (a physical twin), each with a
 measured exit. Nothing built yet — design in **[`docs/path-c-world-model.md`](path-c-world-model.md)**.
 

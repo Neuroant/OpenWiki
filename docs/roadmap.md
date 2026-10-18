@@ -1260,11 +1260,23 @@ facts. Design detail: `path-b-memory.md` §13.
   the agent better in the *next* session?" — must be measured the same way, or it's just poetry.
   This likely needs a new eval axis (cross-session task success), not the current single-shot sets.
 
+## Path C — world models (proposal, 2026-10-18)
+
+Path B remembers what was *said*; its weak spot is state that changes without anyone saying so (versions, counts,
+running services, plans that got done). Path C lets the world write too: built-in sensors over git, files, code,
+tests and local services record **observed** state as B7 facts that close stale beliefs; rules from documents,
+decisions and history (*laws*) are checked against the observations; predictions about changes are logged and
+resolved; discrepancies, violations, misses and drift become events; the context becomes a *world slice* around
+what a prompt touches. Repository first; machines (the LCU 9000 laser unit) federated with the sibling project
+Cognitive Substrate through one MCP contract. Staged C0 (an inventory, no code) → C4 (a simulated physical twin),
+each with a measured exit. Nothing built yet — design in **[`docs/path-c-world-model.md`](path-c-world-model.md)**.
+
 ## Related docs
 
 - `docs/arc42/` — full **architecture documentation** (arc42: goals, constraints, context,
   building blocks, runtime, deployment, concepts, ADRs, quality, risks).
 - `docs/path-b-memory.md` — the **Path B (agent memory)** deep design base.
+- `docs/path-c-world-model.md` — the **Path C (world models)** design proposal.
 - `docs/projects.md` — the projects layer design + phase roadmap.
 - `docs/RAG-vs-GraphRAG.md` — the full evaluation writeup (methodology + numbers).
 - `docs/coding-agents.md` — MCP / OpenCode / Claude Code setup.

@@ -1,9 +1,10 @@
 # OpenWiki Second Brain — a guide
 
-*Path B · OpenWiki v0.120 · state of 10 October 2026*
+*Path B · OpenWiki v0.120 · state of 10 October 2026 (§2, projects and sessions, added 24 October 2026)*
 
 A memory for coding agents that keeps what was decided, when it was true, and where it was said. This guide explains
-how it is built, how a working day with it runs, and how to use it from the command line and the browser. The examples
+what projects and sessions are, how the memory is built, how a working day with it runs, and how to use it from the
+command line and the browser. The examples
 are real output from the `openwiki-dev` project, the memory of the Claude Code sessions that built OpenWiki itself.
 
 | Current facts | Closed facts kept as history | Forgotten (archived) | Themes | Sessions | Transcript turns |
@@ -17,13 +18,14 @@ Figures from `owiki analyze memory` and the web UI on 10 October 2026. Project f
 ## Contents
 
 1. [At a glance](#1-at-a-glance)
-2. [Architecture](#2-architecture)
-3. [A day with the Second Brain](#3-a-day-with-the-second-brain)
-4. [CLI tutorial](#4-cli-tutorial)
-5. [Web UI tutorial](#5-web-ui-tutorial)
-6. [What was measured](#6-what-was-measured)
-7. [Limits and good habits](#7-limits-and-good-habits)
-8. [Cheat sheet](#8-cheat-sheet)
+2. [Projects and sessions](#2-projects-and-sessions)
+3. [Architecture](#3-architecture)
+4. [A day with the Second Brain](#4-a-day-with-the-second-brain)
+5. [CLI tutorial](#5-cli-tutorial)
+6. [Web UI tutorial](#6-web-ui-tutorial)
+7. [What was measured](#7-what-was-measured)
+8. [Limits and good habits](#8-limits-and-good-habits)
+9. [Cheat sheet](#9-cheat-sheet)
 
 ## 1. At a glance
 
@@ -54,7 +56,124 @@ On this machine the Second Brain runs for the OpenWiki repository itself. In pra
 | Models | local Ollama | `bge-m3` embeddings (1024 dimensions) · `qwen3:30b-a3b-instruct-2507-q4_K_M` for capture and checks |
 | Skill | `.claude/skills/session-restart` | `/session-restart prepare \| resume` |
 
-## 2. Architecture
+## 2. Projects and sessions
+
+Two concepts carry everything else: the **project**, where a knowledge base lives, and the **session**, the unit of
+experience it remembers.
+
+### 2.1 What a project is
+
+**A project is one knowledge base in its own folder** — a binder for one subject:
+
+```text
+my-project/
+├─ openwiki.toml   the binder's label and settings: what it's about, which documents, which models
+├─ sources/        the documents it's built from (or pointers to a repository or a URL)
+├─ output/         what OpenWiki builds from them: the wiki, the search index, the graph
+├─ memory/         a readable copy of what it remembers (Second Brain)
+├─ handoff/        the note one session leaves for the next
+└─ .openwiki/      bookkeeping: build state, hook state, caches
+```
+
+`owiki init` creates one, `owiki build` builds it from its sources. This machine has two: **openwiki-dev** (the
+OpenWiki repository plus the memory of the sessions that build it) and **informatik-wiki**. They sit side by side and
+never mix.
+
+### 2.2 What a session is
+
+**A session is one working conversation** — a stretch of work with Claude Code, from its start to its end, or to the
+next `/clear`. OpenWiki keeps sessions as the unit of experience:
+- **what was said** — the raw transcript, searchable word for word later (`owiki sessions search`);
+- **the facts drawn from it** — each knows the session it came from and when;
+- **the handoff** — one session closes with a note, the next opens with a brief.
+
+Besides live Claude Code sessions there are two other kinds: days of older history captured afterwards (`backfill`, one
+session per day, e.g. `claude-2026-09-05`) and the agent's own writes (`agent-2026-10-24`, one per day).
+
+### 2.3 Why these two concepts
+
+**Projects keep knowledge apart and repeatable:**
+- **separation** — the dev memory doesn't leak into the informatik wiki;
+- **repeatability** — the manifest says how to rebuild everything;
+- **persistence** — state survives between commands;
+- **routing** — a repository's hooks know which project its sessions belong to (`--project`).
+
+**Sessions give memory its order and its origin:**
+- **time** — a fact is dated by the session it was said in, so a later change can close an earlier value (§3);
+- **provenance** — you can always see where a fact came from, and open the conversation around it (§6.5);
+- **capture** — each session has a watermark, so nothing is captured twice or lost;
+- **continuity** — the handoff connects one session to the next (§5.8).
+
+### 2.4 How they relate to the Second Brain and to world models
+
+Each path adds one kind of input to the same project:
+
+| | What the project takes in | What it becomes |
+|---|---|---|
+| **Path A — Wiki** | **sources**: what is *written* | a wiki, a search index and a graph of the documents |
+| **Path B — Second Brain** | + **sessions**: what is *said* | + a memory: facts with time and origin, recalled into every prompt |
+| **Path C — World model** (planned) | + **environments**: what *is* | + live state, rules, predictions and checks |
+
+The binder grows with each path: with Path A it holds the manuals; with Path B it also keeps a diary of every working
+session; with Path C (planned) it also gets live gauges connected to the real thing — the repository, the Ableton set, a
+machine — and checks its diary against them. The modes nest: a world-model project is always a Second Brain too, and
+every Second Brain project has a wiki. Path C's design is `docs/path-c-world-model.md` (§2.3 there: projects and
+environments).
+
+### 2.5 Using OpenWiki with other systems
+
+**Today: one person, one machine, everything local.** OpenWiki is a Python package (`owiki`) in a virtual environment;
+Ollama runs the models locally. Other systems connect to a project:
+
+| Who | How they connect | What they get |
+|---|---|---|
+| **Claude Code** | `owiki claude-code --hooks --into <repo> --project <project>` installs the hooks, the MCP server and the skills | memory in every prompt, automatic capture, the handoff, the wiki and memory tools |
+| **OpenCode** | `owiki opencode` sets up an agent with the MCP server | the wiki and memory tools |
+| **any MCP client** | `owiki mcp --project <project>` | the same tools |
+| **people** | `owiki serve` — the web UI — and the CLI | browse, search, ask, the Gedächtnis tab, the project switcher |
+| **twins** (Path C, planned) | their own MCP servers, declared as environments in the project | live state and guarded actions |
+| **models** | local Ollama by default; a cloud model where it is really needed (ADR-52) | |
+
+**Packaging** exists for other setups: the `owiki` distribution, a Docker image with compose, and CI; a public package
+release waits for the license decision.
+
+**Across machines:** a project is a folder, so it can move. The manifest, the sources and the readable memory view go
+into git. The memory itself lives only in the graph file, so it travels as a full export (`owiki memory export --full`,
+§5.9) and comes back with `owiki memory import`; everything else can be rebuilt with `owiki build`. A project shared by
+several people is a later step (Direction F in the roadmap): it needs access control and a graph more than one writer
+can use.
+
+### 2.6 Maintaining projects
+
+**Automatically, every day:** the hooks capture sessions and inject memory, the agent records new states with
+`wiki_remember`, background workers write them into the graph.
+
+**Nightly:** `owiki sleep` — schedule it with the Task Scheduler (§5.7). It forgets one-off events, regroups the
+themes, decays the usage edges and rewrites the readable view.
+
+**When the sources change:** `owiki build` — incremental (only changed stages rerun), and it keeps the memory.
+
+**Now and then:**
+
+| Task | How |
+|---|---|
+| health check | `owiki status` — the build stages, the last handoff, queued writes (§5.1); the web UI's System tab |
+| review | the Pflege panel — facts that may be stale (about one in four really is), forgetting candidates, approvals (§6.7) |
+| backup | `owiki memory export --full` — the graph is the memory's only copy (§5.9) |
+| switching and registering | `owiki project list / use / add / remove`, or the switcher in the web UI (§6.1) |
+| handoff | `/session-restart prepare` at a session's end, `resume` at its start (§5.8) |
+
+**Upgrades:** schema changes migrate on their own the first time a graph is written to. One caution: an `owiki` older
+than v0.48 on the PATH — this machine's pipx install is v0.45 — would erase a project's memory on `build`; update it
+(`pipx install --editable G:\Claude\OpenWiki`) or use the repository's `.venv` (§5).
+
+**With Path C (planned):** `owiki world status` (are the sensors healthy?), reviewing proposed rules, handling events,
+and keeping the twin processes running.
+
+**In one line:** a project is the binder; a session is one day of work written into it. Path B makes the binder remember
+what was said; Path C connects it to the real thing so it can check itself.
+
+## 3. Architecture
 
 ### Two tiers, one graph
 
@@ -190,7 +309,7 @@ it gives each fact only once per stretch, until the next compaction or `/clear`,
    members did not change keeps its summary without a model call.
 5. Decay the usage edges and rewrite the readable Markdown view.
 
-The human side is the **Pflege** panel in the web UI ([5.7](#57-pflege-maintenance)): confirm a fact, close it, or
+The human side is the **Pflege** panel in the web UI ([6.7](#67-pflege-maintenance)): confirm a fact, close it, or
 forget it. All three go through the journal, pinned to the fact's id.
 
 ### Around the memory
@@ -209,7 +328,7 @@ server, hooks, CLI) open the graph per call, which takes about 70 ms and waits u
 first and lock only to apply, waiting up to 60 s for readers. So the server, the MCP tools, the hooks and a nightly
 `sleep` can all run at once. If a write still cannot get the lock, it waits in the journal.
 
-## 3. A day with the Second Brain
+## 4. A day with the Second Brain
 
 This is what happens around a normal working session in the OpenWiki repository. The numbered arrows follow the order
 of events.
@@ -255,7 +374,7 @@ once more.
 **Overnight.** `owiki sleep` forgets one-off events, re-consolidates themes and rewrites the Markdown view. In the
 morning, review the **Pflege** list now and then: about one in four of its candidates is really out of date.
 
-## 4. CLI tutorial
+## 5. CLI tutorial
 
 Commands shown with output were run on 10 October 2026 against openwiki-dev, all read-only. Commands that would change
 the memory or create a project are shown without output. Either run commands inside the project folder, or add
@@ -268,7 +387,7 @@ prints first is left out.
 > and `pipx install --editable G:\Claude\OpenWiki`, or run `G:\Claude\OpenWiki\.venv\Scripts\python -m openwiki`
 > wherever this guide says `owiki`.
 
-### 4.1 Check the state
+### 5.1 Check the state
 
 `owiki status` shows the mode, the build stages and the last handoff. The document stages are *stale* because the
 repository changed since the last wiki build. The memory stage only covers session *sources*, which openwiki-dev
@@ -313,7 +432,7 @@ How to read it: *belief revision* says how much of what was once true has since 
 how much is grouped into themes. *Temperature* sorts facts by how recently they were said. *To review* counts the
 kinds of fact that go stale on their own.
 
-### 4.2 Ask the memory
+### 5.2 Ask the memory
 
 `owiki recall` returns the facts most relevant to a question. Each line carries its validity and its session; the
 scores go to stderr.
@@ -337,9 +456,9 @@ questions phrased the way facts are stored: "recall recency factor applies to" f
 
 The same query without a good match shows the limit. Asked "which embedding model do we use?", recall's top 6 are
 details of an embedding *step* from an evaluation run. The fact "OpenWiki uses BGE-M3 for embeddings" only comes 16th,
-which is still inside what the hook injects ([4.4](#44-see-what-the-agent-gets)).
+which is still inside what the hook injects ([5.4](#54-see-what-the-agent-gets)).
 
-### 4.3 Follow a fact through time
+### 5.3 Follow a fact through time
 
 `--timeline` shows every value an attribute has had, with its validity interval: ○ closed, ● current.
 
@@ -390,7 +509,7 @@ $ owiki recall --all -k 6 "which port does the web UI use?"
 …
 ```
 
-### 4.4 See what the agent gets
+### 5.4 See what the agent gets
 
 `owiki context` assembles the three tiers exactly as the hook and `wiki_memory` do:
 
@@ -422,7 +541,7 @@ PS> '{"prompt": "push and tag v0.120.0"}' | owiki hook inject --project G:\OpenW
 (no output: a git chore needs no memory)
 ```
 
-### 4.5 Find the exact words
+### 5.5 Find the exact words
 
 Facts keep the gist. When you need the reason, a number or the exact command, search the transcripts:
 
@@ -443,7 +562,7 @@ That is the measurement behind the decision, which no fact holds in this detail.
 search covers (here one transcript of 4,490 turns, 31 July to 10 October). `owiki sessions lessons` lists fixes for
 tool failures that recurred on two different days.
 
-### 4.6 Record and correct
+### 5.6 Record and correct
 
 **From the agent: `wiki_remember`.** This is the call Claude Code made after the push of v0.118.0, word for word:
 
@@ -478,7 +597,7 @@ $ owiki memory pending
 $ owiki memory approve <id>      # the id pending lists, or --all; reject moves a write to an audit log
 ```
 
-### 4.7 Keep it clean
+### 5.7 Keep it clean
 
 The review list holds the current facts of kinds that go stale on their own, the likeliest kinds first:
 
@@ -511,7 +630,7 @@ Schedule `sleep` nightly with the Windows Task Scheduler:
 schtasks /Create /SC DAILY /ST 03:00 /TN "OpenWiki sleep" /TR "G:\Claude\OpenWiki\.venv\Scripts\python.exe -m openwiki sleep --project G:\OpenWiki\Projects\openwiki-dev"
 ```
 
-### 4.8 Hand over between sessions
+### 5.8 Hand over between sessions
 
 At the end of a session, run `/session-restart prepare` in Claude Code. The agent records decisions, writes a note and
 calls `owiki handoff prepare --note note.md`. The next session starts with the brief; you can also print it yourself:
@@ -528,7 +647,7 @@ Next (start here):
 Full handoff: G:\OpenWiki\Projects\openwiki-dev\handoff\HANDOFF.md
 ```
 
-### 4.9 Export and back up
+### 5.9 Export and back up
 
 The graph is the only copy of the memory, and Kuzu is archived upstream. Keep exports:
 
@@ -544,7 +663,7 @@ $ owiki memory import backup.cogx.tar.gz                 # into an empty memory:
 The believed export is 0.23 MB. The Markdown view writes a `README.md` with the identity and the themes, plus one file
 per subject with its current facts and history, so a `git diff` shows what the memory learned.
 
-### 4.10 Set it up for another repository
+### 5.10 Set it up for another repository
 
 ```powershell
 PS> owiki init G:\OpenWiki\Projects\my-app-brain --repo --source G:\code\my-app
@@ -556,12 +675,12 @@ PS> owiki backfill $HOME\.claude\projects\G--code-my-app --dry-run --project G:\
 #   lists the days and capture windows of earlier transcripts; drop --dry-run to capture them
 ```
 
-## 5. Web UI tutorial
+## 6. Web UI tutorial
 
 The browser shows the same memory with more context: why a fact scored, what the hook sends, where a fact sits among
 the others, and what was said around it. The labels are German, as in the interface.
 
-### 5.1 Start and switch project
+### 6.1 Start and switch project
 
 ```powershell
 PS> owiki serve --project G:\OpenWiki\Projects\openwiki-dev
@@ -576,7 +695,7 @@ found next to it, plus a field for any folder with an `openwiki.toml`. The serve
 *The project menu (v0.120). Both projects are found next to each other although none is registered; "merken" would
 add a newly opened project to the list.*
 
-### 5.2 The Gedächtnis tab
+### 6.2 The Gedächtnis tab
 
 ![The Gedächtnis tab with the identity line, five count chips, the collapsed Pflege and Sitzungen panels, the recall box and the facts table](img/second-brain/gui-overview.png)
 
@@ -586,7 +705,7 @@ add a newly opened project to the list.*
 The date fields are the browser form of `--as-of` (**Stand am**) and `--known-at` (**Wissensstand vom**). **heute**
 resets both.
 
-### 5.3 Abrufen: recall with its reasons
+### 6.3 Abrufen: recall with its reasons
 
 ![Recall results for the recency floor question, each with its score formula, BM25 boost, rank, one fact marked hereingeholt from rank 13 and one displaced fact](img/second-brain/gui-recall.png)
 
@@ -597,7 +716,7 @@ under Verdrängt.*
 Read it from left to right. "zeitlos" means the fact's kind doesn't go stale, so its Aktualität is 1. "Version, 2 Tage
 alt" means a version fact said two days ago, so recency shaves off a little. A green ×2 badge marks a fact said twice.
 
-### 5.4 Hook-Vorschau: what the hook would send
+### 6.4 Hook-Vorschau: what the hook would send
 
 **Hook-Vorschau** runs the hook's own code for the text in the box. It shows the header, the text, characters against
 the budget, and every recalled fact marked *im Text* or *gekürzt* (cut by the budget). For a chore such as "push" it
@@ -608,7 +727,7 @@ says the hook adds nothing.
 *Left, the hook preview: 2,974 of 3,000 characters, 16 facts, 2 themes. Right, a fact's detail drawer (next step),
 opened from the facts list.*
 
-### 5.5 One fact in depth
+### 6.5 One fact in depth
 
 Search the facts list (**Fakten durchsuchen**, filters for status, source, kind and session) and click a row. The
 drawer shows the fact's validity, when it was recorded and last said, confidence, source, kind, session and theme.
@@ -620,7 +739,7 @@ replaced, what replaced it, and **Wo es gesagt wurde**, the transcript turns it 
 ***Hat ersetzt** links the previous value. Each excerpt under **Wo es gesagt wurde** has **im Verlauf öffnen**, which
 opens the conversation at that turn with a way back to the fact.*
 
-### 5.6 The map
+### 6.6 The map
 
 **Liste | Karte** switches the facts browser to a map: every fact placed by meaning with t-SNE, which keeps about half
 of each fact's ten nearest neighbours. What the filters select is coloured by theme; the other current facts stay as
@@ -632,7 +751,7 @@ faint dots, and the layout never moves.
 scattered far apart, or a single point far from its cluster, is worth a look. Wheel zooms, dragging pans, a click
 opens the fact.*
 
-### 5.7 Pflege: maintenance
+### 6.7 Pflege: maintenance
 
 ![The Pflege panel open, listing facts to review with Plan badges, dates and the buttons stimmt noch and nicht mehr wahr, with paging 1 to 15 of 319](img/second-brain/gui-care.png)
 
@@ -643,7 +762,7 @@ and forgetting candidates appear in the same panel.*
 Each action goes through the journal and lands in seconds; the row shows *eingereiht* until then. With `--dry-run` or
 in Wiki mode the panel is read-only.
 
-### 5.8 Sitzungen: the conversations
+### 6.8 Sitzungen: the conversations
 
 ![The Sitzungen panel listing days with turn counts, and the session viewer open on 27 September at the turn where the recency floor 0.9 result was reported](img/second-brain/gui-sessions.png)
 
@@ -654,7 +773,7 @@ transcripts.*
 The viewer shows turns as plain text, with credentials redacted and instruction-like sentences withheld. **frühere /
 spätere Beiträge** extends the stretch; a cut long turn has **ganz zeigen**.
 
-### 5.9 Memory over time
+### 6.9 Memory over time
 
 **Analyse → Dynamik** has the counts from `analyze memory` and a dated chart. Facts learned stand above the line;
 facts closed, retracted or forgotten hang below. The black line is the number of current facts.
@@ -665,7 +784,7 @@ facts closed, retracted or forgotten hang below. The black line is the number of
 from 18 August to 4 September, the many closings on 23 September and 27 forgotten facts on 26 September (the first
 sleep). A click on a day lists its facts; **Gespräch dieses Tages** opens its conversation.*
 
-## 6. What was measured
+## 7. What was measured
 
 Each part was measured before it became a default; the details are in [path-b-memory.md](path-b-memory.md) §12–13 and
 the [arc42 ADRs](arc42/09-architecture-decisions.md). Accuracies from the local model as judge run high, by about
@@ -695,7 +814,7 @@ the [arc42 ADRs](arc42/09-architecture-decisions.md). Accuracies from the local 
 - **Multi-hop expansion, an LLM audit against poisoning, maturation and deduplication** from other memory systems:
   each lost against the simpler baseline.
 
-## 7. Limits and good habits
+## 8. Limits and good habits
 
 - **Recall is similarity, not reasoning.** Phrase a question like the fact you expect ("recall recency factor applies
   to …"), widen with `-k`, or use `context` (16 facts) and `sessions search` for detail.
@@ -703,16 +822,16 @@ the [arc42 ADRs](arc42/09-architecture-decisions.md). Accuracies from the local 
   current after the decision fell. Decisions reach memory reliably when the agent records the outcome with
   `wiki_remember` and replaces the interim line.
 - **Record the state, plainly.** "OpenWiki current release is v0.120.0", not "was pushed", and without extra
-  commentary in the object; the timeline in [4.3](#43-follow-a-fact-through-time) shows what extra text costs.
+  commentary in the object; the timeline in [5.3](#53-follow-a-fact-through-time) shows what extra text costs.
 - **Attribute matching can misgroup.** "true", "GitHub" and "latest release" joined the release history. Close such
   values in **Pflege** or with `wiki_remember`.
 - **The review list is a candidate list.** About one in four candidates is really stale; the kind rules misfire on
   words like "next".
 - **Back up.** Kuzu is archived upstream and the graph is the memory's only copy. Run `owiki memory export --full` now
   and then; the move to LadybugDB is scoped in [ladybugdb-move.md](ladybugdb-move.md).
-- **Check the `owiki` on PATH** before using it for `build` (see [4](#4-cli-tutorial)).
+- **Check the `owiki` on PATH** before using it for `build` (see [5](#5-cli-tutorial)).
 
-## 8. Cheat sheet
+## 9. Cheat sheet
 
 | Task | CLI | Web UI | Agent (MCP) |
 |---|---|---|---|
@@ -732,6 +851,9 @@ the [arc42 ADRs](arc42/09-architecture-decisions.md). Accuracies from the local 
 | Where facts sit | – | **Fakten → Karte** | – |
 | Back up | `memory export --full` | – | – |
 | Switch project | `--project DIR`, `project use NAME` | project badge ▾ | – |
+| Create a project | `owiki init DIR --source FILE` (`--repo`, `--session`) | – | – |
+| Rebuild after the sources changed | `owiki build` (keeps the memory) | – | – |
+| Connect Claude Code to a project | `owiki claude-code --hooks --into REPO --project DIR` | – | – |
 
 ---
 

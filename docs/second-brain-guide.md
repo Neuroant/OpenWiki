@@ -165,8 +165,9 @@ themes, decays the usage edges and rewrites the readable view.
 | handoff | `/session-restart prepare` at a session's end, `resume` at its start (§6.8) |
 
 **Upgrades:** schema changes migrate on their own the first time a graph is written to. One caution: an `owiki` older
-than v0.48 on the PATH — this machine's pipx install is v0.45 — would erase a project's memory on `build`; update it
-(`pipx install --editable G:\Claude\OpenWiki`) or use the repository's `.venv` (§6).
+than v0.48 on the PATH would erase a project's memory on `build`. Install the global command as an editable install of
+the checkout (`install-openwiki.ps1 -Editable`), so it runs the repository's code and can't fall behind; this machine's
+has been one since 24 October 2026 (§6).
 
 **With Path C (planned):** `owiki world status` (are the sensors healthy?), reviewing proposed rules, handling events,
 and keeping the twin processes running.
@@ -223,8 +224,8 @@ project folder, like SQLite.
 
 ### 3.4 Setting it up
 
-1. **Install:** a Python virtual environment and `pip install -e .`; or pipx for a global `owiki`; a Docker image exists
-   for servers and CI.
+1. **Install:** a Python virtual environment and `pip install -e .`; or pipx for a global `owiki`
+   (`install-openwiki.ps1 -Editable` keeps it in step with the checkout); a Docker image exists for servers and CI.
 2. **Models:** install Ollama and pull `bge-m3` (embeddings) and a chat model — by default a 30B model that runs on a
    12 GB GPU.
 3. **Create a project:** `owiki init my-project --source <docs or repo>`, then `owiki build`.
@@ -492,9 +493,10 @@ prints first is left out.
 
 > **Before you start — check which `owiki` runs.** `owiki --version` should print the repository's version. An
 > install older than v0.48 predates the code that keeps the memory through a rebuild, and its `build` would erase it.
-> On this machine the `owiki` on PATH is an old pipx install (v0.45.0). Update it once with `pipx uninstall openwiki`
-> and `pipx install --editable G:\Claude\OpenWiki`, or run `G:\Claude\OpenWiki\.venv\Scripts\python -m openwiki`
-> wherever this guide says `owiki`.
+> On this machine the `owiki` on PATH is an editable pipx install of the checkout (since 24 October 2026; before, an
+> old v0.45.0), so it always matches. Elsewhere: `pipx uninstall openwiki` if `pipx list` still shows a package by that
+> name, then `install-openwiki.ps1 -Editable` — or run `<checkout>\.venv\Scripts\python -m openwiki` wherever this
+> guide says `owiki`.
 
 ### 6.1 Check the state
 

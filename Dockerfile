@@ -5,7 +5,7 @@
 #   docker build -t owiki .
 #   docker run --rm owiki --version
 #   # serve a project's wiki (Ollama on the host):
-#   docker run --rm -p 8137:8137 -v "$PWD:/data" \
+#   docker run --rm -p 127.0.0.1:8137:8137 -v "$PWD:/data" \
 #     --add-host host.docker.internal:host-gateway owiki \
 #     serve --bind 0.0.0.0 --port 8137 --wiki /data/output/wiki \
 #     -i /data/output/index --graph /data/output/graph \
@@ -26,6 +26,6 @@ RUN pip install .
 
 # Projects mount here; the CLI is the entrypoint, so `docker run owiki <subcommand> …`.
 WORKDIR /data
-EXPOSE 8000
+EXPOSE 8137
 ENTRYPOINT ["owiki"]
 CMD ["--help"]

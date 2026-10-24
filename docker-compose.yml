@@ -8,12 +8,16 @@
 # The bind mount maps the *current directory* (an OpenWiki project) to /data. Ollama runs
 # on the host and is reached via host.docker.internal (the extra_hosts line makes that work
 # on Linux too, not just Docker Desktop).
+#
+# The port is published on the host's loopback only: the web UI has no authentication and
+# can edit pages (arc42 §7.4). Inside the container `serve` binds 0.0.0.0 so Docker's port
+# forwarding reaches it; the 127.0.0.1 on the host side keeps it off the network.
 services:
   openwiki:
     build: .
     image: owiki
     ports:
-      - "8137:8137"
+      - "127.0.0.1:8137:8137"
     volumes:
       - "./:/data"
     extra_hosts:

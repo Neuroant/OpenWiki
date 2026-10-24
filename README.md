@@ -646,7 +646,7 @@ docker build -t owiki .
 docker run --rm owiki --version
 
 # serve a project's wiki (Ollama on the host):
-docker run --rm -p 8137:8137 -v "$PWD:/data" \
+docker run --rm -p 127.0.0.1:8137:8137 -v "$PWD:/data" \
   --add-host host.docker.internal:host-gateway owiki \
   serve --bind 0.0.0.0 --port 8137 \
   --wiki /data/output/wiki -i /data/output/index --graph /data/output/graph \
@@ -655,7 +655,9 @@ docker run --rm -p 8137:8137 -v "$PWD:/data" \
 
 `docker-compose.yml` wires the same thing up (`docker compose up`, then
 http://127.0.0.1:8137). Build a project's `output/` first (locally or
-`docker compose run --rm openwiki build`).
+`docker compose run --rm openwiki build`). Inside the container `serve` binds `0.0.0.0` so
+Docker's port forwarding reaches it; publishing the port as `127.0.0.1:8137:8137` keeps it on
+the host's loopback — drop the `127.0.0.1:` only on a trusted network (see *Security* above).
 
 > **Packaging note:** the distribution name is **`owiki`** (`openwiki` is taken on PyPI); the
 > import package stays `openwiki`. It builds clean (`python -m build` → sdist + wheel, `twine

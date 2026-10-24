@@ -3,7 +3,8 @@
 > **Status: proposal (2026-10-18, OpenWiki v0.120.0). Nothing is built.** **The main architectural plan is §2.1** —
 > the world model as a dynamical system with two boundaries, approved on 2026-10-18 (arc42 ADR-50); §2.2 adds that a
 > twin is a program and that language models work at design time while the twin runs as code (ADR-51). The next step is
-> C0, an inventory that needs no code and decides whether the rest is worth building. Path C builds on Path B ([`path-b-memory.md`](path-b-memory.md))
+> C0, an inventory that needs no code and decides whether the rest is worth building. **The implementation is tracked**
+> in [`path-c-roadmap.md`](path-c-roadmap.md) — phases, work packages, gates, status. Path C builds on Path B ([`path-b-memory.md`](path-b-memory.md))
 > and the agent-memory review ([`memory-systems-review.md`](memory-systems-review.md),
 > [`agent-memory-summary.md`](agent-memory-summary.md)); for machines it pairs with the sibling project **Cognitive
 > Substrate** (`G:\Claude\Cognitive Substrate`). Its test playground is the working digital twin of Ableton Live in
@@ -989,7 +990,9 @@ through MCP.
 
 ## 12. Staged delivery plan (C0–C4)
 
-Each stage is shippable and measured on its own, and each can end Path C.
+Each stage is shippable and measured on its own, and each can end Path C. The work packages, gates, releases and
+status of each stage are tracked in [`path-c-roadmap.md`](path-c-roadmap.md); results are recorded here, as a "Landed"
+note per stage and in a measurements section (§18) created with C0's results.
 
 ### C0 — Inventory (no code)
 - **Goal:** know how much of the memory, and of its known staleness, is observable before building anything.

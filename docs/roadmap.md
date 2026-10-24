@@ -1298,7 +1298,9 @@ a symbolic state with a forward step and an update — with two boundaries: digi
 stateful interface that can fail) and language toward agents and people; the model predicts and checks, the agent
 acts (`path-c-world-model.md` §2.1). Twins are programs — the executable half of the world model, which runs the
 knowledge model's testable claims as tests —, written by the coding agent through reviewed commits and run without
-any language-model call; the local model builds and maintains the knowledge model (§2.2, ADR-51).
+any language-model call; the local model builds and maintains the knowledge model (§2.2, ADR-51). **Implementation
+tracking:** [`docs/path-c-roadmap.md`](path-c-roadmap.md) — a measurement harness (M), C0 – C4 and the Ableton
+playground's prerequisites (P) as work packages with gates, releases and status.
 
 Path B remembers what was *said*; its weak spot is state that changes without anyone saying so (versions, counts,
 running services, plans that got done). Path C lets the world write too: built-in sensors over git, files, code,
@@ -1336,6 +1338,7 @@ by one (`path-c-world-model.md` §11.5):
   building blocks, runtime, deployment, concepts, ADRs, quality, risks).
 - `docs/path-b-memory.md` — the **Path B (agent memory)** deep design base.
 - `docs/path-c-world-model.md` — the **Path C (world models)** design proposal.
+- `docs/path-c-roadmap.md` — Path C's **implementation roadmap**: work packages, gates, status, log.
 - `docs/projects.md` — the projects layer design + phase roadmap.
 - `docs/RAG-vs-GraphRAG.md` — the full evaluation writeup (methodology + numbers).
 - `docs/coding-agents.md` — MCP / OpenCode / Claude Code setup.

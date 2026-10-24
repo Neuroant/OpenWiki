@@ -132,3 +132,9 @@ under a synthetic top-level outline node (its name) so slugs don't collide.
 - [x] **Phase 4 — multi-source merge**
   - [x] `combine_documents` (page/table/image offset + synthetic per-source top node; single source = passthrough)
   - [x] per-source cross-references (`extract_references_multi`, resolved within each source's span via retained per-source IR)
+- [ ] **Phase 5 — environments (Path C, planned; `docs/path-c-world-model.md` §2.3, ADR-53)**
+  - [ ] a third input class next to sources and sessions: `[[environments]]` — a repository, or a twin reached through its MCP command — feeding a world tier the graph keeps across rebuilds like the memory tier
+  - [ ] nested modes: Wiki ⊂ Second Brain ⊂ World model (`[world] enabled` requires `[memory] enabled`)
+  - [ ] authoritative tables in one registry that the rebuild's snapshot / restore reads; `Session.kind`
+  - [ ] twins as separate processes, OpenWiki their client; actions through OpenWiki's `act`
+  - [ ] tracked in `docs/path-c-roadmap.md` (C1.2, C1.12, C1.13, C2.1, C3.1, C3.9)

@@ -173,6 +173,11 @@ projects, every stage still takes explicit paths, and with no manifest the histo
 defaults apply (back-compat). This keeps the project a thin *organizing* layer over an unchanged
 pipeline. Deep design + roadmap: `docs/projects.md`; layout on disk: §7.
 
+**Planned (Path C, ADR-53):** environments become a third input class next to sources and sessions — a repository,
+or a twin reached through its MCP command — feeding a world tier the graph keeps across rebuilds; modes nest (Wiki ⊂
+Second Brain ⊂ World model); twins run as their own processes with OpenWiki as their client
+(`docs/path-c-world-model.md` §2.3).
+
 ## 8.15 The remembered tier (Path B agent memory)
 
 Alongside the document tier, a project in **Second Brain mode** (`[memory] enabled`, ADR-14) grows a

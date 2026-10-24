@@ -50,7 +50,8 @@ ADR-50: the world model as a dynamical system with two boundaries), §2.2 adds t
 language models work at design time while the twins run as code (ADR-51); C0 (an inventory, no code) is the next step.
 Its implementation is tracked in `docs/path-c-roadmap.md` (phases M, C0 – C4, P and track L as work packages with gates
 and status). Paths B and C use language models **hybrid** — local where possible, cloud where really needed — while Path A's
-pipeline stays local (ADR-52 amends ADR-2).
+pipeline stays local (ADR-52 amends ADR-2). Projects gain **environments** — a third input class next to sources and
+sessions; twins run as their own processes with OpenWiki as their client (§2.3, ADR-53; `docs/projects.md` Phase 5).
 
 ## Environment & commands
 

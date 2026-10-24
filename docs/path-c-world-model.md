@@ -3,7 +3,8 @@
 > **Status: proposal (2026-10-18, OpenWiki v0.120.0). Nothing is built.** **The main architectural plan is §2.1** —
 > the world model as a dynamical system with two boundaries, approved on 2026-10-18 (arc42 ADR-50); §2.2 adds that a
 > twin is a program and that language models work at design time while the twin runs as code (ADR-51); ADR-52 makes
-> Paths B and C hybrid — local models where possible, cloud models where really needed. The next step is
+> Paths B and C hybrid — local models where possible, cloud models where really needed; §2.3 places the world model in
+> the project concept (ADR-53). The next step is
 > C0, an inventory that needs no code and decides whether the rest is worth building. **The implementation is tracked**
 > in [`path-c-roadmap.md`](path-c-roadmap.md) — phases, work packages, gates, status. Path C builds on Path B ([`path-b-memory.md`](path-b-memory.md))
 > and the agent-memory review ([`memory-systems-review.md`](memory-systems-review.md),
@@ -30,8 +31,9 @@ rules that bind it, what surprised us lately, and what was decided about it.
 
 1. [Motivation & main idea](#1-motivation--main-idea)
 2. [What "world model" means here](#2-what-world-model-means-here) — including
-   [2.1 The world model as a dynamical system — the architectural plan](#21-the-world-model-as-a-dynamical-system--the-architectural-plan)
-   and [2.2 Digital twins are programs — and where language models work](#22-digital-twins-are-programs--and-where-language-models-work)
+   [2.1 The world model as a dynamical system — the architectural plan](#21-the-world-model-as-a-dynamical-system--the-architectural-plan),
+   [2.2 Digital twins are programs — and where language models work](#22-digital-twins-are-programs--and-where-language-models-work) and
+   [2.3 Projects and environments — where a world model lives](#23-projects-and-environments--where-a-world-model-lives)
 3. [Conceptual model](#3-conceptual-model) — including [3.4 The loop](#34-the-loop)
 4. [Target architecture](#4-target-architecture)
 5. [Proposed data model](#5-proposed-data-model)
@@ -124,8 +126,8 @@ observation only — and at a twin only where acting is explicitly allowed (§10
 the gathered knowledge — where the graph and the embedding space agree. Path C models the *environment* that
 knowledge is about. In this document "world model" means the latter.
 
-The working definition is made precise in §2.1 — the plan the rest of this document details —, and §2.2 says what a
-twin is and where language models work.
+The working definition is made precise in §2.1 — the plan the rest of this document details —, §2.2 says what a
+twin is and where language models work, and §2.3 where a world model lives in a project.
 
 ### 2.1 The world model as a dynamical system — the architectural plan
 
@@ -362,7 +364,8 @@ code, and the twin's loop runs without any language-model call — fast, determi
 1. **Where twin code lives.** The generic machinery — the built-in sensor types (§6.1), generic law checkers, the loop
    runner, the twin contract (§10.1) — in OpenWiki; each environment's twin code in that environment's repository: the
    repository twin's in OpenWiki, the Ableton twin's in the Ableton Expert System, the LCU 9000's in Cognitive
-   Substrate.
+   Substrate. Every twin beyond the built-in sensors runs as its own process behind the twin contract, and OpenWiki
+   never imports environment code (§2.3).
 2. **Every change to twin code goes through a reviewed commit.** Read-only sensors and checks may later be relaxed to
    land without review, once their fixtures have proven them; actuators never.
 3. **Declarative first.** Laws are data with generic checkers (§7.2); a reviewed test function only where an
@@ -395,6 +398,112 @@ stored or logged. The coding agent stays the first large model in the loop. The 
 **Testable share — the knowledge model's test coverage.** The share of facts and laws a twin can test is a headline
 measure next to a stale belief's lifetime (§13): the larger it is, the more of the knowledge model is held to the
 world. C0's inventory (§12) is its first measurement.
+
+### 2.3 Projects and environments — where a world model lives
+
+> **Decided on 2026-10-24 (arc42 ADR-53).** The project concept ([`projects.md`](projects.md)) checked against the plan:
+> it holds. Path C adds a third input class and a runtime role next to `build`.
+
+**What a project is today.**
+
+| Part | Role |
+|---|---|
+| a folder with `openwiki.toml` | identity and settings — flag > manifest > user config > default (ADR-10) |
+| `[[sources]]` — PDF, Markdown, URL, a code repository | *what is written*: the document tier — static, rebuilt at build time through the fingerprint chain (ADR-11) |
+| sessions — transcripts, hooks, backfill, agent writes | *what is said*: the memory tier — captured over time; the graph is its only copy, so rebuilds keep it (ADR-16) |
+| one Kuzu graph | both tiers; one writer at a time (ADR-38) |
+| modes | Wiki (documents only) or Second Brain (with memory) |
+| when things run | `build` (batch), hooks (events), `sleep` (nightly), `serve` and MCP (on demand) |
+| a repository bound to a project | `claude-code --hooks --into`: the repository's sessions feed the project's memory |
+
+**A third input class.**
+
+```
+   sources      ── build time ───────▶  document tier   (what is written — rebuildable)
+   sessions     ── capture time ─────▶  memory tier     (what is said — authoritative)
+   environments ── observation time ─▶  world tier      (what is — authoritative)
+                                        └── one graph per project, three clocks
+```
+
+Modes nest — Wiki ⊂ Second Brain ⊂ World model: `[world] enabled` requires `[memory] enabled`, since observations are
+memory-tier facts and the beliefs live in the memory tier.
+
+```toml
+[world]
+enabled = true                                   # requires [memory] enabled
+
+[[environments]]                                 # the repository twin: built-in sensors only
+name   = "openwiki"
+kind   = "repository"
+source = "G:/Claude/OpenWiki"                    # the code source with this path — defined once
+
+[[environments]]                                 # a twin: its own process behind the twin contract
+name    = "live-set"
+kind    = "twin"
+command = ["python", "twin_server.py"]           # the twin's MCP server (P.7), started in its repository
+cwd     = "G:/Antigravity/ableton-expert-system"
+```
+
+Sensors name the environment they read (`environment = "openwiki"`, §6.2).
+
+**What already fits.**
+- **The project is the world model's home.** openwiki-dev already is the repository twin's home: the OpenWiki
+  repository is its code source, its hooks route the repository's sessions to it, and its sensors would read the same
+  repository.
+- **Settings precedence** carries the new configuration — `[[environments]]`, `[[world.sensors]]`, `[models.tasks]`
+  for the hybrid routing (ADR-52), keys from the environment.
+- **The hooks are the loop's triggers:** `SessionStart` observes at a session's start, `UserPromptSubmit` runs the
+  read-time overlay (§6.5), `PreCompact` and `SessionEnd` the slow sensors, `PostToolUse` records actions (C3).
+- **`sleep`** is the slow loop's home (§3.4.2).
+- **The registry and the project switcher** keep several world projects side by side.
+- **Session search** gives the evidence for explanations: what was said when something changed.
+- **Per-project eval sets, the metrics collector and build observability** carry the new measures — testable share, a
+  stale belief's lifetime, the cost per task.
+
+**Eight adjustments** — each a work package in [`path-c-roadmap.md`](path-c-roadmap.md):
+1. **Environments in the manifest.** `[[environments]]` — a name, a kind (`repository` or `twin`), a source's path or
+   an MCP command; sources stay static, environments are live (C1.2).
+2. **Rebuilds keep the world tier.** Tables declare themselves authoritative in one registry that B0's snapshot /
+   restore reads, instead of a hand-kept list — a table forgotten in that list would be lost at the next build (C2.1).
+3. **Sessions get a kind** — conversation, agent, sensor, twin, import — so the Sitzungen list and session search keep
+   showing conversations (C1.12).
+4. **Write on change, not per reading.** Readings stay in the world cache; the graph is written when a value changes,
+   and `last_seen` is synced at `sleep` — §2.1's "only the errors travel", applied to writes on a one-writer graph
+   (C1.5).
+5. **OpenWiki is the twins' client, not their host.** It never imports environment code: every twin beyond the
+   built-in sensors runs as its own process behind the twin contract (MCP) — the Ableton twin's server, Cognitive
+   Substrate's LCU 9000 server, a custom server in a repository —, declared in the manifest. Process isolation, any
+   language, and the rule that a manifest adds no code (§6.6) still hold (C2.10, P.7).
+6. **Actions go through OpenWiki's `act`.** It checks the precondition and the laws, records the `Action` and its
+   `Prediction`, forwards the action to the twin's own guarded `act` — whose interlocks stay: defence in depth — and
+   resolves the prediction by the read-back. An agent calling a twin directly would bypass all three (C3.9).
+7. **Actions arrive from any agent:** git commits, an MCP tool an agent reports an action with, and host hooks such as
+   Claude Code's `PostToolUse` where they exist (C3.1).
+8. **One probe implementation.** From C1 on, the handoff reads the world model's observed state, events and open
+   predictions instead of probing on its own; its brief at a session's start becomes a world slice (C1.13).
+
+**Two synergies.**
+- **The project observes itself.** A code source's wiki is a snapshot that drifts from the repository — the last
+  handoff note found the dev index 62 commits behind. Wiki freshness becomes an observed variable with a law ("at most
+  N commits behind"), and a violation proposes `owiki build`: the build pipeline becomes part of the loop.
+- **Live state on wiki pages** — reader overlays like the related-pages panel (ADR-28): a code file's page shows its
+  observed constants and the laws on it; a manual's page shows a parameter's live value from a twin.
+
+**How the projects would look.**
+
+| Project | Environments | Sources | Sessions |
+|---|---|---|---|
+| openwiki-dev | the OpenWiki repository (built-in sensors) | the repository as code | Claude Code sessions in the repository |
+| ableton-playground (new) | the Ableton Live set, through the Ableton twin's MCP server | the Ableton 12 manual | the playground's sessions |
+| ableton-dev (optional) | the Ableton Expert System's repository | its code | Claude Code sessions in that repository |
+| lcu-9000 (C4) | the LCU 9000, through Cognitive Substrate's twin | the LCU 9000 manual | operator sessions |
+
+The Ableton Expert System has two environments: its codebase — a repository someone develops — and the Live set it
+controls — the twin, our playground (§11.5). They belong to different projects.
+
+**What does not change:** one corpus per project; discovery by location, with the registry as the fallback; the
+fingerprinted build chain — environments stay outside it, as the memory stage does; Wiki mode for document-only
+projects.
 
 ## 3. Conceptual model
 
@@ -670,8 +779,9 @@ Always created, empty until used (ADR-7); added lazily to old graphs, like the m
 | `Prediction` | `id`, `made_at`, `made_by` (rule, co-change, agent), `basis`, `target` (files, tests or a variable), `expected`, `tolerance`, `due` (commits or a time), `settle_s`, `resolved_at`, `outcome` (hit / partial / miss / unresolved), `score`, `baseline_score` | `ABOUT → Variable` or `ABOUT_PAGE → Page`; `FOR_ACTION → Action`; `RESOLVED_BY → Assertion` | yes |
 | `Event` | `id`, `kind` (discrepancy, violation, miss, drift, exogenous, contested, unresolved), `at`, `detail`, `resolved_at`, `resolution` | `CONCERNS → Variable`, `FROM_LAW → Law`, `FROM_PREDICTION → Prediction`, `FROM_ACTION → Action`, `INVOLVES → Assertion` | yes |
 
-B0's snapshot / restore and the portable export (ADR-39) would need to carry the new tables; how COGX holds them is
-open (§15).
+Every Path C table is registered as authoritative, so B0's snapshot / restore keeps it without a hand-kept list
+(§2.3), and the portable export (ADR-39) carries it — how COGX holds it is open (§15). `Session` gains a `kind`
+(conversation, agent, sensor, twin, import), so the Sitzungen list and session search keep showing conversations.
 
 ### 5.3 Raw telemetry stays outside the graph
 
@@ -708,13 +818,14 @@ C0 inventory lists:
 
 ```toml
 [[world.sensors]]
-id      = "release"
-type    = "file-pattern"
-path    = "pyproject.toml"
-pattern = '^version = "(?P<value>[^"]+)"'
-fact    = { subject = "OpenWiki", predicate = "current release is", object = "v{value}" }
-governs = ["OpenWiki | has version", "project | has version"]   # further attribute groups, as subject | predicate
-every   = "1m"                                                  # at most once a minute; "0" = slow passes only
+id          = "release"
+environment = "openwiki"                                          # the [[environments]] entry it reads (§2.3)
+type        = "file-pattern"
+path        = "pyproject.toml"
+pattern     = '^version = "(?P<value>[^"]+)"'
+fact        = { subject = "OpenWiki", predicate = "current release is", object = "v{value}" }
+governs     = ["OpenWiki | has version", "project | has version"]   # further attribute groups, as subject | predicate
+every       = "1m"                                                # at most once a minute; "0" = slow passes only
 ```
 
 Code sources get a small default set without configuration (git state, a version file when one is found); C0 decides
@@ -734,7 +845,8 @@ which. Bindings can also be *proposed* from memory — facts whose object matche
 
 An observation enters `temporal.plan_merge` with `source = "observed"` and its binding's attribute:
 
-1. **Same value as the current observation** → re-affirmed (`last_seen`).
+1. **Same value as the current observation** → re-affirmed: the world cache notes it, and `last_seen` reaches the
+   graph when the value changes or at `sleep` — a write on change, not per reading (§2.3).
 2. **A new value** → the previous observation closes at the new value's `valid_from`; the new one is current.
 3. **Current beliefs in a governed attribute with a different object** close at the observation's `valid_from` —
    kept as history, with a `SUPERSEDES` edge from the observation. A belief recorded *after* the value it contradicts
@@ -900,7 +1012,9 @@ Each environment is a twin behind the same small set of MCP verbs, so the agent 
 
 OpenWiki would implement the repository twin inside `owiki mcp` (tool names open, §15). A twin is a world model as an
 entity in its own right: it observes its environment, keeps its state, knows its rules and answers questions about
-them — the cyber-physical entity this direction started from.
+them — the cyber-physical entity this direction started from. OpenWiki is the client of every other twin (§2.3):
+agents read twins through OpenWiki's world tools, and an action goes through OpenWiki's `act`, which checks it,
+records it and forwards it to the twin's own guarded `act`.
 
 ### 10.2 Acting
 
@@ -1220,6 +1334,8 @@ kept; the cross-session and cue-trigger sets; LoCoMo overall J — LoCoMo has no
 | the action log | the Claude Code hook installer (`claude_code_template.hooks_config`, adding `PostToolUse`), `cli._cmd_hook`, the journal |
 | events and their review | the Pflege panel (`/api/memory/maintenance`), `handoff.render_brief` |
 | world tools | `mcp_server.build_server` |
+| environments in the manifest | `project.py` (`Project.environments`, next to `source_paths()`), `[[sources]]` paths |
+| the handoff as a world slice | `handoff.environment` — reading the world model's observed state, events and open predictions instead of its own probes |
 | the generic twin machinery — built-in sensor types, generic law checkers, the loop runner, the twin contract | new in OpenWiki, on `handoff`'s probes, the journal and `mcp_server`; each environment's own twin code stays in its repository (§2.2) |
 | analysis | `analysis/memory.py`, extended by a model-versus-reality section: discrepancies, violations, calibration |
 

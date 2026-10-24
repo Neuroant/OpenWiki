@@ -73,6 +73,7 @@
 | [50](#adr-50) | Path C: the world model as a dynamical system with two boundaries — the main architectural plan | Accepted as the plan (2026-10-18); nothing built | correctness, Q4, Q5 |
 | [51](#adr-51) | Digital twins are programs; language models at design time, code at run time | Accepted as the plan (2026-10-18); refines [ADR-50](#adr-50); see [ADR-52](#adr-52) | correctness, security, Q1 |
 | [52](#adr-52) | Hybrid language models for Paths B and C: local where possible, cloud where really needed | Accepted (2026-10-24); amends [ADR-2](#adr-2) for Paths B and C | Q1, correctness |
+| [53](#adr-53) | Projects gain environments — a third input class; twins as separate processes; actions through OpenWiki | Accepted as the plan (2026-10-24); nothing built | Q4, security, correctness |
 
 ---
 
@@ -1140,6 +1141,30 @@ amends [ADR-2](#adr-2) for Paths B and C; Path A stays local)*
   availability, model drift — managed per task; a data-class gate to maintain; every cloud use needs its justifying
   measurement. Implementation: track L of `docs/path-c-roadmap.md`.
 
+### ADR-53
+**Projects gain environments — a third input class; twins as separate processes; actions through OpenWiki.**
+*(2026-10-24; a plan, nothing built; extends [ADR-10](#adr-10) and [ADR-16](#adr-16); refines [ADR-51](#adr-51))*
+- **Context:** a project groups sources (rebuilt at build time) and sessions (the memory tier the graph keeps across
+  rebuilds, ADR-16) into one graph, with Wiki and Second Brain modes (ADR-14). Path C adds live state from environments
+  and twins, laws, predictions and actions — and a loop that runs on a cadence, not at build time.
+- **Decision:** environments become a third input class next to sources and sessions: `[[environments]]` in the
+  manifest — a repository, or a twin reached through its MCP command — feeding a world tier that is authoritative like
+  the memory tier. Modes nest: Wiki ⊂ Second Brain ⊂ World model (`[world] enabled` requires `[memory] enabled`).
+  Tables declare themselves authoritative in one registry that B0's snapshot / restore reads; `Session` gains a `kind`;
+  observations reach the graph when a value changes, not per reading. OpenWiki never imports environment code: every
+  twin beyond the built-in sensors runs as its own process behind the twin contract, and OpenWiki is its client;
+  actions go through OpenWiki's `act`, which checks, records and forwards them to the twin's own guarded `act`.
+  Actions are recorded from git, an MCP tool and host hooks; the handoff reads the world model instead of its own
+  probes (`path-c-world-model.md` §2.3).
+- **Alternatives:** sources with a "live" flag instead of environments — mixes build-time inputs with observed state
+  and breaks the fingerprint chain; twin code imported into OpenWiki — code execution from a manifest, one language, no
+  isolation; agents calling twins directly — bypasses the laws, the action log and the predictions; a hand-kept list of
+  the tables a rebuild preserves — a forgotten table is lost at the next build.
+- **Consequences:** + the project concept holds unchanged for documents and memory; several world projects side by side
+  through the registry and the switcher; twins in any language, isolated; every action checked and recorded once.
+  − A third kind of manifest entry and its validation; twin processes to start and supervise; one more hop for an
+  action (OpenWiki, then the twin).
+
 ---
 *Chapter complete. The Path-B agent-memory direction landed via ADR-14/15/16/17/18/19; the graph then
 deepened (ADR-22 typed relations + relation-aware GraphRAG, ADR-23 entity resolution), gained
@@ -1166,5 +1191,6 @@ human-inspired architecture's replay check (ADR-49), OpenCog Hyperon (ADR-48), M
 debts D1/D2/D6 are resolved. Deep designs in `docs/path-b-memory.md` and `docs/RAG-vs-GraphRAG.md`. Path C's plan — the world model as a
 dynamical system with two boundaries — is ADR-50, accepted as a plan before any code (`docs/path-c-world-model.md` §2.1); ADR-51 adds that twins are programs
 and that language models work at design time, code at run time (§2.2); ADR-52 makes Paths B and C hybrid — local
-where possible, cloud where really needed — while Path A stays local (ADR-2).
+where possible, cloud where really needed — while Path A stays local (ADR-2); ADR-53 places the world model in the
+project concept — environments as a third input class next to sources and sessions.
 New significant decisions should be appended here with the next id.*

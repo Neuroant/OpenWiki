@@ -7,7 +7,7 @@
 
 | # | Constraint | Background / consequence |
 |---|---|---|
-| TC1 | **Local inference only (Ollama)** | No cloud LLM/embedding APIs, no API keys. All embeddings + chat go through a local Ollama HTTP server (`http://localhost:11434`). Enables Q1 (privacy). |
+| TC1 | **Local inference by default (Ollama)** | Embeddings and chat go through a local Ollama HTTP server (`http://localhost:11434`); Path A's document pipeline uses no cloud API and no keys — Q1 (privacy). Paths B and C may route a task to a cloud model where it is really needed, under ADR-52's conditions (a measured need, the data class, a verifiable result, a local fallback, recorded cost); keys only from the environment. |
 | TC2 | **Python 3.10–3.13** (`requires-python = ">=3.10,<3.14"`) | Kuzu has **no Windows wheel for 3.14** — and none is coming: Kuzu was archived upstream in 2025-10 (§11 R10) — so the ceiling is 3.13; 3.13 is used in practice. Code targets 3.10+ (`from __future__ import annotations`; `tomli` backport for <3.11). |
 | TC3 | **Windows-primary** | Primary dev/runtime is Windows 11 + a `.venv`. Paths, stdout UTF-8 reconfiguration, and the pipx installer target Windows first; Linux is CI-verified (the offline suite + the Docker build on `ubuntu-latest`, Python 3.11–3.13 — ADR-24), macOS is unverified (§11 R6). |
 | TC4 | **Minimal dependencies** | Runtime deps are essentially **NumPy, PyMuPDF, Kuzu** (+ pytest for dev; scikit-learn behind the opt-in `[analysis]` extra). Everything else is Python stdlib (`http.server`, `urllib`, `html.parser`, `argparse`, `tomllib`, `json`). |

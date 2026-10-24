@@ -9,7 +9,7 @@ ADR referenced in the last column — see [Architecture Decisions](09-architectu
 | Strategy | What it means | Serves | ADR |
 |---|---|---|---|
 | **IR-centric staged pipeline** | A single intermediate representation (`ParsedDocument` in `models.py`) sits between ingestion and everything downstream. Each stage is a pure-ish transform reading the previous stage's artifact. | Q4, Q3 | ADR-1 |
-| **Local-first via Ollama + protocols** | All inference runs on a local Ollama; access is behind the `Embedder`/`ChatModel` protocols so backends are swappable and the corpus never leaves the machine. | Q1, Q4 | ADR-2 |
+| **Local-first via Ollama + protocols** | Inference runs on a local Ollama by default, behind the `Embedder`/`ChatModel` protocols so backends are swappable; Path A's corpus never leaves the machine. Paths B and C may route a task to a cloud model where it is really needed — measured, gated by the data class, verifiable, with a local fallback (ADR-52). | Q1, Q4 | ADR-2, ADR-52 |
 | **Stdlib-leaning, deps isolated** | Web server, MCP server, and 3 of 4 source parsers are stdlib-only; PyMuPDF and Kuzu are confined to single modules and imported lazily. | Q2 | ADR-4, ADR-5 |
 | **Additive knowledge graph (a mirror)** | The Kuzu graph is layered *over* the wiki + index without mutating them; embeddings are mirrored in so traversal + vector search share one query. The index stays authoritative. | Q4 | ADR-3 |
 | **Deep semantic graph layer** | Over the structural graph, an opt-in LLM layer: typed entities (deterministic-normalized), typed `Entity→Entity` **relations** (traversed by GraphRAG), and corpus-wide **entity resolution** (canonical + aliases + descriptions). | Q4, Q5 | ADR-12/22/23 |

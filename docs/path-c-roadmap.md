@@ -21,7 +21,8 @@ to the Ableton twin's review (`docs/Digital_Twin_Review.md` in `G:\Antigravity\a
 7. [Phase C1 — Observe, don't remember](#7-phase-c1--observe-dont-remember)
 8. [Phase C2 — Laws, drift and the world slice](#8-phase-c2--laws-drift-and-the-world-slice)
 9. [Phase C3 — Predict and verify](#9-phase-c3--predict-and-verify)
-10. [Phase P — The Ableton playground's prerequisites](#10-phase-p--the-ableton-playgrounds-prerequisites)
+10. [Phase P — The Ableton playground's prerequisites](#10-phase-p--the-ableton-playgrounds-prerequisites) and
+    [Track L — language-model routing](#10a-track-l--language-model-routing)
 11. [Phase C4 — Physical twins](#11-phase-c4--physical-twins)
 12. [Decision gates](#12-decision-gates)
 13. [Stop rules and risks](#13-stop-rules-and-risks)
@@ -52,6 +53,7 @@ to the Ableton twin's review (`docs/Digital_Twin_Review.md` in `G:\Antigravity\a
 | **C2** — laws, drift, world slice | rules and decisions checkable; context built around what a prompt touches | C1 exit; decisions 10, 14, 15 | ☐ | v0.125 – v0.128 |
 | **C3** — predict and verify | the full loop on the repository | C2 exit; decisions 4, 8, 9 | ☐ | v0.129 – v0.131 |
 | **P** — playground prerequisites | the Ableton twin safe and trustworthy enough to play with | — (parallel; Ableton repository) | ☐ | Ableton releases |
+| **L** — language-model routing | the hybrid approach: a cloud model per task where really needed | decision 6 (parallel; before the first cloud use) | ☐ | with its first use |
 | **C4** — physical twins | the twin contract on a working twin, then a machine | C3 exit; P; decisions 2, 3, 12 | ☐ | v0.132 + |
 
 **Next actions:** M.1 (bring the replay harness into the repository) → C0.1 (recover the labeled stale facts) → C0.2
@@ -72,6 +74,8 @@ to the Ableton twin's review (`docs/Digital_Twin_Review.md` in `G:\Antigravity\a
 - C3 needs C2's `Variable` / `Event` tables and the world slice: predictions are about variables, misses are events.
 - The playground steps of C2 and C3 need the Ableton twin's safety, identity, sync and read-back (P.1, P.2, P.4, P.6)
   and its twin-contract adapter (P.7); C4's diagnosis needs its parameter observers (P.5).
+- Track L runs beside the phases: any WP that routes a task to a cloud model needs L.1 – L.4 first; its first use is a
+  second benchmark judge (L.5), which M.1's judge pass can use.
 
 ## 4. Rules for every work package
 
@@ -92,6 +96,9 @@ to the Ableton twin's review (`docs/Digital_Twin_Review.md` in `G:\Antigravity\a
   through reviewed commits in the environment's repository; actuators gated (WM §2.2, §6.6, §10.2).
 - **No language model in the twin's loop** (ADR-51): sensors, comparisons, checks and interlocks are code; the local
   model only reads and writes language (capture, extraction, summaries, answers).
+- **Language models are hybrid** (ADR-52): a local model wherever it is enough; a WP that routes a task to a cloud
+  model names the measurement that justifies it, the task's data class and its local fallback, and needs track L.
+  Private memory goes to a cloud model only by the project's explicit opt-in, after redaction.
 - **Docs per release:** `CLAUDE.md`, arc42 (ch. 5 building blocks, ch. 6 runtime, ch. 8 concepts, ch. 9 ADRs, ch. 10
   test count), `docs/roadmap.md`, the web UI's `help.md` where a surface changes, WM §12's "Landed" note, WM §18's
   measurements, and this tracker.
@@ -104,7 +111,7 @@ were never stored with it.
 
 | WP | Tasks | Touches | Tests | Effort | Status |
 |---|---|---|---|---|---|
-| **M.1 — the replay harness** | Replay the real prompts of a Claude Code transcript at their own time: for each prompt, the memory as it stood (recall with `as_of` = the prompt's time minus a capture lag, `now` = the prompt's time) on a scratch copy of a graph; write each prompt's injected context, the recalled facts and their parts as JSONL. Options: `--lag`, `--since/--until`, `--limit`, `--out`. Optional blind-judge pass (shuffled facts, the judge's verdicts in a separate file). Entry point: `owiki eval --replay TRANSCRIPT`. | `openwiki/replay.py` (new), `cli.py`, `sessions.py` (turns), `GraphStore.context_for(report=)` | fake graph + fake transcript, time handling, lag | M | ☐ |
+| **M.1 — the replay harness** | Replay the real prompts of a Claude Code transcript at their own time: for each prompt, the memory as it stood (recall with `as_of` = the prompt's time minus a capture lag, `now` = the prompt's time) on a scratch copy of a graph; write each prompt's injected context, the recalled facts and their parts as JSONL. Options: `--lag`, `--since/--until`, `--limit`, `--out`. Optional blind-judge pass (shuffled facts, the judge's verdicts in a separate file) — the local judge, or a cloud judge once track L is in (L.5). Entry point: `owiki eval --replay TRANSCRIPT`. | `openwiki/replay.py` (new), `cli.py`, `sessions.py` (turns), `GraphStore.context_for(report=)` | fake graph + fake transcript, time handling, lag | M | ☐ |
 | **M.2 — the guard suite** | One command that runs every guard of §4 and prints a pass / fail table: `owiki eval --guards`. | `eval.py`, `cli.py` | fakes for the runner; the live run is manual | S | ☐ |
 | **M.3 — private label files** | A JSONL format for hand labels (`{"id", "label", "route", "binding", "note"}`) kept in the project, not the repository (`<project>/.openwiki/pathc/`); a loader for the measurement scripts. | `openwiki/replay.py` | format round-trip | S | ☐ |
 
@@ -215,11 +222,28 @@ is in (WM §11.5).
 | **P.6 — read-back and a project id (ABL R6)** | `/live/ack <request_id> <ok> <actual_value>` after each write; the set fingerprinted by its file path. | C3.6 | S | ☐ |
 | **P.7 — the twin contract** | A thin adapter over its knowledge and action servers: `entities`, `state`, `history`, `laws`, `act(dry_run=true)` (WM §10.1). | C2.10, C3.6, C4.1 | M | ☐ |
 
+## 10a. Track L — language-model routing
+
+**Goal:** the hybrid approach of ADR-52 — a local model wherever it is enough, a cloud model where it is really needed
+— as configuration, not as code changes per task. **Gate:** decision 6 (which cloud models and providers). Parallel to
+the phases; each later WP that wants a cloud model depends on L.1 – L.4.
+
+| WP | Tasks | Touches | Tests | Effort | Status |
+|---|---|---|---|---|---|
+| **L.1 — a cloud backend** | A `ChatModel` (and, if ever needed, `Embedder`) implementation for the chosen provider, behind the existing protocols; keys from the environment, never stored or logged; timeouts and output caps like the local calls. | `openwiki/llm.py`, `openwiki/embeddings.py` | fakes for the HTTP layer; no network in tests | M | ☐ |
+| **L.2 — per-task routing** | Named tasks — capture, coexist, resolve, extract, laws, summarize, answer, judge, lessons, probes — each routed to `local` (the default) or `cloud:<model>` in `openwiki.toml` (`[models.tasks]`), with a project-level override; `Project.model_for(task)`. | `project.py`, `cli.py` (model construction) | routing and defaults | S | ☐ |
+| **L.3 — the data-class gate** | Each task declares its data class (public / private); a private task refuses a cloud route unless the project opts in (`[models] allow_private_cloud = true`); credential redaction on every cloud request; an audit line per call — task, model and version, tokens, latency, data class, no content. | `openwiki/llm.py`, `policy.py`, `metrics.py` | the gate refuses; redaction applied; the audit line | S | ☐ |
+| **L.4 — fallback and cost** | When the cloud model fails or the machine is offline: the local model, or skip, and record which; the token cost per task in the metrics and in `status` (build observability). | `openwiki/llm.py`, `metrics.py`, `pipeline.py` | fallback paths | S | ☐ |
+| **L.5 — the first use: a second judge** | A cloud judge for the benchmarks (LoCoMo, M.1's judge pass), measured against the local judge on the 60-judgment hand audit (PB §13.11); adopted where it agrees better with the audit. | `eval.py`, `locomo.py` | — | M | ☐ |
+
+Later candidates, each with its own measured need: extraction from public documents (C2.4, C4.3), a large one-off
+capture or re-capture, a learned dynamics model trained on dense telemetry (C4.5).
+
 ## 11. Phase C4 — Physical twins
 
 **Goal:** the same model for a working twin, then for a machine, through federation (WM §11). **Gate:** C3 exit; P
-complete; decisions 2 (acting), 3 (telemetry), 12 (the telemetry store); decision 6 if the LCU 9000 manual's laws are
-to be extracted by a cloud model.
+complete; decisions 2 (acting), 3 (telemetry), 12 (the telemetry store); track L if the LCU 9000 manual's laws are to
+be extracted, or a dynamics model trained, by a cloud model.
 
 | WP | Tasks | Where | Effort | Status |
 |---|---|---|---|---|
@@ -227,7 +251,7 @@ to be extracted by a cloud model.
 | **C4.2 — the LCU 9000 simulator** | An OPC UA server (asyncua) exposing the manual's variables, driven by a small thermal and coolant model, with injectable faults (a degrading pump, a chiller alarm, an opened door, a drifting sensor, a reflective workpiece) and a known causal graph (WM §11.2). | Cognitive Substrate | L | ☐ |
 | **C4.3 — the LCU 9000 twin** | Its MCP server over the simulator (the contract's verbs), shared variable ids with OpenWiki; OpenWiki builds the manual's wiki and extracts its laws (WM §11.1). | Cognitive Substrate + OpenWiki | M | ☐ |
 | **C4.4 — the telemetry store** | Raw series outside the graph (SQLite or Parquet, decision 12); regime changes, threshold crossings and alarms into the graph as observed facts and events (WM §5.3). | OpenWiki | M | ☐ |
-| **C4.5 — learned dependencies** | Lagged correlation, Granger, transfer entropy with PCMCI and surrogate tests, against the simulator's true causal graph and the manual's laws (WM §11.3). | OpenWiki (`[analysis]` extra) | M | ☐ |
+| **C4.5 — learned dependencies** | Lagged correlation, Granger, transfer entropy with PCMCI and surrogate tests, against the simulator's true causal graph and the manual's laws (WM §11.3); where the telemetry is dense enough, a learned dynamics model as one more basis — trained locally or in the cloud (ADR-52, track L) and scored against the baselines. | OpenWiki (`[analysis]` extra) | M | ☐ |
 | **C4.6 — the diagnosis benchmark** | (a) the manual's wiki only, (b) plus live state and history, (c) plus laws and learned dependencies — on both twins; exact fault labels; false alarms on fault-free runs (WM §11.4). | OpenWiki | M | ☐ |
 | **C4.7 — docs and releases** | As §4. | docs | S | ☐ |
 
@@ -245,7 +269,7 @@ The open decisions of WM §15, and the phase that cannot start without them:
 | 3 | telemetry: hardware or simulator | C4.2 | a simulator |
 | 4 | the action log through `PostToolUse` | C3.1 | yes, from C3 |
 | 5 | what the loop may correct by itself | C1.4 | facts automatically, laws and decisions by a person, no automatic remediation |
-| 6 | direct cloud calls for public data | C4.3 (only if the manual's laws are extracted by a cloud model) | keep ADR-2 strict for now |
+| 6 | which cloud models and providers (the hybrid approach itself is decided, ADR-52) | L.1 | choose at the first use — a second benchmark judge (L.5) |
 | 7 | a small local model for per-prompt features | C2.7 (only if the world slice needs it) | measure first |
 | 8 | agent predictions | C3.2 | system-made first |
 | 9 | where the slow loop runs | C3.5 | inside `sleep`, plus `owiki world review` |
@@ -282,3 +306,4 @@ The open decisions of WM §15, and the phase that cannot start without them:
 | Date | Phase / WP | Change | Result |
 |---|---|---|---|
 | 2026-10-24 | — | Roadmap created from WM §12, the plan (WM §2.1 – §2.2) and the open decisions (WM §15) | — |
+| 2026-10-24 | L | Hybrid language models decided (ADR-52): track L added; decision 6 narrowed to the choice of providers | — |

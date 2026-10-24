@@ -22,7 +22,7 @@
 | # | Decision | Status | Quality goal |
 |---|---|---|---|
 | [1](#adr-1) | Intermediate representation between ingestion and the rest | Accepted | Q4, Q3 |
-| [2](#adr-2) | Local Ollama behind `Embedder`/`ChatModel` protocols; no cloud | Accepted | Q1, Q4 |
+| [2](#adr-2) | Local Ollama behind `Embedder`/`ChatModel` protocols; no cloud | Accepted for Path A; amended for Paths B and C by [ADR-52](#adr-52) | Q1, Q4 |
 | [3](#adr-3) | Kuzu graph is an additive *mirror*, not the source of truth | Accepted; refined by [ADR-16](#adr-16) (Path B) | Q4 |
 | [4](#adr-4) | Stdlib zero-dependency web server + no-build SPA | Accepted | Q2 |
 | [5](#adr-5) | Target Python 3.13 (not 3.14) | Accepted | — |
@@ -71,7 +71,8 @@
 | [48](#adr-48) | A use signal first: git co-changes as edges for code corpora | Accepted | Q4, Q5 |
 | [49](#adr-49) | Recency only for the kinds of fact that go stale | Accepted (Path B++); refines [ADR-34](#adr-34) | correctness, Q5 |
 | [50](#adr-50) | Path C: the world model as a dynamical system with two boundaries — the main architectural plan | Accepted as the plan (2026-10-18); nothing built | correctness, Q4, Q5 |
-| [51](#adr-51) | Digital twins are programs; language models at design time, code at run time | Accepted as the plan (2026-10-18); refines [ADR-50](#adr-50); keeps [ADR-2](#adr-2) | correctness, security, Q1 |
+| [51](#adr-51) | Digital twins are programs; language models at design time, code at run time | Accepted as the plan (2026-10-18); refines [ADR-50](#adr-50); see [ADR-52](#adr-52) | correctness, security, Q1 |
+| [52](#adr-52) | Hybrid language models for Paths B and C: local where possible, cloud where really needed | Accepted (2026-10-24); amends [ADR-2](#adr-2) for Paths B and C | Q1, correctness |
 
 ---
 
@@ -95,6 +96,8 @@
   Hard-code Ollama calls in the agent — rejected (untestable, unswappable).
 - **Consequences:** + Fully offline, private, free; backends swappable; tests use fakes.
   − Requires a running Ollama with models pulled; quality/latency bounded by local models.
+- **Amendment (2026-10-24):** local-only stays the principle of Path A — the document pipeline. Paths B and C take a
+  hybrid approach: a local model wherever it is enough, a cloud model where it is really needed ([ADR-52](#adr-52)).
 
 ### ADR-3
 **The Kuzu graph is an additive *mirror*, not the source of truth.** *(refined by [ADR-16](#adr-16))*
@@ -1084,7 +1087,7 @@ plan, nothing built; extends [ADR-14](#adr-14), [ADR-27](#adr-27), [ADR-33](#adr
 
 ### ADR-51
 **Digital twins are programs; language models work at design time, code at run time.** *(2026-10-18; a plan,
-nothing built; refines [ADR-50](#adr-50); keeps [ADR-2](#adr-2))*
+nothing built; refines [ADR-50](#adr-50); cloud use per [ADR-52](#adr-52))*
 - **Context:** ADR-50 makes digital twins the world model's boundary toward the environment. Their sensors, checks and
   simulators are hard to write and consequential. The local 30B is unreliable as a judge of memory (`path-b-memory.md`
   §13.1–13.5) but adequate for parsing and summarizing in bulk, and a frontier coding agent is already in the loop — the
@@ -1097,8 +1100,8 @@ nothing built; refines [ADR-50](#adr-50); keeps [ADR-2](#adr-2))*
   actuators never); laws are declarative first, with test functions only where an expression can't say it. The twin's
   loop makes no language-model call. The local model reads and writes language at run time — capture, extraction,
   summaries, answers — and the twin checks it wherever the content is testable. The generic twin machinery lives in
-  OpenWiki, each environment's twin code in its own repository. OpenWiki itself still makes no cloud call; the large
-  model works through the host agent, in sessions.
+  OpenWiki, each environment's twin code in its own repository. The large model works through the host agent, in
+  sessions, and — where it is really needed — through cloud calls under [ADR-52](#adr-52)'s hybrid approach.
 - **Alternatives:** a language model inside the twin's loop (interpreting instead of compiling) — slow and costly per
   run, not deterministic, and a judgment our audits found unreliable; twin code generated and run without review — code
   execution on the user's machine, and checks written to pass; a cloud model building the knowledge model in the
@@ -1108,6 +1111,34 @@ nothing built; refines [ADR-50](#adr-50); keeps [ADR-2](#adr-2))*
   deterministic, private and free per run; the better the twin, the cheaper the model that builds the knowledge model
   can be; the testable share of the knowledge model becomes a measurable coverage. − Twin code to maintain in several
   repositories; every check needs a failing fixture; review effort for each change to a twin.
+
+### ADR-52
+**Hybrid language models for Paths B and C: local where possible, cloud where really needed.** *(2026-10-24;
+amends [ADR-2](#adr-2) for Paths B and C; Path A stays local)*
+- **Context:** ADR-2 made every inference local — right for Path A's document pipeline: private corpora, bulk work,
+  offline. Paths B and C need judgments the local 30B measurably can't make — four failed audits of memory
+  (`path-b-memory.md` §13.1–13.5), a judge about 7 points generous (§13.11) —, Path C's twins need code a frontier model
+  writes ([ADR-51](#adr-51)), and some jobs are too large for one local GPU in the time they have.
+- **Decision:** a local model stays the default for every task. A task may be routed to a cloud model where it is
+  really needed — when (1) a paired measurement shows the local model isn't enough for it, or the task is too large for
+  it in its time budget; (2) the data class allows it: public data freely, private memory only with the project's
+  explicit opt-in and after credential redaction; (3) the result is verifiable — by a twin, a check, review or a person
+  — or the model is an audited evaluation judge; (4) a local fallback exists, so offline means degraded, not broken;
+  (5) the model, its version, the tokens and the latency are recorded per task. Never inside a twin's loop (ADR-51),
+  and not on the per-prompt path unless a project configures it. Cloud models sit behind the same `ChatModel` /
+  `Embedder` protocols; keys come from the environment and are never stored or logged. The coding agent stays the first
+  large model in the loop. Path A's pipeline stays local.
+- **Alternatives:** local only everywhere — leaves the judgments the audits showed the local model can't make to the
+  agent's sessions and to people, and caps Path C's verification work at one GPU; cloud by default — private memory
+  and code leave the machine, cost and availability become dependencies, results drift with model versions; the coding
+  agent as the only large model — right for sessions, but leaves batch work (benchmark judging, a large one-off
+  extraction) without a strong model.
+- **Consequences:** + strong models where the measurements say the local one fails; benchmark judging comparable with
+  published numbers; large one-off jobs in a reasonable time; learned world models no longer ruled out by compute —
+  where an environment yields dense data (`path-c-world-model.md` §2.1, C4), one may be trained, locally or in the
+  cloud, and kept as a prediction basis if it beats the baselines. − A second class of dependency — keys, cost,
+  availability, model drift — managed per task; a data-class gate to maintain; every cloud use needs its justifying
+  measurement. Implementation: track L of `docs/path-c-roadmap.md`.
 
 ---
 *Chapter complete. The Path-B agent-memory direction landed via ADR-14/15/16/17/18/19; the graph then
@@ -1134,5 +1165,6 @@ human-inspired architecture's replay check (ADR-49), OpenCog Hyperon (ADR-48), M
 (ADR-42, ADR-49) — each idea measured on OpenWiki's own data before anything was adopted. §11
 debts D1/D2/D6 are resolved. Deep designs in `docs/path-b-memory.md` and `docs/RAG-vs-GraphRAG.md`. Path C's plan — the world model as a
 dynamical system with two boundaries — is ADR-50, accepted as a plan before any code (`docs/path-c-world-model.md` §2.1); ADR-51 adds that twins are programs
-and that language models work at design time, code at run time (§2.2).
+and that language models work at design time, code at run time (§2.2); ADR-52 makes Paths B and C hybrid — local
+where possible, cloud where really needed — while Path A stays local (ADR-2).
 New significant decisions should be appended here with the next id.*

@@ -2,7 +2,8 @@
 
 > **Status: proposal (2026-10-18, OpenWiki v0.120.0). Nothing is built.** **The main architectural plan is §2.1** —
 > the world model as a dynamical system with two boundaries, approved on 2026-10-18 (arc42 ADR-50); §2.2 adds that a
-> twin is a program and that language models work at design time while the twin runs as code (ADR-51). The next step is
+> twin is a program and that language models work at design time while the twin runs as code (ADR-51); ADR-52 makes
+> Paths B and C hybrid — local models where possible, cloud models where really needed. The next step is
 > C0, an inventory that needs no code and decides whether the rest is worth building. **The implementation is tracked**
 > in [`path-c-roadmap.md`](path-c-roadmap.md) — phases, work packages, gates, status. Path C builds on Path B ([`path-b-memory.md`](path-b-memory.md))
 > and the agent-memory review ([`memory-systems-review.md`](memory-systems-review.md),
@@ -92,7 +93,8 @@ next to recall.
 ### 1.3 What stays, what changes
 
 - **Stays:** the bi-temporal fact store (B7, ADR-27) and fact identity (B9, ADR-29); the hygiene policy and credential
-  redaction (ADR-30, ADR-37); local-first operation (ADR-2); measure before adopting (ADR-9); readers that hold the
+  redaction (ADR-30, ADR-37); local-first operation — local models where possible, cloud models where really needed
+  (ADR-2, ADR-52); measure before adopting (ADR-9); readers that hold the
   graph per call and writers that lock only to apply (ADR-38).
 - **Changes:** where state comes from, how content is typed (by how it is checked, §3.1), what the context holds (§9),
   and how the memory is judged (§13).
@@ -106,7 +108,7 @@ next to recall.
 
 | Sense | What it is | For Path C |
 |---|---|---|
-| **Learned world models** (Ha & Schmidhuber 2018, DreamerV3, JEPA, Genie) | neural dynamics learned from large streams of observations, used to imagine and plan | out of scope: they need data and GPUs we don't have, and a coding agent's world is not a video stream |
+| **Learned world models** (Ha & Schmidhuber 2018, DreamerV3, JEPA, Genie) | neural dynamics learned from large streams of observations, used to imagine and plan | not the core: the state must stay explicit and correctable, and learned dynamics need dense data a coding workflow rarely produces. Compute is not the limit — under the hybrid approach (ADR-52) cloud compute is there where really needed —, so where an environment yields dense data (a machine's telemetry, C4) a learned model may be trained, locally or in the cloud, and kept as one more prediction basis if it beats the declared and counted ones |
 | **Digital twins** (industry) | a model of an asset kept in sync with it: state from sensors, history, simulation, a control interface | the operational model for machines; for code, a twin needs no learned physics — the real system can be run in a sandbox |
 | **Cognitive world models** (CoALA; Path B's own frame) | the agent's internal model of its world, which it reasons with | what the memory becomes once it is grounded in observation |
 
@@ -252,13 +254,18 @@ policy      a      = π( text, goal )          the agent, with approval where re
 check       a ok?  = laws( ŝ after a ) ∧ precondition( a, s(t) )
 ```
 
-**Why not a learned world model.** Learned world models (Dreamer, JEPA) learn a continuous, hidden state and its
-dynamics by gradient descent and imagine ahead. This plan's dynamical system is deliberately different: the state is
-explicit and symbolic — every value can be read, dated and corrected; the dynamics are mostly declared or counted
-(laws, co-change), because the memory's own history is too sparse to learn them from (MSR §13); for digital
+**Why the core is not a learned world model.** Learned world models (Dreamer, JEPA, Genie) learn a continuous,
+hidden state and its dynamics by gradient descent and imagine ahead. This plan's core is deliberately different: the
+state is explicit and symbolic — every value can be read, dated and corrected; the dynamics are mostly declared or
+counted (laws, co-change), because the memory's own history is too sparse to learn them from (MSR §13); for digital
 environments the simulator is the real system in a sandbox — the world as its own best model, in Rodney Brooks'
 phrase; and the language model is a prior, not the physics: it may propose predictions and explanations, which only the
-loop confirms (§3.2). What the plan gives up is imagination in unseen situations; what it gains is a model that can be
+loop confirms (§3.2). Compute is not the reason. Paths B and C take a hybrid approach (ADR-52) — local models where
+possible, cloud models where really needed —, so where an environment yields dense data, a machine's telemetry above
+all (C4), a learned dynamics model can join as one more prediction basis, trained locally or in the cloud and scored
+against the baselines like every other basis (§3.4.4). And large language models are themselves learned models of the
+world of text and code: through the coding agent and, where needed, cloud calls, they serve as priors — proposals the
+loop confirms. What the core gives up is imagination in unseen situations; what it gains is a model that can be
 checked, replayed and trusted around a codebase or a machine — and a regulator that contains a model of what it
 regulates, as Conant and Ashby put it (1970).
 
@@ -323,22 +330,24 @@ code, and the twin's loop runs without any language-model call — fast, determi
   the same way (its D17: the model proposes, Playwright validates, a failing skill is demoted). The large model is used
   once per change to a twin, not once per turn of the loop; "constantly" applies to the twin running, not to its
   programming, which happens in steps, in sessions, with review.
-- **Building and maintaining the knowledge model — the local model.** Language must be read and written at run time —
+- **Building and maintaining the knowledge model — the local model, by default.** Where it is measurably not enough for
+  a part of this work, the hybrid approach below applies. Language must be read and written at run time —
   capture, extraction, summaries, answers: high volume, private, in the background. The local model is weak at
   judgment (§3.2), and the twin catches its errors wherever the content is testable: when capture records "756 tests"
   and the test-count sensor reads 770, the fact closes by itself. The better the twin, the cheaper the model that builds
   the knowledge model can be. For what no twin can test — decisions, reasons, preferences — the existing guards stay:
   the policy, the agent's `wiki_remember`, a person.
 - **Where the large model touches the knowledge model:** hard cases handed to the agent in a session — review lists,
-  explanations of surprises, proposed laws — and, an open decision (§15), opt-in one-off extraction from public
-  documents. No background pipeline sends private memory to a cloud model; OpenWiki itself makes no cloud call (ADR-2).
+  explanations of surprises, proposed laws — and, under the hybrid approach below, cloud calls where the local model
+  is measurably not enough: a benchmark judge, extraction from public documents, a large one-off job. Private memory
+  goes to a cloud model only by the project's explicit opt-in, after redaction.
 
 | Work | Who | When | Verified by |
 |---|---|---|---|
 | programming the twin — sensors, laws as tests, simulators, the loop | the large model (the coding agent) | design time, in sessions | review, tests, planted violations, running it |
 | running the twin — observe, check, predict, compare | code, no language model | run time, on a schedule | cross-checks, fixtures |
-| building and maintaining the knowledge model — capture, extraction, summaries, embeddings | the local model (Ollama) | run time, in the background | the twin for testable content; the policy, the agent and people for the rest |
-| hard judgments — staleness, explanations, proposed laws | the large model (the agent) or a person | in sessions | the twin, where testable |
+| building and maintaining the knowledge model — capture, extraction, summaries, embeddings | the local model (Ollama) by default; a cloud model where really needed (ADR-52) | run time, in the background | the twin for testable content; the policy, the agent and people for the rest |
+| hard judgments — staleness, explanations, proposed laws | the large model (the agent in sessions, or a cloud model where needed) or a person | in sessions, or as a measured batch job | the twin, where testable |
 
 **Four tiers.**
 
@@ -346,7 +355,7 @@ code, and the twin's loop runs without any language-model call — fast, determi
 |---|---|---|
 | 0 — no language model | rules and code | the merge, the policy, forgetting, sensors, comparisons, law checks, interlocks, the world slice, the twin's loop |
 | 1 — local models | OpenWiki in the background (bge-m3, the 30B) | embeddings; capture; extraction; the narrow merge checks; summaries; answers in the wiki |
-| 2 — the frontier model in the loop | the coding agent, in sessions | programming the twins; decisions and actions; recording new states; explanations; proposed laws; review lists |
+| 2 — large models | the coding agent, in sessions; cloud models OpenWiki calls where really needed (ADR-52) | programming the twins; decisions and actions; recording new states; explanations; proposed laws; review lists; a benchmark judge; large one-off extraction |
 | 3 — people | the user | accept laws, approve actions and twin code, confirm or close facts |
 
 **Decided on 2026-10-18.**
@@ -358,6 +367,24 @@ code, and the twin's loop runs without any language-model call — fast, determi
    land without review, once their fixtures have proven them; actuators never.
 3. **Declarative first.** Laws are data with generic checkers (§7.2); a reviewed test function only where an
    expression can't say it — less code to maintain, and the laws stay readable.
+4. **Hybrid language models** (decided 2026-10-24): local where possible, cloud where really needed — the conditions
+   below (ADR-52).
+
+**The hybrid approach (ADR-52, decided 2026-10-24).** Local-only inference stays Path A's principle (ADR-2): the
+document pipeline never leaves the machine. Paths B and C are hybrid — a local model wherever it is enough, a powerful
+cloud model where it is really needed. A task may be routed to a cloud model when all of these hold:
+- **a measured need** — a paired measurement shows the local model isn't enough for the task, or the task is too large
+  for it in the time it has;
+- **the data class allows it** — public data freely; private memory only with the project's explicit opt-in, and after
+  credential redaction;
+- **the result is verifiable** — by a twin, a check, review or a person — or the model is an audited evaluation judge;
+- **a local fallback exists** — offline means degraded, never broken;
+- **the cost is visible** — the model, its version, the tokens and the latency are recorded per task.
+
+Never inside a twin's loop (ADR-51), and not on the per-prompt path unless a project configures it. Cloud models sit
+behind the same `ChatModel` / `Embedder` protocols as the local ones; keys come from the environment and are never
+stored or logged. The coding agent stays the first large model in the loop. The routing is track L of
+[`path-c-roadmap.md`](path-c-roadmap.md).
 
 **Who tests the tester.**
 - Every check must fail on a planted violation; a check that can't fail is reported, never trusted.
@@ -899,7 +926,7 @@ OPC UA and PLC perception are designed, not built.
 |---|---|---|
 | Owns | the machine's twin: OPC UA / PLC perception, CANONICAL state, actions, procedural skills | documents (the manual as a wiki, the laws extracted from it), the operational memory (sessions, decisions), the repository twin |
 | Engine | Neo4j 5 | Kuzu, moving to LadybugDB (R10) |
-| Models | Gemini embeddings first (D14), a local fallback | local only (ADR-2) |
+| Models | Gemini embeddings first (D14), a local fallback | local by default, cloud where really needed (ADR-52) |
 | Meets the other through | the MCP contract (§10.1), shared variable ids (e.g. `lcu9000.coolant.flow_rate`), COGX for bulk exchange | the same |
 
 **Why federate rather than merge.** The engines differ, so does the stance on cloud models, and both projects are
@@ -985,7 +1012,7 @@ action refer to the same thing (R2), a sync that knows whether it is complete (R
 anything: only a sync reported complete counts as an observation.
 
 **Safe to play with.** A dedicated test set, a limiter on the master, low monitor levels, and observation only until
-the clamps are in place. The twin's own agent uses Gemini; OpenWiki's side stays local (ADR-2) and meets the twin only
+the clamps are in place. The twin's own agent uses Gemini; OpenWiki's side is local by default (ADR-52) and meets the twin only
 through MCP.
 
 ## 12. Staged delivery plan (C0–C4)
@@ -1118,6 +1145,9 @@ kept; the cross-session and cue-trigger sets; LoCoMo overall J — LoCoMo has no
 - **False alarms.** Laws only after review, events resolvable by a person, the false-alarm rate an exit criterion (C2).
 - **Loops that run away or fight.** No automatic remediation, contested variables left alone, silence never taken as
   confirmation, skill scored against a baseline (§3.4.6, §3.4.7).
+- **Cloud dependence** (ADR-52). Private memory only by explicit opt-in and after redaction; the cost recorded per
+  task; a local fallback for every routed task; the model and its version recorded with every result, since cloud
+  models change under their names.
 - **Twin code written by a model.** Written by the coding agent, accepted only through reviewed commits, every check
   proven on a planted violation; no change to a twin's code at run time (§2.2).
 - **Over-observation.** Sensors on things nobody asks about cost latency and add noise; bindings come from the C0
@@ -1139,8 +1169,9 @@ kept; the cross-session and cue-trigger sets; LoCoMo overall J — LoCoMo has no
 - **Declarative first** — laws are data with generic checkers; a reviewed test function only where an expression can't
   say it (§2.2, §7.2).
 - **Language models at design time, code at run time** — the coding agent programs the twins in sessions, the twin's
-  loop makes no language-model call, the local model builds and maintains the knowledge model; OpenWiki itself makes no
-  cloud call (§2.2, ADR-51, ADR-2).
+  loop makes no language-model call, the local model builds and maintains the knowledge model (§2.2, ADR-51).
+- **Hybrid language models** (2026-10-24) — Paths B and C use a local model wherever it is enough and a cloud model
+  where it is really needed, under the conditions of §2.2; Path A stays local (ADR-52, ADR-2).
 
 **Open — for the user**
 
@@ -1156,9 +1187,9 @@ kept; the cross-session and cue-trigger sets; LoCoMo overall J — LoCoMo has no
    before that.*
 5. **What the loop may correct by itself** (§3.4.6): facts automatically, laws and decisions only by a person, never
    automatic remediation? *Recommended: as in §3.4.6.*
-6. **Direct cloud calls for public data only** — an amendment to ADR-2 for an opt-in benchmark judge or a one-off
-   extraction from a public manual? *Recommended: keep ADR-2 strict for now; a second judge for benchmarks is the first
-   case to revisit.*
+6. **Which cloud models and providers** for the hybrid approach — per task, behind the `ChatModel` protocol, keys from
+   the environment? *Recommended: choose at the first use — a second benchmark judge (track L) — and add others only
+   with their own measured need.*
 7. **A small local model** for features that run on every prompt (constraint probes)? *Recommended: measure before
    adding one — the coexistence check proved sensitive to wording.*
 
@@ -1199,7 +1230,8 @@ kept; the cross-session and cue-trigger sets; LoCoMo overall J — LoCoMo has no
   specifications, the Asset Administration Shell of Industrie 4.0 — are the natural vocabulary for a machine's
   variables once C4 meets a real one; FMI / FMU co-simulation for physics models beyond a toy.
 - **Learned world models.** Ha & Schmidhuber, "World Models" (2018); DreamerV3 (Hafner et al., 2023); LeCun's JEPA
-  proposal (2022); Genie (2024) — the sense Path C does not take (§2).
+  proposal (2022); Genie (2024) — not the core of Path C, and no longer ruled out by compute: a candidate prediction
+  basis wherever an environment yields dense data (§2.1, C4).
 - **Control loops (§3.4).** MAPE-K — monitor, analyze, plan, execute over shared knowledge (Kephart & Chess, "The
   Vision of Autonomic Computing", 2003) — is the closest engineering pattern; OODA (Boyd) and PDCA (Shewhart, Deming)
   are its decision and quality cousins. Forecast verification gives the yardstick: proper scores such as the Brier

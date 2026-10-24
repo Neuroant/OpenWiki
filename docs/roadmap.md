@@ -1298,7 +1298,8 @@ a symbolic state with a forward step and an update — with two boundaries: digi
 stateful interface that can fail) and language toward agents and people; the model predicts and checks, the agent
 acts (`path-c-world-model.md` §2.1). Twins are programs — the executable half of the world model, which runs the
 knowledge model's testable claims as tests —, written by the coding agent through reviewed commits and run without
-any language-model call; the local model builds and maintains the knowledge model (§2.2, ADR-51). **Implementation
+any language-model call; the local model builds and maintains the knowledge model (§2.2, ADR-51). Language models are
+hybrid in Paths B and C — local where possible, cloud where really needed; Path A stays local (ADR-52). **Implementation
 tracking:** [`docs/path-c-roadmap.md`](path-c-roadmap.md) — a measurement harness (M), C0 – C4 and the Ableton
 playground's prerequisites (P) as work packages with gates, releases and status.
 

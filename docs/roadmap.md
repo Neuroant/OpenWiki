@@ -1311,7 +1311,9 @@ client (§2.3, ADR-53). Deployed on the machine of its environments, without a r
 scheduled `owiki world observe` runs the loop, and twins are running services reached by URL on localhost (ADR-54).
 **Implementation
 tracking:** [`docs/path-c-roadmap.md`](path-c-roadmap.md) — a measurement harness (M), C0 – C4 and the Ableton
-playground's prerequisites (P) as work packages with gates, releases and status.
+playground's prerequisites (P) as work packages with gates, releases and status. **Landed so far:** track O —
+operations (v0.121: `owiki schedule`, the run log, rolling backups, `owiki doctor`) — and M.1, prompts replayed at
+their own time (v0.122: `owiki eval --replay`, the live-path measurement of path-b-memory §13.32 / §13.36).
 
 Path B remembers what was *said*; its weak spot is state that changes without anyone saying so (versions, counts,
 running services, plans that got done). Path C lets the world write too: built-in sensors over git, files, code,

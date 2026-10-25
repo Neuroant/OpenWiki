@@ -345,6 +345,29 @@ vs 1 %), and a stricter prompt + a grounding filter cannot catch invented framin
 episodes of the same size +151 / −97, though episodes keep the temporal edge (§13.25). `reuse_base` never copies an
 answer made without a variant's extra context (episodes, excerpts).
 
+**Replay real prompts at their own time (Path C, M.1, v0.122)** — the live-path measurement behind
+`docs/path-b-memory.md` §13.32 / §13.36, now in the repository (`openwiki/replay.py`): each user prompt of a Claude Code
+transcript gets the memory the inject hook would have given it **then** — `context_for` with `as_of` = the prompt's
+time minus a capture lag and `now` = the prompt's time, the project's identity / `context_k` / budget / recall aids —
+on a **snapshot** of the graph (copied while a read-only connection keeps writers out, removed when the replay is
+done), one JSONL record per prompt (the prompt, the injected text, every recalled fact with its rank, score parts and
+whether the text holds it, the themes); chore prompts (`hook_skips`) and task notifications are recorded as skipped.
+`--judge` adds a **blind judge** pass (`replay.JUDGE_SYSTEM`: the shown facts, shuffled by a seed per prompt, no rank
+or provenance — which would help with this request?), its verdicts in `<out>.judge.jsonl`:
+```
+.venv\Scripts\python -m openwiki eval --replay ~/.claude/projects/<repo-slug>/<session>.jsonl --limit 80 --judge
+```
+Options: `--lag HOURS` (default 6), `--since` / `--until DATE`, `--limit N` (N prompts evenly spaced over the range),
+`--view valid|known` (`as_of`, default, or `known_at` — transaction time, only for a memory captured live),
+`--out FILE` (default `<project>/.openwiki/pathc/replay-<time>.jsonl` — real prompts stay out of any repository),
+`--no-snapshot`, `--probes`, `--time-budget S` (both passes resume where they stopped: re-run the same command),
+`--model`, `--host`. It prints a summary — prompts replayed / skipped, facts and characters per prompt, the share of
+injected facts younger than a week, and with `--judge` the helpful rate overall and by rank. Checked on the dev
+memory: 20 prompts spread over 2026-07-31 … 10-18 replayed in under a minute, no shown fact dated after its cut; the
+local judge marked 29.5 % of 176 facts helpful (ranks 1–4: 40.9 %), in line with §13.36. Caveat: facts backfilled
+before v0.85 are dated at their day's midnight, so the first prompts of such a day see that day's facts (`--lag 24`
+avoids it); themes are today's (a derived view without history). Treat the local judge as relative, not absolute.
+
 **Sleep — nightly memory maintenance + forgetting** (Path B++): one schedulable writable pass — fold what
 read-only processes queued (usage + journal) → redact credentials in facts stored before v0.99 → **forget** what the
 memory policy says not to keep → re-consolidate
@@ -1405,6 +1428,11 @@ also carry a `⏱ latency · tokens · tok/s` line
   stale ones removed). Works on `GraphStore.memory_snapshot(with_emb)` (the B0 snapshot shape, every schema generation
   read as B7) and feeds `GraphStore.restore_memory(snapshot, embedder)` (empty tier only; shares
   `builder.restore_memory_snapshot` with the B0 rebuild; restores the theme layer too).
+- **`openwiki/replay.py`** — **replaying prompts at their own time** (Path C, M.1, v0.122): `load_prompts`
+  (a transcript's user turns with their times, via `sessions.load_turns`), `snapshot_graph`, `replay_prompt` /
+  `run_replay` (`context_for(…, as_of | known_at, now=)` — `GraphStore.context_for` passes `now` and `known_at` on to
+  `recall` since v0.122), `judge_order` / `run_judge` (blind, resumable), `summarize`. Behind `owiki eval --replay`;
+  no Kuzu import.
 - **`openwiki/sessions.py`** — **session search** (v0.108, ADR-44): pure apart from reading files, no Kuzu. `Turn`
   (session, n, ts, speaker, text); `turns_from_claude` (via `iter_claude_turns`) / `turns_from_text` (paragraphs) /
   `load_turns`; `SessionIndex` — BM25 over `lexical.terms` of `speaker: text`, `rank(query, since, until)`,

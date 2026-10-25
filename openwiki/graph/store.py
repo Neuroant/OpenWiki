@@ -2051,7 +2051,8 @@ class GraphStore:
     def context_for(self, query: str, embedder, identity: str = "",
                     k: int = 16, max_themes: int = 4, max_chars=None,
                     as_of: Optional[int] = None, probes=None, lexical: float = 0.0,
-                    temporal: float = 0.0, exclude: Optional[dict] = None, report: Optional[dict] = None) -> str:
+                    temporal: float = 0.0, exclude: Optional[dict] = None, report: Optional[dict] = None,
+                    now: Optional[int] = None, known_at: Optional[int] = None) -> str:
         """B6: assemble a session's context for ``query`` from the three memory tiers —
         identity + decay-weighted ``recall`` (activation) + the relevant consolidated themes
         (attractors), optionally fit within a ``max_chars`` budget. Facts carry their validity
@@ -2062,17 +2063,19 @@ class GraphStore:
         injects each fact once per stretch (v0.107); ``report`` (a dict) receives what was assembled
         (``facts``, ``themes``, ``identity``) and how: ``recalled`` (every recalled fact, its score
         explained — before ``exclude`` and the budget), ``recall`` (the recall's report) and
-        ``theme_labels``. Read-only + **fail-soft** (missing embedder / empty memory → identity only,
+        ``theme_labels``. ``now`` and ``known_at`` go to ``recall`` — the replay harness (M.1) assembles a prompt's
+        context at its own time. Read-only + **fail-soft** (missing embedder / empty memory → identity only,
         or ``""``)."""
         from .memory import assemble_context
         facts = []
         explained: Optional[dict] = {} if report is not None else None
         if embedder is not None:
             try:
-                facts = (self.recall_probed(query, embedder, probes, k=k, as_of=as_of, lexical=lexical,
-                                            temporal=temporal, report=explained)
-                         if probes else self.recall(query, embedder, k=k, as_of=as_of, lexical=lexical,
-                                                    temporal=temporal, report=explained))
+                when = {"as_of": as_of, "now": now, "known_at": known_at}
+                facts = (self.recall_probed(query, embedder, probes, k=k, lexical=lexical, temporal=temporal,
+                                            report=explained, **when)
+                         if probes else self.recall(query, embedder, k=k, lexical=lexical, temporal=temporal,
+                                                    report=explained, **when))
             except Exception:      # never let a memory read break the caller
                 facts = []
         recalled = list(facts)

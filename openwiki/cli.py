@@ -246,7 +246,8 @@ def _build_argparser() -> argparse.ArgumentParser:
     eval_p.add_argument("--answers", action="store_true",
                         help="Also generate RAG & GraphRAG answers and score citation grounding (slow).")
     eval_p.add_argument("--judge", action="store_true",
-                        help="With --answers/--global, an LLM judge picks the better answer per question (slower).")
+                        help="With --answers/--global, an LLM judge picks the better answer per question (slower); "
+                             "with --replay, a blind judge marks the injected facts that would help each prompt.")
     eval_p.add_argument("--global", dest="global_search", action="store_true",
                         help="Evaluate global search on a thematic set: community grounding "
                              "(+ --judge = Global vs RAG). Needs a graph with communities.")
@@ -295,7 +296,7 @@ def _build_argparser() -> argparse.ArgumentParser:
                              "alone) or add-only (nothing superseded). An ablation; with --locomo use a separate --work "
                              "dir.")
     eval_p.add_argument("--time-budget", type=float, default=None, metavar="SECONDS",
-                        help="--locomo: stop cleanly after this many seconds; re-run to continue.")
+                        help="--locomo / --replay: stop cleanly after this many seconds; re-run to continue.")
     eval_p.add_argument("--cross-session", dest="cross_session", action="store_true",
                         help="Evaluate the Path B memory tier: cross-session task success "
                              "(cold vs raw-log vs assembled; + --judge = assembled vs raw-log). "
@@ -306,7 +307,26 @@ def _build_argparser() -> argparse.ArgumentParser:
     eval_p.add_argument("--probes", action="store_true",
                         help="--cross-session: cue-trigger recall — constraint probes reserve recall "
                              "slots for the user's implicit constraints (P1; +1 chat call/scenario).")
-    eval_p.add_argument("--limit", type=int, default=None, help="Only evaluate the first N questions.")
+    eval_p.add_argument("--limit", type=int, default=None,
+                        help="Only evaluate the first N questions (--replay: N prompts, evenly spaced over the range).")
+    eval_p.add_argument("--replay", nargs="+", type=Path, default=None, metavar="TRANSCRIPT",
+                        help="Replay the user prompts of Claude Code transcripts (JSONL) at their own time: the memory "
+                             "the inject hook would have given each, as it stood then, on a snapshot of the graph "
+                             "(Path C, M.1). Output: JSONL under the project's .openwiki/pathc/ (--out); --judge adds a "
+                             "blind judge pass. Resumable with --time-budget.")
+    eval_p.add_argument("--lag", type=float, default=None, metavar="HOURS",
+                        help="--replay: the capture lag — the memory as it stood this many hours before each prompt "
+                             "(default: 6).")
+    eval_p.add_argument("--since", default=None, metavar="DATE", help="--replay: prompts from this date on.")
+    eval_p.add_argument("--until", default=None, metavar="DATE", help="--replay: prompts up to this date (inclusive).")
+    eval_p.add_argument("--view", choices=["valid", "known"], default="valid",
+                        help="--replay: the memory true at the cut (valid time, as_of — default) or recorded by then "
+                             "(transaction time, known_at — only for a memory captured live, not backfilled).")
+    eval_p.add_argument("--out", type=Path, default=None, metavar="FILE",
+                        help="--replay: the records' JSONL (default: .openwiki/pathc/replay-<time>.jsonl); an existing "
+                             "file is continued; the judge's verdicts go next to it (<name>.judge.jsonl).")
+    eval_p.add_argument("--no-snapshot", action="store_true",
+                        help="--replay: read the live graph instead of a snapshot (a writer may change it meanwhile).")
     eval_p.add_argument("--model", default=None, help="Chat model for --answers (default: project's models.chat).")
     eval_p.add_argument("--host", default=None, help="Ollama host URL.")
 
@@ -1751,6 +1771,11 @@ def _apply_project(args: argparse.Namespace, project: Optional[Project],
 
 
 RUNS_DAYS = 7   # `status`'s window over the run log
+DEFAULT_REPLAY_LAG_H = 6.0     # --replay's capture lag (path-b-memory §13.32, §13.36)
+
+
+def iso_date(t) -> str:
+    return time.strftime("%Y-%m-%d", time.gmtime(t))
 
 
 def _print_runs(project: Project) -> None:
@@ -1918,6 +1943,8 @@ def _cmd_eval(args: argparse.Namespace) -> int:
         return _locomo_eval(args)
     if getattr(args, "cross_session", False):
         return _cross_session_eval(args, project)
+    if getattr(args, "replay", None):
+        return _replay_eval(args, project)
     path = _resolve_eval_set(args.eval_set, project)
     if not path.is_file():
         print(f"error: eval set not found: {path}\n"
@@ -2253,6 +2280,118 @@ def _ask_global(args: argparse.Namespace, graph) -> int:
     for i, c in enumerate(comms, 1):
         mark = "*" if i in cited else " "
         print(f" {mark}[{i}] {c['label']}  ({c['size']} pages)")
+    return 0
+
+
+def _replay_embedder(args: argparse.Namespace):
+    """The index's embedder for ``--replay`` (the prompts are embedded as the hook embeds them)."""
+    index = SemanticIndex.load(args.index)
+    if isinstance(index.embedder, OllamaEmbedder):
+        index.embedder.host = args.host.rstrip("/")
+    return index.embedder
+
+
+def _remove_snapshot(snap: Path) -> None:
+    """Delete a replay's graph snapshot (Kuzu's file and its sidecars, or a directory). Best-effort."""
+    try:
+        if snap.is_dir():
+            shutil.rmtree(snap)
+            return
+        for f in snap.parent.glob(snap.name + "*"):
+            f.unlink()
+    except OSError:
+        pass
+
+
+def _replay_skip(project: Project, prompt) -> Optional[str]:
+    """Would the inject hook have skipped this prompt? (``hook_skips``; a bare acknowledgement opening a session
+    keeps its memory, as ``_skip_memory`` decides.)"""
+    kind = hook_skips(project, prompt.text)
+    if kind is None or (kind == "ack" and prompt.first):
+        return None
+    return f"chore: {kind}"
+
+
+def _replay_eval(args: argparse.Namespace, project: Optional[Project]) -> int:
+    """Path C, M.1: replay the prompts of Claude Code transcripts at their own time (``openwiki/replay.py``) — the
+    memory the inject hook would have given each, as it stood then; optionally a blind judge pass. Resumable."""
+    from . import replay
+    if project is None or not project.memory_enabled:
+        print("error: --replay needs a Second Brain project ([memory] enabled = true).", file=sys.stderr)
+        return 2
+    missing = [str(p) for p in args.replay if not Path(p).is_file()]
+    if missing:
+        print(f"error: no such transcript: {', '.join(missing)}", file=sys.stderr)
+        return 2
+    if not (args.index / "index.json").is_file() or not Path(args.graph).exists():
+        print(f"error: --replay needs the project's index and graph ({args.index}, {args.graph}).", file=sys.stderr)
+        return 2
+    until = parse_date(args.until)
+    if until is not None and args.until and len(str(args.until).strip()) <= 10:
+        until += 86399                                     # a date means the whole day
+    prompts = replay.evenly(replay.load_prompts(args.replay, since=parse_date(args.since), until=until), args.limit)
+    if not prompts:
+        print("error: no user prompts with a timestamp in that range.", file=sys.stderr)
+        return 2
+    out = Path(args.out) if args.out else project.state_dir / "pathc" / f"replay-{time.strftime('%Y%m%d-%H%M%S')}.jsonl"
+    lag_h = DEFAULT_REPLAY_LAG_H if args.lag is None else args.lag
+    have = {f"{r.get('session')}#{r.get('n')}" for r in replay.read_jsonl(out)}
+    todo = [p for p in prompts if p.key not in have]
+    started = time.monotonic()
+    print(f"Replaying {len(prompts)} prompt(s), {iso_date(prompts[0].t)} … {iso_date(prompts[-1].t)}, the memory as it "
+          f"stood {lag_h:g} h before each ({args.view} time) → {out}"
+          + (f" ({len(prompts) - len(todo)} already done)" if len(todo) < len(prompts) else ""), flush=True)
+    res = {"left": 0}
+    if todo:
+        snap = out.with_suffix(".graph")
+        if args.no_snapshot:
+            graph_path = args.graph
+        else:
+            if not snap.exists():
+                replay.snapshot_graph(args.graph, snap, lambda path: _open_reader(path, wait=READ_WAIT))
+            graph_path = snap
+        graph = _open_reader(graph_path, wait=READ_WAIT)
+        if graph is None:
+            print(f"error: can't open {graph_path} for reading.", file=sys.stderr)
+            return 2
+        model = args.model or project.setting("models", "chat", DEFAULT_CHAT)
+        host = (args.host or project.setting("models", "host", DEFAULT_HOST)).rstrip("/")
+        settings = replay.Settings(identity=project.identity, k=project.context_k, budget=project.context_budget,
+                                   lexical=project.lexical_weight, temporal=project.temporal_weight)
+
+        def progress(done, total):
+            if done % 25 == 0 or done == total:
+                print(f"  replayed {done}/{total}", file=sys.stderr)
+        try:
+            res = replay.run_replay(graph, CachingEmbedder(_replay_embedder(args)), todo, settings, out,
+                                    lag_s=lag_h * 3600, view=args.view, skip=lambda p: _replay_skip(project, p),
+                                    probes=(lambda text: _memory_probes(text, model, host)) if args.probes else None,
+                                    time_budget=args.time_budget, progress=progress)
+        finally:
+            graph.close()
+        if res["left"]:
+            print(f"Stopped after the time budget: {res['left']} prompt(s) left — run the same command to continue.")
+        elif not args.no_snapshot:
+            _remove_snapshot(snap)               # the judge pass needs only the records
+    keys = {p.key for p in prompts}
+    records = [r for r in replay.read_jsonl(out) if f"{r.get('session')}#{r.get('n')}" in keys]
+    verdict_path = out.with_name(out.stem + ".judge.jsonl")
+    if args.judge and not res["left"]:
+        left_s = None if args.time_budget is None else max(0.0, args.time_budget - (time.monotonic() - started))
+        model = args.model or project.setting("models", "chat", DEFAULT_CHAT)
+        host = (args.host or project.setting("models", "host", DEFAULT_HOST)).rstrip("/")
+        judge = OllamaChat(model=model, host=host, temperature=0.0, timeout=600.0, options={"num_predict": 256})
+
+        def judged(done, total):
+            if done % 10 == 0 or done == total:
+                print(f"  judged {done}/{total}", file=sys.stderr)
+        jres = replay.run_judge(records, judge, verdict_path, time_budget=left_s, progress=judged)
+        if jres["left"]:
+            print(f"Judge stopped after the time budget: {jres['left']} prompt(s) left — run the same command to "
+                  "continue.")
+    verdicts = [v for v in replay.read_jsonl(verdict_path) if f"{v.get('session')}#{v.get('n')}" in keys]
+    print(replay.format_summary(replay.summarize(records, verdicts)))
+    print(f"Records: {out}" + (f"\nVerdicts: {verdict_path}" if verdicts else ""))
     return 0
 
 

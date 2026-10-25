@@ -48,7 +48,7 @@ to the Ableton twin's review (`docs/Digital_Twin_Review.md` in `G:\Antigravity\a
 
 | Phase | Goal | Gate | Status | Releases (planned) |
 |---|---|---|---|---|
-| **M** — measurement harness | replay real prompts at their own time, in the repository; one guard command | — | ☐ | with C0 (v0.122) |
+| **M** — measurement harness | replay real prompts at their own time, in the repository; one guard command | — | ◐ M.1 ☑ | v0.122.0 (M.1); M.2, M.3 with C0 |
 | **C0** — inventory | is enough of the memory observable to build C1? | M.1 | ☐ | docs only; go / no-go |
 | **C1** — observe, don't remember | observable state right by construction | C0 go; decisions 5, 13 | ☐ | v0.122 – v0.124 |
 | **C2** — laws, drift, world slice | rules and decisions checkable; context built around what a prompt touches | C1 exit; decisions 10, 14, 15 | ☐ | v0.125 – v0.128 |
@@ -58,9 +58,10 @@ to the Ableton twin's review (`docs/Digital_Twin_Review.md` in `G:\Antigravity\a
 | **O** — operations | scheduled tasks, a health check, a saved run log, rolling backups — for Path B now, and the loop's home between sessions (ADR-54) | — (parallel) | ☑ O.1 – O.4 (twin checks with C2) | v0.121.0 |
 | **C4** — physical twins | the twin contract on a working twin, then a machine | C3 exit; P; decisions 2, 3, 12 | ☐ | v0.132 + |
 
-**Next actions:** M.1 (bring the replay harness into the repository) → C0.1 (recover the labeled stale facts) → C0.2
-(the rubric). Track O landed in v0.121.0 (§10b). Release numbers in the phase sections are as planned on 2026-10-24;
-track O took v0.121, so each later release moves up by one.
+**Next actions:** C0.1 (recover the labeled stale facts — in M.3's label format, so M.3 comes with it) → C0.2 (the
+rubric); M.2 (the guard suite) before the first release that changes a default. Track O landed in v0.121.0 (§10b),
+M.1 in v0.122.0 (§5). Release numbers in the phase sections are as planned on 2026-10-24; track O took v0.121, so each
+later release moves up by one.
 
 ## 3. Dependencies
 
@@ -116,10 +117,16 @@ were never stored with it.
 
 | WP | Tasks | Touches | Tests | Effort | Status |
 |---|---|---|---|---|---|
-| **M.1 — the replay harness** | Replay the real prompts of a Claude Code transcript at their own time: for each prompt, the memory as it stood (recall with `as_of` = the prompt's time minus a capture lag, `now` = the prompt's time) on a scratch copy of a graph; write each prompt's injected context, the recalled facts and their parts as JSONL. Options: `--lag`, `--since/--until`, `--limit`, `--out`. Optional blind-judge pass (shuffled facts, the judge's verdicts in a separate file) — the local judge, or a cloud judge once track L is in (L.5). Entry point: `owiki eval --replay TRANSCRIPT`. | `openwiki/replay.py` (new), `cli.py`, `sessions.py` (turns), `GraphStore.context_for(report=)` | fake graph + fake transcript, time handling, lag | M | ☐ |
+| **M.1 — the replay harness** | Replay the real prompts of a Claude Code transcript at their own time: for each prompt, the memory as it stood (recall with `as_of` = the prompt's time minus a capture lag, `now` = the prompt's time) on a scratch copy of a graph; write each prompt's injected context, the recalled facts and their parts as JSONL. Options: `--lag`, `--since/--until`, `--limit`, `--out`. Optional blind-judge pass (shuffled facts, the judge's verdicts in a separate file) — the local judge, or a cloud judge once track L is in (L.5). Entry point: `owiki eval --replay TRANSCRIPT`. | `openwiki/replay.py` (new), `cli.py`, `sessions.py` (turns), `GraphStore.context_for(report=)` | fake graph + fake transcript, time handling, lag | M | ☑ |
 | **M.2 — the guard suite** | One command that runs every guard of §4 and prints a pass / fail table: `owiki eval --guards`. | `eval.py`, `cli.py` | fakes for the runner; the live run is manual | S | ☐ |
 | **M.3 — private label files** | A JSONL format for hand labels (`{"id", "label", "route", "binding", "note"}`) kept in the project, not the repository (`<project>/.openwiki/pathc/`); a loader for the measurement scripts. | `openwiki/replay.py` | format round-trip | S | ☐ |
 
+**Landed:** M.1 in v0.122.0 — `openwiki/replay.py`, `owiki eval --replay` (snapshot, `--lag`, `--since/--until`,
+`--limit` evenly spaced, `--view valid|known`, `--judge` blind and resumable, `--time-budget`; 11 tests). Checked on the
+dev memory: 20 prompts in under a minute, no shown fact dated after its cut; the local judge: 29.5 % of 176 facts
+helpful (ranks 1–4: 40.9 %), in line with PB §13.36. Found while checking: facts backfilled before v0.85 are dated at
+their day's midnight, so the first prompts of such a day see that day's facts — `--lag 24` for those days, or C0.5
+reports it.
 **Exit:** the C0 baseline (C0.5) can be produced by commands in the repository.
 
 ## 6. Phase C0 — Inventory
@@ -339,5 +346,6 @@ The open decisions of WM §15, and the phase that cannot start without them:
 | 2026-10-24 | L | Hybrid language models decided (ADR-52): track L added; decision 6 narrowed to the choice of providers | — |
 | 2026-10-24 | C1, C2, C3 | The project concept checked against Path C (WM §2.3, ADR-53): environments as a third input class; work packages C1.2 and C1.5 widened, C1.12, C1.13 and C3.9 added, C2.1, C2.10 and C3.1 widened | — |
 | 2026-10-24 | — | Deployment reviewed against Path C; two fixes landed at once: the global `owiki` reinstalled as an editable pipx install of the checkout (the old v0.45 one, older than B0, removed), and `docker-compose.yml` publishing on `127.0.0.1` only (`1b12eff`) | — |
+| 2026-10-25 | M | M.1 built (v0.122.0): `owiki eval --replay` — prompts replayed at their own time on a graph snapshot, a blind judge pass; checked on 20 real prompts (no fact after its cut; judge 29.5 % helpful, ranks 1–4 40.9 %) | M.1 ☑ |
 | 2026-10-25 | O | Track O built and released as v0.121.0: `owiki schedule` (Task Scheduler XML / cron, tested end to end against the real scheduler), the saved run log (`.openwiki/runs.jsonl`, `status`, the System tab), rolling backups at `sleep` (restore tested), `owiki doctor`; M and the phases move up one release | O.1 – O.4 ☑ |
 | 2026-10-25 | O, C1, C2, P | Deployment decided (WM §2.3, ADR-54, arc42 §7.5): the loop between sessions as a scheduled `owiki world observe`; twins as running services reached by URL; the world tier native. Track O added (O.1 – O.4), C2.13 added, C1.2, C1.7, C2.10 and P.7 widened | — |

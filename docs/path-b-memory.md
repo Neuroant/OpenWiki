@@ -1401,7 +1401,8 @@ both variants, and a strong BM25 match did not mark the useful ones (the top thi
 often). **Not adopted**; session search stays pulled — `wiki_sessions`, where the agent asks a question with intent (the
 coding-detail questions of §13.25: excerpts 41 / 47). The judge's verdicts were genuinely useful 23 % of the time for
 excerpts and 33–41 % for facts: the local judge rewards text that resembles the request, so its absolute helpful rates
-overstate usefulness; the earlier live-path comparisons set facts against facts and stay relative.
+overstate usefulness; the earlier live-path comparisons set facts against facts and stay relative. (The fact half of
+this replay is `owiki eval --replay … --judge` since v0.122; the excerpt variant stays a script.)
 
 ### 13.35 Importance and reflection — measured, not adopted
 
@@ -1536,6 +1537,10 @@ replacements 9.2 % (7 prompts better, 42 worse). Not adopted.
 Recency on every fact wins only while the last hours' facts are in memory — facts the agent still has in its context,
 and mostly not yet captured (capture runs at compaction and session end). With a realistic lag the two are judged
 alike, and v0.113's other evidence (fewer stale-labeled facts, LoCoMo) stands: kept.
+
+*Reproducible since v0.122:* the replay ran from scratch scripts; `owiki eval --replay TRANSCRIPT [--lag H] [--judge]`
+(`openwiki/replay.py`, Path C's M.1) now does it from the repository — a graph snapshot, `as_of` = prompt − lag,
+`now` = prompt, a blind judge pass.
 
 ### 13.31 Recency only where truth changes with time (v0.113)
 

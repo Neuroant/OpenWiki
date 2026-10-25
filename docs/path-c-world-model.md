@@ -846,8 +846,10 @@ Built-in types only: a manifest configures them but never adds a command.
 
 ### 6.2 Bindings
 
-A binding names a sensor, the fact it produces and the attributes it governs — the paraphrases B9 grouped, which the
-C0 inventory lists:
+A binding names a sensor, the fact it produces and the facts it governs — **by a pattern over their wording**, with
+exclusions, accepted by a person on a dry run before it closes anything. (The first sketch governed attribute groups,
+B9's paraphrase groups; C0.4 measured them: the memory's facts sit in mostly single-member groups, so a list of
+attribute keys reaches almost nothing — §18.1.)
 
 ```toml
 [[world.sensors]]
@@ -857,7 +859,8 @@ type        = "file-pattern"
 path        = "pyproject.toml"
 pattern     = '^version = "(?P<value>[^"]+)"'
 fact        = { subject = "OpenWiki", predicate = "current release is", object = "v{value}" }
-governs     = ["OpenWiki | has version", "project | has version"]   # further attribute groups, as subject | predicate
+governs     = '^(OpenWiki|owiki|project) \| (is versioned|has version|current release is)\b'   # over "s | p | o"
+excludes    = 'contains|was added|introduced'                     # milestones are history, not the current value
 every       = "1m"                                                # at most once a minute; "0" = slow passes only
 ```
 
@@ -1567,3 +1570,50 @@ binding govern more facts than its own wording — and C0.5's baselines.
 
 **Staleness of the 200** (a side result): A labeled 18 *stale*, 27 *unclear*, 39 *past*, 116 *current*; B 20 *stale*.
 About one current fact in ten is stale today — more than PB §13.26's estimate of 4.4 % on 2026-10-05.
+
+#### C0.4 — the binding plan (2026-10-25)
+
+**The bindings.** The labelers' binding strings, mapped by hand to one binding each where they read the same thing (A's
+three schema patterns are one binding — the graph's tables —, its three ADR patterns one — the ADR index):
+
+| Binding | Type : target | The fact it writes | Stale facts — A | — both (strict) | Current facts it would govern today |
+|---|---|---|---|---|---|
+| **T** test count | `pytest-collect` | OpenWiki · test suite collects · N tests | 7 | 7 | 10 — 8 of them stale |
+| **V** release | `file-pattern:pyproject.toml:version` | OpenWiki · current release is · vX | 3 | 3 | 1 — stale (v0.120.0) |
+| **R** runtime-view headings | `file-pattern:docs/arc42/06-runtime-view.md:## 6.N` | arc42 runtime view · §6.N is · title | 2 | 2 | 0 |
+| **G** graph tables | `file-pattern:openwiki/graph/builder.py:CREATE … TABLE` | the graph · has table · Name | 3 | 0 | 0 |
+| **A** ADR index | `file-pattern:docs/arc42/09-architecture-decisions.md:ADR index` | arc42 · has decision · ADR-N title | 3 | 0 | 0 |
+| **P** probes' default | `file-pattern:openwiki/graph/memory.py:constraint_probes n` | constraint probes · at most · N per request | 1 | 1 | 1 |
+| **K** risk and debt rows | `count:docs/arc42/11-risks-and-technical-debt.md` | arc42 · lists · N risks, M debts | 1 | 1 | 0 |
+| **C** context budget default | `file-pattern:openwiki/project.py:context_budget` | context budget · defaults to · N chars | 1 | 1 | 0 |
+| **U** web UI tabs | `count:openwiki/web/static/index.html:class="tab"` | web UI · has · N tabs | 1 | 1 | 2 |
+| **S** build stages | `py-constant:openwiki/pipeline.py:STAGES` | openwiki build · runs stages · … | 1 | 1 | 1 |
+| **W** web UI listening | `process:port:8137` | web UI · is listening on · 8137 | 1 | 1 | 1 |
+
+**Ranked by the stale facts they reach:** on A's labels five bindings — T, G, A, V, R — reach 18 of 54; on the strictest
+reading (the facts both labelers call *sensor*; G and A are the disputed ones) nine do: T, V, R and six that reach one
+each. The threshold of C0.6 — about 15 bindings for 18 — holds either way.
+
+**What B9's attribute groups add: nothing.** The memory's 2,631 facts sit in 1,857 attribute groups, mostly of one;
+the seven stale test-count facts sit in seven ("CI · exercises · 357 tests", "test count · increased to · 284", "Web
+UI · has 396 tests in suite · yes", …). A binding that lists attribute keys would reach the facts it was written from
+and miss every new paraphrase — the reason §6.2 now governs by a pattern.
+
+**Governing by a pattern over the wording** reaches them — T's pattern (a number followed by "tests", "test count",
+"test suite has / passes / collects") finds 6 of its 7 stale facts — and pays off at once: it governs 10 current facts,
+8 of them stale today (623, 699, 713, 714, 756 tests, …). But it over-reaches: of the 10, about 6 claim the suite's
+present count; the others are a measurement ("643 of 645 tests through a shim"), a statement about a document ("arc42
+lists the test count 756" — a *law* case: the document against the suite) and "Path A has 10 new tests". So for C1:
+a binding governs by a pattern with exclusions; on activation it lists, as a dry run, every fact it would govern and
+close, and a person accepts that list; it closes only facts that claim the present value, never history, measurements
+or statements about documents (those are laws, C2).
+
+**The first slice for C1** — what to build first, by stale facts reached and current facts kept right:
+1. **T** the test count (`pytest-collect`, opt-in) — the largest single gain;
+2. **V** the release, with the law *`pyproject.toml`'s version = `openwiki.__version__`*;
+3. the latest tag (`git`), with the law *every released version has a tag* — no stale fact among the 54, but it keeps
+   the release facts the agent records honest;
+4. **U** the tab count, **S** the build stages, **C** and **P** two defaults — one stale fact each, cheap.
+
+These seven reach 14 of the 54 on the strictest reading (26 %); **R**, **K** and **W** complete the 18. G and A wait —
+whether "the project lacks X" is a sensor case is exactly what the labelers disagreed on.

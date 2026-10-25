@@ -5,8 +5,9 @@
 > twin is a program and that language models work at design time while the twin runs as code (ADR-51); ADR-52 makes
 > Paths B and C hybrid — local models where possible, cloud models where really needed; §2.3 places the world model in
 > the project concept (ADR-53) and decides how it is deployed — a scheduled `owiki world observe` between sessions,
-> twins as running services reached by URL (ADR-54). The next step is
-> C0, an inventory that needs no code and decides whether the rest is worth building. **The implementation is tracked**
+> twins as running services reached by URL (ADR-54). **Under way: C0**, an inventory that needs no code and decides
+> whether the rest is worth building — its rubric is §18.1 (2026-10-25); track O and the replay harness (M.1) have
+> landed (v0.121, v0.122). **The implementation is tracked**
 > in [`path-c-roadmap.md`](path-c-roadmap.md) — phases, work packages, gates, status. Path C builds on Path B ([`path-b-memory.md`](path-b-memory.md))
 > and the agent-memory review ([`memory-systems-review.md`](memory-systems-review.md),
 > [`agent-memory-summary.md`](agent-memory-summary.md)); for machines it pairs with the sibling project **Cognitive
@@ -50,6 +51,7 @@ rules that bind it, what surprised us lately, and what was decided about it.
 15. [Decisions](#15-decisions)
 16. [Relationship to the current code](#16-relationship-to-the-current-code)
 17. [Prior art](#17-prior-art)
+18. [Measurements](#18-measurements) — [18.1 C0 — Inventory](#181-c0--inventory) (the rubric)
 
 ## 1. Motivation & main idea
 
@@ -1409,3 +1411,115 @@ kept; the cross-session and cue-trigger sets; LoCoMo overall J — LoCoMo has no
   capability ladder L1 predictor → L2 simulator → L3 evolver → L4 cross-domain inference → L5 test synthesis (its
   `docs/ROADMAP.md`). Path C's repository twin reaches L1–L2 for code — predicting a change's effects, then running it
   in a worktree; C4 is its L4 with OpenWiki's documents and memory attached.
+
+## 18. Measurements
+
+Each stage records its results here — the numbers come from runs logged in [`path-c-roadmap.md`](path-c-roadmap.md)
+(§14 there); the design sections above stay the plan.
+
+### 18.1 C0 — Inventory
+
+> **The rubric, written on 2026-10-25 before any C0 label (C0.2).** The labels (C0.3), the binding plan (C0.4), the
+> baselines (C0.5) and the go / no-go (C0.6) follow below as they are made. The labels themselves stay private —
+> `<project>/.openwiki/pathc/`, in M.3's format.
+
+#### The rubric — how could a fact be checked?
+
+**The question for every fact:** *if it stopped being true tomorrow, what would notice — without anyone saying so?*
+The answer is one **route**, found by the steps below **in this order**; the first that applies wins.
+
+1. **Can it stop being true at all?** A statement about the past — what a release contained, a measurement on a date,
+   a milestone ("0.33.0 contains the Markdown parser", "on 2026-09-26 31 % of the injected facts were junk") —, a
+   definition, or junk (garbled, a tautology, unclear what it claims) → **none**, with the note *past*, *definition*
+   or *junk*. A fact phrased as an event that implies a present state is that state: "test count increased to 284"
+   claims "the test count is 284" and goes on to step 2.
+2. **sensor** — a built-in sensor type of §6.1 reads, from an environment of this project, the value the fact states
+   or the one its truth turns on, and a binding without code maps the reading to the fact. **The test: write the
+   binding** (below) with a target that exists in the repository today — a file, a constant, a key, a pattern — or a
+   local endpoint, port or service; its reading today would confirm or contradict the fact. A route without a
+   nameable target is not *sensor*.
+3. **law** — no single reading decides it, but a rule over readings does: the fact asserts a relation between
+   observable things (§7.2's kinds — equality, comparison, implication, convention, co-change). Write the rule.
+   "documentation is consistent with code v0.90" → *the version the docs name equals the release in
+   `pyproject.toml`*.
+4. **deadline** — a state expected to end, with nothing observable marking the end: a plan, a next step, a
+   "remaining" item, something in progress, a temporary limit. It can be checked only by asking again after a while;
+   note the horizon when the fact gives one.
+5. **person** — only someone who knows can confirm it: decisions and their reasons, preferences, intentions,
+   assessments ("works well"), facts about the world outside this project's environments, and descriptions of how the
+   code behaves that no constant or pattern states ("the coexistence check decides rivalry by itself" — a reviewed test
+   could check it, which is C2's twin code, not a built-in sensor: note *test*).
+
+**What counts as observable — the strict reading:**
+- **Built-in types only**, as in §6.1: `git`, `file-pattern`, `py-constant`, `toml-key`, `count`, `ollama`,
+  `http-json` (localhost), `process`, `gpu`, `pytest-collect`; `opcua` and `twin` have no environment in openwiki-dev.
+  No shell, no new code, no query into a database file.
+- **This project's environments:** for openwiki-dev, the OpenWiki repository (its files, its git) and this machine's
+  local services (Ollama, the GPU, processes, ports), plus the project's own folder (its manifest). Another project's
+  files (informatik-wiki's graph), the internet (PyPI, GitHub), the user's accounts and calendars: not observable —
+  *person*.
+- **The reading must decide the fact, not hint at it.** "The web UI has ten tabs" — a `count` of the tab buttons in
+  `index.html` decides it; "the web UI is easy to use" — nothing does.
+- **A defined approximation is allowed** when the quantity read is the one stated up to its definition: "697 passing
+  tests" ← `pytest-collect` counts collected tests — *sensor*, note *collected, not passed*. A proxy is not: "the hook
+  is fast" is not decided by a latency the hook doesn't log.
+- **A default in code is a sensor when a pattern states it:** `RECENCY_FLOOR = 0.9` (`py-constant`);
+  `self.setting("memory", "context_k", 16)` is not a module-level constant, but `file-pattern` reads it.
+- **Documents are sources:** "arc42 contains ADR-28", "CLAUDE.md documents `--hybrid`" → *sensor* (`file-pattern` or
+  `count` on the document); the repository's docs are part of its source.
+- **Running things:** a port, a live lock file, a loaded model → *sensor* (`process`, `ollama`); "the backfill is
+  running" with no port or lock to read → *deadline*.
+- **A decision with a precondition** is labeled by what it states — *person* —, and its precondition goes into the
+  note when a sensor could read it ("embed in one phase first because the 30B and bge-m3 evict each other" → *person*,
+  note *precondition: gpu memory, ollama loaded models*).
+
+**Writing the binding** (the `binding` field) — `type:target[:selector]`, the **same string for every fact the same
+binding would govern**, so C0.4 can group them:
+
+| Binding | Reads | A fact it would decide |
+|---|---|---|
+| `file-pattern:pyproject.toml:version` | the release in the package metadata | "OpenWiki's current release is v0.120.0" |
+| `py-constant:openwiki/graph/store.py:RECENCY_FLOOR` | a module-level constant | "recall's recency floor is 0.9" |
+| `file-pattern:openwiki/project.py:context_k default` | a default inside a method | "context_k defaults to 16" |
+| `toml-key:openwiki.toml:memory.context_budget` | the project's own manifest | "openwiki-dev's context budget is 3000" |
+| `count:openwiki/web/static/index.html:class="tab"` | the tab buttons | "the web UI has ten tabs" |
+| `pytest-collect` | the collected tests | "the suite has 821 tests" |
+| `git:latest-tag` / `git:head` / `git:upstream` / `git:dirty` | the repository's state | "v0.122.0 is the latest tag"; "main is pushed" |
+| `ollama:models` / `ollama:loaded` | pulled / loaded models | "bge-m3 is pulled" |
+| `gpu:memory` | GPU memory | "the GPU has 12 GB" |
+| `process:port:8137` / `process:lock:<name>` | a listening port, a live lock file | "the web UI runs on 8137" |
+| `http-json:127.0.0.1:8137/api/health:<field>` | one value from a local endpoint | a served project's health value |
+
+The target must exist at the repository's HEAD on the labeling day (checked by the labeler — its existence, not its
+value), or the fact must be about something the repository had then and removed since (note *removed*). For *law*,
+`binding` holds the rule in words: "pyproject version == latest tag", "CLAUDE.md test count == pytest-collect".
+
+**The label record** (M.3): `route` (sensor / law / deadline / person / none), `binding` (as above, or the rule),
+`note` (*past* / *definition* / *junk* / *test* / *collected, not passed* / *removed* / a precondition / a horizon).
+The staleness label stays separate: *stale* for the 54 recovered facts; for the 200 random facts *current*, *past*,
+*stale* or *unclear* against the repository at HEAD on the labeling day.
+
+**Protocol (C0.3):**
+- **One sheet**: the 54 stale facts and 200 random current facts of openwiki-dev, shuffled with a recorded seed, each
+  with its wording, its date and its session — no ids, no staleness, no kind, no group.
+- **Blindness:** whoever labeled or recovered the 54 has seen them (C0.1's labeler has). The routes of the 54 decide
+  the go / no-go, so a labeler who hasn't seen them — a fresh session given only this rubric and the sheet, or a
+  person — labels the sheet; C0.1's labeler labels it too, and both are reported.
+- **A second pass** on 30 facts, blind to the first, by the same labeler: route agreement and Cohen's κ.
+- **Report per group** (the 54, the 200) and per route, so a rubric that bends toward the known stale facts shows.
+
+**What C0 computes from the labels:**
+- **Testable share** — *sensor* + *law* among the 200 random facts, with a 95 % interval: the knowledge model's test
+  coverage today (§2.2, §13).
+- **Coverage of the stale facts** — the 54 by route; the *sensor* ones grouped by binding, the bindings ranked by how
+  many stale facts they govern (directly, or through B9's attribute groups, C0.4); how many bindings it takes to reach
+  a third.
+- **Go / no-go (C0.6):** go if about 15 bindings would have caught at least a third of the labeled stale facts (§12) —
+  18 of 54. Otherwise stop and record the negative result.
+
+**Expectation, written before labeling.** PB §13.26 found the stale facts concentrated in counts (6 of 10 flagged
+counts stale), plans (4 of 5) and versions (11 of 64, most version facts being milestones), and half of them design
+changes no phrasing reveals. Counts and versions are what the sensors read; plans are *deadline*; design changes are
+*person*. So the threshold should be met narrowly, carried by a few bindings — the release, the test count, the tab
+count, a handful of defaults — and most stale design descriptions should land in *person*. A miss of the threshold is
+a real outcome, not a reason to widen the rubric after the fact.

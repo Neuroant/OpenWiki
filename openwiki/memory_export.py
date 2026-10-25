@@ -444,3 +444,73 @@ def write_markdown(files: dict, out) -> tuple:
             stale.unlink()
             removed += 1
     return written, removed
+
+
+# -- rolling backups (track O, O.4) ----------------------------------------------------------------------------
+# `sleep` writes a full export (`--full`: embeddings, retracted and forgotten facts, pending themes) before it changes
+# anything, and keeps the newest N. The graph is the memory's only copy and Kuzu is archived upstream (R10).
+
+BACKUP_PREFIX = "memory-"
+_BACKUP_NAME = re.compile(r"memory-\d{8}-\d{6}Z" + re.escape(TAR_SUFFIX))
+
+
+def backup_name(t: float) -> str:
+    """A backup's file name for epoch time ``t`` — UTC, so names sort in time order across clock changes."""
+    return BACKUP_PREFIX + datetime.fromtimestamp(t, timezone.utc).strftime("%Y%m%d-%H%M%SZ") + TAR_SUFFIX
+
+
+def backup_time(path) -> Optional[float]:
+    """The epoch time a backup's name records, or ``None`` for a name that isn't one."""
+    name = Path(path).name
+    if not _BACKUP_NAME.fullmatch(name):
+        return None
+    stamp = name[len(BACKUP_PREFIX):len(BACKUP_PREFIX) + 16]
+    return datetime.strptime(stamp, "%Y%m%d-%H%M%SZ").replace(tzinfo=timezone.utc).timestamp()
+
+
+def list_backups(folder) -> list:
+    """The backups in ``folder``, oldest first (files named by :func:`backup_name` only)."""
+    try:
+        files = [p for p in Path(folder).iterdir() if p.is_file() and backup_time(p) is not None]
+    except OSError:
+        return []
+    return sorted(files, key=lambda p: p.name)
+
+
+def newest_backup(folder) -> Optional[Path]:
+    """The most recent backup in ``folder``, or ``None``."""
+    files = list_backups(folder)
+    return files[-1] if files else None
+
+
+def prune_backups(folder, keep: int) -> int:
+    """Delete all but the newest ``keep`` backups (and partial ones a failed run left); return how many went."""
+    removed = 0
+    files = list_backups(folder)
+    for old in files[:max(0, len(files) - max(1, keep))]:
+        try:
+            old.unlink()
+            removed += 1
+        except OSError:
+            pass
+    for partial in Path(folder).glob("partial-*" + TAR_SUFFIX):
+        try:
+            partial.unlink()
+        except OSError:
+            pass
+    return removed
+
+
+def write_backup(records: list, folder, t: float, embedding_model: Optional[str] = None) -> Path:
+    """Write a full backup into ``folder`` under :func:`backup_name` — packed to a ``partial-`` name first and
+    renamed at the end, so an interrupted run never leaves a truncated file among the backups."""
+    folder = Path(folder)
+    final = folder / backup_name(t)
+    partial = folder / ("partial-" + final.name)
+    try:
+        write_cogx(records, partial, embedding_model=embedding_model,
+                   notes=["OpenWiki memory backup (written by sleep; a full export)"])
+        partial.replace(final)
+    finally:
+        partial.unlink(missing_ok=True)
+    return final

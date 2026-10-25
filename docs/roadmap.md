@@ -367,6 +367,12 @@ point it jumps to P0.</sub>
   tab's build table (Dauer / LLM columns). Immediately shows where a build's time + tokens go —
   e.g. entity extraction (one chat call/page) and memory capture dominate, while ingest/wiki are
   instant. *(Still open: request logging to disk.)*
+- ✅ **Operations landed (v0.121, track O).** `owiki schedule install / remove / status` (the Task Scheduler from an
+  XML definition — a missed run catches up, battery power doesn't block it — or cron; the nightly `sleep`, later Path
+  C's `world observe`), a saved **run log** (`.openwiki/runs.jsonl` — every hook, worker, scheduled run and write pass
+  with its duration, outcome and model spend; `status`, the System tab), **rolling backups** at `sleep` (a full export
+  before anything changes, the newest 7 kept) and **`owiki doctor`** (one health check, exit 1 on a failure). It
+  closes the request-logging gap above for the runs that leave no window open. `path-c-roadmap.md` §10b, arc42 ADR-55.
 
 ### G — Ingestion fidelity & new modalities (P2)
 - Adopt **`pymupdf_layout`** for higher-fidelity PDF structure (already flagged in

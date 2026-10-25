@@ -149,7 +149,8 @@ can use.
 **Automatically, every day:** the hooks capture sessions and inject memory, the agent records new states with
 `wiki_remember`, background workers write them into the graph.
 
-**Nightly:** `owiki sleep` — schedule it with the Task Scheduler (§6.7). It forgets one-off events, regroups the
+**Nightly:** `owiki sleep` — `owiki schedule install` registers it (§6.7). It backs up the memory first, forgets
+one-off events, regroups the
 themes, decays the usage edges and rewrites the readable view.
 
 **When the sources change:** `owiki build` — incremental (only changed stages rerun), and it keeps the memory.
@@ -158,9 +159,9 @@ themes, decays the usage edges and rewrites the readable view.
 
 | Task | How |
 |---|---|
-| health check | `owiki status` — the build stages, the last handoff, queued writes (§6.1); the web UI's System tab |
+| health check | `owiki doctor` — one check of everything, exit 1 on a failure; `owiki status` — the build stages, the last handoff, queued writes, recent runs (§6.1); the web UI's System tab |
 | review | the Pflege panel — facts that may be stale (about one in four really is), forgetting candidates, approvals (§7.7) |
-| backup | `owiki memory export --full` — the graph is the memory's only copy (§6.9) |
+| backup | automatic: `sleep` keeps the newest 7 full backups in `.openwiki/backups/`; by hand `owiki memory export --full` (§6.9) |
 | switching and registering | `owiki project list / use / add / remove`, or the switcher in the web UI (§7.1) |
 | handoff | `/session-restart prepare` at a session's end, `resume` at its start (§6.8) |
 
@@ -243,7 +244,8 @@ project folder, like SQLite.
 - **You can look at everything:** `owiki serve` opens a web UI on `127.0.0.1:8137` — the wiki, search, the graph and
   the memory tab (§7); the CLI does the same from the terminal (§6).
 - **Housekeeping:** `owiki build` when the documents change (it keeps the memory), `owiki sleep` every night as a
-  scheduled task, and now and then a look at the review panel and a backup — `owiki memory export --full` (§6.7, §6.9).
+  scheduled task (`owiki schedule install`), which also keeps a week of backups, and now and then `owiki doctor` and a
+  look at the review panel (§6.7, §6.9).
 
 ### 3.6 Many repositories, many projects
 
@@ -738,10 +740,13 @@ $ owiki sleep                          # fold · redact · forget · consolidate
 $ owiki consolidate --budget 20        # themes only, at most 20 new summaries this run
 ```
 
-Schedule `sleep` nightly with the Windows Task Scheduler:
+Schedule `sleep` nightly (v0.121) — the Task Scheduler on Windows, cron elsewhere; a missed run catches up when the
+machine is back, and each run's output goes to `.openwiki/schedule.log`:
 
-```bat
-schtasks /Create /SC DAILY /ST 03:00 /TN "OpenWiki sleep" /TR "G:\Claude\OpenWiki\.venv\Scripts\python.exe -m openwiki sleep --project G:\OpenWiki\Projects\openwiki-dev"
+```text
+$ owiki schedule install                # daily at 03:30; --at HH:MM for another time
+$ owiki schedule status                 # installed? the next and last run, and how it went
+$ owiki doctor                          # the whole setup in one check
 ```
 
 ### 6.8 Hand over between sessions
@@ -763,7 +768,9 @@ Full handoff: G:\OpenWiki\Projects\openwiki-dev\handoff\HANDOFF.md
 
 ### 6.9 Export and back up
 
-The graph is the only copy of the memory, and Kuzu is archived upstream. Keep exports:
+The graph is the only copy of the memory, and Kuzu is archived upstream. Since v0.121 `sleep` writes a full backup to
+`.openwiki/backups/` before it changes anything and keeps the newest 7; to roll back, move the graph aside, rebuild it
+(`owiki build --only graph --force`) and `owiki memory import` a backup. Exports by hand:
 
 ```text
 $ owiki memory export --out memory.cogx.tar.gz
@@ -941,8 +948,9 @@ the [arc42 ADRs](arc42/09-architecture-decisions.md). Accuracies from the local 
   values in **Pflege** or with `wiki_remember`.
 - **The review list is a candidate list.** About one in four candidates is really stale; the kind rules misfire on
   words like "next".
-- **Back up.** Kuzu is archived upstream and the graph is the memory's only copy. Run `owiki memory export --full` now
-  and then; the move to LadybugDB is scoped in [ladybugdb-move.md](ladybugdb-move.md).
+- **Back up.** Kuzu is archived upstream and the graph is the memory's only copy. A scheduled `sleep` keeps a week of
+  full backups; `owiki doctor` warns when the newest is older than two days. The move to LadybugDB is scoped in
+  [ladybugdb-move.md](ladybugdb-move.md).
 - **Check the `owiki` on PATH** before using it for `build` (see [6](#6-cli-tutorial)).
 
 ## 10. Cheat sheet
@@ -959,11 +967,12 @@ the [arc42 ADRs](arc42/09-architecture-decisions.md). Accuracies from the local 
 | Confirm, close, forget a fact | `wiki_remember`, `sleep` | **Pflege** | `wiki_remember` |
 | Review stale candidates | `analyze memory --review` | **Pflege → Zu prüfen** | – |
 | Approve agent writes | `memory pending / approve / reject` | **Pflege → Zur Freigabe** | – |
-| Nightly maintenance | `owiki sleep` | – | – |
+| Nightly maintenance | `owiki schedule install` (runs `owiki sleep`) | – | – |
+| Is everything healthy? | `owiki doctor`, `owiki status` | **System** (runs) | – |
 | Hand over to the next session | `handoff prepare / resume` | – | `wiki_handoff`, `/session-restart` |
 | Overview and trends | `owiki analyze memory` | **Analyse → Dynamik** | – |
 | Where facts sit | – | **Fakten → Karte** | – |
-| Back up | `memory export --full` | – | – |
+| Back up | automatic at `sleep` (newest 7); `memory export --full` | – | – |
 | Switch project | `--project DIR`, `project use NAME` | project badge ▾ | – |
 | Create a project | `owiki init DIR --source FILE` (`--repo`, `--session`) | – | – |
 | Rebuild after the sources changed | `owiki build` (keeps the memory) | – | – |

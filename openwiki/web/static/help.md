@@ -405,6 +405,13 @@ Gesamtzeit, Tokens) und eine Liste der letzten Ereignisse, die sich alle 2 s
 aktualisiert. Dieselben Zahlen erscheinen auch im CLI (`⏱`-Fußzeile bei `ask`) und je
 Build-Stufe im Reiter **Projekt**.
 
+Darunter stehen die **gespeicherten Läufe** des Projekts (`.openwiki/runs.jsonl`): jeder Hook, jeder
+Hintergrund-Worker, jeder geplante und jeder schreibende Lauf (`sleep`, `build`, `remember` …) mit Dauer,
+Ergebnis und Modellaufrufen — je Lauf-Art Anzahl, p50/p95, Fehler und der letzte Lauf, aufgeklappt die letzten
+Läufe mit ihren Notizen (etwa wie viele Zeichen der Hook eingefügt hat). Diese Zahlen überdauern den Prozess,
+anders als die Live-Telemetrie oben. Im Terminal: `openwiki status`; den nächtlichen `sleep` plant
+`openwiki schedule install` ein, und `openwiki doctor` prüft das ganze Setup auf einmal.
+
 ## Ein neues Wiki anlegen
 
 **Als Projekt (empfohlen).** Ein *Projekt* bündelt ein Wiki in einem Ordner mit der

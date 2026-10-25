@@ -51,6 +51,7 @@ class WikiWebApp:
         self.project = project  # optional Project (serves its build status in the UI)
         self._lock = threading.Lock()
         self._ans_lock = threading.Lock()          # guards the answer-eval job state
+        self._runs_cache: tuple = ((), {})         # (the run-log files' signature, the last answer)
         self._ans_job = {"status": "idle"}
 
     _MAIN_BOOK = "(Hauptverzeichnis)"
@@ -508,6 +509,30 @@ class WikiWebApp:
         for the System tab / ``/api/metrics``."""
         from .. import metrics as m
         return m.COLLECTOR.snapshot(limit=limit)
+
+    def runs(self, days: int = 7, limit: int = 40) -> dict:
+        """The saved run log (track O, O.3) for the System tab / ``/api/runs``: per run name over the last ``days``
+        days (count, median / p95 duration, failures, model spend, the last run) and the newest ``limit`` runs.
+        Re-read only when a log file changed — the tab polls every 2 s."""
+        if self.project is None:
+            return {"available": False, "reason": "no_project"}
+        from .. import runlog
+        state_dir = self.project.state_dir
+        sig = []
+        for name in (runlog.ROTATED_FILE, runlog.RUNS_FILE):
+            try:
+                st = (state_dir / name).stat()
+                sig.append((name, st.st_mtime_ns, st.st_size))
+            except OSError:
+                sig.append((name, 0, 0))
+        key = (tuple(sig), days, limit, int(time.time() // 60))   # the minute keeps "since" current
+        if self._runs_cache[0] == key:
+            return self._runs_cache[1]
+        runs = runlog.read_runs(state_dir, since=time.time() - days * 86400)
+        out = {"available": True, "days": days, "path": str(runlog.runs_path(state_dir)),
+               "summary": runlog.summarize(runs), "recent": runs[-limit:][::-1], "total": len(runs)}
+        self._runs_cache = (key, out)
+        return out
 
     # -- world-model analysis (Analyse tab) ----------------------------------
 
@@ -1244,6 +1269,10 @@ def make_handler(app):
                     query = parse_qs(urlparse(self.path).query)
                     limit = int(query.get("limit", ["50"])[0])
                     return self._json(app.metrics(limit))
+                if path == "/api/runs":
+                    query = parse_qs(urlparse(self.path).query)
+                    days = max(1, min(90, int(query.get("days", ["7"])[0])))
+                    return self._json(app.runs(days))
                 if path == "/api/memory":
                     return self._json(app.memory_info())
                 if path == "/api/memory/facts":
@@ -1500,7 +1529,7 @@ def make_handler(app):
 def _observe_request(method: str, path: str, status: int, ms: float) -> None:
     """Record an API request as an ``http`` metrics event. Skips static assets and the
     metrics-poll itself so the System tab doesn't drown in its own traffic. Best-effort."""
-    if not path.startswith("/api/") or path == "/api/metrics":
+    if not path.startswith("/api/") or path in ("/api/metrics", "/api/runs"):
         return
     try:
         from .. import metrics as m

@@ -48,18 +48,19 @@ to the Ableton twin's review (`docs/Digital_Twin_Review.md` in `G:\Antigravity\a
 
 | Phase | Goal | Gate | Status | Releases (planned) |
 |---|---|---|---|---|
-| **M** — measurement harness | replay real prompts at their own time, in the repository; one guard command | — | ☐ | with C0 (v0.121) |
+| **M** — measurement harness | replay real prompts at their own time, in the repository; one guard command | — | ☐ | with C0 (v0.122) |
 | **C0** — inventory | is enough of the memory observable to build C1? | M.1 | ☐ | docs only; go / no-go |
 | **C1** — observe, don't remember | observable state right by construction | C0 go; decisions 5, 13 | ☐ | v0.122 – v0.124 |
 | **C2** — laws, drift, world slice | rules and decisions checkable; context built around what a prompt touches | C1 exit; decisions 10, 14, 15 | ☐ | v0.125 – v0.128 |
 | **C3** — predict and verify | the full loop on the repository | C2 exit; decisions 4, 8, 9 | ☐ | v0.129 – v0.131 |
 | **P** — playground prerequisites | the Ableton twin safe and trustworthy enough to play with | — (parallel; Ableton repository) | ☐ | Ableton releases |
 | **L** — language-model routing | the hybrid approach: a cloud model per task where really needed | decision 6 (parallel; before the first cloud use) | ☐ | with its first use |
-| **O** — operations | scheduled tasks, a health check, a saved run log, rolling backups — for Path B now, and the loop's home between sessions (ADR-54) | — (parallel; can start now) | ☐ | from v0.121 |
+| **O** — operations | scheduled tasks, a health check, a saved run log, rolling backups — for Path B now, and the loop's home between sessions (ADR-54) | — (parallel) | ☑ O.1 – O.4 (twin checks with C2) | v0.121.0 |
 | **C4** — physical twins | the twin contract on a working twin, then a machine | C3 exit; P; decisions 2, 3, 12 | ☐ | v0.132 + |
 
 **Next actions:** M.1 (bring the replay harness into the repository) → C0.1 (recover the labeled stale facts) → C0.2
-(the rubric). Track O can start any time; C1 needs O.1 and O.3 (§10b).
+(the rubric). Track O landed in v0.121.0 (§10b). Release numbers in the phase sections are as planned on 2026-10-24;
+track O took v0.121, so each later release moves up by one.
 
 ## 3. Dependencies
 
@@ -257,13 +258,15 @@ couldn't wait (the stale v0.45 `owiki` on the PATH, the compose file publishing 
 
 | WP | Tasks | Touches | Tests | Effort | Status |
 |---|---|---|---|---|---|
-| **O.1 — `owiki schedule`** | `owiki schedule install / remove / status` for a project's scheduled tasks: `sleep` (nightly, a quiet hour) and — from C1 — `world observe` (every few minutes). Task Scheduler on Windows (`schtasks` with fixed arguments, a task name per project), cron elsewhere; pinned to the interpreter the hooks use, as `claude-code --hooks --into` pins them; `status` shows each task's next and last run and its result (O.3). | `openwiki/schedule.py` (new), `cli.py` | the rendered `schtasks` / crontab lines for both platforms; no real scheduler in tests | S | ☐ |
-| **O.2 — `owiki doctor`** | One health check, pass / warn / fail per line, a non-zero exit on a failure, `--json`: the hook interpreter and its version against the `owiki` on the PATH (and a different program shadowing `openwiki`), Ollama reachable and the project's models pulled, the graph readable, queued journal writes and their age, staged approvals, the scheduled tasks present and their last result, hook-log problems, the age of the newest backup (O.4) and, from C2, each twin reachable with its token set. Reuses the handoff's probes. | `openwiki/doctor.py` (new), `handoff.py`, `cli.py` | each check against fakes | S | ☐ |
-| **O.3 — the saved run log** | `<project>/.openwiki/runs.jsonl`: one line per hook, worker, scheduled run and CLI write pass — command, start, duration, outcome, model calls and tokens (the `metrics.COLLECTOR` delta, as build stages record theirs) and, with track L, the cost; rotated by size. `status`, `doctor` and the System tab read it. | `metrics.py`, `cli.py`, `web/server.py` | append, rotation, the delta | S | ☐ |
-| **O.4 — rolling backups at `sleep`** | Before `sleep` writes, `memory export --full` into `<project>/.openwiki/backups/`, keeping the newest N (`[memory] backups`, default 7 — about 100 MB for the dev memory's 14.3 MB export); `doctor` warns when the newest is older than two days; the restore path documented (`memory import` into an empty memory). | `cli.py` (`_cmd_sleep`), `memory_export.py` | rotation; a restore round-trip on a fake graph | S | ☐ |
+| **O.1 — `owiki schedule`** | `owiki schedule install / remove / status` for a project's scheduled tasks: `sleep` (nightly, a quiet hour) and — from C1 — `world observe` (every few minutes). Task Scheduler on Windows (`schtasks` with fixed arguments, a task name per project), cron elsewhere; pinned to the interpreter the hooks use, as `claude-code --hooks --into` pins them; `status` shows each task's next and last run and its result (O.3). | `openwiki/schedule.py` (new), `cli.py` | the rendered `schtasks` / crontab lines for both platforms; no real scheduler in tests | S | ☑ |
+| **O.2 — `owiki doctor`** | One health check, pass / warn / fail per line, a non-zero exit on a failure, `--json`: the hook interpreter and its version against the `owiki` on the PATH (and a different program shadowing `openwiki`), Ollama reachable and the project's models pulled, the graph readable, queued journal writes and their age, staged approvals, the scheduled tasks present and their last result, hook-log problems, the age of the newest backup (O.4) and, from C2, each twin reachable with its token set. Reuses the handoff's probes. | `openwiki/doctor.py` (new), `handoff.py`, `cli.py` | each check against fakes | S | ☑ |
+| **O.3 — the saved run log** | `<project>/.openwiki/runs.jsonl`: one line per hook, worker, scheduled run and CLI write pass — command, start, duration, outcome, model calls and tokens (the `metrics.COLLECTOR` delta, as build stages record theirs) and, with track L, the cost; rotated by size. `status`, `doctor` and the System tab read it. | `metrics.py`, `cli.py`, `web/server.py` | append, rotation, the delta | S | ☑ |
+| **O.4 — rolling backups at `sleep`** | Before `sleep` writes, `memory export --full` into `<project>/.openwiki/backups/`, keeping the newest N (`[memory] backups`, default 7 — 25 MB each for the dev memory); `doctor` warns when the newest is older than two days; the restore path documented (`memory import` into an empty memory). | `cli.py` (`_cmd_sleep`), `memory_export.py` | rotation; a restore round-trip on a fake graph | S | ☑ |
 
-**Releases (planned):** from v0.121, each as it is ready; O.1 and O.3 before C1's v0.123 (the scheduled observe, the
-latency measurement).
+**Released:** v0.121.0 — O.1 – O.4 together (`openwiki/schedule.py`, `runlog.py`, `doctor.py`; the backup step in
+`sleep`; 40 new tests; the scheduler tested end to end on Windows; the restore drilled on a copy of openwiki-dev: `sleep`
+wrote a 25 MB backup and forgot 15 facts (11 s); a fresh graph took 46 s, the import 54 s — all 2,609 facts back with
+their ids, values and intervals, the 15 unforgotten, the 172 themes). `doctor`'s twin checks come with C2.13.
 **Exit:** `owiki doctor` passes on openwiki-dev with `sleep` scheduled by O.1 and a backup younger than a day.
 
 ## 11. Phase C4 — Physical twins
@@ -336,4 +339,5 @@ The open decisions of WM §15, and the phase that cannot start without them:
 | 2026-10-24 | L | Hybrid language models decided (ADR-52): track L added; decision 6 narrowed to the choice of providers | — |
 | 2026-10-24 | C1, C2, C3 | The project concept checked against Path C (WM §2.3, ADR-53): environments as a third input class; work packages C1.2 and C1.5 widened, C1.12, C1.13 and C3.9 added, C2.1, C2.10 and C3.1 widened | — |
 | 2026-10-24 | — | Deployment reviewed against Path C; two fixes landed at once: the global `owiki` reinstalled as an editable pipx install of the checkout (the old v0.45 one, older than B0, removed), and `docker-compose.yml` publishing on `127.0.0.1` only (`1b12eff`) | — |
+| 2026-10-25 | O | Track O built and released as v0.121.0: `owiki schedule` (Task Scheduler XML / cron, tested end to end against the real scheduler), the saved run log (`.openwiki/runs.jsonl`, `status`, the System tab), rolling backups at `sleep` (restore tested), `owiki doctor`; M and the phases move up one release | O.1 – O.4 ☑ |
 | 2026-10-25 | O, C1, C2, P | Deployment decided (WM §2.3, ADR-54, arc42 §7.5): the loop between sessions as a scheduled `owiki world observe`; twins as running services reached by URL; the world tier native. Track O added (O.1 – O.4), C2.13 added, C1.2, C1.7, C2.10 and P.7 widened | — |

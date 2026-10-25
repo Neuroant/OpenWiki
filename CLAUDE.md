@@ -348,21 +348,62 @@ answer made without a variant's extra context (episodes, excerpts).
 **Sleep — nightly memory maintenance + forgetting** (Path B++): one schedulable writable pass — fold what
 read-only processes queued (usage + journal) → redact credentials in facts stored before v0.99 → **forget** what the
 memory policy says not to keep → re-consolidate
-the themes over what's left → decay the usage edges → rewrite the readable Markdown view (v0.102, below). Forgetting
+the themes over what's left → decay the usage edges → rewrite the readable Markdown view (v0.102, below); since v0.121
+it first writes a rolling full backup (*Operations*, below). Forgetting
 is **policy-based archiving**, not decay: one-off
 session events ("vX | was pushed and tagged | yes", commit hashes, "server | is serving | v0.78.0", tautologies —
 `memory.is_ephemeral`, pure rules) plus the P0 policy re-applied to facts captured before it. A forgotten fact
 leaves recall, context, consolidation and counts but stays in the graph (`forgotten_at` + reason):
 ```
 .venv\Scripts\python -m openwiki sleep --dry-run        # list what would be forgotten
-.venv\Scripts\python -m openwiki sleep                  # schedule it nightly (Task Scheduler / cron)
+.venv\Scripts\python -m openwiki sleep                  # schedule it nightly: `openwiki schedule install`
 ```
-Options: `--dry-run`, `--no-consolidate` (skip the only step that calls the chat model), `--min-size` / `--max-facts` /
-`--similar-k` / `--resummarize` / `--budget N` (as `consolidate`), `--half-life` / `--floor` (as `decay`), `-i/--index` (embedder for
-queued ops), `--graph`, `--model`, `--host`. Gated by `[memory] enabled`. **Measured** on the dogfooding memory: 31 %
+Options: `--dry-run`, `--no-consolidate` (skip the only step that calls the chat model), `--no-backup`, `--min-size` /
+`--max-facts` / `--similar-k` / `--resummarize` / `--budget N` (as `consolidate`), `--half-life` / `--floor` (as `decay`),
+`-i/--index` (embedder for queued ops), `--graph`, `--model`, `--host`. Gated by `[memory] enabled`. **Measured** on the dogfooding memory: 31 %
 of the facts injected for 40 real prompts were such junk (vs ~3 % of all facts — it clusters on frequent actions) →
 **5 %** after forgetting 27 facts, 0 of 232 hand-labeled keep-facts dropped; an LLM review dropped 11–81 keep-facts
 depending on batch order (`docs/path-b-memory.md` §13.3, arc42 ADR-32).
+
+**Operations — scheduled tasks, a run log, backups, a health check (track O, v0.121)** — what keeps a Second Brain
+running unattended (`docs/path-c-roadmap.md` §10b, arc42 ADR-55):
+```
+.venv\Scripts\python -m openwiki schedule install      # sleep nightly at 03:30 (Task Scheduler / cron)
+.venv\Scripts\python -m openwiki schedule status       # installed? the next and last run, the run log's word
+.venv\Scripts\python -m openwiki doctor                # one health check: ok / info / warn / fail per line
+```
+**`schedule`** (`openwiki/schedule.py`, O.1): `install` / `remove` / `status`, `--task sleep` (Path C's C1 adds `world
+observe`, ADR-54), `--at HH:MM`, `--dry-run` (prints the definition). Windows: an XML task definition (`schtasks /Create
+/XML`) under `\OpenWiki\<project>-<hash>\` — a missed run starts as soon as the machine can (`StartWhenAvailable`),
+battery power doesn't block it, one instance at a time, a 2 h limit, the logged-on user with least privilege; `status`
+reads the definition back (`/XML`) and the last / next run from `Get-ScheduledTaskInfo` (locale-independent); `remove`
+drops the empty scheduler folders. Elsewhere: a crontab line with a marker comment. A task runs the installing
+interpreter — windowless `pythonw.exe` on Windows — with `--trigger schedule` (a hidden flag on every project command):
+the run log marks the run and its output goes to `.openwiki/schedule.log`. Tested end to end against the real Task
+Scheduler (install → a run started by the scheduler → `schedule.log` + the run log → status → remove). **Run log**
+(`openwiki/runlog.py`, O.3): `.openwiki/runs.jsonl`, one JSON line per hook (`hook inject`, `hook capture` / `hook
+capture worker`, `hook fold worker`, `hook resume`), scheduled run and CLI write pass (`build`, `sleep`, `consolidate`,
+`decay`, `communities`, `remember`, `backfill`, `cochange`, `references`, `graph-build`, `index`, `memory export /
+import / approve / reject`, `handoff prepare` — `cli._run_name`) — start, duration, outcome (`ok`, `exit N`, `error:
+…`, `interrupted`), trigger, model calls + tokens (the `metrics.COLLECTOR` delta, `runlog.llm_spend`) and notes
+(`runlog.note`: the inject hook's characters / facts / skip reason, a capture's windows / facts / failures, a fold's
+records + lock time, `sleep`'s forgotten / themes / backup); one `write` per line, rotated at 2 MB (`runs.1.jsonl`), a
+log that can't be written never breaks the run. Read by `status` (a *runs* section over 7 days: count, p50 / p95,
+failures, model spend, last run), `doctor`, `schedule status` and the System tab (`/api/runs`). **Backups** (O.4):
+`sleep` first writes a full export (`memory export --full`'s content) to
+`.openwiki/backups/memory-YYYYMMDD-HHMMSSZ.cogx.tar.gz` (packed under a `partial-` name, then renamed) and keeps the
+newest `[memory] backups` (`Project.memory_backups`, default 7; `0` = off; `sleep --no-backup` skips one); a failed
+backup is reported and the pass goes on (`memory_export.write_backup` / `list_backups` / `prune_backups` /
+`newest_backup`). Restore: move the graph aside, rebuild it (`owiki build --only graph --force`), `owiki memory import
+<backup>` — a lossless restore into the empty memory (drilled on a copy of openwiki-dev: `sleep` wrote a 25 MB backup
+and forgot 15 facts (11 s); a fresh graph took 46 s, the import 54 s — all 2,609 facts back with their ids, values and
+intervals, the 15 unforgotten, the 172 themes). **Doctor** (`openwiki/doctor.py`, O.2): which OpenWiki
+runs and the `owiki` on the PATH (fail if older than v0.48 — its `build` erases the memory; warn if it differs, or if
+another program answers to `openwiki`), the hooks bound to the project in its code sources and the CWD (their
+interpreter exists, its version), Ollama + the project's models, the graph (readable, counts), queued journal writes
+(warn after a day) + staged approvals, the scheduled tasks (installed, interpreter alive, the last scheduled run ok and
+recent), the newest backup (warn after 2 days), failed runs in 24 h, hook-log problems, the index's commits behind its
+repository; `--json`; exit 1 on a failure. Every probe that leaves the process is injected (`doctor.Probes`).
 
 **Portable memory — export / import (v0.102, R10)** — since B0 the graph is the only store of remembered content and
 Kuzu is archived upstream, so the memory can leave the engine in two forms. A **COGX** archive (Cognee's exchange
@@ -718,6 +759,16 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   System tab, per-turn `chat()` stats, and **per-build-stage token spend** (`_cmd_build`
   diffs the collector per stage — build observability). Always-on but bounded (`maxlen`
   1024, spanning a full build's per-stage LLM events) — no config, no cost.
+- **`openwiki/runlog.py`** — the **saved run log** (track O, O.3, ADR-55): `run(name, state_dir, trigger)` (a context
+  manager that records duration, outcome, the collector's model-call delta and `note(**kv)`s into
+  `<project>/.openwiki/runs.jsonl`), `read_runs` / `summarize` / `last_run`, `llm_spend` (shared with the build
+  stages' `_sum_llm`). Pure stdlib; `main()` wraps the logged commands, `_run_hook` the hooks.
+- **`openwiki/schedule.py`** — **`owiki schedule`** (O.1): `Scheduler(name, root, runner, platform, python)` —
+  `definition` / `install` / `remove` / `status` against the Task Scheduler (`render_task_xml`, `parse_task_xml`,
+  `Get-ScheduledTaskInfo`) or cron (`cron_line`, a marker comment); `TASKS` (today `sleep`). The runner is injected,
+  so tests never touch the real scheduler.
+- **`openwiki/doctor.py`** — **`owiki doctor`** (O.2): `run_checks(project, Probes, repos)` → `Check(area, level,
+  message, hint)`s; `bound_hooks` (a repository's hooks bound to the project), `program_version`, `render` / `to_json`.
 - **`openwiki/agent.py`** — `RAGAgent`: retrieve top chunks → number them as
   excerpts → a grounded system prompt → `ChatModel` → `RAGAnswer` (answer +
   `Source`s). `<think>…</think>` is stripped; `cited_markers()` reports which
@@ -1070,8 +1121,9 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   async answer-quality job, `/api/health` = KB quality metrics, `/api/communities` =
   the graph's topical communities, `/api/global` (POST) = a thematic answer from the
   community summaries, `/api/metrics?limit=` = the runtime observability snapshot
-  (`WikiWebApp.metrics()` → `metrics.COLLECTOR.snapshot()`), `/api/memory` = the Path B
-  memory-tier overview (`memory_info()`: identity + counts + themes + browsable assertions),
+  (`WikiWebApp.metrics()` → `metrics.COLLECTOR.snapshot()`), `/api/runs?days=` = the saved run log (O.3:
+  `WikiWebApp.runs()` — per run name + the newest runs; re-read only when a log file changed), `/api/memory` = the
+  Path B memory-tier overview (`memory_info()`: identity + counts + themes + browsable assertions),
   `/api/memory/facts?q=&status=&source=&session=&kind=&theme=&sort=&offset=&limit=` = the **facts browser**
   (`memory_facts` → `memory_browse.filter_facts` over every fact; `status=` empty = all states; `ids=1` adds every
   match's id — the map), `/api/memory/map?method=auto|tsne|pca` = the **memory map** (M6, v0.118: every fact with an
@@ -1171,7 +1223,9 @@ empty states (no graph / Wiki mode / no sessions / no index). Backed by `GraphSt
 `recall`/`context_for`/`memory_concepts`. The **System tab** (`renderSystem`
 → `/api/metrics`) is the **observability** surface: per-kind summary cards (chat / embed /
 http — count, p50/p95, total time, token in/out) + a live recent-events table, polled every
-2 s while active; agent chat replies also carry a `⏱ latency · tokens · tok/s` line
+2 s while active, and below it **Gespeicherte Läufe** (`renderRuns` → `/api/runs`: the project's run log — per run
+name count / p50 / p95 / failures / model spend / last run, and the newest runs with their notes); agent chat replies
+also carry a `⏱ latency · tokens · tok/s` line
 (`renderChatStats` from `chat()`'s `stats`). The **Evaluation tab** (`renderEval`,
   backed by `/api/eval` → `WikiWebApp.run_eval()`, reusing `eval.make_retrievers`)
   runs the project's `eval.jsonl` benchmark live with `top_k`/`expand_k` sliders,
@@ -1443,7 +1497,8 @@ http — count, p50/p95, total time, token in/out) + a live recent-events table,
   (`list`/`use`/`add`/`remove`/`add-source`), `opencode`, `claude-code`, `ontology`, `ingest`,
   `build-wiki`, `index`, `search`, `eval`, `ask` (`--global` = global search),
   `chat`, `graph-build`, `references`, `communities`, `decay`, `remember`, `backfill`, `recall`,
-  `consolidate`, `sleep` (nightly maintenance + forgetting), `memory` (`export` / `import` — portable
+  `consolidate`, `sleep` (nightly maintenance + forgetting), `schedule` (`install` / `remove` / `status` — the
+  project's scheduled tasks), `doctor` (one health check), `memory` (`export` / `import` — portable
   memory; `pending` / `approve` / `reject` — the approval step), `sessions` (`search` / `list` — session
   search), `context`,
   `analyze` (world-model analysis — `coupling` | `gaps` | `memory`, offline), `hook` (host-lifecycle

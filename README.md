@@ -350,7 +350,9 @@ the default), then:
 openwiki remember session.md --session 2026-09-08   # capture subject–predicate–object facts
 openwiki recall "which chat model did we standardize on?"   # decay-weighted, current facts
 openwiki consolidate                                 # "sleep": cluster facts into LLM-summarized themes
-openwiki sleep                                       # nightly: forget one-off events, re-consolidate, decay
+openwiki sleep                                       # nightly: back up, forget one-off events, re-consolidate, decay
+openwiki schedule install                            # …run it every night (Task Scheduler / cron)
+openwiki doctor                                      # one health check of the setup
 openwiki context "which models do we use?"           # assemble the 3-tier session context
 openwiki memory export --full                        # portable: a COGX archive (Cognee's exchange format)
 openwiki memory import memory.cogx.tar.gz            # restore it — or remember another system's facts

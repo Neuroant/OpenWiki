@@ -284,6 +284,13 @@ the web **System** tab (`/api/metrics` — per-kind p50/p95 + token totals + a l
 The point is honest visibility (it revealed that one agent "turn" is several model calls, and a slow
 first answer is mostly cold-model *load* time), not a monitoring stack.
 
+**Beyond the process (v0.121, ADR-55).** The collector lives per process, so a hook, a detached capture worker or a
+scheduled `sleep` lost its numbers when it exited. The **run log** (`runlog.py`) keeps one line per such run in
+`.openwiki/runs.jsonl` — duration, outcome, trigger, the collector's delta of model calls and tokens, and notes (the
+inject hook's characters and facts, a capture's windows and failures). It is a file, not graph tables: hooks are graph
+readers (ADR-38), and the log must work when the graph doesn't. `status`, the System tab (`/api/runs`) and `owiki
+doctor` read it; Path C measures the inject hook's latency from it (C1.10).
+
 ## 8.17 Retrieval strategy — layered, and *measured* (ADR-9/21)
 
 Retrieval is a stack of **opt-in** layers over one baseline, each earning its place through `owiki eval`

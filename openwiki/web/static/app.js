@@ -335,20 +335,66 @@ function renderMetrics(data) {
     <tbody>${rows || `<tr><td colspan="6" class="muted">—</td></tr>`}</tbody></table>`;
 }
 
+// The saved run log (track O, O.3): hooks, workers, scheduled and write runs of this project, kept beyond their
+// processes — the live telemetry above only covers the server's own process.
+const RUN_NOTES = { chars: "Zeichen", facts: "Fakten", skipped: "übersprungen", windows: "Fenster", failed: "fehlgeschlagen",
+  folded: "eingearbeitet", forgotten: "vergessen", themes: "Themen", spawned: "Worker gestartet", lock_s: "Sperre (s)" };
+
+function fmtSec(s) { return s == null ? "" : fmtMs(s * 1000); }
+
+function renderRuns(r) {
+  if (!r || !r.available) {
+    return `<h3 class="m-h3">Gespeicherte Läufe</h3><p class="muted">Kein Projekt — der Lauf-Log
+      (<code>.openwiki/runs.jsonl</code>) gehört zu einem Projekt.</p>`;
+  }
+  const sum = (r.summary || []).map((s) => {
+    const last = s.last || {};
+    const ok = last.outcome === "ok";
+    return `<tr><td class="m-name">${escapeHtml(s.name)}</td><td class="num">${s.count}</td>
+      <td class="num">${fmtSec(s.p50_s)}</td><td class="num">${fmtSec(s.p95_s)}</td>
+      <td class="num">${s.failures || ""}</td>
+      <td class="num">${s.calls ? `${s.calls} · ${(s.eval_tokens || 0).toLocaleString()} tok` : ""}</td>
+      <td class="num">${new Date(last.t * 1000).toLocaleString()}</td>
+      <td class="${ok ? "" : "m-bad"}">${escapeHtml(last.outcome || "")}</td></tr>`;
+  }).join("");
+  const recent = (r.recent || []).map((x) => {
+    const notes = Object.entries(x.notes || {}).map(([k, v]) => `${RUN_NOTES[k] || k}: ${v === true ? "ja" : v}`).join(" · ");
+    const llm = x.llm ? `${x.llm.calls} Aufruf(e), ${x.llm.eval_tokens} tok` : "";
+    const ok = (x.outcome || "ok") === "ok";
+    return `<tr><td class="num">${new Date(x.t * 1000).toLocaleString()}</td><td class="m-name">${escapeHtml(x.name)}${x.trigger ? ` <span class="muted">(${escapeHtml(x.trigger)})</span>` : ""}</td>
+      <td class="num">${fmtSec(x.duration_s)}</td><td class="${ok ? "" : "m-bad"}">${escapeHtml(x.outcome || "ok")}</td>
+      <td class="num">${llm}</td><td class="muted">${escapeHtml(notes)}</td></tr>`;
+  }).join("");
+  return `<h3 class="m-h3">Gespeicherte Läufe <span class="muted">· letzte ${r.days} Tage · ${r.total} Läufe ·
+      <code title="${escapeHtml(r.path)}">.openwiki/runs.jsonl</code></span></h3>
+    <div class="m-scroll"><table class="m-table"><thead><tr><th>Lauf</th><th>Anzahl</th><th>p50</th><th>p95</th>
+      <th>Fehler</th><th>Modell</th><th>Zuletzt</th><th>Ergebnis</th></tr></thead>
+    <tbody>${sum || `<tr><td colspan="8" class="muted">Noch keine Läufe aufgezeichnet — Hooks, Worker, <code>sleep</code>
+      und Schreibläufe tragen sich hier ein.</td></tr>`}</tbody></table></div>
+    ${recent ? `<details class="m-details"><summary>Letzte Läufe</summary>
+    <div class="m-scroll"><table class="m-table"><thead><tr><th>Zeit</th><th>Lauf</th><th>Dauer</th><th>Ergebnis</th>
+      <th>Modell</th><th>Notizen</th></tr></thead>
+    <tbody>${recent}</tbody></table></div></details>` : ""}`;
+}
+
 async function renderSystem() {
   const content = $("#content");
   content.innerHTML = `<div id="sys"><p class="muted">Wird geladen…</p></div>`;
   const draw = async () => {
-    let data;
+    let data, runs = null;
     try {
-      data = await getJSON("/api/metrics?limit=60");
+      [data, runs] = await Promise.all([getJSON("/api/metrics?limit=60"),
+                                        getJSON("/api/runs?days=7").catch(() => null)]);
     } catch (e) {
       const sys = $("#sys");
       if (sys) sys.innerHTML = `<p class="muted">Fehler: ${escapeHtml(e.message)}</p>`;
       return;
     }
     const sys = $("#sys");
-    if (sys) sys.innerHTML = renderMetrics(data);   // null if the tab was switched away mid-fetch
+    if (!sys) return;                              // the tab was switched away mid-fetch
+    const open = !!sys.querySelector("details.m-details[open]");
+    sys.innerHTML = renderMetrics(data) + renderRuns(runs);
+    if (open) sys.querySelector("details.m-details")?.setAttribute("open", "");   // keep it open across polls
   };
   await draw();
   startMetricsPoll(draw);

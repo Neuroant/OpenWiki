@@ -109,6 +109,9 @@ files, network/Ollama, or Kuzu).
 | `lexical.py` | pure (+NumPy) | `tokenize`; `BM25` (inverted index) over chunk texts; `reciprocal_rank_fusion(rankings)`. The lexical half of hybrid retrieval (ADR-21) — no `rank-bm25` dependency. For memory recall (ADR-40): `terms` (stopwords, a light `stem`), `fact_scores(query, texts, max_df)` (normalized BM25, frequent query terms ignored), `RECALL_WEIGHT`. |
 | `rerank.py` | pure (injected chat) | `rerank_order(query, texts, chat) -> permutation` (one chat call; `parse_order` robust) — the LLM re-rank pass (ADR-21). |
 | `metrics.py` | pure (stdlib) | `MetricsCollector` + module `COLLECTOR` (bounded ring buffer) + `parse_ollama_stats`. Observability (ADR-20): LLM/embed/http events with latency + tokens. |
+| `runlog.py` | pure (stdlib) | The saved run log (track O, ADR-55): `run(name, state_dir, trigger)` records a hook's, worker's, scheduled or write run — duration, outcome, the collector's model-call delta, notes — in `.openwiki/runs.jsonl`; `read_runs`, `summarize`. |
+| `schedule.py` | stdlib (subprocess) | `owiki schedule` (ADR-55): `Scheduler` — Task Scheduler from an XML definition, or cron — behind an injectable runner; `render_task_xml` / `parse_task_xml` / `cron_line`. |
+| `doctor.py` | stdlib | `owiki doctor` (ADR-55): `run_checks` over injected `Probes` (install, hooks, Ollama, graph, journal, schedule, backups, runs, hook log, wiki freshness). |
 
 **Agents**
 

@@ -21,6 +21,7 @@ import logging
 import os
 import re
 import shutil
+import subprocess
 import sys
 import threading
 import time
@@ -53,10 +54,12 @@ from .handoff import CAPTURE_STATE_FILE, capture_watermark
 from .llm import OllamaChat
 from .mcp_server import build_server
 from .memory_export import (
-    TAR_SUFFIX, believed_only, current_facts, foreign_facts, from_cogx, read_cogx, render_markdown, to_cogx,
-    write_cogx, write_markdown,
+    TAR_SUFFIX, believed_only, current_facts, foreign_facts, from_cogx, prune_backups, read_cogx, render_markdown,
+    to_cogx, write_backup, write_cogx, write_markdown,
 )
 from .merge import combine_documents
+from . import runlog
+from .schedule import TASKS as SCHEDULE_TASKS, Scheduler
 from .models import ParsedDocument
 from .ontology import format_entity_types, propose_ontology, sample_corpus
 from .outline import synthesize_outline
@@ -88,6 +91,7 @@ def _build_argparser() -> argparse.ArgumentParser:
         help="Project directory (with openwiki.toml). Default: discover from CWD "
              "(or $OPENWIKI_PROJECT).",
     )
+    common.add_argument("--trigger", default=None, help=argparse.SUPPRESS)   # "schedule" from `owiki schedule`'s tasks
 
     init_p = sub.add_parser("init", help="Scaffold a new OpenWiki project (openwiki.toml + sources/).")
     init_p.add_argument("dir", nargs="?", type=Path, default=Path("."),
@@ -484,6 +488,8 @@ def _build_argparser() -> argparse.ArgumentParser:
                          help="List what would be forgotten; write nothing.")
     sleep_p.add_argument("--no-consolidate", action="store_true",
                          help="Skip the theme re-consolidation (the only step that calls the chat model).")
+    sleep_p.add_argument("--no-backup", action="store_true",
+                         help="Skip the full memory backup sleep writes first (default: keep [memory] backups, 7).")
     sleep_p.add_argument("--graph", type=Path, default=None,
                          help="Graph database dir (default: project's graph, else ./output/graph).")
     sleep_p.add_argument("-i", "--index", type=Path, default=None,
@@ -732,6 +738,25 @@ def _build_argparser() -> argparse.ArgumentParser:
     ho_p.add_argument("--max-chars", type=int, default=None, metavar="N",
                       help="resume: fit the brief within about N characters.")
     bf_redo_help = "Re-capture days whose session is already in memory (default: skip them — resume)."
+
+    doc_p = sub.add_parser("doctor", parents=[common],
+                           help="One health check of the project and this machine: which OpenWiki runs, the hooks' "
+                                "interpreter, Ollama and the models, the graph, queued writes, the scheduled tasks, "
+                                "the newest backup, failed runs, the hook log. Exit 1 if something is broken.")
+    doc_p.add_argument("--json", action="store_true", help="Print the checks as JSON.")
+
+    sch_p = sub.add_parser("schedule", parents=[common],
+                           help="Install, remove or check the project's scheduled tasks — the nightly `sleep` "
+                                "(Task Scheduler on Windows, cron elsewhere), run by this interpreter.")
+    sch_p.add_argument("action", choices=["install", "remove", "status"],
+                       help="install = register (or replace) the task; remove = unregister it; status = installed? "
+                            "what it runs, when it last ran and how.")
+    sch_p.add_argument("--task", choices=sorted(SCHEDULE_TASKS), default=None,
+                       help="The task (default: sleep for install; every task for remove and status).")
+    sch_p.add_argument("--at", default=None, metavar="HH:MM",
+                       help="Daily start time for install (default: 03:30 — a quiet hour: sleep holds the write lock).")
+    sch_p.add_argument("--dry-run", action="store_true",
+                       help="Show what install would register; change nothing.")
 
     bf_p = sub.add_parser("backfill", parents=[common],
                           help="Backfill the memory tier from Claude Code transcripts (JSONL): one "
@@ -1266,13 +1291,8 @@ def _sum_llm(events) -> dict:
     """Sum the chat+embed calls + token counts over a metrics-event slice — a build
     stage's LLM spend (from the observability collector). ``{}`` when the stage made
     no model calls (ingest/wiki)."""
-    calls = prompt = evalt = 0
-    for e in events:
-        if e.kind in ("chat", "embed"):
-            calls += 1
-            prompt += e.prompt_tokens or 0
-            evalt += e.eval_tokens or 0
-    return {"calls": calls, "prompt_tokens": prompt, "eval_tokens": evalt} if calls else {}
+    spend = runlog.llm_spend(events)
+    return {k: spend[k] for k in ("calls", "prompt_tokens", "eval_tokens")} if spend else {}
 
 
 def _stage_start():
@@ -1588,6 +1608,7 @@ def _cmd_status(args: argparse.Namespace) -> int:
             meta.append(f"{llm['calls']} call(s), {llm.get('eval_tokens', 0)} tok")
         metastr = ("  [" + " · ".join(meta) + "]") if meta else ""
         print(f"    {stage:<7} {label:<11}{metastr}{extra}")
+    _print_runs(project)
     from .handoff import HANDOFF_DIR, HANDOFF_MD, load_handoff, next_query
     handoff = load_handoff(project.root / HANDOFF_DIR)
     if handoff:
@@ -1727,6 +1748,30 @@ def _apply_project(args: argparse.Namespace, project: Optional[Project],
         path("index", p.index_dir if p else None, Path("output") / "index")
         val("model", "models", "chat", DEFAULT_CHAT)
         val("host", "models", "host", DEFAULT_HOST)
+
+
+RUNS_DAYS = 7   # `status`'s window over the run log
+
+
+def _print_runs(project: Project) -> None:
+    """``status``'s runs section: per run name over the last ``RUNS_DAYS`` days — how often, the median and p95
+    duration, failures, model spend, and the last run (track O, O.3)."""
+    now = time.time()
+    summary = runlog.summarize(runlog.read_runs(project.state_dir, since=now - RUNS_DAYS * 86400))
+    if not summary:
+        return
+    print(f"  runs   : last {RUNS_DAYS} days ({runlog.runs_path(project.state_dir)})")
+    width = max(len(s["name"]) for s in summary)
+    for s in summary:
+        last = s["last"]
+        parts = [f"{s['count']:>4}×", f"p50 {runlog.format_duration(s['p50_s'])}",
+                 f"p95 {runlog.format_duration(s['p95_s'])}"]
+        if s["failures"]:
+            parts.append(f"{s['failures']} failed")
+        if s["calls"]:
+            parts.append(f"{s['calls']} model call(s), {s['eval_tokens']:,} tok out")
+        parts.append(f"last {runlog.format_age(now - last['t'])} ago: {last['outcome']}")
+        print(f"    {s['name']:<{width}}  " + " · ".join(parts))
 
 
 def _cmd_ingest(args: argparse.Namespace) -> int:
@@ -2799,6 +2844,7 @@ def _cmd_sleep(args: argparse.Namespace) -> int:
         if not graph.has_memory():
             print("(no remembered facts yet — capture sessions with `openwiki remember` first)")
             return 0
+        backup = "" if args.no_backup or project is None else _backup_memory(graph, project, args.index)
         folded = graph.fold_usage()
         embedder = _decay_embedder(args)
         if embedder is not None and graph.pending_ops():
@@ -2818,7 +2864,11 @@ def _cmd_sleep(args: argparse.Namespace) -> int:
         view = _write_memory_view(graph, project)
     finally:
         graph.close()
+    runlog.note(folded=folded["records"] + ops.get("records", 0), forgotten=sum(forgotten.values()),
+                themes=consolidated[0]["concepts"] if consolidated is not None else None)
     print(f"Slept → {args.graph}")
+    if backup:
+        print(f"  {backup}")
     if folded["records"] or ops.get("records"):
         print(f"  folded {folded['records']} usage record(s), {ops.get('records', 0)} queued op(s)")
     if secrets:
@@ -2836,6 +2886,27 @@ def _cmd_sleep(args: argparse.Namespace) -> int:
     if view:
         print(f"  {view}")
     return 0
+
+
+def _backup_memory(graph, project: Project, index_dir) -> str:
+    """``sleep``'s first step (track O, O.4): a full memory export — embeddings, retracted and forgotten facts,
+    pending themes, as ``memory export --full`` writes it — into ``.openwiki/backups/``, before anything is changed,
+    keeping the newest ``[memory] backups``. Fail-soft: a failed backup is reported, and the pass goes on."""
+    keep = project.memory_backups
+    if keep <= 0:
+        return ""
+    folder = project.backups_dir
+    try:
+        records = to_cogx(graph.memory_snapshot(with_emb=True), graph.memory_concepts(include_pending=True),
+                          graph.concept_members(), project.identity, with_embeddings=True)
+        path = write_backup(records, folder, time.time(), embedding_model=_index_model(index_dir))
+        removed = prune_backups(folder, keep)
+    except Exception as exc:
+        runlog.note(backup=f"failed: {exc}")
+        return f"backup FAILED ({exc}) — the pass goes on; `openwiki memory export --full` writes one by hand"
+    runlog.note(backup=path.name)
+    return (f"backup → {path} ({path.stat().st_size / 1e6:.1f} MB; keeping the newest {keep}"
+            f"{f', {removed} older removed' if removed else ''})")
 
 
 def _write_memory_view(graph, project: Optional[Project]) -> str:
@@ -3878,10 +3949,17 @@ def _run_hook(event: str, payload: dict, project_dir=None) -> None:
     project = Project.load(project_dir) if project_dir else Project.find(payload.get("cwd") or None)
     if project is None:
         return
+    name = f"hook {event}" + (" worker" if payload.get("_worker") else "")
+    with runlog.run(name, project.state_dir):
+        _run_project_hook(event, payload, project)
+
+
+def _run_project_hook(event: str, payload: dict, project: Project) -> None:
     if event == "resume":            # a handoff needs no memory tier — Wiki-mode projects have them too
         _hook_resume(project, payload)
         return
     if not project.memory_enabled:
+        runlog.note(skipped="wiki mode")
         return   # Wiki mode → nothing to inject or capture
     if event == "inject":
         _hook_inject(project, payload)
@@ -4029,13 +4107,16 @@ def _hook_inject(project: Project, payload: dict) -> None:
     (``_skip_memory``)."""
     prompt = str(payload.get("prompt") or "").strip()
     if _skip_memory(project, payload):
+        runlog.note(skipped="chore")
         return
     embedder = _hook_embedder(project) if prompt else None
     if not embedder or not project.graph_path.exists():
+        runlog.note(skipped="no prompt" if not prompt else "no index or graph")
         return
     probes = hook_probes(project, prompt)
     graph = _open_reader(project.graph_path, wait=5.0)   # a writer applies in seconds
     if graph is None:
+        runlog.note(skipped="graph busy")
         return
     # each fact, theme and the identity once per stretch — the earlier injection is still in the agent's
     # context until a compaction or /clear (55 % of injected facts were repeats, v0.107)
@@ -4054,6 +4135,7 @@ def _hook_inject(project: Project, payload: dict) -> None:
                       "identity": bool(given.get("identity") or used.get("identity")),
                       "updated": int(time.time())}
         _save_inject_state(project, state)
+    runlog.note(chars=len(context.strip()), facts=len(used.get("facts") or ()))
     if context.strip():
         sys.stdout.write(INJECT_HEADER + context + "\n")
 
@@ -4237,6 +4319,7 @@ def _hook_capture(project: Project, payload: dict) -> None:
     if not payload.get("_worker") and str(payload.get("hook_event_name") or "") == "PreCompact":
         _reset_injected(project, payload.get("session_id"))   # the compaction drops earlier injections
     if not payload.get("_worker") and _spawn_capture(project, payload):
+        runlog.note(spawned=True)
         return
     tpath = payload.get("transcript_path")
     embedder = _hook_embedder(project)
@@ -4251,6 +4334,7 @@ def _hook_capture(project: Project, payload: dict) -> None:
     model = project.setting("models", "chat", DEFAULT_CHAT)
     host = project.setting("models", "host", DEFAULT_HOST)
     wrote = False
+    counts = {"windows": 0, "failed": 0, "facts": 0}
     try:
         chat = _capture_chat(model, host)
         for _ in range(4):                       # a few rounds: turns may arrive while capturing
@@ -4273,6 +4357,9 @@ def _hook_capture(project: Project, payload: dict) -> None:
                     print(f"openwiki hook: capture of session {sid} window from {first} failed "
                           f"({exc}); skipped", file=sys.stderr)
                     facts, dropped = [], []
+                    counts["failed"] += 1
+                counts["windows"] += 1
+                counts["facts"] += len(facts)
                 for f in dropped:                  # logged to .openwiki/hook.log by the worker
                     print(f"openwiki hook: scrubbed instruction-like fact: {f.subject} | "
                           f"{f.predicate} | {f.object}", file=sys.stderr)
@@ -4286,6 +4373,7 @@ def _hook_capture(project: Project, payload: dict) -> None:
         if not wrote and pending_journal(journal_path(project.graph_path)):
             _write_captured(project, sid, [], embedder, int(time.time()), model, host)  # fold queued ops
     finally:
+        runlog.note(**counts)
         try:
             lock.unlink()
         except OSError:
@@ -4488,6 +4576,7 @@ def _hook_fold(project: Project, payload: dict) -> None:
                       file=sys.stderr)
                 break
             folded = res.get("folded") or {}
+            runlog.note(folded=folded.get("records", 0), lock_s=res.get("lock_s"))
             reviewed = "".join(f", {folded[k]} {label}" for k, label in (("confirmed", "confirmed"),
                                                                         ("forgotten", "forgotten"))
                                if folded.get(k))
@@ -4653,6 +4742,129 @@ def _cmd_mcp(args: argparse.Namespace) -> int:
     return 0
 
 
+SCHEDULE_LOG = "schedule.log"
+SCHEDULE_LOG_BYTES = 1_000_000        # past this, the log starts over (the previous one kept as schedule.1.log)
+
+
+def _schedule_log(project: Project, argv: Sequence[str] = ()) -> None:
+    """A scheduled run (``--trigger schedule``) writes its output to ``.openwiki/schedule.log`` — it runs windowless
+    (``pythonw``, no console) or from cron, where stdout goes nowhere. Best-effort."""
+    path = project.state_dir / SCHEDULE_LOG
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.exists() and path.stat().st_size > SCHEDULE_LOG_BYTES:
+            path.replace(path.with_name("schedule.1.log"))
+        log = path.open("a", encoding="utf-8", buffering=1)
+    except OSError:
+        return
+    log.write(f"\n=== {time.strftime('%Y-%m-%d %H:%M:%S')} · openwiki {' '.join(argv)}\n")
+    sys.stdout = sys.stderr = log
+
+
+def _cmd_schedule(args: argparse.Namespace) -> int:
+    """Track O, O.1: install, remove or check the project's scheduled tasks. A task runs this interpreter (pinned, as
+    the hooks are) with ``--trigger schedule`` — the run log marks the run, its output goes to
+    ``.openwiki/schedule.log``."""
+    project = getattr(args, "project_obj", None)
+    if project is None:
+        print("error: not in an OpenWiki project — run it in one or pass --project.", file=sys.stderr)
+        return 2
+    sched = Scheduler(project.name, project.root)
+    if args.action == "status":
+        _print_schedule(project, sched, [args.task] if args.task else sorted(SCHEDULE_TASKS))
+        return 0
+    tasks = [args.task or "sleep"] if args.action == "install" else ([args.task] if args.task else
+                                                                    sorted(SCHEDULE_TASKS))
+    if args.action == "install":
+        task = tasks[0]
+        if task == "sleep" and not project.memory_enabled:
+            print("error: memory is disabled (Wiki mode) — sleep would do nothing; set [memory] enabled = true.",
+                  file=sys.stderr)
+            return 2
+        try:
+            definition = sched.definition(task, args.at)
+        except ValueError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+        if args.dry_run:
+            print(f"Would register {task} for {project.name} (dry run — nothing changed):\n{definition}")
+            return 0
+        try:
+            name = sched.install(task, args.at)
+        except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+            print(f"error: could not register the task: {exc}", file=sys.stderr)
+            return 1
+        at = args.at or SCHEDULE_TASKS[task].get("at")
+        print(f"Scheduled {task} for {project.name}: daily at {at} → {name}")
+        print(f"  runs   : {sched.python} {subprocess.list2cmdline(task_arguments_of(project, task))}")
+        print(f"  output : {project.state_dir / SCHEDULE_LOG}; each run in the run log "
+              f"(`openwiki status`, the System tab)")
+        return 0
+    removed = []
+    for task in tasks:
+        if args.dry_run:
+            print(f"Would remove {task} for {project.name} (dry run).")
+        elif sched.remove(task):
+            removed.append(task)
+    if not args.dry_run:
+        print(f"Removed {', '.join(removed)} for {project.name}." if removed else
+              f"(no scheduled task of {project.name} to remove)")
+    return 0
+
+
+def _cmd_doctor(args: argparse.Namespace) -> int:
+    """Track O, O.2: check the project and the machine — pass / warn / fail per line; exit 1 on a failure."""
+    from . import doctor
+    from .handoff import ollama_state
+    project = getattr(args, "project_obj", None)
+    if project is None:
+        print("error: not in an OpenWiki project — run it in one or pass --project.", file=sys.stderr)
+        return 2
+    probes = doctor.Probes(which=shutil.which, version_of=doctor.program_version, ollama=ollama_state,
+                           open_graph=lambda path: _open_reader(path, wait=5.0), scheduler=Scheduler)
+    checks = doctor.run_checks(project, probes, repos=doctor.candidate_repos(project, Path.cwd()))
+    if args.json:
+        print(json.dumps(doctor.to_json(project, checks), ensure_ascii=False, indent=2))
+    else:
+        print(doctor.render(project, checks))
+    return 1 if any(c.level == "fail" for c in checks) else 0
+
+
+def task_arguments_of(project: Project, task: str) -> list:
+    from .schedule import task_arguments
+    return task_arguments(project.root, task)
+
+
+def _print_schedule(project: Project, sched: Scheduler, tasks: list) -> None:
+    """``schedule status``: per task — installed? what it runs, the next and last run (the scheduler's word and the
+    run log's), and whether the pinned interpreter still exists."""
+    print(f"Scheduled tasks of {project.name} ({project.root}):")
+    now = time.time()
+    for task in tasks:
+        info = sched.status(task)
+        if not info.get("installed"):
+            print(f"  {task:<8} not installed — `openwiki schedule install --task {task}`")
+            continue
+        when = f"every {info['interval']}" if info.get("interval") else f"daily at {info.get('at') or '?'}"
+        print(f"  {task:<8} installed · {when} · {info.get('name')}")
+        print(f"           runs: {info.get('command')} {info.get('arguments', '')}".rstrip())
+        if not info.get("interpreter_ok"):
+            print("           WARNING: that interpreter no longer exists — `openwiki schedule install` again")
+        if info.get("next_run"):
+            print(f"           next: {time.strftime('%Y-%m-%d %H:%M', time.localtime(info['next_run']))}")
+        if info.get("last_run"):
+            print(f"           last: {time.strftime('%Y-%m-%d %H:%M', time.localtime(info['last_run']))} "
+                  f"({info.get('last_result') or '?'})")
+        runs = [r for r in runlog.read_runs(project.state_dir, name=" ".join(SCHEDULE_TASKS[task]["args"]))
+                if r.get("trigger") == "schedule"]
+        if runs:
+            r = runs[-1]
+            print(f"           run log: last scheduled run {runlog.format_age(now - r['t'])} ago, "
+                  f"{runlog.format_duration(r.get('duration_s'))}: {r.get('outcome', 'ok')}")
+        else:
+            print("           run log: no scheduled run recorded yet")
+
+
 _DISPATCH = {
     "build": _cmd_build,
     "status": _cmd_status,
@@ -4677,6 +4889,8 @@ _DISPATCH = {
     "decay": _cmd_decay,
     "consolidate": _cmd_consolidate,
     "sleep": _cmd_sleep,
+    "schedule": _cmd_schedule,
+    "doctor": _cmd_doctor,
     "memory": _cmd_memory,
     "cochange": _cmd_cochange,
     "sessions": _cmd_sessions,
@@ -4723,10 +4937,40 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     args.project_obj = project
     if args.command == "serve":        # the browser's project switch re-applies another project to the flags as given
         args.raw_args = copy.copy(args)
+    if getattr(args, "trigger", None) == "schedule" and project is not None:
+        _schedule_log(project, sys.argv[1:] if argv is None else list(argv))
     _apply_project(args, project, UserConfig.load())
 
     handler = _DISPATCH.get(args.command)
-    return handler(args) if handler else 1
+    if handler is None:
+        return 1
+    name = _run_name(args)
+    if name is None or project is None:
+        return handler(args)
+    with runlog.run(name, project.state_dir, trigger=getattr(args, "trigger", None)) as run:
+        code = handler(args)
+        run.exit(code)
+    return code
+
+
+# The commands the run log records (track O, O.3): the write passes and the maintenance runs — the ones that run in
+# the background or on a schedule, or take long enough that their timings matter later. Hooks record themselves
+# (`_run_hook`): they resolve their project from the session, not from the command line.
+_LOGGED_RUNS = {"build", "sleep", "consolidate", "decay", "communities", "remember", "backfill", "cochange",
+                "references", "graph-build", "index"}
+_LOGGED_SUBRUNS = {("memory", "memory_cmd"): {"export", "import", "approve", "reject"},
+                   ("handoff", "mode"): {"prepare"}}
+
+
+def _run_name(args: argparse.Namespace) -> Optional[str]:
+    """The run log's name for this command (``"sleep"``, ``"memory export"``), or ``None`` if it isn't logged."""
+    cmd = args.command
+    if cmd in _LOGGED_RUNS:
+        return cmd
+    for (top, dest), subs in _LOGGED_SUBRUNS.items():
+        if cmd == top and getattr(args, dest, None) in subs:
+            return f"{cmd} {getattr(args, dest)}"
+    return None
 
 
 if __name__ == "__main__":

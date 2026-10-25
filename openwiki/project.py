@@ -239,6 +239,19 @@ class Project:
         return p if p.is_absolute() else self.root / p
 
     @property
+    def memory_backups(self) -> int:
+        """How many full memory backups ``sleep`` keeps in ``.openwiki/backups/`` — ``[memory] backups``, default 7;
+        ``0`` turns them off (track O, O.4: the graph is the memory's only copy)."""
+        try:
+            return max(0, int(self.setting("memory", "backups", 7)))
+        except (TypeError, ValueError):
+            return 7
+
+    @property
+    def backups_dir(self) -> Path:
+        return self.state_dir / "backups"
+
+    @property
     def memory_enabled(self) -> bool:
         """Second Brain mode — whether the remembered tier (Path B) is active for this
         project. **Off by default** (Wiki mode, §3.1 / ADR-14); turn it on with
@@ -404,6 +417,7 @@ enabled = {str(memory).lower()}
 # approve_writes = false  # stage the agent's wiki_remember writes until a person approves them (memory pending)
 # skip_prompts = []       # more chore prompts for this project, as regexes, e.g. ["sync arc42 docs"]
 # markdown_dir = "memory" # sleep writes a readable Markdown view of the memory here ("" = off)
+# backups = 7             # full memory backups sleep keeps in .openwiki/backups/ (0 = off)
 # transcripts = []        # more transcripts for session search (files / folders); hooked sessions are found anyway
 
 [serve]

@@ -314,6 +314,12 @@ header {
 .m-row { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; padding: 2px 0; color: var(--muted); }
 .m-row b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
 .m-h3 { margin: 22px 0 6px; font-size: 15px; }
+.m-h3 .muted { font-weight: 400; font-size: 12.5px; }
+.m-bad { color: #c0392b; font-weight: 600; }
+.m-details { margin-top: 10px; }
+.m-scroll { overflow-x: auto; }
+.m-scroll .m-table td.num, .m-scroll .m-table td.m-name { white-space: nowrap; }
+.m-details summary { cursor: pointer; color: var(--muted); font-size: 13px; padding: 4px 0; }
 .m-table { border-collapse: collapse; width: 100%; }
 .m-table th, .m-table td { text-align: left; padding: 5px 12px; border-bottom: 1px solid var(--line);
   font-size: 13px; font-variant-numeric: tabular-nums; }

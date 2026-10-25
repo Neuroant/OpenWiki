@@ -75,6 +75,7 @@
 | [52](#adr-52) | Hybrid language models for Paths B and C: local where possible, cloud where really needed | Accepted (2026-10-24); amends [ADR-2](#adr-2) for Paths B and C | Q1, correctness |
 | [53](#adr-53) | Projects gain environments — a third input class; twins as separate processes; actions through OpenWiki | Accepted as the plan (2026-10-24); nothing built; amended by [ADR-54](#adr-54) | Q4, security, correctness |
 | [54](#adr-54) | Path C deployment: a scheduled `owiki world observe` between sessions; twins as running services reached by URL; the world tier native | Accepted as the plan (2026-10-25); nothing built; amends [ADR-53](#adr-53) | security, Q4, correctness |
+| [55](#adr-55) | Operations: a saved run log, scheduled tasks from the CLI, rolling backups at `sleep`, one health check | Accepted (v0.121); extends [ADR-20](#adr-20) | Q5, correctness |
 
 ---
 
@@ -1199,6 +1200,37 @@ world tier native.**
   endpoint with a token — the Ableton servers run over stdio today (P.7); cloud keys (ADR-52) and twin tokens must be
   set for the user account, since a scheduled task doesn't inherit a session's environment.
 
+### ADR-55
+**Operations: a saved run log, scheduled tasks from the CLI, rolling backups at `sleep`, one health check.**
+*(2026-10-25, v0.121; extends [ADR-20](#adr-20); applies [ADR-32](#adr-32) and [ADR-39](#adr-39); prepares
+[ADR-54](#adr-54))*
+- **Context:** the deployment review (2026-10-24, §7) found that OpenWiki's unattended work left little behind. The
+  metrics collector lives per process, so a hook's or a worker's timings died with it (only build stages saved theirs);
+  `sleep` was scheduled by hand from a `schtasks` line in the docs, and nothing checked that it ran; backups were manual
+  although the graph is the memory's only copy and Kuzu is archived (R10); and what a person needs to tell whether a
+  setup is healthy was spread over `status`, `hook.log` and the handoff brief — a v0.45 `owiki` on the PATH, whose
+  `build` would have erased the memory, went unnoticed for weeks. Path C needs the first two as well: the inject hook's
+  latency (C1.10) and a scheduled `world observe` (ADR-54).
+- **Decision:** (1) a **run log** per project — `.openwiki/runs.jsonl`, one line per hook, worker, scheduled run and CLI
+  write pass (start, duration, outcome, trigger, model calls and tokens from the collector's delta, notes), one write
+  per line, rotated at 2 MB, best-effort. (2) **`owiki schedule`** registers a project's tasks with the OS scheduler, pinned
+  to the installing interpreter: on Windows from an XML definition — a missed run starts when the machine can, battery
+  power doesn't block it, one instance, a time limit, least privilege, windowless — and cron elsewhere; a scheduled run
+  is marked (`--trigger schedule`) and writes its output to `.openwiki/schedule.log`. (3) **`sleep` backs up first**: a
+  full export into `.openwiki/backups/`, the newest 7 kept, packed under a partial name and renamed. (4) **`owiki
+  doctor`** runs every check with injected probes and exits 1 on a failure.
+- **Alternatives:** the run log in the graph — a reader (every hook, ADR-38) can't write it, and a broken graph would
+  hide its own diagnosis; a resident OpenWiki service for scheduling — rejected in ADR-54; `schtasks /SC DAILY` — a
+  missed 03:30 run never happens and battery power blocks the start; a backup after `sleep` — a wrong forgetting pass
+  couldn't be undone; copying the Kuzu file — tied to one engine's format and unsafe while a writer is active, where the
+  COGX export is engine-independent and restores losslessly (ADR-39).
+- **Consequences:** + unattended runs leave a trace that the CLI, the web UI and `doctor` read; `sleep` runs nightly
+  without a hand-made task; a bad night can be undone — drilled on a copy of openwiki-dev: `sleep` wrote a 25 MB backup
+  and forgot 15 facts (11 s); a fresh graph took 46 s, the import 54 s — all 2,609 facts back with their ids, values and
+  intervals, the 15 unforgotten, the 172 themes; one command answers "is this setup healthy?".
+  − Seven full exports on disk (25 MB each for the dev memory's 2,609 facts with embeddings); `doctor` starts the
+  interpreters it checks (seconds); the hooks add ~200 bytes per prompt to the run log (rotated).
+
 ---
 *Chapter complete. The Path-B agent-memory direction landed via ADR-14/15/16/17/18/19; the graph then
 deepened (ADR-22 typed relations + relation-aware GraphRAG, ADR-23 entity resolution), gained
@@ -1228,5 +1260,5 @@ and that language models work at design time, code at run time (§2.2); ADR-52 m
 where possible, cloud where really needed — while Path A stays local (ADR-2); ADR-53 places the world model in the
 project concept — environments as a third input class next to sources and sessions; ADR-54 decides how Path C is
 deployed — a scheduled `owiki world observe` between sessions, twins as running services reached by URL, the world
-tier native.
+tier native; ADR-55 gives OpenWiki its operations — a run log, scheduled tasks, rolling backups, a health check.
 New significant decisions should be appended here with the next id.*

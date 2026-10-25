@@ -1432,7 +1432,12 @@ also carry a `⏱ latency · tokens · tok/s` line
   (a transcript's user turns with their times, via `sessions.load_turns`), `snapshot_graph`, `replay_prompt` /
   `run_replay` (`context_for(…, as_of | known_at, now=)` — `GraphStore.context_for` passes `now` and `known_at` on to
   `recall` since v0.122), `judge_order` / `run_judge` (blind, resumable), `summarize`. Behind `owiki eval --replay`;
-  no Kuzu import.
+  no Kuzu import. **Hand labels (M.3):** `read_labels` / `write_labels` / `label_problems` / `pathc_dir` — JSONL, one
+  record per fact: `id`, `label` (`LABELS`: stale / current / past / unclear), `route` (`ROUTES`: sensor / law /
+  person / deadline / none — C0.2's rubric), `binding`, `note`, other keys kept; written through a temporary file,
+  every record checked first. Kept in `<project>/.openwiki/pathc/`, never in the repository (C0.1 wrote the 54
+  labeled stale facts of path-b-memory §13.4 / §13.26 there: `stale-labeled.jsonl`, all 373 labels in
+  `labels-pb13.jsonl`).
 - **`openwiki/sessions.py`** — **session search** (v0.108, ADR-44): pure apart from reading files, no Kuzu. `Turn`
   (session, n, ts, speaker, text); `turns_from_claude` (via `iter_claude_turns`) / `turns_from_text` (paragraphs) /
   `load_turns`; `SessionIndex` — BM25 over `lexical.terms` of `speaker: text`, `rank(query, since, until)`,

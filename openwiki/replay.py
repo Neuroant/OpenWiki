@@ -351,3 +351,75 @@ def format_summary(s: dict) -> str:
         lines.append("  by rank: " + " · ".join(f"{k}: {v['helpful_rate']:.1%} of {v['facts']}"
                                                 for k, v in j["by_rank"].items()))
     return "\n".join(lines)
+
+
+# -- hand labels (M.3) ---------------------------------------------------------------------------------------------
+# Label files sit in the project, never in the repository — they quote real facts: `<project>/.openwiki/pathc/`. One
+# JSON object per line: `id` (an assertion id), `label`, and from C0.2 on `route` (how the fact could be checked) and
+# `binding` (the sensor binding that would govern it); `note`; any other key (`fact`, `set`, `closed_at`, …) is kept.
+
+LABELS = ("stale", "current", "past", "unclear")
+ROUTES = ("sensor", "law", "person", "deadline", "none")      # C0.2's rubric (WM §18.1)
+
+
+def pathc_dir(project) -> Path:
+    """Where a project keeps its Path C measurement files (private)."""
+    return Path(project.state_dir) / "pathc"
+
+
+def label_problems(row: dict) -> list:
+    """What's wrong with one label record (empty when nothing is)."""
+    out = []
+    if not isinstance(row, dict):
+        return ["not an object"]
+    if not row.get("id"):
+        out.append("no id")
+    if row.get("label") not in LABELS:
+        out.append(f"label {row.get('label')!r} is not one of {', '.join(LABELS)}")
+    if row.get("route") is not None and row.get("route") not in ROUTES:
+        out.append(f"route {row.get('route')!r} is not one of {', '.join(ROUTES)}")
+    return out
+
+
+def read_labels(path, strict: bool = False) -> list:
+    """The label records of a file, in order; a line that doesn't parse or fit is skipped (``strict``: raises)."""
+    out = []
+    try:
+        lines = Path(path).read_text(encoding="utf-8").splitlines()
+    except OSError:
+        if strict:
+            raise
+        return out
+    for i, line in enumerate(lines, 1):
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except ValueError:
+            row = None
+        problems = label_problems(row) if row is not None else ["not JSON"]
+        if problems:
+            if strict:
+                raise ValueError(f"{path}:{i}: {'; '.join(problems)}")
+            continue
+        out.append({"route": None, "binding": None, "note": "", **row})
+    return out
+
+
+def write_labels(path, rows: Iterable) -> int:
+    """Write label records (every one checked first — a bad one is a ``ValueError`` and nothing is written), through a
+    temporary file, so a reader never sees half a file. Returns how many."""
+    rows = [{"id": r.get("id"), "label": r.get("label"), "route": r.get("route"), "binding": r.get("binding"),
+             "note": r.get("note") or "", **{k: v for k, v in r.items()
+                                            if k not in ("id", "label", "route", "binding", "note")}}
+            for r in rows]
+    for i, r in enumerate(rows, 1):
+        problems = label_problems(r)
+        if problems:
+            raise ValueError(f"label {i}: {'; '.join(problems)}")
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows), encoding="utf-8")
+    tmp.replace(path)
+    return len(rows)

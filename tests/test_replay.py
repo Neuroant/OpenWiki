@@ -282,3 +282,34 @@ def test_cli_replay_and_judge(tmp_path, capsys, monkeypatch):
     text = capsys.readouterr().out
     assert "(3 already done)" in text and "Judge: 2 prompt(s)" in text
     assert len(replay.read_jsonl(tmp_path / "r.judge.jsonl")) == 2
+
+
+# -- hand labels (M.3) ------------------------------------------------------------------------------------------
+
+
+def test_label_files_round_trip(tmp_path):
+    rows = [{"id": "a1", "label": "stale", "fact": "x | y | z", "set": "pb13.4", "closed_at": None},
+            {"id": "b2", "label": "current", "route": "sensor", "binding": "version-file", "note": "pyproject"}]
+    path = tmp_path / "pathc" / "labels.jsonl"
+    assert replay.write_labels(path, rows) == 2
+    back = replay.read_labels(path, strict=True)
+    assert back[0] == {"id": "a1", "label": "stale", "route": None, "binding": None, "note": "",
+                       "fact": "x | y | z", "set": "pb13.4", "closed_at": None}
+    assert back[1]["route"] == "sensor" and back[1]["binding"] == "version-file"
+    assert not (tmp_path / "pathc" / "labels.jsonl.tmp").exists()
+
+
+def test_label_files_are_checked(tmp_path):
+    path = tmp_path / "labels.jsonl"
+    with pytest.raises(ValueError, match="label 'old'"):
+        replay.write_labels(path, [{"id": "a", "label": "stale"}, {"id": "b", "label": "old"}])
+    assert not path.exists()                                       # nothing written
+    with pytest.raises(ValueError, match="route"):
+        replay.write_labels(path, [{"id": "a", "label": "stale", "route": "guess"}])
+    path.write_text('{"id": "a", "label": "stale"}\nnot json\n{"label": "current"}\n'
+                    '{"id": "c", "label": "past"}\n', encoding="utf-8")
+    assert [r["id"] for r in replay.read_labels(path)] == ["a", "c"]
+    with pytest.raises(ValueError, match=":2: not JSON"):
+        replay.read_labels(path, strict=True)
+    assert replay.read_labels(tmp_path / "missing.jsonl") == []
+    assert replay.label_problems({"id": "x", "label": "unclear", "route": "none"}) == []

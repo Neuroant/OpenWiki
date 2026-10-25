@@ -48,8 +48,8 @@ to the Ableton twin's review (`docs/Digital_Twin_Review.md` in `G:\Antigravity\a
 
 | Phase | Goal | Gate | Status | Releases (planned) |
 |---|---|---|---|---|
-| **M** — measurement harness | replay real prompts at their own time, in the repository; one guard command | — | ◐ M.1 ☑ | v0.122.0 (M.1); M.2, M.3 with C0 |
-| **C0** — inventory | is enough of the memory observable to build C1? | M.1 | ☐ | docs only; go / no-go |
+| **M** — measurement harness | replay real prompts at their own time, in the repository; one guard command | — | ◐ M.1, M.3 ☑ | v0.122.0 (M.1); M.3 in main, released with C0; M.2 |
+| **C0** — inventory | is enough of the memory observable to build C1? | M.1 | ◐ C0.1 ☑ | docs only; go / no-go |
 | **C1** — observe, don't remember | observable state right by construction | C0 go; decisions 5, 13 | ☐ | v0.122 – v0.124 |
 | **C2** — laws, drift, world slice | rules and decisions checkable; context built around what a prompt touches | C1 exit; decisions 10, 14, 15 | ☐ | v0.125 – v0.128 |
 | **C3** — predict and verify | the full loop on the repository | C2 exit; decisions 4, 8, 9 | ☐ | v0.129 – v0.131 |
@@ -58,8 +58,8 @@ to the Ableton twin's review (`docs/Digital_Twin_Review.md` in `G:\Antigravity\a
 | **O** — operations | scheduled tasks, a health check, a saved run log, rolling backups — for Path B now, and the loop's home between sessions (ADR-54) | — (parallel) | ☑ O.1 – O.4 (twin checks with C2) | v0.121.0 |
 | **C4** — physical twins | the twin contract on a working twin, then a machine | C3 exit; P; decisions 2, 3, 12 | ☐ | v0.132 + |
 
-**Next actions:** C0.1 (recover the labeled stale facts — in M.3's label format, so M.3 comes with it) → C0.2 (the
-rubric); M.2 (the guard suite) before the first release that changes a default. Track O landed in v0.121.0 (§10b),
+**Next actions:** C0.2 (the rubric, written into WM §18.1 before any labeling) → C0.3 (label) → C0.4 (the binding
+plan); M.2 (the guard suite) before the first release that changes a default. Track O landed in v0.121.0 (§10b),
 M.1 in v0.122.0 (§5). Release numbers in the phase sections are as planned on 2026-10-24; track O took v0.121, so each
 later release moves up by one.
 
@@ -119,7 +119,7 @@ were never stored with it.
 |---|---|---|---|---|---|
 | **M.1 — the replay harness** | Replay the real prompts of a Claude Code transcript at their own time: for each prompt, the memory as it stood (recall with `as_of` = the prompt's time minus a capture lag, `now` = the prompt's time) on a scratch copy of a graph; write each prompt's injected context, the recalled facts and their parts as JSONL. Options: `--lag`, `--since/--until`, `--limit`, `--out`. Optional blind-judge pass (shuffled facts, the judge's verdicts in a separate file) — the local judge, or a cloud judge once track L is in (L.5). Entry point: `owiki eval --replay TRANSCRIPT`. | `openwiki/replay.py` (new), `cli.py`, `sessions.py` (turns), `GraphStore.context_for(report=)` | fake graph + fake transcript, time handling, lag | M | ☑ |
 | **M.2 — the guard suite** | One command that runs every guard of §4 and prints a pass / fail table: `owiki eval --guards`. | `eval.py`, `cli.py` | fakes for the runner; the live run is manual | S | ☐ |
-| **M.3 — private label files** | A JSONL format for hand labels (`{"id", "label", "route", "binding", "note"}`) kept in the project, not the repository (`<project>/.openwiki/pathc/`); a loader for the measurement scripts. | `openwiki/replay.py` | format round-trip | S | ☐ |
+| **M.3 — private label files** | A JSONL format for hand labels (`{"id", "label", "route", "binding", "note"}`) kept in the project, not the repository (`<project>/.openwiki/pathc/`); a loader for the measurement scripts. | `openwiki/replay.py` | format round-trip | S | ☑ |
 
 **Landed:** M.1 in v0.122.0 — `openwiki/replay.py`, `owiki eval --replay` (snapshot, `--lag`, `--since/--until`,
 `--limit` evenly spaced, `--view valid|known`, `--judge` blind and resumable, `--time-budget`; 11 tests). Checked on the
@@ -136,12 +136,29 @@ code. **Gate:** M.1. **Assumes** decision 1's recommendation (the repository fir
 
 | WP | Tasks | Output | Effort | Status |
 |---|---|---|---|---|
-| **C0.1 — recover the labeled stale facts** | The 14 stale facts of PB §13.4 were closed through `wiki_remember` in the v0.90 measurement, the 40 of PB §13.26 in the v0.109 review: find them in the dev graph as facts closed by an `agent-…` session's `replaces` on those days, cross-checked against the facts the two sections quote. | `<project>/.openwiki/pathc/stale-labeled.jsonl` (private) | S | ☐ |
+| **C0.1 — recover the labeled stale facts** | The 14 stale facts of PB §13.4 were closed through `wiki_remember` in the v0.90 measurement, the 40 of PB §13.26 in the v0.109 review: find them in the dev graph as facts closed by an `agent-…` session's `replaces` on those days, cross-checked against the facts the two sections quote. | `<project>/.openwiki/pathc/stale-labeled.jsonl` (private) | S | ☑ |
 | **C0.2 — the rubric** | For each fact: how could it be checked — a **sensor** (which built-in type of WM §6.1, which binding), a **law** (WM §7), a **person**, a **deadline**, or **not at all**. "Observable" means a built-in sensor type could read it, not that a clever script could. Written into WM §18.1 before labeling. | the rubric | S | ☐ |
 | **C0.3 — label** | The 54 recovered stale facts and 200 random current facts of openwiki-dev, shuffled and labeled blind to their stale status; a second pass on 30 of them for agreement. | `<project>/.openwiki/pathc/c0-labels.jsonl` (private) | M | ☐ |
 | **C0.4 — the binding plan** | Group the observable facts into bindings: sensor type, target, the fact template, the attribute groups (B9 paraphrases) each binding would govern; count how many bindings cover how many of the stale facts. | the candidate bindings, ranked by coverage | S | ☐ |
 | **C0.5 — the baseline** | With M.1 on the replayed prompts: the injected facts in the attributes the candidate bindings govern, and how many were stale at the prompt's time; the **lifetime of a stale belief** for the governed attributes (from the world's change — git history for versions, test counts, defaults — to the closing of the remembered value); the **testable share** of the 200 random facts (sensor- or law-checkable). | WM §18.1: the three baselines | M | ☐ |
 | **C0.6 — go / no-go** | Go if about 15 bindings would have caught at least a third of the labeled stale facts (WM §12); otherwise stop and record the negative result. | the decision in WM §18.1, the log, `docs/roadmap.md` | S | ☐ |
+
+**C0.1 done (2026-10-25).** The labels never were in a file that survived — the scratch files of those days are
+gone —, but every step is in the transcripts, so they were rebuilt from them and matched to the dev graph by
+wording (a snapshot; every sheet line resolved to exactly one fact believed at the labeling time):
+- **§13.4 (14 stale, 7 unclear):** `stale_labels.py` as written on 2026-09-26; the live memory closed exactly those
+  14 in one op on 2026-09-27 07:48 (`remember_live.py`), with one ordinary supersession ("399 passing tests"),
+  which is not a label. (The tracker's first text said they were closed in the v0.90 *measurement*; that ran on a
+  copy — the live memory got the same op afterwards.)
+- **§13.26 (40 stale of 352 labels):** set 1 — `vol_sheet.json`, 239 facts, 29 stale, 153 current, 35 past, 22
+  unclear; set 2 — `vol_sheet2.json`, 113 facts, 11 stale, 90 current, 3 past, 9 unclear; the sheets as the tool
+  results printed them, the labels from the `vol*_labels_*.txt` heredocs. All 40 are closed in the live memory: 31
+  in that evening's review calls, the rest by `wiki_remember` calls of the days before (the sheets were drawn from
+  a copy of 2026-09-27, so 7 had been closed already when they were labeled), and the "§" line on 2026-10-09.
+- **Files** (M.3's format, private): `<project>/.openwiki/pathc/stale-labeled.jsonl` (the 54) and
+  `labels-pb13.jsonl` (all 373 labels — the current, past and unclear ones too; C0.3 may reuse them, against the
+  state of 2026-10-05). Each record: `id`, `label`, `route` / `binding` (empty until C0.2–C0.4), `note`, `fact`,
+  `set`, `n`, `labeled_at`, `closed_at`.
 
 **Exit (go / no-go):** as C0.6. **Release:** docs only (with M's code in v0.121).
 
@@ -346,6 +363,7 @@ The open decisions of WM §15, and the phase that cannot start without them:
 | 2026-10-24 | L | Hybrid language models decided (ADR-52): track L added; decision 6 narrowed to the choice of providers | — |
 | 2026-10-24 | C1, C2, C3 | The project concept checked against Path C (WM §2.3, ADR-53): environments as a third input class; work packages C1.2 and C1.5 widened, C1.12, C1.13 and C3.9 added, C2.1, C2.10 and C3.1 widened | — |
 | 2026-10-24 | — | Deployment reviewed against Path C; two fixes landed at once: the global `owiki` reinstalled as an editable pipx install of the checkout (the old v0.45 one, older than B0, removed), and `docker-compose.yml` publishing on `127.0.0.1` only (`1b12eff`) | — |
+| 2026-10-25 | C0, M | C0.1 done: the 14 + 40 labeled stale facts (and all 373 labels) rebuilt from the transcripts, matched to the dev graph's ids, written to `.openwiki/pathc/` in M.3's format; M.3 built (`replay.read_labels` / `write_labels`, 2 tests) | C0.1, M.3 ☑ |
 | 2026-10-25 | M | M.1 built (v0.122.0): `owiki eval --replay` — prompts replayed at their own time on a graph snapshot, a blind judge pass; checked on 20 real prompts (no fact after its cut; judge 29.5 % helpful, ranks 1–4 40.9 %) | M.1 ☑ |
 | 2026-10-25 | O | Track O built and released as v0.121.0: `owiki schedule` (Task Scheduler XML / cron, tested end to end against the real scheduler), the saved run log (`.openwiki/runs.jsonl`, `status`, the System tab), rolling backups at `sleep` (restore tested), `owiki doctor`; M and the phases move up one release | O.1 – O.4 ☑ |
 | 2026-10-25 | O, C1, C2, P | Deployment decided (WM §2.3, ADR-54, arc42 §7.5): the loop between sessions as a scheduled `owiki world observe`; twins as running services reached by URL; the world tier native. Track O added (O.1 – O.4), C2.13 added, C1.2, C1.7, C2.10 and P.7 widened | — |

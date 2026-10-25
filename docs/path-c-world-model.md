@@ -1617,3 +1617,48 @@ or statements about documents (those are laws, C2).
 
 These seven reach 14 of the 54 on the strictest reading (26 %); **R**, **K** and **W** complete the 18. G and A wait —
 whether "the project lacks X" is a sensor case is exactly what the labelers disagreed on.
+
+#### C0.5 — the baselines (2026-10-25)
+
+**How.** Every user prompt of this repository's transcript (615, 2026-07-31 … 10-25) replayed at its own time with M.1
+(`owiki eval --replay`, the memory as it stood 6 h before each prompt, on a snapshot of openwiki-dev): 410 prompts got
+memory, 205 were chores or task notifications. A fact is *governed* when a C0.4 binding's pattern (with its excludes)
+matches it. The world's value at any moment comes from git — the release in `pyproject.toml`, the latest tag, the tab
+buttons, `STAGES`, the defaults, arc42's headings and risk rows at every commit that touched them; for the test count,
+whether the suite's test functions changed since the fact was said (a count of `def test_`, so a change, not an
+absolute number). A fact counts as true when said if its claim matched the world at some moment in the day after its
+date (capture windows are dated by their first turn, early backfills by their day's midnight); stale at a prompt if
+the world no longer matched it then.
+
+**1 — Governed facts in the injected context.** 210 of the 6,328 injected facts (3.3 %) were governed, in 141 of the
+410 prompts (34 %). Of the 105 that could be judged, **68 were stale at the prompt's time (65 %)**, and **56 prompts
+(13.7 %) got at least one stale governed fact** — but they were few facts, injected again and again: 8 distinct stale
+facts among 16 judged. "web UI · is versioned · 0.6.0" was given to prompts for two weeks after v0.6.0, a three-tab
+"tab bar with Wiki · Hilfe · Tutorial" long after the UI had more, the four-stage build after `memory` became the
+fifth. Not judged: 41 running states (the port, "server running" — no history to compare with), 30 facts from before
+the repository's first commit, 34 statements about history phrased as state ("owiki · has release · v0.6.0" said in
+September).
+
+**2 — The lifetime of a stale belief.** Of the governed facts the world contradicted later (92), 46 were closed after
+the change, 39 before it (another fact replaced them first), and **7 are still believed today**:
+
+| | closed after the change — median | quartiles | longest | still believed — since the change |
+|---|---|---|---|---|
+| all | 0.0 d | 0.0–4.8 d | 65 d | 7 facts, median 16 d, longest **85 d** |
+| release (V) | 0.0 d | 0.0–0.1 d | 65 d | 1 ("current release is · v0.120.0", since today's v0.121) |
+| test count (T) | **4.0 d** | 2.5–14.2 d | 58 d | 5 (623, 699, 713, 714, 756 tests) |
+| tabs, stages, defaults, docs (U, S, C, K, R) | 4–29 d (one each) | | | 1 (the three-tab fact, 85 d) |
+
+Releases are closed the day they change — since v0.90 the agent records each release, and each supersedes the last;
+everything else waits for someone to say it: days for the test count, weeks to months for the UI and the build. A
+stale belief's lifetime is unbounded today exactly where nobody records the change.
+
+**3 — The testable share:** 43.5 % (C0.3).
+
+**What C1 has to beat:** stale governed facts in **13.7 % of prompts** (65 % of the governed facts injected); a stale
+belief about the test count living **4 days** (median, up to 58), about the UI or the build **weeks to months**. C1's
+exit asks for near zero and one sensor period.
+
+**Caveats.** Ground truth comes from git, so running states are not judged; the test count is judged by its change, not
+its value; a fact's moment is uncertain by up to a day; the replay's memory is valid time as of 6 h before each prompt
+(M.1), and its themes are today's.

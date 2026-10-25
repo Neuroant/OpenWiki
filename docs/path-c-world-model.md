@@ -51,7 +51,7 @@ rules that bind it, what surprised us lately, and what was decided about it.
 15. [Decisions](#15-decisions)
 16. [Relationship to the current code](#16-relationship-to-the-current-code)
 17. [Prior art](#17-prior-art)
-18. [Measurements](#18-measurements) — [18.1 C0 — Inventory](#181-c0--inventory) (the rubric)
+18. [Measurements](#18-measurements) — [18.1 C0 — Inventory](#181-c0--inventory) (the rubric, the labels)
 
 ## 1. Motivation & main idea
 
@@ -1523,3 +1523,47 @@ changes no phrasing reveals. Counts and versions are what the sensors read; plan
 *person*. So the threshold should be met narrowly, carried by a few bindings — the release, the test count, the tab
 count, a handful of defaults — and most stale design descriptions should land in *person*. A miss of the threshold is
 a real outcome, not a reason to widen the rubric after the fact.
+
+#### C0.3 — the labels (2026-10-25)
+
+**Who labeled.** **A** — a fresh session that had seen nothing of this work, given only the rubric above (up to the
+protocol, not the expectation), the sheet and the repository; told not to open the label files, the write-ups that
+quote stale facts, the transcripts or the memory. **B** — C0.1's labeler, who had seen the 54. **A2** — a second
+fresh run with A's instructions on 30 facts of the sheet, reshuffled (seed 20261026). The sheet: the 54 stale facts
+and 200 of the 2,068 current facts, shuffled (seed 20261025). The labels: `<project>/.openwiki/pathc/c0-labels.jsonl`.
+
+| Route | the 54 stale — A | — B | the 200 random — A | — B |
+|---|---|---|---|---|
+| sensor | **24** | 21 | **86** | 76 |
+| law | 2 | 2 | 1 | 1 |
+| deadline | 10 | 10 | 12 | 11 |
+| person | 13 | 19 | 44 | 51 |
+| none | 5 | 2 | 57 | 61 |
+
+**Agreement.** A and B chose the same route for 83.5 % of the facts (Cohen's κ 0.77; on the 54: 77.8 %, κ 0.68; on
+the 200: 85.0 %, κ 0.78); A and A2 for 80.0 % of their 30 (κ 0.71) — substantial, short of excellent. The
+disagreements are mostly one pattern: a fact saying the project *lacks* or *does not support* something — A named a
+schema pattern that would show it exists now (*sensor*), B and A2 read a design description (*person*) —, and facts
+about a release, read as a version state (*sensor*) or as history (*none*).
+
+**Blind check.** Not told which facts were the stale ones, A labeled 38 of the 54 *stale*, 7 *unclear*, 5 *past* and
+4 *current* — one of these rightly: the runtime view's §6.7 is the remember-and-recall scenario again, after being
+renumbered away and back.
+
+**Testable share** (*sensor* + *law* among the 200 random facts): A **43.5 %** (95 % 36.8–50.4 %), B 38.5 % (32.0–45.4
+%). About two in five of the memory's current facts could be checked by a built-in sensor or a rule today.
+
+**Coverage of the stale facts.** A: 24 of 54 *sensor*, through 15 bindings; 18 are reached with **9** bindings. B: 21
+through 10; 18 with 7. **The strictest reading — the facts both call *sensor* — gives exactly 18**, through 9
+bindings: `pytest-collect` 7; the release in `pyproject.toml` 3; the runtime view's section headings 2; one each for
+the constraint probes' default count, arc42's risk and debt rows, the default context budget, the web UI's tab
+buttons, the build stages and the web UI's port. The rest of the 54: plans and "remaining" items (*deadline*, 10),
+design descriptions and other projects (*person*, 13–19), two document-consistency rules (*law*).
+
+**Against the expectation:** as written beforehand — carried by the test count and the release; design changes in
+*person*; plans in *deadline*. The threshold (about 15 bindings for 18 of 54) holds under every reading, but on the
+strictest one only just: 18 is the threshold itself. C0.6 decides after C0.4 — B9's attribute groups may let a
+binding govern more facts than its own wording — and C0.5's baselines.
+
+**Staleness of the 200** (a side result): A labeled 18 *stale*, 27 *unclear*, 39 *past*, 116 *current*; B 20 *stale*.
+About one current fact in ten is stale today — more than PB §13.26's estimate of 4.4 % on 2026-10-05.

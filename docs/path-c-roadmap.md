@@ -49,7 +49,7 @@ to the Ableton twin's review (`docs/Digital_Twin_Review.md` in `G:\Antigravity\a
 | Phase | Goal | Gate | Status | Releases (planned) |
 |---|---|---|---|---|
 | **M** — measurement harness | replay real prompts at their own time, in the repository; one guard command | — | ◐ M.1, M.3 ☑ | v0.122.0 (M.1); M.3 in main, released with C0; M.2 |
-| **C0** — inventory | is enough of the memory observable to build C1? | M.1 | ◐ C0.1, C0.2 ☑ | docs only; go / no-go |
+| **C0** — inventory | is enough of the memory observable to build C1? | M.1 | ◐ C0.1 – C0.3 ☑ | docs only; go / no-go |
 | **C1** — observe, don't remember | observable state right by construction | C0 go; decisions 5, 13 | ☐ | v0.122 – v0.124 |
 | **C2** — laws, drift, world slice | rules and decisions checkable; context built around what a prompt touches | C1 exit; decisions 10, 14, 15 | ☐ | v0.125 – v0.128 |
 | **C3** — predict and verify | the full loop on the repository | C2 exit; decisions 4, 8, 9 | ☐ | v0.129 – v0.131 |
@@ -58,9 +58,10 @@ to the Ableton twin's review (`docs/Digital_Twin_Review.md` in `G:\Antigravity\a
 | **O** — operations | scheduled tasks, a health check, a saved run log, rolling backups — for Path B now, and the loop's home between sessions (ADR-54) | — (parallel) | ☑ O.1 – O.4 (twin checks with C2) | v0.121.0 |
 | **C4** — physical twins | the twin contract on a working twin, then a machine | C3 exit; P; decisions 2, 3, 12 | ☐ | v0.132 + |
 
-**Next actions:** C0.3 (label — first decide the blind labeler, WM §18.1's protocol) → C0.4 (the binding plan) →
-C0.5 (the baselines); M.2 (the guard suite) before the first release that changes a default. Track O landed in
-v0.121.0 (§10b), M.1 in v0.122.0 (§5). Release numbers in the phase sections are as planned on 2026-10-24; track O
+**Next actions:** C0.4 (the binding plan: group the sensor-checkable facts, widen through B9's attribute groups) →
+C0.5 (the baselines) → C0.6 (go / no-go — the threshold holds on the labels, only just on the strictest reading);
+M.2 (the guard suite) before the first release that changes a default. Track O landed in v0.121.0 (§10b), M.1 in
+v0.122.0 (§5). Release numbers in the phase sections are as planned on 2026-10-24; track O
 took v0.121, so each later release moves up by one.
 
 ## 3. Dependencies
@@ -138,7 +139,7 @@ code. **Gate:** M.1. **Assumes** decision 1's recommendation (the repository fir
 |---|---|---|---|---|
 | **C0.1 — recover the labeled stale facts** | The 14 stale facts of PB §13.4 were closed through `wiki_remember` in the v0.90 measurement, the 40 of PB §13.26 in the v0.109 review: find them in the dev graph as facts closed by an `agent-…` session's `replaces` on those days, cross-checked against the facts the two sections quote. | `<project>/.openwiki/pathc/stale-labeled.jsonl` (private) | S | ☑ |
 | **C0.2 — the rubric** | For each fact: how could it be checked — a **sensor** (which built-in type of WM §6.1, which binding), a **law** (WM §7), a **person**, a **deadline**, or **not at all**. "Observable" means a built-in sensor type could read it, not that a clever script could. Written into WM §18.1 before labeling. | the rubric | S | ☑ |
-| **C0.3 — label** | The 54 recovered stale facts and 200 random current facts of openwiki-dev, shuffled and labeled blind to their stale status; a second pass on 30 of them for agreement. | `<project>/.openwiki/pathc/c0-labels.jsonl` (private) | M | ☐ |
+| **C0.3 — label** | The 54 recovered stale facts and 200 random current facts of openwiki-dev, shuffled and labeled blind to their stale status; a second pass on 30 of them for agreement. | `<project>/.openwiki/pathc/c0-labels.jsonl` (private) | M | ☑ |
 | **C0.4 — the binding plan** | Group the observable facts into bindings: sensor type, target, the fact template, the attribute groups (B9 paraphrases) each binding would govern; count how many bindings cover how many of the stale facts. | the candidate bindings, ranked by coverage | S | ☐ |
 | **C0.5 — the baseline** | With M.1 on the replayed prompts: the injected facts in the attributes the candidate bindings govern, and how many were stale at the prompt's time; the **lifetime of a stale belief** for the governed attributes (from the world's change — git history for versions, test counts, defaults — to the closing of the remembered value); the **testable share** of the 200 random facts (sensor- or law-checkable). | WM §18.1: the three baselines | M | ☐ |
 | **C0.6 — go / no-go** | Go if about 15 bindings would have caught at least a third of the labeled stale facts (WM §12); otherwise stop and record the negative result. | the decision in WM §18.1, the log, `docs/roadmap.md` | S | ☐ |
@@ -363,6 +364,7 @@ The open decisions of WM §15, and the phase that cannot start without them:
 | 2026-10-24 | L | Hybrid language models decided (ADR-52): track L added; decision 6 narrowed to the choice of providers | — |
 | 2026-10-24 | C1, C2, C3 | The project concept checked against Path C (WM §2.3, ADR-53): environments as a third input class; work packages C1.2 and C1.5 widened, C1.12, C1.13 and C3.9 added, C2.1, C2.10 and C3.1 widened | — |
 | 2026-10-24 | — | Deployment reviewed against Path C; two fixes landed at once: the global `owiki` reinstalled as an editable pipx install of the checkout (the old v0.45 one, older than B0, removed), and `docker-compose.yml` publishing on `127.0.0.1` only (`1b12eff`) | — |
+| 2026-10-25 | C0 | C0.3 done (WM §18.1): a fresh subagent (A, blind), C0.1's labeler (B) and a second fresh run on 30 (A2) labeled the shuffled sheet of 54 stale + 200 random facts. Agreement A–B 83.5 % (κ 0.77), A–A2 80 % (κ 0.71). Testable share 43.5 % (A) / 38.5 % (B). Stale facts sensor-checkable: 24 / 21 / 18 on the strictest reading, 18 reached with 9 / 7 / 9 bindings — the go threshold holds, only just on the strictest reading | C0.3 ☑ |
 | 2026-10-25 | C0 | C0.2 done: the rubric in WM §18.1, before any label — five routes found in a fixed order (none → sensor → law → deadline → person), the strict reading of "observable", a binding string per fact (`type:target[:selector]`), the protocol (one shuffled sheet, a labeler who hasn't seen the 54, a second pass on 30, per-group reports) and an expectation written beforehand | C0.2 ☑ |
 | 2026-10-25 | C0, M | C0.1 done: the 14 + 40 labeled stale facts (and all 373 labels) rebuilt from the transcripts, matched to the dev graph's ids, written to `.openwiki/pathc/` in M.3's format; M.3 built (`replay.read_labels` / `write_labels`, 2 tests) | C0.1, M.3 ☑ |
 | 2026-10-25 | M | M.1 built (v0.122.0): `owiki eval --replay` — prompts replayed at their own time on a graph snapshot, a blind judge pass; checked on 20 real prompts (no fact after its cut; judge 29.5 % helpful, ranks 1–4 40.9 %) | M.1 ☑ |

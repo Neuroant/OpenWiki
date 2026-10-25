@@ -4,7 +4,8 @@
 > the world model as a dynamical system with two boundaries, approved on 2026-10-18 (arc42 ADR-50); §2.2 adds that a
 > twin is a program and that language models work at design time while the twin runs as code (ADR-51); ADR-52 makes
 > Paths B and C hybrid — local models where possible, cloud models where really needed; §2.3 places the world model in
-> the project concept (ADR-53). The next step is
+> the project concept (ADR-53) and decides how it is deployed — a scheduled `owiki world observe` between sessions,
+> twins as running services reached by URL (ADR-54). The next step is
 > C0, an inventory that needs no code and decides whether the rest is worth building. **The implementation is tracked**
 > in [`path-c-roadmap.md`](path-c-roadmap.md) — phases, work packages, gates, status. Path C builds on Path B ([`path-b-memory.md`](path-b-memory.md))
 > and the agent-memory review ([`memory-systems-review.md`](memory-systems-review.md),
@@ -402,7 +403,8 @@ world. C0's inventory (§12) is its first measurement.
 ### 2.3 Projects and environments — where a world model lives
 
 > **Decided on 2026-10-24 (arc42 ADR-53).** The project concept ([`projects.md`](projects.md)) checked against the plan:
-> it holds. Path C adds a third input class and a runtime role next to `build`.
+> it holds. Path C adds a third input class and a runtime role next to `build`. Where it runs was decided on 2026-10-25
+> (ADR-54, *Where it runs* below).
 
 **What a project is today.**
 
@@ -437,11 +439,11 @@ name   = "openwiki"
 kind   = "repository"
 source = "G:/Claude/OpenWiki"                    # the code source with this path — defined once
 
-[[environments]]                                 # a twin: its own process behind the twin contract
-name    = "live-set"
-kind    = "twin"
-command = ["python", "twin_server.py"]           # the twin's MCP server (P.7), started in its repository
-cwd     = "G:/Antigravity/ableton-expert-system"
+[[environments]]                                 # a twin: a running service behind the twin contract
+name      = "live-set"
+kind      = "twin"
+url       = "http://127.0.0.1:8770/mcp"          # its MCP server (P.7), started by its own backend
+token_env = "LIVE_SET_TWIN_TOKEN"                # the variable that holds its token — never the manifest
 ```
 
 Sensors name the environment they read (`environment = "openwiki"`, §6.2).
@@ -462,7 +464,7 @@ Sensors name the environment they read (`environment = "openwiki"`, §6.2).
 
 **Eight adjustments** — each a work package in [`path-c-roadmap.md`](path-c-roadmap.md):
 1. **Environments in the manifest.** `[[environments]]` — a name, a kind (`repository` or `twin`), a source's path or
-   an MCP command; sources stay static, environments are live (C1.2).
+   a running twin's URL and token variable (ADR-54); sources stay static, environments are live (C1.2).
 2. **Rebuilds keep the world tier.** Tables declare themselves authoritative in one registry that B0's snapshot /
    restore reads, instead of a hand-kept list — a table forgotten in that list would be lost at the next build (C2.1).
 3. **Sessions get a kind** — conversation, agent, sensor, twin, import — so the Sitzungen list and session search keep
@@ -472,8 +474,9 @@ Sensors name the environment they read (`environment = "openwiki"`, §6.2).
    (C1.5).
 5. **OpenWiki is the twins' client, not their host.** It never imports environment code: every twin beyond the
    built-in sensors runs as its own process behind the twin contract (MCP) — the Ableton twin's server, Cognitive
-   Substrate's LCU 9000 server, a custom server in a repository —, declared in the manifest. Process isolation, any
-   language, and the rule that a manifest adds no code (§6.6) still hold (C2.10, P.7).
+   Substrate's LCU 9000 server, a custom server in a repository —, declared in the manifest by its URL: OpenWiki
+   connects to the running twin and starts only twins it owns (ADR-54). Process isolation, any language, and the rule
+   that a manifest adds no code (§6.6) still hold (C2.10, P.7).
 6. **Actions go through OpenWiki's `act`.** It checks the precondition and the laws, records the `Action` and its
    `Prediction`, forwards the action to the twin's own guarded `act` — whose interlocks stay: defence in depth — and
    resolves the prediction by the read-back. An agent calling a twin directly would bypass all three (C3.9).
@@ -500,6 +503,31 @@ Sensors name the environment they read (`environment = "openwiki"`, §6.2).
 
 The Ableton Expert System has two environments: its codebase — a repository someone develops — and the Live set it
 controls — the twin, our playground (§11.5). They belong to different projects.
+
+**Where it runs** (decided on 2026-10-25, arc42 ADR-54 and §7.5). On the machine of its environments, and still without
+a resident OpenWiki service — every process is one-shot or on demand, as today:
+
+| Process | When | Its part of the loop |
+|---|---|---|
+| the hooks (Claude Code) | during a session: each prompt, a session's start and end | the overlay (fast sensors), the session's observations, the action log (C3) |
+| `owiki world observe`, scheduled | every few minutes, between sessions | the sensors whose period is due; writes on change; resolves the predictions that fell due |
+| `owiki sleep`, scheduled | nightly | the slow loop — laws re-checked, prediction bases re-scored; a rolling backup |
+| `owiki serve`, `owiki mcp` | on demand | read the world model; approvals in the Pflege panel or from the CLI |
+| a twin | always — started by its own system | its fast loop; its state over MCP on localhost |
+
+- **The loop between sessions is a scheduled `owiki world observe`**, installed with the OS scheduler like `sleep`
+  (Task Scheduler or cron, pinned to the hooks' interpreter; `owiki schedule`, track O). Not inside `serve`: the web UI
+  runs only while someone has it open, and the loop must not depend on that.
+- **Twins are running services, reached by URL.** A twin owns its environment — the Ableton knowledge server listens on
+  UDP 11001 and holds its own graph file; a second instance started by OpenWiki would collide on both. So a `twin`
+  environment names its `url` (MCP over Streamable HTTP, `127.0.0.1` only) and the environment variable that holds its
+  token; OpenWiki connects to it and never supervises it. A twin that doesn't answer is a failed reading: its beliefs
+  go stale, they don't change. `command` remains for twins OpenWiki owns, such as a simulator a test starts and stops.
+- **The world tier runs natively.** Sensors read the host's git, files, processes and GPU; in the Docker image they
+  would see only the container. Docker stays for document-only setups and CI.
+- **Keys and other machines.** Cloud keys (ADR-52) and twin tokens come from the user account's environment — a
+  scheduled task doesn't inherit a session's. Twins on other machines wait for network transport, TLS and
+  authentication (Direction F).
 
 **What does not change:** one corpus per project; discovery by location, with the registry as the fallback; the
 fingerprinted build chain — environments stay outside it, as the memory stage does; Wiki mode for document-only
@@ -599,6 +627,9 @@ answer — and *why the world is in this state* can be traced back to an action 
 | Session | the agent and the commit | minutes to hours | companion files and tests predicted, resolved by the commit | "make the bass punchier" → the diagnostics run again |
 | Slow | `sleep` | nightly | law results, basis scores, drift | the same, over the day's observations |
 | Human | a person | as needed | accept laws, confirm or close facts | approve actions, accept laws |
+
+Between sessions no agent closes the session loop; a scheduled `owiki world observe` keeps the observations current and
+resolves the predictions that fell due (§2.3, ADR-54).
 
 The inner loops are cheap and frequent and correct only what is deterministic; the outer loops are rare and correct
 what needs judgment. This is the shape of MAPE-K from autonomic computing (monitor, analyze, plan, execute over shared
@@ -736,7 +767,7 @@ the time to detect a change (§13).
 
 | Component | Does | Runs in | Builds on |
 |---|---|---|---|
-| **Sensors** | read one value each, with no side effects | the inject hook (fast ones), the capture worker, `sleep`, `handoff prepare`, `owiki world observe` | `handoff.git_state` / `ollama_state` / `capture_workers` / `wiki_freshness` |
+| **Sensors** | read one value each, with no side effects | the inject hook (fast ones), the capture worker, `sleep`, `handoff prepare`, `owiki world observe` (scheduled between sessions) | `handoff.git_state` / `ollama_state` / `capture_workers` / `wiki_freshness` |
 | **Bindings** | map a sensor's value to a fact and to the attributes it governs | manifest `[[world.sensors]]`, defaults for code sources | B9's `store.attr_key` |
 | **Observation merge** | store observations, close contradicted beliefs, raise events | the two-phase writer and the journal fold | `temporal.plan_merge`, `journal`, ADR-38 |
 | **Read-time overlay** | replace a stale recalled fact with the fresh observation | `context_for` (hook, `context`, `wiki_memory`) | B6 assembly |
@@ -746,7 +777,7 @@ the time to detect a change (§13).
 | **Events** | discrepancies, violations, misses, drift, exogenous and contested changes, unresolved predictions | the world slice, the Pflege panel, the handoff brief | the Pflege panel (M7) |
 | **World slice** | assemble the context around what a prompt touches | the inject hook, `context`, `wiki_memory` | `assemble_context` budgets |
 | **World tools** | the MCP contract (§10.1) | `owiki mcp` | `mcp_server.build_server` |
-| **Twins** | other world models behind the same contract | separate MCP servers, e.g. Cognitive Substrate | — |
+| **Twins** | other world models behind the same contract | separate MCP servers of their own, running, reached by URL on localhost (ADR-54) — e.g. Cognitive Substrate's | — |
 
 ## 5. Proposed data model
 
@@ -838,7 +869,7 @@ which. Bindings can also be *proposed* from memory — facts whose object matche
 |---|---|---|
 | inject hook (every prompt) | fast ones whose cached value is older than `every`; at most ~200 ms in total | not at all — the overlay (§6.5), plus an `observe` op in the journal |
 | capture worker, `sleep`, `handoff prepare` | all, slow ones included | through the two-phase writer (ADR-38) |
-| `owiki world observe [--sensor ID]` | the ones asked for | as above |
+| `owiki world observe [--sensor ID]` — on demand, and scheduled every few minutes between sessions (ADR-54) | the ones asked for; scheduled: those whose period is due | as above |
 | MCP world tools | the ones asked about | the journal |
 
 ### 6.4 Merge rules
@@ -870,6 +901,8 @@ queued as an `observe` op for the next writer. The context is right at once; the
 - **No shell.** Built-in types only; file paths confined to the project's sources and repository; HTTP to localhost
   only; OPC UA read-only. Twin code beyond the built-in types — sensors, checks, simulators — enters only through a
   reviewed commit in the environment's repository (§2.2); at run time a manifest can't add a command.
+- **Twins by URL, on localhost only.** A twin is reached at `127.0.0.1` with its own token, which lives in an
+  environment variable, never in the manifest; any other address is refused (ADR-54).
 - **Values are input like any other.** Observed values pass credential redaction and the P0 policy (ADR-30, ADR-37):
   a config file can hold a token, a log line an injected instruction.
 - **`pytest-collect` is opt-in.** It runs the project's test setup; on a foreign repository that is code execution.
@@ -1011,10 +1044,10 @@ Each environment is a twin behind the same small set of MCP verbs, so the agent 
 | `act(action, dry_run=true)` | only for twins that declare actions (§10.2) |
 
 OpenWiki would implement the repository twin inside `owiki mcp` (tool names open, §15). A twin is a world model as an
-entity in its own right: it observes its environment, keeps its state, knows its rules and answers questions about
-them — the cyber-physical entity this direction started from. OpenWiki is the client of every other twin (§2.3):
-agents read twins through OpenWiki's world tools, and an action goes through OpenWiki's `act`, which checks it,
-records it and forwards it to the twin's own guarded `act`.
+entity in its own right: it observes its environment, keeps its state, knows its rules and answers questions about them
+— the cyber-physical entity this direction started from. OpenWiki is the client of every other twin, connecting to it as
+a running service by URL (§2.3, ADR-54): agents read twins through OpenWiki's world tools, and an action goes through
+OpenWiki's `act`, which checks it, records it and forwards it to the twin's own guarded `act`.
 
 ### 10.2 Acting
 
@@ -1151,9 +1184,9 @@ note per stage and in a measurements section (§18) created with C0's results.
 - **Goal:** observable state in memory is right by construction.
 - **Build:** the sensor types of §6.1 except `opcua`; bindings, with defaults for code sources; `source = "observed"`;
   the merge rules (§6.4); the read-time overlay (§6.5); the `observe` journal op; `owiki world status` and
-  `owiki world observe` (subcommands, ADR-13); an "observed" badge in the Gedächtnis tab; governed attributes leave the
-  review list; each observed change attributed to the commit that made it, else exogenous — half of the loop
-  (§3.4.3, §3.4.9).
+  `owiki world observe` (subcommands, ADR-13; scheduled between sessions, ADR-54); an "observed" badge in the
+  Gedächtnis tab; governed attributes leave the review list; each observed change attributed to the commit that made
+  it, else exogenous — half of the loop (§3.4.3, §3.4.9).
 - **Builds on:** B7 and B9, the journal and the two-phase writer (ADR-38), `handoff`'s probes, `assemble_context`.
 - **Hard part:** the governed attribute groups (B9's paraphrases) and the authority rule, without changing what B7
   decides elsewhere.
@@ -1286,6 +1319,9 @@ kept; the cross-session and cue-trigger sets; LoCoMo overall J — LoCoMo has no
   loop makes no language-model call, the local model builds and maintains the knowledge model (§2.2, ADR-51).
 - **Hybrid language models** (2026-10-24) — Paths B and C use a local model wherever it is enough and a cloud model
   where it is really needed, under the conditions of §2.2; Path A stays local (ADR-52, ADR-2).
+- **Deployment** (2026-10-25) — between sessions the loop runs as a scheduled `owiki world observe`, not inside
+  `serve`; twins are running services OpenWiki reaches by URL on localhost with a token, started by their own systems;
+  the world tier runs natively, Docker stays for document-only setups and CI (§2.3, ADR-54).
 
 **Open — for the user**
 

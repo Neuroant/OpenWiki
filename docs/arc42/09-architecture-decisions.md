@@ -73,7 +73,8 @@
 | [50](#adr-50) | Path C: the world model as a dynamical system with two boundaries — the main architectural plan | Accepted as the plan (2026-10-18); nothing built | correctness, Q4, Q5 |
 | [51](#adr-51) | Digital twins are programs; language models at design time, code at run time | Accepted as the plan (2026-10-18); refines [ADR-50](#adr-50); see [ADR-52](#adr-52) | correctness, security, Q1 |
 | [52](#adr-52) | Hybrid language models for Paths B and C: local where possible, cloud where really needed | Accepted (2026-10-24); amends [ADR-2](#adr-2) for Paths B and C | Q1, correctness |
-| [53](#adr-53) | Projects gain environments — a third input class; twins as separate processes; actions through OpenWiki | Accepted as the plan (2026-10-24); nothing built | Q4, security, correctness |
+| [53](#adr-53) | Projects gain environments — a third input class; twins as separate processes; actions through OpenWiki | Accepted as the plan (2026-10-24); nothing built; amended by [ADR-54](#adr-54) | Q4, security, correctness |
+| [54](#adr-54) | Path C deployment: a scheduled `owiki world observe` between sessions; twins as running services reached by URL; the world tier native | Accepted as the plan (2026-10-25); nothing built; amends [ADR-53](#adr-53) | security, Q4, correctness |
 
 ---
 
@@ -1164,6 +1165,39 @@ amends [ADR-2](#adr-2) for Paths B and C; Path A stays local)*
   through the registry and the switcher; twins in any language, isolated; every action checked and recorded once.
   − A third kind of manifest entry and its validation; twin processes to start and supervise; one more hop for an
   action (OpenWiki, then the twin).
+- **Amended by [ADR-54](#adr-54) (2026-10-25):** a twin environment names a running service's `url` (localhost, a
+  token per twin), not the `command` that starts it; OpenWiki starts only the twins it owns, and supervises none.
+
+### ADR-54
+**Path C deployment: a scheduled `owiki world observe` between sessions; twins as running services reached by URL; the
+world tier native.**
+*(2026-10-25; a plan, nothing built; amends [ADR-53](#adr-53); builds on [ADR-38](#adr-38); see [ADR-52](#adr-52))*
+- **Context:** deployment reviewed against Path C (2026-10-24, §7). OpenWiki runs no resident service of its own: CLI
+  commands are one-shot, `serve` and `mcp` start on demand, the hooks run during sessions, `sleep` nightly — so between
+  sessions nothing would run the loop. ADR-53's manifest sketch named a twin by the `command` that starts its MCP
+  server, but a twin owns its environment: the Ableton knowledge server listens on UDP 11001 and holds its own Kuzu
+  file, and a second instance started by OpenWiki would collide on both. Sensors read the host's git, files, processes
+  and GPU; inside the Docker image they would see only the container.
+- **Decision:** (1) Between sessions the loop runs as a **scheduled `owiki world observe`** every few minutes — a
+  one-shot process installed with the OS scheduler like `sleep` (Task Scheduler or cron, pinned to the hooks'
+  interpreter), writing on change through the two-phase writer (ADR-38); not inside `serve`. (2) A `twin` environment
+  names a **running service** by `url` — MCP over Streamable HTTP on `127.0.0.1` — and `token_env`, the environment
+  variable that holds its token (never the manifest); any other address is a validation error until remote
+  environments (Direction F). OpenWiki neither starts nor supervises such a twin; one that doesn't answer is a failed
+  reading, so its beliefs go stale instead of changing. `command` remains only for twins OpenWiki owns, such as a
+  simulator a test starts and stops. (3) **The world tier runs natively** on the machine of its environments; Docker
+  stays for document-only setups and CI. (4) Operations get a track of their own (`path-c-roadmap.md` track O):
+  `owiki schedule`, `owiki doctor`, a saved run log, rolling backups at `sleep`.
+- **Alternatives:** the loop inside `serve` — it runs only while someone has the web UI open, and makes `serve` a
+  supervisor; a resident daemon — a service of our own to install, supervise and secure; OpenWiki starting twins from
+  `command` — collides with the twin's own instance and makes OpenWiki the supervisor of systems it doesn't own; Path C
+  in a container — the sensors would observe the container, not the machine.
+- **Consequences:** + still no resident OpenWiki service — every process one-shot or on demand; one instance per
+  twin, owned by its own system; the loop runs whether or not a browser is open. − The scheduled tasks must exist and
+  run (`owiki schedule` installs them, `owiki doctor` checks them); between sessions an observation is up to one
+  schedule period old (during a session the inject hook's overlay keeps fast sensors fresh); a twin needs an HTTP
+  endpoint with a token — the Ableton servers run over stdio today (P.7); cloud keys (ADR-52) and twin tokens must be
+  set for the user account, since a scheduled task doesn't inherit a session's environment.
 
 ---
 *Chapter complete. The Path-B agent-memory direction landed via ADR-14/15/16/17/18/19; the graph then
@@ -1192,5 +1226,7 @@ debts D1/D2/D6 are resolved. Deep designs in `docs/path-b-memory.md` and `docs/R
 dynamical system with two boundaries — is ADR-50, accepted as a plan before any code (`docs/path-c-world-model.md` §2.1); ADR-51 adds that twins are programs
 and that language models work at design time, code at run time (§2.2); ADR-52 makes Paths B and C hybrid — local
 where possible, cloud where really needed — while Path A stays local (ADR-2); ADR-53 places the world model in the
-project concept — environments as a third input class next to sources and sessions.
+project concept — environments as a third input class next to sources and sessions; ADR-54 decides how Path C is
+deployed — a scheduled `owiki world observe` between sessions, twins as running services reached by URL, the world
+tier native.
 New significant decisions should be appended here with the next id.*

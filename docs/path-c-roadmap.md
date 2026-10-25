@@ -22,7 +22,8 @@ to the Ableton twin's review (`docs/Digital_Twin_Review.md` in `G:\Antigravity\a
 8. [Phase C2 — Laws, drift and the world slice](#8-phase-c2--laws-drift-and-the-world-slice)
 9. [Phase C3 — Predict and verify](#9-phase-c3--predict-and-verify)
 10. [Phase P — The Ableton playground's prerequisites](#10-phase-p--the-ableton-playgrounds-prerequisites) and
-    [Track L — language-model routing](#10a-track-l--language-model-routing)
+    [Track L — language-model routing](#10a-track-l--language-model-routing) and
+    [Track O — operations](#10b-track-o--operations)
 11. [Phase C4 — Physical twins](#11-phase-c4--physical-twins)
 12. [Decision gates](#12-decision-gates)
 13. [Stop rules and risks](#13-stop-rules-and-risks)
@@ -54,10 +55,11 @@ to the Ableton twin's review (`docs/Digital_Twin_Review.md` in `G:\Antigravity\a
 | **C3** — predict and verify | the full loop on the repository | C2 exit; decisions 4, 8, 9 | ☐ | v0.129 – v0.131 |
 | **P** — playground prerequisites | the Ableton twin safe and trustworthy enough to play with | — (parallel; Ableton repository) | ☐ | Ableton releases |
 | **L** — language-model routing | the hybrid approach: a cloud model per task where really needed | decision 6 (parallel; before the first cloud use) | ☐ | with its first use |
+| **O** — operations | scheduled tasks, a health check, a saved run log, rolling backups — for Path B now, and the loop's home between sessions (ADR-54) | — (parallel; can start now) | ☐ | from v0.121 |
 | **C4** — physical twins | the twin contract on a working twin, then a machine | C3 exit; P; decisions 2, 3, 12 | ☐ | v0.132 + |
 
 **Next actions:** M.1 (bring the replay harness into the repository) → C0.1 (recover the labeled stale facts) → C0.2
-(the rubric).
+(the rubric). Track O can start any time; C1 needs O.1 and O.3 (§10b).
 
 ## 3. Dependencies
 
@@ -76,6 +78,8 @@ to the Ableton twin's review (`docs/Digital_Twin_Review.md` in `G:\Antigravity\a
   and its twin-contract adapter (P.7); C4's diagnosis needs its parameter observers (P.5).
 - Track L runs beside the phases: any WP that routes a task to a cloud model needs L.1 – L.4 first; its first use is a
   second benchmark judge (L.5), which M.1's judge pass can use.
+- Track O runs beside the phases and helps Path B now: C1's scheduled `owiki world observe` needs O.1 (the scheduler),
+  C1.10's hook latency and L.4's cost per task need O.3 (the saved run log).
 
 ## 4. Rules for every work package
 
@@ -142,12 +146,12 @@ late belief is stored). Decision 11 can wait: bindings come from the manifest an
 | WP | Tasks | Touches | Tests | Effort | Status |
 |---|---|---|---|---|---|
 | **C1.1 — sensor types** | The built-in types of WM §6.1 except `opcua` and `twin`: `git` (on `handoff.git_state`), `file-pattern`, `py-constant` (`ast`, no import), `toml-key`, `count`, `ollama` (on `handoff.ollama_state`), `http-json` (localhost only), `process` (a port, a live lock file), `gpu` (`nvidia-smi`, fixed arguments), `pytest-collect` (opt-in). Each returns a reading: value, time, quality (complete / partial / failed), and the change time when the source knows it (a commit date, `git blame` on the line). | `openwiki/world/sensors.py` (new), `handoff.py` | one test per type on temporary files, a temporary git repository, a fake Ollama | M | ☐ |
-| **C1.2 — environments and bindings** | `[[environments]]` in `openwiki.toml` — a name, a kind (`repository` or `twin`), a source's path or an MCP command (WM §2.3); `[[world.sensors]]` naming their environment (WM §6.2), and defaults for code sources (git state; the version file when one is found); validation — unknown type or environment, a path outside the sources, a non-localhost URL are errors; `governs` resolved to attribute keys (`store.attr_key`); `[world] enabled` (default off; on for openwiki-dev; requires `[memory] enabled`). | `openwiki/world/bindings.py` (new), `project.py` (`Project.environments`, `world_sensors`, `world_enabled`) | parsing, defaults, validation errors | S | ☐ |
+| **C1.2 — environments and bindings** | `[[environments]]` in `openwiki.toml` — a name, a kind (`repository` or `twin`), a source's path, or a running twin's `url` (localhost only) and `token_env` (the variable that holds its token), with `command` only for twins OpenWiki owns (WM §2.3, ADR-54); `[[world.sensors]]` naming their environment (WM §6.2), and defaults for code sources (git state; the version file when one is found); validation — unknown type or environment, a path outside the sources, a non-localhost URL are errors; `governs` resolved to attribute keys (`store.attr_key`); `[world] enabled` (default off; on for openwiki-dev; requires `[memory] enabled`). | `openwiki/world/bindings.py` (new), `project.py` (`Project.environments`, `world_sensors`, `world_enabled`) | parsing, defaults, validation errors | S | ☐ |
 | **C1.3 — observed facts** | `source = "observed"` (`memory.SOURCES`, `coerce_source`); one `Session` per sensor (`sensor:<id>`); `valid_from` from the reading's change time, else the first observation; confidence 1.0; readers show "observed" (recall lines, the Gedächtnis tab's badge, the timeline). | `graph/memory.py`, `graph/store.py`, `web/static/app.js` | source round-trip, recall rendering | S | ☐ |
 | **C1.4 — the authority rule** | `temporal.plan_merge` for governed attributes (WM §3.3, §6.4): observed > agent > user > assistant > material; rules 1–5 — re-affirm, a new value closes the previous observation, contradicted current beliefs close at the observation's `valid_from` with a `SUPERSEDES` edge, an agreeing belief is re-affirmed, a later contradicting belief becomes a zero-length interval (decision 13). Discrepancies are counted and reported until `Event` exists (C2). | `graph/temporal.py`, `graph/store.py` | each rule; attributes without a sensor unchanged (the temporal set 13 / 13) | M | ☐ |
 | **C1.5 — the `observe` op, written on change** | `journal.append_observe`; `fold_journal` applies it through the two-phase writer; the writers: the capture worker, `sleep`, `handoff prepare`, `owiki world observe`. Readings stay in the world cache; the graph is written only when a value changes, and `last_seen` is synced at `sleep` (WM §2.3). | `graph/journal.py`, `graph/store.py`, `cli.py` | journal round-trip, fold, two-phase | S | ☐ |
 | **C1.6 — the read-time overlay** | In `context_for`: fast sensors whose cached reading is older than `every` run within about 200 ms in total (cache in `<project>/.openwiki/world-cache.json`); a recalled fact in a governed attribute whose fresh reading differs is replaced in the assembled text by the observation ("… (observed just now: pyproject.toml)"), and an `observe` op is queued (WM §6.5). | `graph/store.py`, `cli.py` (the inject hook), `openwiki/world/observe.py` (new) | overlay replaces, cache, budget, fail-soft (a failing sensor never blocks the hook) | M | ☐ |
-| **C1.7 — CLI** | `owiki world status` (bindings, last readings with their age, governed attributes, discrepancies) and `owiki world observe [--sensor ID] [--dry-run]` (subcommands, ADR-13). | `cli.py` | output with a fake store | S | ☐ |
+| **C1.7 — CLI** | `owiki world status` (bindings, last readings with their age, governed attributes, discrepancies) and `owiki world observe [--sensor ID] [--dry-run]` (subcommands, ADR-13); `observe` is scheduled every few minutes between sessions with O.1 (ADR-54) and quiet unless something changed. | `cli.py` | output with a fake store | S | ☐ |
 | **C1.8 — the review list** | Governed attributes leave `analyze memory --review` and the Pflege panel's "zu prüfen" list; `analyze memory` reports how many facts sensors govern. | `analysis/memory.py`, `memory_browse.py` | exclusion | S | ☐ |
 | **C1.9 — attribution, light** | The observe report names the commit that changed a value (git log on the source path), else "outside any commit" — the null prediction's first half (WM §3.4.3). Persistent attribution waits for `Action` (C3). | `openwiki/world/observe.py` | a temporary repository with two commits | S | ☐ |
 | **C1.10 — measure** | Replayed prompts (M.1): stale facts among the injected facts in governed attributes against C0.5's baseline; the lifetime of a stale belief; the inject hook's p95 latency; the review list's size; the guards (M.2). | WM §18.2 | — | M | ☐ |
@@ -179,13 +183,14 @@ exit; decisions 10 (tool names), 14 (how the new tables travel in COGX), 15 (a *
 | **C2.7 — the world slice** | `context_for` assembles the touched variables — file paths and identifiers in the prompt, the working tree's changes, BM25 over variable labels, the recalled facts' subjects — with their state, laws, open events and the decisions about them, in at most a third of the budget; skipped when nothing touched is known (WM §9). | `graph/store.py`, `graph/memory.py` (`assemble_context`) | assembly, budget, the fallback is today's context | M | ☐ |
 | **C2.8 — read-only world tools** | The contract's read verbs (WM §10.1) — `entities`, `state`, `history`, `laws` — as MCP tools (names: decision 10). | `mcp_server.py` | `MCPStdioServer.handle` with fakes | S | ☐ |
 | **C2.9 — the web UI** | Variables with their values and age, laws with their status, open events — as a *Welt* tab or as panels in Gedächtnis (decision 15). | `web/` | `test_web.py` round-trips; a Playwright check | M | ☐ |
-| **C2.10 — the playground's laws** | Needs P.1, P.2, P.4, P.6, P.7. A dedicated `ableton-playground` project (sources: the Ableton 12 manual; the Live set as `[[environments]] kind = "twin"`, its MCP server started by OpenWiki as a client, WM §2.3); the `twin` sensor type reads the Ableton twin through its `state` verb; its Production Constitution as laws; planted violations (a fader above unity, a value outside its range) raise events here, and its interlocks refuse the write there. | `openwiki/world/sensors.py` (`twin`), the Ableton repository | the `twin` type against a fake contract | M | ☐ |
+| **C2.10 — the playground's laws** | Needs P.1, P.2, P.4, P.6, P.7 and C2.13. A dedicated `ableton-playground` project (sources: the Ableton 12 manual; the Live set as `[[environments]] kind = "twin"`, reached at its running MCP server's URL — OpenWiki its client, never its host, WM §2.3, ADR-54); the `twin` sensor type reads the Ableton twin through its `state` verb; its Production Constitution as laws; planted violations (a fader above unity, a value outside its range) raise events here, and its interlocks refuse the write there. | `openwiki/world/sensors.py` (`twin`), the Ableton repository | the `twin` type against a fake contract | M | ☐ |
 | **C2.11 — measure** | Planted drifts on a scratch copy (a changed constant, a desynchronized version pair, a changed GPU, an untagged release): at least 9 of 10 detected; false alarms in real use at most one a week; the world slice against today's context at equal size on replayed prompts that touch a governed variable (paired, blind judge); time to detect; the playground's planted violations. | WM §18.3 | — | M | ☐ |
 | **C2.12 — docs and releases** | As §4; an ADR for declarative laws with planted-violation fixtures. | docs | — | S | ☐ |
+| **C2.13 — the twin client** | An MCP client over Streamable HTTP for the `twin` sensor type and C3.9's forward to a twin's `act`: stdlib `urllib`, JSON-RPC as `mcp_server.py` speaks it; `127.0.0.1` only; the bearer token from `token_env`; timeouts and an output cap; a twin that doesn't answer is a failed reading — its beliefs go stale, `owiki doctor` (O.2) reports it. For twins OpenWiki owns, `command` starts the twin for a run and stops it after (WM §2.3, ADR-54). | `openwiki/world/twin_client.py` (new) | a fake twin on `http.server`; non-localhost URLs and a missing token refused; timeouts | M | ☐ |
 
 **Releases (planned):** v0.125 — schema, variables, generic checkers (C2.1 – C2.3); v0.126 — law extraction and
 review, decisions with preconditions, events (C2.4 – C2.6); v0.127 — the world slice, the world tools, the UI (C2.7 –
-C2.9); v0.128 — the playground's laws and the measurement (C2.10 – C2.12).
+C2.9); v0.128 — the twin client, the playground's laws and the measurement (C2.10 – C2.13).
 **Exit:** WM §12's C2 exit.
 
 ## 9. Phase C3 — Predict and verify
@@ -224,7 +229,7 @@ is in (WM §11.5).
 | **P.4 — a sync you can trust (ABL R4)** | Buffer from `sync_start` to `sync_complete`, replace in one pass, counts → "complete" or "partial". | C2.10 (only a complete snapshot closes a belief) | M | ☐ |
 | **P.5 — observers (ABL R5)** | The track list, the selected device's parameters, sends, solo, playing slots; reinstalled when the track list changes. | C4.1 | M | ☐ |
 | **P.6 — read-back and a project id (ABL R6)** | `/live/ack <request_id> <ok> <actual_value>` after each write; the set fingerprinted by its file path. | C3.6 | S | ☐ |
-| **P.7 — the twin contract** | A thin adapter over its knowledge and action servers: `entities`, `state`, `history`, `laws`, `act(dry_run=true)` (WM §10.1). | C2.10, C3.6, C4.1 | M | ☐ |
+| **P.7 — the twin contract** | A thin adapter over its knowledge and action servers: `entities`, `state`, `history`, `laws`, `act(dry_run=true)` (WM §10.1) — served by the one running instance over MCP's Streamable HTTP transport on `127.0.0.1`, with a bearer token and no CORS. Today's servers run over stdio, started by the agent backend, and the knowledge server holds UDP 11001 and its graph file, so OpenWiki can't start a second copy (ADR-54). | C2.10, C3.6, C4.1 | M | ☐ |
 
 ## 10a. Track L — language-model routing
 
@@ -242,6 +247,24 @@ the phases; each later WP that wants a cloud model depends on L.1 – L.4.
 
 Later candidates, each with its own measured need: extraction from public documents (C2.4, C4.3), a large one-off
 capture or re-capture, a learned dynamics model trained on dense telemetry (C4.5).
+
+## 10b. Track O — operations
+
+**Goal:** OpenWiki's scheduled work runs, its health is visible in one place, its timings outlive their processes, and
+the memory has a backup — today for Path B, and as the loop's home between sessions for Path C (ADR-54; arc42 §7.5).
+**Gate:** none; parallel to the phases. From the deployment review of 2026-10-24, which also fixed the two problems that
+couldn't wait (the stale v0.45 `owiki` on the PATH, the compose file publishing the web UI on every interface).
+
+| WP | Tasks | Touches | Tests | Effort | Status |
+|---|---|---|---|---|---|
+| **O.1 — `owiki schedule`** | `owiki schedule install / remove / status` for a project's scheduled tasks: `sleep` (nightly, a quiet hour) and — from C1 — `world observe` (every few minutes). Task Scheduler on Windows (`schtasks` with fixed arguments, a task name per project), cron elsewhere; pinned to the interpreter the hooks use, as `claude-code --hooks --into` pins them; `status` shows each task's next and last run and its result (O.3). | `openwiki/schedule.py` (new), `cli.py` | the rendered `schtasks` / crontab lines for both platforms; no real scheduler in tests | S | ☐ |
+| **O.2 — `owiki doctor`** | One health check, pass / warn / fail per line, a non-zero exit on a failure, `--json`: the hook interpreter and its version against the `owiki` on the PATH (and a different program shadowing `openwiki`), Ollama reachable and the project's models pulled, the graph readable, queued journal writes and their age, staged approvals, the scheduled tasks present and their last result, hook-log problems, the age of the newest backup (O.4) and, from C2, each twin reachable with its token set. Reuses the handoff's probes. | `openwiki/doctor.py` (new), `handoff.py`, `cli.py` | each check against fakes | S | ☐ |
+| **O.3 — the saved run log** | `<project>/.openwiki/runs.jsonl`: one line per hook, worker, scheduled run and CLI write pass — command, start, duration, outcome, model calls and tokens (the `metrics.COLLECTOR` delta, as build stages record theirs) and, with track L, the cost; rotated by size. `status`, `doctor` and the System tab read it. | `metrics.py`, `cli.py`, `web/server.py` | append, rotation, the delta | S | ☐ |
+| **O.4 — rolling backups at `sleep`** | Before `sleep` writes, `memory export --full` into `<project>/.openwiki/backups/`, keeping the newest N (`[memory] backups`, default 7 — about 100 MB for the dev memory's 14.3 MB export); `doctor` warns when the newest is older than two days; the restore path documented (`memory import` into an empty memory). | `cli.py` (`_cmd_sleep`), `memory_export.py` | rotation; a restore round-trip on a fake graph | S | ☐ |
+
+**Releases (planned):** from v0.121, each as it is ready; O.1 and O.3 before C1's v0.123 (the scheduled observe, the
+latency measurement).
+**Exit:** `owiki doctor` passes on openwiki-dev with `sleep` scheduled by O.1 and a backup younger than a day.
 
 ## 11. Phase C4 — Physical twins
 
@@ -312,3 +335,5 @@ The open decisions of WM §15, and the phase that cannot start without them:
 | 2026-10-24 | — | Roadmap created from WM §12, the plan (WM §2.1 – §2.2) and the open decisions (WM §15) | — |
 | 2026-10-24 | L | Hybrid language models decided (ADR-52): track L added; decision 6 narrowed to the choice of providers | — |
 | 2026-10-24 | C1, C2, C3 | The project concept checked against Path C (WM §2.3, ADR-53): environments as a third input class; work packages C1.2 and C1.5 widened, C1.12, C1.13 and C3.9 added, C2.1, C2.10 and C3.1 widened | — |
+| 2026-10-24 | — | Deployment reviewed against Path C; two fixes landed at once: the global `owiki` reinstalled as an editable pipx install of the checkout (the old v0.45 one, older than B0, removed), and `docker-compose.yml` publishing on `127.0.0.1` only (`1b12eff`) | — |
+| 2026-10-25 | O, C1, C2, P | Deployment decided (WM §2.3, ADR-54, arc42 §7.5): the loop between sessions as a scheduled `owiki world observe`; twins as running services reached by URL; the world tier native. Track O added (O.1 – O.4), C2.13 added, C1.2, C1.7, C2.10 and P.7 widened | — |

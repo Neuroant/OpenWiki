@@ -132,7 +132,7 @@ Ollama runs the models locally. Other systems connect to a project:
 | **OpenCode** | `owiki opencode` sets up an agent with the MCP server | the wiki and memory tools |
 | **any MCP client** | `owiki mcp --project <project>` | the same tools |
 | **people** | `owiki serve` — the web UI — and the CLI | browse, search, ask, the Gedächtnis tab, the project switcher |
-| **twins** (Path C, planned) | their own MCP servers, declared as environments in the project | live state and guarded actions |
+| **twins** (Path C, planned) | running services with their own MCP servers, reached by URL on localhost and declared as environments in the project | live state and guarded actions |
 | **models** | local Ollama by default; a cloud model where it is really needed (ADR-52) | |
 
 **Packaging** exists for other setups: the `owiki` distribution, a Docker image with compose, and CI; a public package
@@ -169,8 +169,9 @@ than v0.48 on the PATH would erase a project's memory on `build`. Install the gl
 the checkout (`install-openwiki.ps1 -Editable`), so it runs the repository's code and can't fall behind; this machine's
 has been one since 24 October 2026 (§6).
 
-**With Path C (planned):** `owiki world status` (are the sensors healthy?), reviewing proposed rules, handling events,
-and keeping the twin processes running.
+**With Path C (planned):** a scheduled `owiki world observe` next to `sleep`, `owiki world status` (are the sensors
+healthy?), reviewing proposed rules and handling events; the twins run as services of their own, started by their own
+systems.
 
 **In one line:** a project is the binder; a session is one day of work written into it. Path B makes the binder remember
 what was said; Path C connects it to the real thing so it can check itself.
@@ -263,9 +264,11 @@ and the agent interface stay on `localhost`. And the graph file is the memory's 
   installed models — so the memory corrects itself instead of waiting to be told: no more "the release is v0.119" a day
   after v0.120 shipped.
 - **Twins** are separate services for systems OpenWiki doesn't own — the Ableton project's backend, for example —, and
-  OpenWiki connects to them on localhost. They run their own fast loop; OpenWiki reads their state, checks its rules
-  against it, and passes an action on only after the twin's own guards and, where required, your approval.
-- **A scheduled job** reads the sensors between sessions, the way `sleep` runs at night.
+  OpenWiki connects to them by URL on localhost, with a token per twin — it never starts or supervises them. They run
+  their own fast loop; OpenWiki reads their state, checks its rules against it, and passes an action on only after the
+  twin's own guards and, where required, your approval.
+- **A scheduled `owiki world observe`** reads the sensors every few minutes between sessions, the way `sleep` runs at
+  night; during a session the hooks do it.
 
 Path C's design is `docs/path-c-world-model.md`; how the projects carry it, §2.4 here.
 

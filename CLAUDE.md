@@ -42,14 +42,21 @@ field, §20) is in `docs/memory-systems-review.md`; its summary — where they a
 the ranked plan for Path B's next steps — is `docs/agent-memory-summary.md`.
 A **user guide to the Second Brain** — architecture, a working day, CLI + web UI tutorials with real
 `openwiki-dev` output and screenshots (`docs/img/second-brain/`), a cheat sheet — is `docs/second-brain-guide.md`.
-A design **proposal** for **Path C — world models** (observed state from built-in sensors, laws, predictions, events,
-a world slice as context; the repository first, machines federated with Cognitive Substrate; the working Ableton Live
-twin of the sibling project `G:\Antigravity\ableton-expert-system` as its test playground) is
-`docs/path-c-world-model.md` — nothing built yet; its §2.1 is the **main architectural plan** (approved 2026-10-18,
-ADR-50: the world model as a dynamical system with two boundaries), §2.2 adds that twins are programs and that
-language models work at design time while the twins run as code (ADR-51); C0 (an inventory, no code) is the next step.
-Its implementation is tracked in `docs/path-c-roadmap.md` (phases M, C0 – C4, P and track L as work packages with gates
-and status). Paths B and C use language models **hybrid** — local where possible, cloud where really needed — while Path A's
+The design of **Path C — world models** (observed state from built-in sensors, laws, predictions, events, a world
+slice as context; the repository first, machines federated with Cognitive Substrate; the working Ableton Live twin of
+the sibling project `G:\Antigravity\ableton-expert-system` as its test playground) is `docs/path-c-world-model.md`;
+its §2.1 is the **main architectural plan** (approved 2026-10-18, ADR-50: the world model as a dynamical system with
+two boundaries), §2.2 adds that twins are programs and that language models work at design time while the twins run
+as code (ADR-51). Its implementation is tracked in `docs/path-c-roadmap.md` (phases M, C0 – C4, P and tracks L and O
+as work packages with gates, status and a log). **State (2026-11-07):** built — track O (operations, v0.121; the
+nightly `sleep` with a backup runs on openwiki-dev), M.1 (prompts replayed at their own time, `owiki eval --replay`,
+v0.122) and M.3 (the private label files, in `main`); measured — the C0 inventory, C0.1 – C0.5
+(`path-c-world-model.md` §18.1: testable share 43.5 %; nine bindings reach 18 of the 54 labeled stale facts on the
+strictest reading; bindings govern by a pattern over the wording, not B9's attribute groups — §6.2; baselines: 13.7 %
+of the replayed prompts got a stale governed fact, a stale test count lives 4 days). No world-model code yet: next is
+C0.6, the go / no-go, which needs the user's decisions 1, 5 and 13 (WM §15), then M.2 (the guard suite) and C1
+(v0.123 – v0.125).
+Paths B and C use language models **hybrid** — local where possible, cloud where really needed — while Path A's
 pipeline stays local (ADR-52 amends ADR-2). Projects gain **environments** — a third input class next to sources and
 sessions; twins run as their own processes with OpenWiki as their client (§2.3, ADR-53; `docs/projects.md` Phase 5) —
 running services reached by URL on localhost, never started by OpenWiki; between sessions the loop is a scheduled

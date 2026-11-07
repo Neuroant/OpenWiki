@@ -1313,7 +1313,9 @@ scheduled `owiki world observe` runs the loop, and twins are running services re
 tracking:** [`docs/path-c-roadmap.md`](path-c-roadmap.md) — a measurement harness (M), C0 – C4 and the Ableton
 playground's prerequisites (P) as work packages with gates, releases and status. **Landed so far:** track O —
 operations (v0.121: `owiki schedule`, the run log, rolling backups, `owiki doctor`) — and M.1, prompts replayed at
-their own time (v0.122: `owiki eval --replay`, the live-path measurement of path-b-memory §13.32 / §13.36).
+their own time (v0.122: `owiki eval --replay`, the live-path measurement of path-b-memory §13.32 / §13.36). **C0, the
+inventory, closed with a go on 2026-11-07:** testable share 43.5 %, nine bindings for 18 of the 54 labeled stale
+facts, stale governed facts in 13.7 % of the replayed prompts (`path-c-world-model.md` §18.1); C1 is next.
 
 Path B remembers what was *said*; its weak spot is state that changes without anyone saying so (versions, counts,
 running services, plans that got done). Path C lets the world write too: built-in sensors over git, files, code,

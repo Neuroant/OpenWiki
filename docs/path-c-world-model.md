@@ -5,9 +5,8 @@
 > twin is a program and that language models work at design time while the twin runs as code (ADR-51); ADR-52 makes
 > Paths B and C hybrid — local models where possible, cloud models where really needed; §2.3 places the world model in
 > the project concept (ADR-53) and decides how it is deployed — a scheduled `owiki world observe` between sessions,
-> twins as running services reached by URL (ADR-54). **Under way: C0**, an inventory that needs no code and decides
-> whether the rest is worth building — its rubric is §18.1 (2026-10-25); track O and the replay harness (M.1) have
-> landed (v0.121, v0.122). **The implementation is tracked**
+> twins as running services reached by URL (ADR-54). **C0, the inventory, is done: go** (2026-11-07, §18.1) — the next
+> stage is C1; track O and the replay harness (M.1) have landed (v0.121, v0.122). **The implementation is tracked**
 > in [`path-c-roadmap.md`](path-c-roadmap.md) — phases, work packages, gates, status. Path C builds on Path B ([`path-b-memory.md`](path-b-memory.md))
 > and the agent-memory review ([`memory-systems-review.md`](memory-systems-review.md),
 > [`agent-memory-summary.md`](agent-memory-summary.md)); for machines it pairs with the sibling project **Cognitive
@@ -51,7 +50,8 @@ rules that bind it, what surprised us lately, and what was decided about it.
 15. [Decisions](#15-decisions)
 16. [Relationship to the current code](#16-relationship-to-the-current-code)
 17. [Prior art](#17-prior-art)
-18. [Measurements](#18-measurements) — [18.1 C0 — Inventory](#181-c0--inventory) (the rubric, the labels)
+18. [Measurements](#18-measurements) — [18.1 C0 — Inventory](#181-c0--inventory) (the rubric, the labels, the
+    binding plan, the baselines, the decision)
 
 ## 1. Motivation & main idea
 
@@ -687,7 +687,7 @@ The local model may propose hypotheses on the model rung, but a rung counts only
 
 | Correction | Who | Why |
 |---|---|---|
-| close a belief that a complete observation contradicts | automatic | deterministic; kept as history (§6.4) |
+| close a belief that a complete observation contradicts | automatic — once a person has accepted the binding's dry run (§6.2) | deterministic; kept as history (§6.4); decision 5 (2026-11-07) |
 | re-score a prediction basis; record a law's result | automatic | statistics only |
 | raise an event; mark a variable externally controlled | automatic, reversible | nothing is lost |
 | accept, change or retire a law | a person | laws are few and consequential (§7.3) |
@@ -888,9 +888,9 @@ An observation enters `temporal.plan_merge` with `source = "observed"` and its b
    kept as history, with a `SUPERSEDES` edge from the observation. A belief recorded *after* the value it contradicts
    began also raises a *discrepancy* event: someone believed something the world had already changed.
 4. **A belief that agrees** is re-affirmed and kept; it is still the user's or the agent's statement.
-5. **A later belief that contradicts a current observation** never becomes current. It is stored as a zero-length
-   interval — the device B9 already uses for ordered changes within one capture — and raises a discrepancy event:
-   "the session said v0.119.0; `pyproject.toml` says 0.120.0".
+5. **A later belief that contradicts a current observation** (decision 13, 2026-11-07) never becomes current. It is
+   stored as a zero-length interval — the device B9 already uses for ordered changes within one capture — and raises a
+   discrepancy event: "the session said v0.119.0; `pyproject.toml` says 0.120.0".
 
 The temporal set (13 / 13) guards these rules: they may not change what B7 decides for attributes without a sensor.
 
@@ -1184,6 +1184,8 @@ note per stage and in a measurements section (§18) created with C0's results.
   could.
 - **Exit (go / no-go):** go if about 15 bindings would have caught at least a third of the labeled stale facts;
   otherwise stop and record the negative result, like the measured-and-not-adopted items of Path B.
+- **Landed (2026-11-07): go** — nine bindings reach 18 of the 54 labeled stale facts on the strictest reading; the
+  baselines put stale governed facts in 13.7 % of the replayed prompts (§18.1).
 
 ### C1 — Observe, don't remember
 - **Goal:** observable state in memory is right by construction.
@@ -1328,20 +1330,25 @@ kept; the cross-session and cue-trigger sets; LoCoMo overall J — LoCoMo has no
   `serve`; twins are running services OpenWiki reaches by URL on localhost with a token, started by their own systems;
   the world tier runs natively, Docker stays for document-only setups and CI (§2.3, ADR-54).
 
+**Decided on 2026-11-07** (by the user, with C0's go — §18.1)
+
+- **1 — the first environment:** the OpenWiki repository for C0 – C1, where the stale-fact baseline is; the Ableton
+  twin as the test playground from C2 on (§11.5).
+- **5 — what the loop may correct by itself:** facts, automatically — once a person has accepted the binding's dry
+  run (§6.2); laws and decisions only by a person; never automatic remediation (§3.4.6).
+- **13 — a contradicting late belief:** stored as a zero-length interval, never current, and reported as a
+  discrepancy (§6.4, rule 5).
+
 **Open — for the user**
 
-1. **The first environment:** the repository (measurable now), the Ableton twin (runs now; needs R1, R2, R4 and R6 of
-   its review), or the LCU 9000 (needs the simulator)? *Recommended: the repository for C0–C1, where the stale-fact
-   baseline is; the Ableton twin as the test playground from C2 on — laws, actions, predictions and diagnosis on a
-   system that answers back (§11.5).*
+1. *(The first environment — decided 2026-11-07, above.)*
 2. **Acting:** may twins act, or stay read-only? *Recommended: read-only through C4.*
 3. **Telemetry:** real hardware or an OPC UA server, or a simulator? *The plan starts with the Ableton twin's live
    data and adds a simulator for faults with known causes.*
 4. **The action log:** record the coding agent's edits and commands as `Action`s through a `PostToolUse` hook — local,
    and needed to tell the agent's changes from everyone else's (§3.4.3)? *Recommended: yes, from C3; git covers commits
    before that.*
-5. **What the loop may correct by itself** (§3.4.6): facts automatically, laws and decisions only by a person, never
-   automatic remediation? *Recommended: as in §3.4.6.*
+5. *(What the loop may correct by itself — decided 2026-11-07, above.)*
 6. **Which cloud models and providers** for the hybrid approach — per task, behind the `ChatModel` protocol, keys from
    the environment? *Recommended: choose at the first use — a second benchmark judge (track L) — and add others only
    with their own measured need.*
@@ -1357,7 +1364,7 @@ kept; the cross-session and cue-trigger sets; LoCoMo overall J — LoCoMo has no
 10. Names of the world tools (`wiki_state` and siblings, or a `world_*` family).
 11. Bindings only in the manifest, or also proposed from memory (§6.2)?
 12. The telemetry store, SQLite or Parquet (C4).
-13. Whether a contradicting late belief is stored at all (§6.4, rule 5) or only reported.
+13. *(Whether a contradicting late belief is stored — decided 2026-11-07, above.)*
 14. How laws, predictions, actions and events travel in COGX (e.g. in `--full` metadata).
 15. A *Welt* (world) tab in the web UI, or panels inside Gedächtnis.
 
@@ -1662,3 +1669,28 @@ exit asks for near zero and one sensor period.
 **Caveats.** Ground truth comes from git, so running states are not judged; the test count is judged by its change, not
 its value; a fact's moment is uncertain by up to a day; the replay's memory is valid time as of 6 h before each prompt
 (M.1), and its themes are today's.
+
+#### C0.6 — the decision (2026-11-07): go
+
+**Go.** The criterion — about 15 bindings that would have caught at least 18 of the 54 labeled stale facts — holds on
+every reading: five bindings on the blind labeler's labels, nine on the strictest (the facts both labelers call
+*sensor*, C0.4).
+
+**Why it is worth building.** The baselines (C0.5): stale governed facts reached 13.7 % of the replayed prompts, and
+outside the releases — which the agent records itself — a stale belief lives days (the test count: 4 days median, up
+to 58) to months (the UI, the build: up to 85 days). That is exactly what a sensor ends within one period.
+
+**What it is not.** Governed facts are 3.3 % of what the hook injects; C1 fixes a narrow, persistent class of errors,
+not the memory's quality in general. The testable share (43.5 %) bounds what sensors and laws could ever check; the
+rest stays with people and with `wiki_remember`.
+
+**Decided with it** (the user, §15): 1 — the repository first; 5 — facts are corrected automatically only once a
+person has accepted the binding's dry run, laws and decisions only by a person, never automatic remediation; 13 — a
+contradicting late belief is stored as a zero-length interval and reported.
+
+**C1 as decided.** M.2 (the guard suite) first; then C0.4's first slice — the test count, the release (with the law
+*pyproject = `__version__`*), the latest tag (with *every release has a tag*), the tab count, the build stages and two
+defaults; the runtime-view headings, arc42's risk rows and the web UI's port after them. Bindings govern by a pattern
+with excludes, activated by an accepted dry run; observations outrank beliefs only in governed facts. The exit (§12)
+measured against C0.5: stale governed facts in the replayed prompts from 13.7 % to near zero; a stale belief's life in
+a governed attribute at most one sensor period; the inject hook's p95 at most 300 ms slower; the guards unmoved.

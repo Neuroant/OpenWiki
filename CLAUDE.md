@@ -53,9 +53,10 @@ nightly `sleep` with a backup runs on openwiki-dev), M.1 (prompts replayed at th
 v0.122) and M.3 (the private label files, in `main`); measured — the C0 inventory, C0.1 – C0.5
 (`path-c-world-model.md` §18.1: testable share 43.5 %; nine bindings reach 18 of the 54 labeled stale facts on the
 strictest reading; bindings govern by a pattern over the wording, not B9's attribute groups — §6.2; baselines: 13.7 %
-of the replayed prompts got a stale governed fact, a stale test count lives 4 days). No world-model code yet: next is
-C0.6, the go / no-go, which needs the user's decisions 1, 5 and 13 (WM §15), then M.2 (the guard suite) and C1
-(v0.123 – v0.125).
+of the replayed prompts got a stale governed fact, a stale test count lives 4 days). C0 closed with a **go** on
+2026-11-07 (WM §18.1), with the user's decisions 1, 5 and 13 (WM §15: the repository first; facts corrected
+automatically only once a person has accepted a binding's dry run; a contradicting late belief stored, never
+current). No world-model code yet: next are M.2 (the guard suite) and C1 (v0.123 – v0.125).
 Paths B and C use language models **hybrid** — local where possible, cloud where really needed — while Path A's
 pipeline stays local (ADR-52 amends ADR-2). Projects gain **environments** — a third input class next to sources and
 sessions; twins run as their own processes with OpenWiki as their client (§2.3, ADR-53; `docs/projects.md` Phase 5) —

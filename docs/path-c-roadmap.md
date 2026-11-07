@@ -48,20 +48,20 @@ to the Ableton twin's review (`docs/Digital_Twin_Review.md` in `G:\Antigravity\a
 
 | Phase | Goal | Gate | Status | Releases (planned) |
 |---|---|---|---|---|
-| **M** — measurement harness | replay real prompts at their own time, in the repository; one guard command | — | ◐ M.1, M.3 ☑ | v0.122.0 (M.1); M.3 in main, released with C0; M.2 |
-| **C0** — inventory | is enough of the memory observable to build C1? | M.1 | ◐ C0.1 – C0.5 ☑ | docs only; go / no-go |
-| **C1** — observe, don't remember | observable state right by construction | C0 go; decisions 5, 13 | ☐ | v0.122 – v0.124 |
-| **C2** — laws, drift, world slice | rules and decisions checkable; context built around what a prompt touches | C1 exit; decisions 10, 14, 15 | ☐ | v0.125 – v0.128 |
-| **C3** — predict and verify | the full loop on the repository | C2 exit; decisions 4, 8, 9 | ☐ | v0.129 – v0.131 |
+| **M** — measurement harness | replay real prompts at their own time, in the repository; one guard command | — | ◐ M.1, M.3 ☑ | v0.122.0 (M.1); M.3 and M.2 with C1's first release, v0.123 |
+| **C0** — inventory | is enough of the memory observable to build C1? | M.1 | ☑ **go** (2026-11-07) | docs only |
+| **C1** — observe, don't remember | observable state right by construction | C0 go ✓; decisions 5, 13 ✓ | ☐ next | v0.123 – v0.125 |
+| **C2** — laws, drift, world slice | rules and decisions checkable; context built around what a prompt touches | C1 exit; decisions 10, 14, 15 | ☐ | v0.126 – v0.129 |
+| **C3** — predict and verify | the full loop on the repository | C2 exit; decisions 4, 8, 9 | ☐ | v0.130 – v0.132 |
 | **P** — playground prerequisites | the Ableton twin safe and trustworthy enough to play with | — (parallel; Ableton repository) | ☐ | Ableton releases |
 | **L** — language-model routing | the hybrid approach: a cloud model per task where really needed | decision 6 (parallel; before the first cloud use) | ☐ | with its first use |
 | **O** — operations | scheduled tasks, a health check, a saved run log, rolling backups — for Path B now, and the loop's home between sessions (ADR-54) | — (parallel) | ☑ O.1 – O.4 (twin checks with C2) | v0.121.0 |
-| **C4** — physical twins | the twin contract on a working twin, then a machine | C3 exit; P; decisions 2, 3, 12 | ☐ | v0.132 + |
+| **C4** — physical twins | the twin contract on a working twin, then a machine | C3 exit; P; decisions 2, 3, 12 | ☐ | v0.133 + |
 
-**Next actions:** C0.6 (go / no-go, with the decisions C1 needs: 1, 5, 13) → C1;
-M.2 (the guard suite) before the first release that changes a default. Track O landed in v0.121.0 (§10b), M.1 in
-v0.122.0 (§5). Release numbers in the phase sections are as planned on 2026-10-24; track O
-took v0.121, so each later release moves up by one.
+**Next actions:** M.2 (the guard suite) → C1's first release, v0.123 (C1.1 sensor types, C1.2 environments and
+bindings, C1.7 `owiki world status` — read-only, nothing written). C0 closed with a **go** on 2026-11-07, with the
+user's decisions 1, 5 and 13 (§6, §12); track O landed in v0.121.0 (§10b), M.1 in v0.122.0 (§5). The release
+numbers below are moved up by one against the first plan, since track O took v0.121.
 
 ## 3. Dependencies
 
@@ -141,7 +141,7 @@ code. **Gate:** M.1. **Assumes** decision 1's recommendation (the repository fir
 | **C0.3 — label** | The 54 recovered stale facts and 200 random current facts of openwiki-dev, shuffled and labeled blind to their stale status; a second pass on 30 of them for agreement. | `<project>/.openwiki/pathc/c0-labels.jsonl` (private) | M | ☑ |
 | **C0.4 — the binding plan** | Group the observable facts into bindings: sensor type, target, the fact template, the attribute groups (B9 paraphrases) each binding would govern; count how many bindings cover how many of the stale facts. | the candidate bindings, ranked by coverage | S | ☑ |
 | **C0.5 — the baseline** | With M.1 on the replayed prompts: the injected facts in the attributes the candidate bindings govern, and how many were stale at the prompt's time; the **lifetime of a stale belief** for the governed attributes (from the world's change — git history for versions, test counts, defaults — to the closing of the remembered value); the **testable share** of the 200 random facts (sensor- or law-checkable). | WM §18.1: the three baselines | M | ☑ |
-| **C0.6 — go / no-go** | Go if about 15 bindings would have caught at least a third of the labeled stale facts (WM §12); otherwise stop and record the negative result. | the decision in WM §18.1, the log, `docs/roadmap.md` | S | ☐ |
+| **C0.6 — go / no-go** | Go if about 15 bindings would have caught at least a third of the labeled stale facts (WM §12); otherwise stop and record the negative result. | the decision in WM §18.1, the log, `docs/roadmap.md` | S | ☑ |
 
 **C0.1 done (2026-10-25).** The labels never were in a file that survived — the scratch files of those days are
 gone —, but every step is in the transcripts, so they were rebuilt from them and matched to the dev graph by
@@ -166,7 +166,8 @@ wording (a snapshot; every sheet line resolved to exactly one fact believed at t
 
 **Goal:** observable state in memory is right by construction — half of the loop (WM §3.4.9). **Gate:** C0 go;
 decisions 5 (what the loop may correct by itself — C1 closes beliefs automatically) and 13 (whether a contradicting
-late belief is stored). Decision 11 can wait: bindings come from the manifest and defaults first.
+late belief is stored). *Met on 2026-11-07 (C0.6).* Decision 11 can wait: bindings come from the manifest and defaults
+first.
 
 | WP | Tasks | Touches | Tests | Effort | Status |
 |---|---|---|---|---|---|
@@ -184,9 +185,9 @@ late belief is stored). Decision 11 can wait: bindings come from the manifest an
 | **C1.12 — sessions get a kind** | `Session.kind` — conversation, agent, sensor, twin, import — set on every write path (capture, `wiki_remember`, imports, sensors); the Sitzungen list, session search and the handoff show conversations (WM §2.3). | `graph/store.py`, `graph/builder.py`, `memory_browse.py`, `sessions.py` | migration of existing sessions (their ids tell the kind), filters | S | ☐ |
 | **C1.13 — the handoff reads the world model** | `handoff.environment` takes git state, Ollama, the wiki's freshness and the capture workers from the world model's observed state instead of its own probes; the brief at a session's start shows observed state and, from C2, open events (WM §2.3). Wiki freshness becomes a variable. | `handoff.py`, `openwiki/world/observe.py` | the brief with a fake world model | S | ☐ |
 
-**Releases (planned):** v0.122 — environments, sensors, bindings, `owiki world status` (C1.1, C1.2, C1.7; read-only,
-nothing written); v0.123 — observed facts, the authority rule, the `observe` op, session kinds (C1.3 – C1.5, C1.8,
-C1.9, C1.12); v0.124 — the overlay, the handoff on the world model, and the measurement; default on for code projects
+**Releases (planned):** v0.123 — environments, sensors, bindings, `owiki world status` (C1.1, C1.2, C1.7; read-only,
+nothing written); v0.124 — observed facts, the authority rule, the `observe` op, session kinds (C1.3 – C1.5, C1.8,
+C1.9, C1.12); v0.125 — the overlay, the handoff on the world model, and the measurement; default on for code projects
 only if C1.10 holds (C1.6, C1.10, C1.11, C1.13).
 **Exit:** WM §12's C1 exit — stale facts in governed attributes near zero on the replayed prompts; a stale belief in a
 governed attribute lives at most one sensor period; the review list shrinks by the governed share; hook p95 + ≤ 300 ms;
@@ -213,9 +214,9 @@ exit; decisions 10 (tool names), 14 (how the new tables travel in COGX), 15 (a *
 | **C2.12 — docs and releases** | As §4; an ADR for declarative laws with planted-violation fixtures. | docs | — | S | ☐ |
 | **C2.13 — the twin client** | An MCP client over Streamable HTTP for the `twin` sensor type and C3.9's forward to a twin's `act`: stdlib `urllib`, JSON-RPC as `mcp_server.py` speaks it; `127.0.0.1` only; the bearer token from `token_env`; timeouts and an output cap; a twin that doesn't answer is a failed reading — its beliefs go stale, `owiki doctor` (O.2) reports it. For twins OpenWiki owns, `command` starts the twin for a run and stops it after (WM §2.3, ADR-54). | `openwiki/world/twin_client.py` (new) | a fake twin on `http.server`; non-localhost URLs and a missing token refused; timeouts | M | ☐ |
 
-**Releases (planned):** v0.125 — schema, variables, generic checkers (C2.1 – C2.3); v0.126 — law extraction and
-review, decisions with preconditions, events (C2.4 – C2.6); v0.127 — the world slice, the world tools, the UI (C2.7 –
-C2.9); v0.128 — the twin client, the playground's laws and the measurement (C2.10 – C2.13).
+**Releases (planned):** v0.126 — schema, variables, generic checkers (C2.1 – C2.3); v0.127 — law extraction and
+review, decisions with preconditions, events (C2.4 – C2.6); v0.128 — the world slice, the world tools, the UI (C2.7 –
+C2.9); v0.129 — the twin client, the playground's laws and the measurement (C2.10 – C2.13).
 **Exit:** WM §12's C2 exit.
 
 ## 9. Phase C3 — Predict and verify
@@ -235,7 +236,7 @@ decisions 4 (the action log), 8 (agent predictions), 9 (where the slow loop runs
 | **C3.8 — docs and releases** | As §4; an ADR for the action log. | docs | — | S | ☐ |
 | **C3.9 — `act` through OpenWiki** | OpenWiki's world tools gain `act`: check the precondition (the same object as observed) and the accepted laws, record the `Action` and its `Prediction`, forward to the twin's own guarded `act` (dry run first; its interlocks stay), resolve by the read-back; agents read twins through OpenWiki's tools too (WM §2.3, §10.2). | `mcp_server.py`, `openwiki/world/` (the contract client) | refusal on a broken precondition or law; the forward and the record against a fake twin | M | ☐ |
 
-**Releases (planned):** v0.129 — the action log (C3.1); v0.130 — predictions, resolution, skill (C3.2, C3.3); v0.131 —
+**Releases (planned):** v0.130 — the action log (C3.1); v0.131 — predictions, resolution, skill (C3.2, C3.3); v0.132 —
 `explain`, the slow loop, the playground's fast loop, the measurement (C3.4 – C3.8).
 **Exit:** WM §12's C3 exit.
 
@@ -318,11 +319,11 @@ The open decisions of WM §15, and the phase that cannot start without them:
 
 | # | Decision (WM §15) | Needed before | Recommendation |
 |---|---|---|---|
-| 1 | the first environment | C1 (C0 assumes the repository) | the repository for C0 – C1, the Ableton twin from C2 |
+| 1 | the first environment | C1 (C0 assumes the repository) | **decided 2026-11-07:** the repository for C0 – C1, the Ableton twin from C2 |
 | 2 | may twins act | C4.1 (writes beyond the playground's test set) | read-only through C4 |
 | 3 | telemetry: hardware or simulator | C4.2 | a simulator |
 | 4 | the action log through `PostToolUse` | C3.1 | yes, from C3 |
-| 5 | what the loop may correct by itself | C1.4 | facts automatically, laws and decisions by a person, no automatic remediation |
+| 5 | what the loop may correct by itself | C1.4 | **decided 2026-11-07:** facts automatically once a binding's dry run is accepted, laws and decisions by a person, no automatic remediation |
 | 6 | which cloud models and providers (the hybrid approach itself is decided, ADR-52) | L.1 | choose at the first use — a second benchmark judge (L.5) |
 | 7 | a small local model for per-prompt features | C2.7 (only if the world slice needs it) | measure first |
 | 8 | agent predictions | C3.2 | system-made first |
@@ -330,7 +331,7 @@ The open decisions of WM §15, and the phase that cannot start without them:
 | 10 | names of the world tools | C2.8 | — |
 | 11 | bindings proposed from memory | after C1 (manifest and defaults first) | — |
 | 12 | the telemetry store | C4.4 | — |
-| 13 | whether a contradicting late belief is stored | C1.4 | store it as a zero-length interval, with a discrepancy |
+| 13 | whether a contradicting late belief is stored | C1.4 | **decided 2026-11-07:** store it as a zero-length interval, with a discrepancy |
 | 14 | how the new tables travel in COGX | C2.1 | in `--full`'s metadata |
 | 15 | a *Welt* tab or panels in Gedächtnis | C2.9 | — |
 
@@ -363,6 +364,7 @@ The open decisions of WM §15, and the phase that cannot start without them:
 | 2026-10-24 | L | Hybrid language models decided (ADR-52): track L added; decision 6 narrowed to the choice of providers | — |
 | 2026-10-24 | C1, C2, C3 | The project concept checked against Path C (WM §2.3, ADR-53): environments as a third input class; work packages C1.2 and C1.5 widened, C1.12, C1.13 and C3.9 added, C2.1, C2.10 and C3.1 widened | — |
 | 2026-10-24 | — | Deployment reviewed against Path C; two fixes landed at once: the global `owiki` reinstalled as an editable pipx install of the checkout (the old v0.45 one, older than B0, removed), and `docker-compose.yml` publishing on `127.0.0.1` only (`1b12eff`) | — |
+| 2026-11-07 | C0, C1 | C0.6: **go** (WM §18.1) — the criterion holds on every reading, the baselines show a narrow but persistent error class; the user decided 1 (the repository first), 5 (facts corrected automatically only after an accepted dry run) and 13 (a contradicting late belief stored as a zero-length interval and reported). C1's gate met; release numbers moved up by one | C0 ☑ |
 | 2026-10-25 | C0 | C0.5 done (WM §18.1): 410 replayed prompts; 3.3 % of injected facts governed, 65 % of the judged ones stale at the prompt's time, 13.7 % of prompts with a stale governed fact (8 distinct facts, injected again and again); a stale belief lives 0 d for releases (the agent records them), 4 d for the test count (median, up to 58), weeks to months for UI and build facts; 7 still believed today, up to 85 d | C0.5 ☑ |
 | 2026-10-25 | C0, C1 | C0.4 done (WM §18.1): eleven canonical bindings; 18 of 54 reached by 5 (A) or 9 (strict); B9's attribute groups add nothing (2,631 facts in 1,857 groups), so bindings govern by a pattern over the wording — T's reaches 6 of 7 stale test-count facts and 10 current ones, 8 stale today, but over-reaches (≈ 6 of 10 claim the present count) → C1.2 widened: `governs` + `excludes`, a dry run accepted by a person; first slice T, V, latest tag, U, S, C, P (14 of 54 strictly) | C0.4 ☑ |
 | 2026-10-25 | C0 | C0.3 done (WM §18.1): a fresh subagent (A, blind), C0.1's labeler (B) and a second fresh run on 30 (A2) labeled the shuffled sheet of 54 stale + 200 random facts. Agreement A–B 83.5 % (κ 0.77), A–A2 80 % (κ 0.71). Testable share 43.5 % (A) / 38.5 % (B). Stale facts sensor-checkable: 24 / 21 / 18 on the strictest reading, 18 reached with 9 / 7 / 9 bindings — the go threshold holds, only just on the strictest reading | C0.3 ☑ |

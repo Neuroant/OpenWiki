@@ -59,8 +59,8 @@ to the Ableton twin's review (`docs/Digital_Twin_Review.md` in `G:\Antigravity\a
 | **C4** — physical twins | the twin contract on a working twin, then a machine | C3 exit; P; decisions 2, 3, 12 | ☐ | v0.133 + |
 
 **Next actions:** C1's first release, v0.123 (C1.1 sensor types, C1.2 environments and bindings, C1.7 `owiki world
-status` — read-only, nothing written); LoCoMo's guard baseline once its data has a home outside `%TEMP%` (§5). M.2
-landed on 2026-11-07: `owiki eval --guards`, all four cross-session guards green (§5). C0 closed with a **go** on
+status` — read-only, nothing written). M.2 landed on 2026-11-07: `owiki eval --guards`, all five guards green,
+LoCoMo's baseline recorded (§5). C0 closed with a **go** on
 2026-11-07, with the user's decisions 1, 5 and 13 (§6, §12); track O landed in v0.121.0 (§10b), M.1 in v0.122.0
 (§5). The release numbers below are moved up by one against the first plan, since track O took v0.121.
 
@@ -143,8 +143,12 @@ and context), `--record` takes a new baseline after an adopted change. The first
 cross-session 6/8: without a session date the capture model invented dates, and the valid-time merge kept
 "master" after "renamed to main" (fixed: `memory.drop_guessed_dates`), plus a scorer artifact (a correct German
 answer) — then every guard passed: temporal 13/13, poisoning 0/5 leaks and 8/8 kept, cue-trigger 8/8, cross-session
-8/8 (PB §13.37). **Open:** LoCoMo's baseline — the `%TEMP%` cleanup took its data and state, and a baseline must
-live somewhere it persists (the user's call).
+8/8 (PB §13.37). **LoCoMo's baseline** (recorded 2026-11-07; data and state in openwiki-dev's
+`.openwiki/pathc/guards/locomo/`, outside `%TEMP%` — the user's decision): conv-26, 19 sessions captured once (297
+facts), 673 merge checks asked once and recorded, 199 contexts; a rebuild from that state matched all 199 with no
+model call, so the guard is deterministic. J 65.1 % (categories 1–4: single-hop 72.9 %, multi-hop 68.8 %,
+open-domain 53.8 %, temporal 51.4 %; adversarial 83.0 %). About 25 minutes of model time once; a guard run then
+takes 8 seconds (the rebuild from the recorded state), plus answers only for contexts that moved.
 **Exit:** the C0 baseline (C0.5) can be produced by commands in the repository.
 
 ## 6. Phase C0 — Inventory
@@ -382,6 +386,7 @@ The open decisions of WM §15, and the phase that cannot start without them:
 | 2026-10-24 | L | Hybrid language models decided (ADR-52): track L added; decision 6 narrowed to the choice of providers | — |
 | 2026-10-24 | C1, C2, C3 | The project concept checked against Path C (WM §2.3, ADR-53): environments as a third input class; work packages C1.2 and C1.5 widened, C1.12, C1.13 and C3.9 added, C2.1, C2.10 and C3.1 widened | — |
 | 2026-10-24 | — | Deployment reviewed against Path C; two fixes landed at once: the global `owiki` reinstalled as an editable pipx install of the checkout (the old v0.45 one, older than B0, removed), and `docker-compose.yml` publishing on `127.0.0.1` only (`1b12eff`) | — |
+| 2026-11-07 | M | LoCoMo's guard baseline recorded (§5): conv-26 in openwiki-dev's `.openwiki/pathc/guards/locomo/` (the user's decision); a rebuild matched all 199 contexts with no model call (8 s); J 65.1 %. All five guards green on b87d46b | — |
 | 2026-11-07 | M | M.2 done: `owiki eval --guards` — the four cross-session guards run resumably at the code's own defaults; LoCoMo's guard compares rebuilt contexts with a recorded baseline. First run: cross-session 6/8 — undated captures invented dates (fixed, PB §13.37) and a scorer artifact; then all green. LoCoMo's baseline waits for a home for its data | M.2 ☑ |
 | 2026-11-07 | C0, C1 | C0.6: **go** (WM §18.1) — the criterion holds on every reading, the baselines show a narrow but persistent error class; the user decided 1 (the repository first), 5 (facts corrected automatically only after an accepted dry run) and 13 (a contradicting late belief stored as a zero-length interval and reported). C1's gate met; release numbers moved up by one | C0 ☑ |
 | 2026-10-25 | C0 | C0.5 done (WM §18.1): 410 replayed prompts; 3.3 % of injected facts governed, 65 % of the judged ones stale at the prompt's time, 13.7 % of prompts with a stale governed fact (8 distinct facts, injected again and again); a stale belief lives 0 d for releases (the agent records them), 4 d for the test count (median, up to 58), weeks to months for UI and build facts; 7 still believed today, up to 85 d | C0.5 ☑ |

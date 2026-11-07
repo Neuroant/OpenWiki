@@ -1407,6 +1407,12 @@ session date are unchanged — the hooks, `backfill` and LoCoMo always pass one;
 After the fix every guard passed again (table). Caveat: one scenario showed it; how often real undated captures were
 mis-dated is not measured (the live path dates every capture).
 
+**LoCoMo's guard** was recorded the same day on conv-26 — 19 sessions captured once (297 facts), 673 merge checks
+asked once and recorded, 199 contexts. A rebuild from that state with the same code matched all 199 contexts without
+a model call, in 8 seconds, so the guard is deterministic. J 65.1 % (single-hop 72.9 %, multi-hop 68.8 %, open-domain
+53.8 %, temporal 51.4 %; adversarial 83.0 %) — one conversation, a fresh capture, so not comparable to §13.19's 62.9 %
+over all ten.
+
 ### 13.36 Session excerpts on the live path — measured, not adopted
 
 Session search (§13.25, v0.108) left one question open: excerpts next to the facts gave LoCoMo its largest gain

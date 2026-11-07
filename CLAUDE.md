@@ -57,8 +57,7 @@ facts on the strictest reading; bindings govern by a pattern over the wording, n
 baselines: 13.7 % of the replayed prompts got a stale governed fact, a stale test count lives 4 days). C0 closed with
 a **go** on 2026-11-07 (WM §18.1), with the user's decisions 1, 5 and 13 (WM §15: the repository first; facts
 corrected automatically only once a person has accepted a binding's dry run; a contradicting late belief stored,
-never current). No world-model code yet: next is C1 (v0.123 – v0.125); LoCoMo's guard baseline waits for its data to
-get a home outside `%TEMP%`.
+never current). No world-model code yet: next is C1 (v0.123 – v0.125).
 Paths B and C use language models **hybrid** — local where possible, cloud where really needed — while Path A's
 pipeline stays local (ADR-52 amends ADR-2). Projects gain **environments** — a third input class next to sources and
 sessions; twins run as their own processes with OpenWiki as their client (§2.3, ADR-53; `docs/projects.md` Phase 5) —
@@ -398,7 +397,11 @@ moved context is a code change, never noise; answers are kept per question and c
 `--record` takes a new baseline after an adopted change. First run (2026-11-07, 37 scenarios, ~45 min): temporal 13/13,
 poisoning 0/5 leaks and 8/8 kept, cue-trigger 8/8 (answers 6/8, constraints 5/8 — info), cross-session **6/8** →
 undated captures invented dates (fixed: `memory.drop_guessed_dates`) and a scorer artifact → 8/8
-(`docs/path-b-memory.md` §13.37). LoCoMo's baseline is not recorded yet: the `%TEMP%` cleanup took its data and state.
+(`docs/path-b-memory.md` §13.37). **LoCoMo's baseline** (recorded 2026-11-07): conv-26 — 19 sessions, 297 facts, 673
+merge checks, 199 contexts — in openwiki-dev's `.openwiki/pathc/guards/locomo/` (with `locomo10.json`; outside
+`%TEMP%`, whose cleanup took the earlier LoCoMo state; never in a repository — license); a rebuild matched all 199
+contexts with no model call, in 8 s; J 65.1 % (adversarial 83.0 %). Run it with
+`--locomo <project>\.openwiki\pathc\guards\locomo\locomo10.json`.
 
 **Sleep — nightly memory maintenance + forgetting** (Path B++): one schedulable writable pass — fold what
 read-only processes queued (usage + journal) → redact credentials in facts stored before v0.99 → **forget** what the

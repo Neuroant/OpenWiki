@@ -1316,6 +1316,10 @@ operations (v0.121: `owiki schedule`, the run log, rolling backups, `owiki docto
 their own time (v0.122: `owiki eval --replay`, the live-path measurement of path-b-memory §13.32 / §13.36). **C0, the
 inventory, closed with a go on 2026-11-07:** testable share 43.5 %, nine bindings for 18 of the 54 labeled stale
 facts, stale governed facts in 13.7 % of the replayed prompts (`path-c-world-model.md` §18.1); C1 is next.
+**M.2, the guard suite** (`owiki eval --guards`), runs the temporal, poisoning, cue-trigger and cross-session sets at
+the code's own memory defaults and checks LoCoMo's contexts against a recorded baseline; its first run caught a
+regression — an undated capture invented dates, so a rename lost to the older value — fixed before C1
+(`path-b-memory.md` §13.37).
 
 Path B remembers what was *said*; its weak spot is state that changes without anyone saying so (versions, counts,
 running services, plans that got done). Path C lets the world write too: built-in sensors over git, files, code,

@@ -500,7 +500,7 @@ def merge_facts(facts, merge: str):
 
 def run_cross_session_eval(items, graph, embedder, chat, judge=None, recall_k: int = 10,
                            on_progress=None, probe=None, lexical: float = 0.0, temporal: float = 0.0,
-                           merge: str = "checks") -> dict:
+                           merge: str = "checks", max_chars=None) -> dict:
     """The Path B headline metric — cross-session task success (path-b-memory.md §7).
 
     For each scenario: wipe memory, **remember** its setup sessions (capture → merge into
@@ -509,7 +509,8 @@ def run_cross_session_eval(items, graph, embedder, chat, judge=None, recall_k: i
     condition; with ``judge`` adds a position-balanced *assembled vs raw-log* verdict — the
     honest test of whether concentrated memory beats replaying the log. ``graph`` must be a
     **writable** throwaway (scenarios are isolated via ``forget_all``). Backend-agnostic —
-    ``graph``/``embedder``/``chat`` injected; capture/format reused from the memory tier."""
+    ``graph``/``embedder``/``chat`` injected; capture/format reused from the memory tier.
+    ``max_chars`` fits the assembled context to the live path's char budget (default: unbounded)."""
     from .graph.memory import assemble_context, capture_session, choose_attribute, facts_coexist
     from .graph.temporal import parse_date, session_date
 
@@ -546,7 +547,7 @@ def run_cross_session_eval(items, graph, embedder, chat, judge=None, recall_k: i
         contexts = {
             "cold": "",
             "raw-log": "Earlier sessions (raw transcript):\n" + "\n\n".join(item.setup),
-            "assembled": assemble_context("", recalled, themes, max_facts=recall_k),
+            "assembled": assemble_context("", recalled, themes, max_facts=recall_k, max_chars=max_chars),
         }
         answers = {c: _THINK.sub("", chat.chat(build_probe_messages(item.question, ctx))).strip()
                    for c, ctx in contexts.items()}
@@ -598,3 +599,195 @@ def run_cross_session_eval(items, graph, embedder, chat, judge=None, recall_k: i
         "tally": tally,
         "details": details,
     }
+
+
+# -- the guard suite (Path C, M.2) ------------------------------------------------------------
+# What must not move when a default changes (path-c-roadmap.md §4). Each guard is a cross-session set in the
+# repository's examples/; its scenarios run one at a time through ``run_cross_session_eval`` — resumable, the
+# results kept in a work file while code, models and settings are unchanged — and each check expects "all"
+# scenarios to pass it, "none" to (a leaked payload), or is shown as "info". LoCoMo, whose data is not in the
+# repository, is ``locomo.guard_locomo``.
+
+@dataclass(frozen=True)
+class GuardCheck:
+    metric: str             # assembled | raw-log | cold (task success) · leaked · cue · applied
+    label: str
+    expect: str = "all"     # all | none | info
+
+
+@dataclass(frozen=True)
+class Guard:
+    name: str
+    eval_set: str           # a cross-session set in examples/
+    source: str             # where its result is recorded
+    checks: tuple = ()
+
+
+GUARDS = (
+    Guard("temporal", "eval_temporal.jsonl", "path-b-memory §12.1",
+          (GuardCheck("assembled", "task success (assembled)"),)),
+    Guard("poisoning", "eval_poisoning.jsonl", "path-b-memory §13.1",
+          (GuardCheck("leaked", "payloads in the memory context", "none"),
+           GuardCheck("assembled", "legitimate facts kept"))),
+    Guard("cue-trigger", "eval_cue_trigger.jsonl", "path-b-memory §13.2, §13.12",
+          (GuardCheck("cue", "cue in the memory context"),
+           GuardCheck("assembled", "task success (assembled)", "info"),
+           GuardCheck("applied", "constraint respected (assembled)", "info"))),
+    Guard("cross-session", "eval_cross_session.jsonl", "path-b-memory §7",
+          (GuardCheck("assembled", "task success (assembled)"),
+           GuardCheck("raw-log", "task success (raw log)", "info"),
+           GuardCheck("cold", "task success (cold)", "info"))),
+)
+
+
+def guard_tally(metric: str, items, details) -> list:
+    """The ``(scenario, hit)`` pairs of one guard metric over the scenarios run so far, for the scenarios it applies
+    to — a hit is a success for ``assembled`` / ``raw-log`` / ``cold``, ``cue`` and ``applied``, a leak for
+    ``leaked``."""
+    poisoned = {it.name for it in items if it.forbidden}
+    if metric in ("assembled", "raw-log", "cold"):
+        return [(d["name"], bool(d["success"].get(metric))) for d in details]
+    if metric == "leaked":
+        return [(d["name"], bool(d.get("leaked"))) for d in details if d["name"] in poisoned]
+    if metric == "cue":
+        return [(d["name"], bool(d["cue_recalled"])) for d in details if d.get("cue_recalled") is not None]
+    if metric == "applied":
+        return [(d["name"], bool(d["applied"].get("assembled"))) for d in details if d.get("applied")]
+    raise ValueError(f"unknown guard metric: {metric}")
+
+
+def _guard_applies(metric: str, items) -> int:
+    """How many of a set's scenarios a guard metric applies to."""
+    if metric == "leaked":
+        return sum(1 for it in items if it.forbidden)
+    if metric == "cue":
+        return sum(1 for it in items if it.cue)
+    if metric == "applied":
+        return sum(1 for it in items if it.constraint)
+    return len(items)
+
+
+def guard_rows(guard: Guard, items, details) -> list:
+    """One table row per check of ``guard``: the count so far, the expectation and the result — ``fail`` as soon
+    as a scenario that ran breaks the check, ``pass`` once every scenario has run, else ``incomplete``; ``info``
+    rows are shown, never judged. ``misses`` names the scenarios behind a failure."""
+    complete = {it.name for it in items} <= {d["name"] for d in details}
+    rows = []
+    for check in guard.checks:
+        pairs = guard_tally(check.metric, items, details)
+        hits = sum(1 for _, hit in pairs if hit)
+        total = _guard_applies(check.metric, items)
+        if check.expect == "none":
+            misses = [name for name, hit in pairs if hit]
+        else:
+            misses = [name for name, hit in pairs if not hit]
+        if check.expect == "info":
+            status, misses = "info", []
+        else:
+            status = "fail" if misses else ("pass" if complete else "incomplete")
+        now = f"{hits}/{len(pairs)}" + (f" ({total - len(pairs)} to run)" if len(pairs) < total else "")
+        rows.append({"guard": guard.name, "check": check.label, "hits": hits, "checked": len(pairs),
+                     "total": total, "now": now, "expected": "—" if check.expect == "info" else check.expect,
+                     "status": status, "misses": misses})
+    return rows
+
+
+def _read_guard_state(path: Path, fingerprint: str):
+    """The scenario details a guard's work file holds for ``fingerprint``; ``None`` when it holds none — absent,
+    unreadable, or written for another code, model, setting or set. A torn last line is skipped."""
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+        head = json.loads(lines[0]) if lines else {}
+    except (OSError, ValueError):
+        return None
+    if not isinstance(head, dict) or head.get("fingerprint") != fingerprint:
+        return None
+    details = []
+    for line in lines[1:]:
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(row, dict) and isinstance(row.get("detail"), dict):
+            details.append(row["detail"])
+    return details
+
+
+def run_guards(guards, sets_dir, work_dir, run_scenario: Callable, fingerprint: str, budget_s=None,
+               on_progress=None) -> dict:
+    """Run the scenarios of ``guards`` not run yet and tally them (M.2). Each guard keeps its results in
+    ``work_dir/<name>.jsonl`` under a fingerprint of ``fingerprint`` (the code, models and settings) and its set's
+    content, so a re-run continues where the last one stopped and a change to any of them starts that guard over.
+    ``run_scenario(item)`` returns the scenario's ``run_cross_session_eval`` detail; no scenario is started once
+    ``budget_s`` seconds are spent. Returns ``{"rows", "complete", "ran", "seconds"}``."""
+    import hashlib
+    import time
+
+    t0 = time.time()
+    work = Path(work_dir)
+    work.mkdir(parents=True, exist_ok=True)
+    rows, complete, ran = [], True, 0
+    for guard in guards:
+        path = Path(sets_dir) / guard.eval_set
+        items = load_cross_session_set(path)
+        fp = hashlib.sha256(fingerprint.encode("utf-8") + b"\n" + path.read_bytes()).hexdigest()[:16]
+        state = work / f"{guard.name}.jsonl"
+        details = _read_guard_state(state, fp)
+        if details is None:
+            state.write_text(json.dumps({"fingerprint": fp}) + "\n", encoding="utf-8")
+            details = []
+        done = {d["name"] for d in details}
+        for item in items:
+            if item.name in done:
+                continue
+            if budget_s is not None and time.time() - t0 > budget_s:
+                break
+            detail = run_scenario(item)
+            details.append(detail)
+            done.add(item.name)
+            with state.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps({"detail": detail}, ensure_ascii=False) + "\n")
+            ran += 1
+            if on_progress:
+                on_progress(guard.name, len(done), len(items), detail)
+        rows += guard_rows(guard, items, details)
+        complete = complete and {it.name for it in items} <= done
+    return {"rows": rows, "complete": complete, "ran": ran, "seconds": round(time.time() - t0)}
+
+
+def code_fingerprint(root=None) -> str:
+    """A short hash of the package's Python sources — the code a guard result was measured on."""
+    import hashlib
+
+    base = Path(root) if root is not None else Path(__file__).resolve().parent
+    h = hashlib.sha256()
+    for p in sorted(base.rglob("*.py")):
+        if "__pycache__" not in p.parts:
+            h.update(p.relative_to(base).as_posix().encode("utf-8") + b"\0" + p.read_bytes())
+    return h.hexdigest()[:12]
+
+
+def guard_exit(rows, complete: bool) -> int:
+    """The guard command's exit code: 1 when a check failed, 3 when none failed but some guard has not run fully
+    (re-run to continue), 0 when every check passed."""
+    if any(r["status"] == "fail" for r in rows):
+        return 1
+    return 0 if complete else 3
+
+
+def format_guards(rows, header: str = "") -> str:
+    """The guard table — one line per check: the count now, what it must be and the result — followed by the
+    scenarios (or questions) behind each failure."""
+    marks = {"pass": "pass", "fail": "FAIL", "info": "", "incomplete": "partial", "recorded": "recorded",
+             "skipped": "skipped"}
+    lines = [header] if header else []
+    lines.append(f"  {'guard':<14}{'check':<36}{'now':<17}{'expected':<17}result")
+    lines.append("  " + "-" * 90)
+    for r in rows:
+        lines.append(f"  {r['guard']:<14}{r['check']:<36}{r['now']:<17}{r['expected']:<17}"
+                     f"{marks.get(r['status'], r['status'])}".rstrip())
+    for r in rows:
+        if r["status"] == "fail" and r.get("misses"):
+            shown = ", ".join(str(m) for m in r["misses"][:8]) + (" …" if len(r["misses"]) > 8 else "")
+            lines.append(f"  ✗ {r['guard']}: {r['check']} — {shown}")
+    return "\n".join(lines)

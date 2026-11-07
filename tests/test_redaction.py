@@ -121,7 +121,7 @@ def test_capture_never_shows_a_credential_to_the_model():
     transcript = f"User: here is the key {FAKE['anthropic_key']} — keep it in .env\nAssistant: noted."
     kept, dropped = capture_session_detailed(chat, transcript, report=report)
     assert FAKE["anthropic_key"] not in chat.seen[0] and policy.REDACTED in chat.seen[0]
-    assert report == {"redacted": 1} and [f.object for f in kept] == [".env"] and not dropped
+    assert report["redacted"] == 1 and [f.object for f in kept] == [".env"] and not dropped
 
 
 def test_journal_never_stores_a_credential(tmp_path):

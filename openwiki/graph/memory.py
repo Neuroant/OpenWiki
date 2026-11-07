@@ -366,6 +366,24 @@ def is_secret_only(fact) -> bool:
     return any(str(getattr(fact, n)).strip(" '\"`") == REDACTED for n in ("subject", "object"))
 
 
+def drop_guessed_dates(facts, transcript: str) -> tuple:
+    """Capture of a session **without a date**: the model dates facts anyway — measured on the guard suite (M.2),
+    "default branch is master" got 2023-10-01 and "renamed to main" 2023-09-01, so the valid-time merge kept
+    master. With no session date nothing relative can be resolved, so a ``valid_from`` stands only when the
+    transcript states its year; the others are dropped (the fact is then valid from when it is recorded).
+    Returns ``(facts, how many dates were dropped)``."""
+    from dataclasses import replace
+
+    from .temporal import format_date
+
+    kept, dropped = [], 0
+    for f in facts:
+        if f.valid_from is not None and format_date(f.valid_from)[:4] not in transcript:
+            f, dropped = replace(f, valid_from=None), dropped + 1
+        kept.append(f)
+    return kept, dropped
+
+
 def capture_session_detailed(chat, transcript: str, session_date: Optional[int] = None,
                              audit: bool = False, style: str = "durable", report=None) -> tuple:
     """B2 capture + **P0 scrubbing** → ``(kept, dropped)``: the security-sensitive rule policy
@@ -374,11 +392,16 @@ def capture_session_detailed(chat, transcript: str, session_date: Optional[int] 
     of the injections and dropped two legitimate facts, the user's own "answer me in German" and a
     decision), kept only for experiments, like the re-rank add-on. **Credentials are redacted from
     the transcript before the model sees it** (v0.99) — a pasted key can't become a fact; ``report``
-    (a dict) receives ``"redacted"``, how many."""
+    (a dict) receives ``"redacted"``, how many. Without a ``session_date``, dates the transcript doesn't state are
+    dropped (:func:`drop_guessed_dates`; ``report["guessed_dates"]``)."""
     transcript, redacted = redact_secrets(transcript)
     if report is not None:
         report["redacted"] = len(redacted)
     facts = parse_facts(chat.chat(build_capture_messages(transcript, session_date, style)))
+    if session_date is None:
+        facts, guessed = drop_guessed_dates(facts, transcript)
+        if report is not None:
+            report["guessed_dates"] = guessed
     flagged = {i for i, f in enumerate(facts) if is_unsafe_instruction(f)}
     if audit and facts:
         try:

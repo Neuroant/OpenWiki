@@ -158,6 +158,25 @@ def test_capture_resolves_relative_event_dates_but_never_defaults_one():
     assert "never guess" in system
 
 
+def test_an_undated_capture_keeps_only_the_dates_its_transcript_states():
+    """The guard suite (M.2) found it: without a session date the model dated "master" 2023-10-01 and "renamed to
+    main" 2023-09-01, so the valid-time merge kept master. A date stands only when its year is in the transcript."""
+    from openwiki.graph.memory import capture_session_detailed, drop_guessed_dates
+
+    class _Chat:
+        def chat(self, messages):
+            return ('[{"subject":"default branch","predicate":"is","object":"main","valid_from":"2023-09-01"},'
+                    ' {"subject":"port","predicate":"is","object":"9000","valid_from":"2025-09-16"}]')
+    talk = "User: We renamed the branch to main. Since 2025-09-16 the port is 9000."
+    report = {}
+    kept, dropped = capture_session_detailed(_Chat(), talk, report=report)
+    assert [f.valid_from for f in kept] == [None, T("2025-09-16")] and dropped == []
+    assert report["guessed_dates"] == 1
+    dated, _ = capture_session_detailed(_Chat(), talk, session_date=T("2025-10-01"), report=report)
+    assert dated[0].valid_from == T("2023-09-01")             # with a session date the model's dates stand
+    assert drop_guessed_dates([MemoryFact("a", "b", "c")], "") == ([MemoryFact("a", "b", "c")], 0)
+
+
 def test_journal_remember_record_carries_b7_fields(tmp_path):
     jp = tmp_path / "g.journal.jsonl"
     facts = [MemoryFact("a", "b", "c"),

@@ -35,6 +35,8 @@ SESSION_TYPE = "session"
 DEFAULT_EMBED = "bge-m3"
 DEFAULT_CHAT = "qwen3:30b-a3b-instruct-2507-q4_K_M"
 DEFAULT_HOST = "http://localhost:11434"
+DEFAULT_CONTEXT_BUDGET = 3000         # [memory] context_budget — chars of an assembled memory context (v0.96)
+DEFAULT_CONTEXT_K = 16                # [memory] context_k — facts recalled into it (v0.96, path-b-memory §13.12)
 
 
 @dataclass(frozen=True)
@@ -129,9 +131,9 @@ class Project:
         auto-inject hook / `wiki_memory` put into a prompt. ``[memory] context_budget``, else 3000
         (v0.96: 2000 → 3000 so the larger ``context_k`` fits next to identity + themes)."""
         try:
-            return max(0, int(self.setting("memory", "context_budget", 3000)))
+            return max(0, int(self.setting("memory", "context_budget", DEFAULT_CONTEXT_BUDGET)))
         except (TypeError, ValueError):
-            return 3000
+            return DEFAULT_CONTEXT_BUDGET
 
     @property
     def context_k(self) -> int:
@@ -139,9 +141,9 @@ class Project:
         `wiki_memory`, `context` and the web context box. ``[memory] context_k``, else 16 (v0.96:
         8 → 16, measured on the live path — path-b-memory.md §13.12)."""
         try:
-            return max(1, int(self.setting("memory", "context_k", 16)))
+            return max(1, int(self.setting("memory", "context_k", DEFAULT_CONTEXT_K)))
         except (TypeError, ValueError):
-            return 16
+            return DEFAULT_CONTEXT_K
 
     @property
     def agent_writes(self) -> bool:

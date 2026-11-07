@@ -1284,6 +1284,8 @@ fact lives until someone says otherwise —, with C1 it should not exceed one se
 
 **Guards** (must not move): the temporal set at 13 / 13; the poisoning set at 0 / 5 leaks with 8 / 8 legitimate facts
 kept; the cross-session and cue-trigger sets; LoCoMo overall J — LoCoMo has no sensors, so any change there is a bug.
+`owiki eval --guards` runs them (M.2); for LoCoMo it checks more than J — every question's context, rebuilt from
+frozen captures, must equal the recorded baseline.
 
 ## 14. Risks & guardrails
 

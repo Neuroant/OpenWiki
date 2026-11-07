@@ -385,3 +385,197 @@ def run_locomo(conversations, work_dir, open_graph: Callable, embedder, chat, ju
         records += [r for r in answers.values() if r["category"] in cats]
     return {"complete": complete, "records": records, "summary": summarize(records),
             "seconds": round(time.time() - t0)}
+
+
+# -- the LoCoMo guard (Path C, M.2) -----------------------------------------------------
+# LoCoMo has no sensors, so a Path C change must not move what any of its questions gets to see
+# (path-c-roadmap.md §4). The guard freezes what is slow and noisy — the capture, the merge's model checks,
+# the embeddings — and rebuilds the memory from it with the current code on every run: a context that differs
+# from the recorded baseline is a change in the code, never noise. Answers are kept per (question, context),
+# so J is paired by construction — an unchanged context keeps its answer.
+
+class RecordedChecks:
+    """The merge's model checks (``coexist`` / ``resolve``) with every answer kept in a JSONL file: a later run
+    asks the model only what no run asked before (``asked`` counts those), so the same captures and the same
+    code rebuild the same memory."""
+
+    def __init__(self, path, coexist=None, resolve=None) -> None:
+        self.path = Path(path)
+        self._checks = {"coexist": coexist, "resolve": resolve}
+        self.answers: dict = {}
+        self.asked = 0
+        for row in _read_jsonl(self.path):
+            self.answers[(row["kind"], json.dumps(row["args"], ensure_ascii=False))] = row["answer"]
+
+    def _ask(self, kind: str, args: list, call: Callable):
+        key = (kind, json.dumps(args, ensure_ascii=False))
+        if key not in self.answers:
+            answer = call()                       # a failed call raises — nothing is recorded
+            self.answers[key] = answer
+            self.asked += 1
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            with self.path.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps({"kind": kind, "args": args, "answer": answer}, ensure_ascii=False) + "\n")
+        return self.answers[key]
+
+    @property
+    def coexist(self):
+        check = self._checks["coexist"]
+        if check is None:
+            return None
+        return lambda older, newer, subjects=None: self._ask(
+            "coexist", [older, newer, list(subjects) if subjects else None],
+            lambda: bool(check(older, newer, subjects=subjects)))
+
+    @property
+    def resolve(self):
+        check = self._checks["resolve"]
+        if check is None:
+            return None
+        return lambda fact, labels: self._ask("resolve", [fact, list(labels)], lambda: check(fact, labels))
+
+
+def _write_jsonl(path: Path, rows) -> None:
+    tmp = path.with_name(path.name + ".partial")
+    tmp.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows), encoding="utf-8")
+    tmp.replace(path)
+
+
+def _context_hash(text: str) -> str:
+    import hashlib
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+
+def _guard_row(check: str, now: str, expected: str, status: str, misses=()) -> dict:
+    return {"guard": "locomo", "check": check, "now": now, "expected": expected, "status": status,
+            "misses": list(misses)}
+
+
+def guard_locomo(conversations, work_dir, open_graph: Callable, embedder, chat, judge=None, coexist=None,
+                 resolve=None, recall_k: int = 20, lexical: float = 0.0, temporal: float = 0.0,
+                 answer_style: str = "infer", budget_s: Optional[float] = None, record: bool = False,
+                 code: str = "", on_progress: Optional[Callable] = None) -> dict:
+    """The LoCoMo guard. Per conversation, in ``work_dir/<sample_id>/``: capture each session once
+    (``captured.jsonl`` — chat only, frozen from then on), rebuild the memory from those captures into a fresh graph
+    (``open_graph(path)`` returns it writable and empty) with the merge's model checks answered from
+    ``checks.jsonl`` where asked before (``RecordedChecks``) and the vectors from ``embeddings.npz``, assemble every
+    question's context as ``run_locomo`` does and compare it with the baseline — ``baseline.jsonl``, written by the
+    first complete run or with ``record`` (the one it replaces kept under its date). Then each question whose
+    context has no answer yet is answered and judged (``answers.jsonl``, keyed by question, context, model and
+    answer style) while ``budget_s`` lasts. Returns ``{"rows", "complete", "seconds"}`` — rows for
+    ``eval.format_guards``."""
+    from .graph.memory import MemoryFact, assemble_context, capture_session
+
+    t0 = time.time()
+    over = (lambda: budget_s is not None and time.time() - t0 > budget_s)
+    model = getattr(chat, "name", "")
+    rows, complete = [], True
+    for conv in conversations:
+        cdir = Path(work_dir) / conv.sample_id
+        cdir.mkdir(parents=True, exist_ok=True)
+        label = f"contexts unchanged ({conv.sample_id})"
+        cap_path = cdir / "captured.jsonl"
+        captured = {r["sid"]: r["facts"] for r in _read_jsonl(cap_path)}
+        for s in conv.sessions:                                            # 1. capture, once (chat only)
+            if s.sid in captured or over():
+                continue
+            facts = _retry(lambda: capture_session(chat, s.text, session_date=s.date))
+            captured[s.sid] = [[f.subject, f.predicate, f.object, f.valid_from, f.cardinality, f.source]
+                               for f in facts]
+            with cap_path.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps({"sid": s.sid, "facts": captured[s.sid]}, ensure_ascii=False) + "\n")
+            if on_progress:
+                on_progress(f"{conv.sample_id}: captured {len(captured)}/{len(conv.sessions)} sessions")
+        n_sessions = len(conv.sessions)
+        left = sum(1 for s in conv.sessions if s.sid not in captured)
+        if left or over():
+            rows.append(_guard_row(label, f"{n_sessions - left}/{n_sessions} captured", "all", "incomplete"))
+            complete = False
+            continue
+        emb = CachingEmbedder(embedder)
+        emb.load(cdir / "embeddings.npz")
+        checks = RecordedChecks(cdir / "checks.jsonl", coexist, resolve)
+        as_facts = {sid: [MemoryFact(t[0], t[1], t[2], valid_from=t[3], cardinality=t[4] or "one", source=t[5])
+                          for t in held] for sid, held in captured.items()}
+        contexts, rebuilt = [], True
+        graph = open_graph(cdir / "guard-graph")                           # 2. rebuild with this code
+        try:
+            emb.warm(docs=[f.text() for s in conv.sessions for f in as_facts[s.sid]])
+            for n, s in enumerate(conv.sessions, 1):
+                if over():
+                    rebuilt = False
+                    break
+                graph.remember(s.sid, as_facts[s.sid], emb, session_date=s.date, coexist=checks.coexist,
+                               resolve=checks.resolve)
+                if on_progress and (n % 5 == 0 or n == n_sessions):
+                    on_progress(f"{conv.sample_id}: rebuilt {n}/{n_sessions} sessions "
+                                f"({checks.asked} model check(s) asked anew)")
+            if rebuilt:                                                    # 3. every question's context
+                emb.warm(queries=[q.question for q in conv.qa])
+                for q in conv.qa:
+                    hits = graph.recall(q.question, emb, k=recall_k, now=conv.present, lexical=lexical,
+                                        temporal=temporal)
+                    contexts.append(assemble_context("", hits, [], max_facts=recall_k))
+        finally:
+            graph.close()
+            emb.save(cdir / "embeddings.npz")
+        if not rebuilt:
+            rows.append(_guard_row(label, "rebuild stopped", "all", "incomplete"))
+            complete = False
+            continue
+        hashes = [_context_hash(c) for c in contexts]
+        _write_jsonl(cdir / "contexts.jsonl", [{"i": i, "ctx": h, "context": c}
+                                               for i, (h, c) in enumerate(zip(hashes, contexts))])
+        base_path = cdir / "baseline.jsonl"
+        base = _read_jsonl(base_path)
+        recorded = record or not base
+        if recorded:                                                       # 4. the baseline: first run, --record
+            if base:
+                stamp = re.sub(r"[^0-9TZ]", "", str(base[0].get("recorded") or "")) or "old"
+                base_path.replace(cdir / f"baseline-{stamp}.jsonl")
+            head = {"recorded": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "code": code,
+                    "settings": {"recall_k": recall_k, "lexical": lexical, "temporal": temporal,
+                                 "embedder": emb.name, "model": model}, "questions": len(conv.qa)}
+            base = [head] + [{"i": i, "category": q.category, "ctx": h, "context": c}
+                             for i, (q, h, c) in enumerate(zip(conv.qa, hashes, contexts))]
+            _write_jsonl(base_path, base)
+        base_rows = {r["i"]: r for r in base[1:]}
+        changed = [i for i, h in enumerate(hashes) if (base_rows.get(i) or {}).get("ctx") != h]
+        ans_path = cdir / "answers.jsonl"                                  # 5. answers, per (question, context)
+        answers = {(r["i"], r["ctx"]): r for r in _read_jsonl(ans_path)
+                   if r.get("model") == model and r.get("style") == answer_style}
+        todo = [(i, hashes[i], contexts[i]) for i in range(len(conv.qa))]
+        todo += [(i, base_rows[i]["ctx"], base_rows[i].get("context") or "") for i in changed if i in base_rows]
+        for i, h, ctx in todo:
+            if (i, h) in answers:
+                continue
+            if over():
+                break
+            q = conv.qa[i]
+            raw = _retry(lambda: chat.chat(build_answer_messages(q.question, ctx, answer_style))) or ""
+            pred = re.sub(r"<think>.*?</think>", "", raw, flags=re.S).strip()
+            ok = (abstains(pred) if q.category == 5
+                  else _retry(lambda: judge_answer(judge or chat, q.question, q.answer, pred)))
+            answers[(i, h)] = {"i": i, "ctx": h, "model": model, "style": answer_style, "category": q.category,
+                               "prediction": pred, "f1": round(f1(pred, q.answer), 4), "j": bool(ok)}
+            with ans_path.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(answers[(i, h)], ensure_ascii=False) + "\n")
+            if on_progress and len(answers) % 20 == 0:
+                on_progress(f"{conv.sample_id}: {len(answers)} answer(s) kept")
+        main = [i for i, q in enumerate(conv.qa) if q.category in (1, 2, 3, 4)]
+
+        def j_rate(keys):
+            got = [answers[k] for k in keys if k in answers]
+            return (sum(1 for r in got if r["j"]) / len(got) if got and len(got) == len(keys) else None), len(got)
+
+        j_now, n_now = j_rate([(i, hashes[i]) for i in main])
+        j_base, _ = j_rate([(i, base_rows[i]["ctx"]) for i in main if i in base_rows])
+        status = "recorded" if recorded else ("fail" if changed else "pass")
+        rows.append(_guard_row(label, f"{len(conv.qa) - len(changed)}/{len(conv.qa)}", "all", status,
+                               [f"q{i}" for i in changed]))
+        rows.append(_guard_row(f"merge checks asked anew ({conv.sample_id})", str(checks.asked), "—", "info"))
+        rows.append(_guard_row(f"J, categories 1-4 ({conv.sample_id})",
+                               f"{j_now:.1%}" if j_now is not None else f"{n_now}/{len(main)} answered",
+                               f"baseline {j_base:.1%}" if j_base is not None else "—", "info"))
+        complete = complete and j_now is not None and j_base is not None
+    return {"rows": rows, "complete": complete, "seconds": round(time.time() - t0)}

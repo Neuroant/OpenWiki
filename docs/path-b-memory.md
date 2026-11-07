@@ -1370,6 +1370,43 @@ the live context — the hooks assemble k = 8 within a 2,000-character budget, a
 suggests trying a larger k there, measured on that path (→ §13.12). LoCoMo now: **overall J 60.7 %** with a local
 30B (Mem0 reports ≈ 67 % with GPT-4o-mini — and both are generous-judge numbers).
 
+### 13.37 The guard suite's first run — an undated capture invented dates (M.2, v0.123)
+
+Path C's guard suite (`owiki eval --guards`, `path-c-roadmap.md` M.2) runs the four cross-session sets at the code's
+own memory defaults — k 16, a 3,000-character budget, lexical 0.2, window 0.1, the live path's — one scenario at a
+time and resumable, and compares each with what it must be. The cross-session set (§7) had lived only in the
+Informatik project; it moved into `examples/` with the other three. First run, qwen3 30B and bge-m3, 37 scenarios in
+about 45 minutes of foreground chunks:
+
+| guard | check | must be | first run | after the fix |
+|---|---|---|---|---|
+| temporal | task success (assembled) | all | 13/13 | 13/13 |
+| poisoning | payloads in the memory context · legitimate facts kept | none · all | 0/5 · 8/8 | 0/5 · 8/8 |
+| cue-trigger | cue in the memory context (answers · constraint respected: info) | all | 8/8 (6/8 · 5/8) | 8/8 (6/8 · 5/8) |
+| cross-session | task success (assembled) | all | **6/8** | **8/8** |
+
+Cue-trigger's info rows are §13.12's level (12/16 over two passes) with the same two answer-side misses
+(`state-deep-work`, `goal-dog`: the cue in the context, the answer ignoring it). The cross-session set was last
+recorded at 8/8 with B6 (v0.52); its two misses had two causes:
+
+- **`comment-language`** — a scorer artifact. The scenario asks for answers in German, and both the assembled and the
+  raw-log answer said, correctly, "auf **Englisch**"; the expected substring was "English". The set now accepts
+  `English|Englisch`.
+- **`changed-branch`** — a real miss: "we renamed the default branch from master to main", and the memory answered
+  `master`. None of the set's sessions is dated, and without a "Session date:" line the capture model dated the facts
+  anyway — the same in two runs: "default git branch | is | master" **2023-10-01**, "… | is renamed to | main"
+  **2023-09-01**. B9 grouped the two wordings, and B7's valid-time merge closed `main` as the older value. The prompt
+  says "never guess"; the model supplies a date when it has none. It came in with B7's stated dates (v0.81), after
+  the set's last run; the temporal set leaves 1 of its 23 sessions undated and never met the case.
+
+**Fixed:** `memory.drop_guessed_dates` — a capture without a session date keeps a stated date only when the
+transcript states its year (with no session date nothing relative can be resolved); the others are dropped, and the
+fact is valid from when it is recorded (`capture_session_detailed(report=)` → `"guessed_dates"`). Captures with a
+session date are unchanged — the hooks, `backfill` and LoCoMo always pass one; `owiki remember` without
+`--session-date` or a date in the session id, the build's session sources without one, and the eval sets did not.
+After the fix every guard passed again (table). Caveat: one scenario showed it; how often real undated captures were
+mis-dated is not measured (the live path dates every capture).
+
 ### 13.36 Session excerpts on the live path — measured, not adopted
 
 Session search (§13.25, v0.108) left one question open: excerpts next to the facts gave LoCoMo its largest gain

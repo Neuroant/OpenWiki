@@ -12,6 +12,7 @@ import json
 import time
 import urllib.error
 import urllib.request
+from pathlib import Path
 from typing import Protocol, Sequence, runtime_checkable
 
 import numpy as np
@@ -133,3 +134,44 @@ class CachingEmbedder:
     def embed_query(self, text):
         self.warm(queries=[text])
         return self._queries[text]
+
+    def save(self, path) -> None:
+        """Write every vector held to ``path`` (a ``.npz``), so a later run can ``load`` them and ask the model
+        only for texts it never embedded — the same text gets the same vector across runs (the LoCoMo guard)."""
+        import os
+
+        import numpy as np
+
+        def stack(held: dict) -> np.ndarray:
+            return (np.vstack([np.asarray(v, dtype=np.float32) for v in held.values()]) if held
+                    else np.zeros((0, 0), dtype=np.float32))
+
+        p = Path(path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        meta = json.dumps({"name": self.name, "docs": list(self._docs), "queries": list(self._queries)},
+                          ensure_ascii=False)
+        tmp = p.with_name(p.stem + ".partial.npz")
+        np.savez(tmp, meta=np.array([meta]), docs=stack(self._docs), queries=stack(self._queries))
+        os.replace(tmp, p)
+
+    def load(self, path) -> int:
+        """Take the vectors a ``save`` wrote for this embedder (none when ``path`` is absent, unreadable or another
+        model's); returns how many."""
+        import numpy as np
+
+        p = Path(path)
+        if not p.is_file():
+            return 0
+        try:
+            with np.load(p, allow_pickle=False) as z:
+                meta = json.loads(str(z["meta"][0]))
+                docs, queries = z["docs"], z["queries"]
+        except (OSError, ValueError, KeyError, IndexError):
+            return 0
+        if meta.get("name") != self.name:
+            return 0
+        for t, v in zip(meta.get("docs") or [], docs):
+            self._docs.setdefault(t, v)
+        for t, v in zip(meta.get("queries") or [], queries):
+            self._queries.setdefault(t, v)
+        return len(meta.get("docs") or []) + len(meta.get("queries") or [])

@@ -48,7 +48,7 @@ to the Ableton twin's review (`docs/Digital_Twin_Review.md` in `G:\Antigravity\a
 
 | Phase | Goal | Gate | Status | Releases (planned) |
 |---|---|---|---|---|
-| **M** — measurement harness | replay real prompts at their own time, in the repository; one guard command | — | ◐ M.1, M.3 ☑ | v0.122.0 (M.1); M.3 and M.2 with C1's first release, v0.123 |
+| **M** — measurement harness | replay real prompts at their own time, in the repository; one guard command | — | ☑ M.1 – M.3 | v0.122.0 (M.1); M.2 and M.3 with C1's first release, v0.123 |
 | **C0** — inventory | is enough of the memory observable to build C1? | M.1 | ☑ **go** (2026-11-07) | docs only |
 | **C1** — observe, don't remember | observable state right by construction | C0 go ✓; decisions 5, 13 ✓ | ☐ next | v0.123 – v0.125 |
 | **C2** — laws, drift, world slice | rules and decisions checkable; context built around what a prompt touches | C1 exit; decisions 10, 14, 15 | ☐ | v0.126 – v0.129 |
@@ -58,10 +58,11 @@ to the Ableton twin's review (`docs/Digital_Twin_Review.md` in `G:\Antigravity\a
 | **O** — operations | scheduled tasks, a health check, a saved run log, rolling backups — for Path B now, and the loop's home between sessions (ADR-54) | — (parallel) | ☑ O.1 – O.4 (twin checks with C2) | v0.121.0 |
 | **C4** — physical twins | the twin contract on a working twin, then a machine | C3 exit; P; decisions 2, 3, 12 | ☐ | v0.133 + |
 
-**Next actions:** M.2 (the guard suite) → C1's first release, v0.123 (C1.1 sensor types, C1.2 environments and
-bindings, C1.7 `owiki world status` — read-only, nothing written). C0 closed with a **go** on 2026-11-07, with the
-user's decisions 1, 5 and 13 (§6, §12); track O landed in v0.121.0 (§10b), M.1 in v0.122.0 (§5). The release
-numbers below are moved up by one against the first plan, since track O took v0.121.
+**Next actions:** C1's first release, v0.123 (C1.1 sensor types, C1.2 environments and bindings, C1.7 `owiki world
+status` — read-only, nothing written); LoCoMo's guard baseline once its data has a home outside `%TEMP%` (§5). M.2
+landed on 2026-11-07: `owiki eval --guards`, all four cross-session guards green (§5). C0 closed with a **go** on
+2026-11-07, with the user's decisions 1, 5 and 13 (§6, §12); track O landed in v0.121.0 (§10b), M.1 in v0.122.0
+(§5). The release numbers below are moved up by one against the first plan, since track O took v0.121.
 
 ## 3. Dependencies
 
@@ -93,7 +94,8 @@ numbers below are moved up by one against the first plan, since track O took v0.
   (`examples/eval_temporal.jsonl`), the poisoning set 0 / 5 leaks with 8 / 8 legitimate facts kept
   (`examples/eval_poisoning.jsonl`), the cue-trigger set (`examples/eval_cue_trigger.jsonl`), the cross-session
   conditions (`owiki eval --cross-session`), and a LoCoMo subset — LoCoMo has no sensors, so any change there is a bug.
-  LoCoMo's data and state live outside the repository (license; check `%TEMP%` before a run).
+  LoCoMo's data and state live outside the repository (license; check `%TEMP%` before a run). `owiki eval --guards`
+  runs them all (M.2).
 - **Schema:** new tables are always created, empty until used (ADR-7), migrated lazily on old graphs (as
   `_ensure_memory_schema` does), carried by B0's snapshot / restore, and — decision 14 — by `memory export --full`.
 - **Concurrency:** readers hold the graph per call (`LazyGraph`), writers plan read-only and lock only to apply, queued
@@ -118,7 +120,7 @@ were never stored with it.
 | WP | Tasks | Touches | Tests | Effort | Status |
 |---|---|---|---|---|---|
 | **M.1 — the replay harness** | Replay the real prompts of a Claude Code transcript at their own time: for each prompt, the memory as it stood (recall with `as_of` = the prompt's time minus a capture lag, `now` = the prompt's time) on a scratch copy of a graph; write each prompt's injected context, the recalled facts and their parts as JSONL. Options: `--lag`, `--since/--until`, `--limit`, `--out`. Optional blind-judge pass (shuffled facts, the judge's verdicts in a separate file) — the local judge, or a cloud judge once track L is in (L.5). Entry point: `owiki eval --replay TRANSCRIPT`. | `openwiki/replay.py` (new), `cli.py`, `sessions.py` (turns), `GraphStore.context_for(report=)` | fake graph + fake transcript, time handling, lag | M | ☑ |
-| **M.2 — the guard suite** | One command that runs every guard of §4 and prints a pass / fail table: `owiki eval --guards`. | `eval.py`, `cli.py` | fakes for the runner; the live run is manual | S | ☐ |
+| **M.2 — the guard suite** | One command that runs every guard of §4 and prints a pass / fail table: `owiki eval --guards`. | `eval.py`, `cli.py` | fakes for the runner; the live run is manual | S | ☑ |
 | **M.3 — private label files** | A JSONL format for hand labels (`{"id", "label", "route", "binding", "note"}`) kept in the project, not the repository (`<project>/.openwiki/pathc/`); a loader for the measurement scripts. | `openwiki/replay.py` | format round-trip | S | ☑ |
 
 **Landed:** M.1 in v0.122.0 — `openwiki/replay.py`, `owiki eval --replay` (snapshot, `--lag`, `--since/--until`,
@@ -127,6 +129,22 @@ dev memory: 20 prompts in under a minute, no shown fact dated after its cut; the
 helpful (ranks 1–4: 40.9 %), in line with PB §13.36. Found while checking: facts backfilled before v0.85 are dated at
 their day's midnight, so the first prompts of such a day see that day's facts — `--lag 24` for those days, or C0.5
 reports it.
+**Landed:** M.2 on 2026-11-07 (in `main`, released with v0.123) — `owiki eval --guards [NAME …]`: the temporal,
+poisoning, cue-trigger and cross-session sets of `examples/` (the last moved there from the Informatik project) at
+the code's own memory defaults (k 16, budget 3,000, lexical 0.2, window 0.1), one scenario at a time through the
+cross-session harness, kept in `<project>/.openwiki/pathc/guards/` under a fingerprint of the code, the models, the
+settings and the set — a re-run continues, a change starts that guard over; `--time-budget` stops cleanly; exit 1
+on a failure, 3 while a guard has not run fully (`eval.GUARDS`, `run_guards`, `guard_rows`, `format_guards`).
+LoCoMo's guard (`--locomo`, the first `--conversations`) is stricter than J: the capture is frozen, the merge's
+model checks and the embeddings are recorded (`locomo.RecordedChecks`, `CachingEmbedder.save` / `load`), the
+memory is rebuilt with the current code every run, and every question's assembled context must equal the recorded
+baseline — a moved context is a code change, never noise; J is paired by construction (answers kept per question
+and context), `--record` takes a new baseline after an adopted change. The first run found a real regression —
+cross-session 6/8: without a session date the capture model invented dates, and the valid-time merge kept
+"master" after "renamed to main" (fixed: `memory.drop_guessed_dates`), plus a scorer artifact (a correct German
+answer) — then every guard passed: temporal 13/13, poisoning 0/5 leaks and 8/8 kept, cue-trigger 8/8, cross-session
+8/8 (PB §13.37). **Open:** LoCoMo's baseline — the `%TEMP%` cleanup took its data and state, and a baseline must
+live somewhere it persists (the user's call).
 **Exit:** the C0 baseline (C0.5) can be produced by commands in the repository.
 
 ## 6. Phase C0 — Inventory
@@ -364,6 +382,7 @@ The open decisions of WM §15, and the phase that cannot start without them:
 | 2026-10-24 | L | Hybrid language models decided (ADR-52): track L added; decision 6 narrowed to the choice of providers | — |
 | 2026-10-24 | C1, C2, C3 | The project concept checked against Path C (WM §2.3, ADR-53): environments as a third input class; work packages C1.2 and C1.5 widened, C1.12, C1.13 and C3.9 added, C2.1, C2.10 and C3.1 widened | — |
 | 2026-10-24 | — | Deployment reviewed against Path C; two fixes landed at once: the global `owiki` reinstalled as an editable pipx install of the checkout (the old v0.45 one, older than B0, removed), and `docker-compose.yml` publishing on `127.0.0.1` only (`1b12eff`) | — |
+| 2026-11-07 | M | M.2 done: `owiki eval --guards` — the four cross-session guards run resumably at the code's own defaults; LoCoMo's guard compares rebuilt contexts with a recorded baseline. First run: cross-session 6/8 — undated captures invented dates (fixed, PB §13.37) and a scorer artifact; then all green. LoCoMo's baseline waits for a home for its data | M.2 ☑ |
 | 2026-11-07 | C0, C1 | C0.6: **go** (WM §18.1) — the criterion holds on every reading, the baselines show a narrow but persistent error class; the user decided 1 (the repository first), 5 (facts corrected automatically only after an accepted dry run) and 13 (a contradicting late belief stored as a zero-length interval and reported). C1's gate met; release numbers moved up by one | C0 ☑ |
 | 2026-10-25 | C0 | C0.5 done (WM §18.1): 410 replayed prompts; 3.3 % of injected facts governed, 65 % of the judged ones stale at the prompt's time, 13.7 % of prompts with a stale governed fact (8 distinct facts, injected again and again); a stale belief lives 0 d for releases (the agent records them), 4 d for the test count (median, up to 58), weeks to months for UI and build facts; 7 still believed today, up to 85 d | C0.5 ☑ |
 | 2026-10-25 | C0, C1 | C0.4 done (WM §18.1): eleven canonical bindings; 18 of 54 reached by 5 (A) or 9 (strict); B9's attribute groups add nothing (2,631 facts in 1,857 groups), so bindings govern by a pattern over the wording — T's reaches 6 of 7 stale test-count facts and 10 current ones, 8 stale today, but over-reaches (≈ 6 of 10 claim the present count) → C1.2 widened: `governs` + `excludes`, a dry run accepted by a person; first slice T, V, latest tag, U, S, C, P (14 of 54 strictly) | C0.4 ☑ |

@@ -257,9 +257,10 @@ def _build_argparser() -> argparse.ArgumentParser:
                              "from the assembled recall, report F1 + LLM-judge J per category. Resumable.")
     eval_p.add_argument("--work", type=Path, default=None, metavar="DIR",
                         help="--locomo: work directory (per-conversation graphs + answers; a re-run "
-                             "continues where it stopped). Default: ./locomo-work.")
+                             "continues where it stopped). Default: ./locomo-work. --guards: where the guards keep "
+                             "their results (default: the project's .openwiki/pathc/guards/, else ~/.openwiki/guards/).")
     eval_p.add_argument("--conversations", type=int, default=None, metavar="N",
-                        help="--locomo: only the first N conversations (default: all 10).")
+                        help="--locomo: only the first N conversations (default: all 10; with --guards: 1).")
     eval_p.add_argument("--categories", default=None, metavar="LIST",
                         help="--locomo: question categories, e.g. 1,2,3,4 (1 multi-hop, 2 temporal, "
                              "3 open-domain, 4 single-hop, 5 adversarial; default: all).")
@@ -296,7 +297,17 @@ def _build_argparser() -> argparse.ArgumentParser:
                              "alone) or add-only (nothing superseded). An ablation; with --locomo use a separate --work "
                              "dir.")
     eval_p.add_argument("--time-budget", type=float, default=None, metavar="SECONDS",
-                        help="--locomo / --replay: stop cleanly after this many seconds; re-run to continue.")
+                        help="--locomo / --replay / --guards: stop cleanly after this many seconds; re-run to continue.")
+    eval_p.add_argument("--guards", nargs="*", default=None, metavar="NAME",
+                        help="Run the guard suite (Path C, M.2) — what must not move when a default changes: the "
+                             "temporal, poisoning, cue-trigger and cross-session sets of the repository's examples/ "
+                             "and, with --locomo, LoCoMo — at the code's own memory defaults, and print a pass / fail "
+                             "table (exit 1 on a failure, 3 while a guard has not run fully). Names select guards "
+                             "(default: all). Resumable: results stay in --work while code, models and settings "
+                             "are unchanged.")
+    eval_p.add_argument("--record", action="store_true",
+                        help="--guards --locomo: record this code's LoCoMo contexts as the new baseline (after an "
+                             "adopted change that is meant to move them).")
     eval_p.add_argument("--cross-session", dest="cross_session", action="store_true",
                         help="Evaluate the Path B memory tier: cross-session task success "
                              "(cold vs raw-log vs assembled; + --judge = assembled vs raw-log). "
@@ -1939,6 +1950,8 @@ def _resolve_eval_set(spec, project: Optional[Project]) -> Path:
 
 def _cmd_eval(args: argparse.Namespace) -> int:
     project = getattr(args, "project_obj", None)
+    if getattr(args, "guards", None) is not None:
+        return _guards_eval(args, project)
     if getattr(args, "locomo", None) is not None:
         return _locomo_eval(args)
     if getattr(args, "cross_session", False):
@@ -2262,6 +2275,135 @@ def _cross_session_eval(args: argparse.Namespace, project) -> int:
         print(f"\nLLM judge (assembled vs raw-log, position-balanced):  "
               f"assembled {t['assembled']}  ·  raw-log {t['raw-log']}  ·  tie {t['tie']}")
     return 0
+
+
+GUARD_SETS = Path(__file__).resolve().parents[1] / "examples"      # the guard sets ship with the repository
+GUARD_LOCOMO_K = 20                                                 # LoCoMo's recall k (ADR-34, as --locomo)
+
+
+def _guards_eval(args: argparse.Namespace, project) -> int:
+    """The guard suite (Path C, M.2; path-c-roadmap.md §4): what must not move when a default changes — the
+    cross-session sets of the repository's examples/ and, with --locomo, LoCoMo — run at the code's own memory
+    defaults (not a project's overrides), with a pass / fail table. Resumable: each guard's results stay in --work
+    while code, models and settings are unchanged; --time-budget stops cleanly between scenarios."""
+    import tempfile
+
+    from .eval import (GUARDS, code_fingerprint, format_guards, guard_exit, run_cross_session_eval,
+                       run_guards)
+    from .project import DEFAULT_CONTEXT_BUDGET, DEFAULT_CONTEXT_K
+    from .userconfig import home_dir
+
+    names = list(args.guards or [])
+    known = [g.name for g in GUARDS] + ["locomo"]
+    unknown = [n for n in names if n not in known]
+    if unknown:
+        print(f"error: unknown guard(s): {', '.join(unknown)} (known: {', '.join(known)}).", file=sys.stderr)
+        return 2
+    want_locomo = not names or "locomo" in names
+    if names == ["locomo"] and args.locomo is None:
+        print("error: the locomo guard needs --locomo locomo10.json (github.com/snap-research/locomo).",
+              file=sys.stderr)
+        return 2
+    if want_locomo and args.locomo is not None and not args.locomo.is_file():
+        print(f"error: LoCoMo data not found: {args.locomo}", file=sys.stderr)
+        return 2
+    selected = [g for g in GUARDS if not names or g.name in names]
+    missing = [g.eval_set for g in selected if not (GUARD_SETS / g.eval_set).is_file()]
+    if missing:
+        print(f"error: guard set(s) not found in {GUARD_SETS}: {', '.join(missing)} — the guard sets live in the "
+              f"repository's examples/ (run from a source checkout).", file=sys.stderr)
+        return 2
+    if not (args.index / "index.json").is_file():
+        print(f"error: no index at {args.index} (needed for the embedder).", file=sys.stderr)
+        return 2
+    index = SemanticIndex.load(args.index)
+    if isinstance(index.embedder, OllamaEmbedder):
+        index.embedder.host = args.host.rstrip("/")
+    work = args.work or ((project.state_dir / "pathc" / "guards") if project is not None else home_dir() / "guards")
+    chat = OllamaChat(model=args.model, host=args.host, temperature=0.2)
+    k, budget = DEFAULT_CONTEXT_K, DEFAULT_CONTEXT_BUDGET
+    code = code_fingerprint()
+    embed_name = getattr(index.embedder, "name", "embedder")
+    fingerprint = json.dumps({"code": code, "chat": chat.name, "embedder": embed_name, "k": k, "budget": budget,
+                              "lexical": RECALL_WEIGHT, "temporal": WINDOW_WEIGHT, "merge": "checks"},
+                             sort_keys=True)
+    header = (f"Guards — code {code}, {chat.name}, {embed_name}; k {k}, budget {budget:,}, "
+              f"lexical {RECALL_WEIGHT:g}, window {WINDOW_WEIGHT:g}  → {work}")
+    print(header, file=sys.stderr)
+    t0 = time.time()
+    rows, complete = [], True
+    if selected:
+        tmp_dir = Path(tempfile.mkdtemp(prefix="owiki-guards-"))
+        try:
+            graph = _open_graph(_build_stub_graph(tmp_dir, index.embedder), writable=True)
+            if graph is None or not getattr(graph, "writable", False):
+                print("error: could not open a writable throwaway graph (is Kuzu installed?).", file=sys.stderr)
+                return 2
+            try:
+                def scenario(item):
+                    return run_cross_session_eval(
+                        [item], graph, index.embedder, chat, recall_k=k, lexical=RECALL_WEIGHT,
+                        temporal=WINDOW_WEIGHT, merge="checks", max_chars=budget)["details"][0]
+
+                def progress(name, done, total, detail):
+                    mark = "✓" if detail["success"]["assembled"] else "✗"
+                    notes = ([f"leaked {', '.join(detail['leaked'])}"] if detail.get("leaked") else []) + \
+                        (["cue missing"] if detail.get("cue_recalled") is False else [])
+                    print(f"  {name} {done}/{total}  {mark} {detail['name']}"
+                          + (f"  ({'; '.join(notes)})" if notes else ""), file=sys.stderr)
+
+                res = run_guards(selected, GUARD_SETS, work, scenario, fingerprint, budget_s=args.time_budget,
+                                 on_progress=progress)
+            finally:
+                graph.close()
+        finally:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+        rows, complete = res["rows"], res["complete"]
+    if want_locomo:
+        if args.locomo is None:
+            rows.append({"guard": "locomo", "check": "contexts (no --locomo data)", "now": "—",
+                         "expected": "all", "status": "skipped", "misses": []})
+        else:
+            left = None if args.time_budget is None else max(0.0, args.time_budget - (time.time() - t0))
+            lres = _locomo_guard(args, index, work / "locomo", left, code)
+            rows += lres["rows"]
+            complete = complete and lres["complete"]
+    print(format_guards(rows, header="\n" + header))
+    if not complete:
+        print("\npartial — re-run the same command to continue.")
+    return guard_exit(rows, complete)
+
+
+def _locomo_guard(args: argparse.Namespace, index, work: Path, budget_s, code: str) -> dict:
+    """The LoCoMo guard's I/O for ``locomo.guard_locomo``: the first ``--conversations`` (default 1), a fresh memory
+    graph per run, production's merge checks and recall weights."""
+    from .locomo import guard_locomo, load_locomo
+
+    convs = load_locomo(args.locomo)[: args.conversations or 1]
+    stub = work / "_stub"
+
+    def open_graph(path: Path):                     # an empty memory graph (the schema), rebuilt every run
+        for cand in (path, path.with_name(path.name + ".wal"), path.with_name(path.name + ".tmp")):
+            if cand.is_dir():
+                shutil.rmtree(cand, ignore_errors=True)
+            elif cand.exists():
+                cand.unlink()
+        if not (stub / "graph").exists():
+            stub.mkdir(parents=True, exist_ok=True)
+            _build_stub_graph(stub, index.embedder)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(stub / "graph", path)
+        return GraphStore(path, writable=True)
+
+    chat = OllamaChat(model=args.model, host=args.host, temperature=0.2, timeout=900.0,
+                      options={"num_predict": 4096})
+    judge = OllamaChat(model=args.model, host=args.host, temperature=0.0)
+    return guard_locomo(convs, work, open_graph, index.embedder, chat, judge=judge,
+                        coexist=_coexist_check(args.model, args.host),
+                        resolve=_attribute_resolver(args.model, args.host),
+                        recall_k=GUARD_LOCOMO_K, lexical=RECALL_WEIGHT, temporal=WINDOW_WEIGHT,
+                        budget_s=budget_s, record=args.record, code=code,
+                        on_progress=lambda msg: print(f"  {msg}", file=sys.stderr))
 
 
 def _ask_global(args: argparse.Namespace, graph) -> int:

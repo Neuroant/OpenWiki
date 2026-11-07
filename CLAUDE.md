@@ -50,13 +50,15 @@ two boundaries), §2.2 adds that twins are programs and that language models wor
 as code (ADR-51). Its implementation is tracked in `docs/path-c-roadmap.md` (phases M, C0 – C4, P and tracks L and O
 as work packages with gates, status and a log). **State (2026-11-07):** built — track O (operations, v0.121; the
 nightly `sleep` with a backup runs on openwiki-dev), M.1 (prompts replayed at their own time, `owiki eval --replay`,
-v0.122) and M.3 (the private label files, in `main`); measured — the C0 inventory, C0.1 – C0.5
-(`path-c-world-model.md` §18.1: testable share 43.5 %; nine bindings reach 18 of the 54 labeled stale facts on the
-strictest reading; bindings govern by a pattern over the wording, not B9's attribute groups — §6.2; baselines: 13.7 %
-of the replayed prompts got a stale governed fact, a stale test count lives 4 days). C0 closed with a **go** on
-2026-11-07 (WM §18.1), with the user's decisions 1, 5 and 13 (WM §15: the repository first; facts corrected
-automatically only once a person has accepted a binding's dry run; a contradicting late belief stored, never
-current). No world-model code yet: next are M.2 (the guard suite) and C1 (v0.123 – v0.125).
+v0.122), M.2 (the guard suite, `owiki eval --guards`, in `main` — its first run caught and fixed undated captures
+inventing dates, path-b-memory §13.37) and M.3 (the private label files, in `main`); measured — the C0 inventory,
+C0.1 – C0.5 (`path-c-world-model.md` §18.1: testable share 43.5 %; nine bindings reach 18 of the 54 labeled stale
+facts on the strictest reading; bindings govern by a pattern over the wording, not B9's attribute groups — §6.2;
+baselines: 13.7 % of the replayed prompts got a stale governed fact, a stale test count lives 4 days). C0 closed with
+a **go** on 2026-11-07 (WM §18.1), with the user's decisions 1, 5 and 13 (WM §15: the repository first; facts
+corrected automatically only once a person has accepted a binding's dry run; a contradicting late belief stored,
+never current). No world-model code yet: next is C1 (v0.123 – v0.125); LoCoMo's guard baseline waits for its data to
+get a home outside `%TEMP%`.
 Paths B and C use language models **hybrid** — local where possible, cloud where really needed — while Path A's
 pipeline stays local (ADR-52 amends ADR-2). Projects gain **environments** — a third input class next to sources and
 sessions; twins run as their own processes with OpenWiki as their client (§2.3, ADR-53; `docs/projects.md` Phase 5) —
@@ -375,6 +377,28 @@ memory: 20 prompts spread over 2026-07-31 … 10-18 replayed in under a minute, 
 local judge marked 29.5 % of 176 facts helpful (ranks 1–4: 40.9 %), in line with §13.36. Caveat: facts backfilled
 before v0.85 are dated at their day's midnight, so the first prompts of such a day see that day's facts (`--lag 24`
 avoids it); themes are today's (a derived view without history). Treat the local judge as relative, not absolute.
+
+**The guard suite (Path C, M.2)** — what must not move when a default changes (`docs/path-c-roadmap.md` §4), in one
+command with a pass / fail table (exit 1 on a failure, 3 while a guard has not run fully):
+```
+.venv\Scripts\python -m openwiki eval --guards --time-budget 480          # re-run the same command to continue
+.venv\Scripts\python -m openwiki eval --guards --locomo locomo10.json     # + LoCoMo (its data is not in the repo)
+```
+The temporal, poisoning, cue-trigger and cross-session sets of `examples/` (`eval.GUARDS`; each check expects "all"
+scenarios to pass it, "none" — a leaked payload — or is "info"), run one scenario at a time through the cross-session
+harness at the **code's own** memory defaults (k 16, budget 3,000, lexical 0.2, window 0.1 — not a project's
+overrides); results stay in `--work` (default `<project>/.openwiki/pathc/guards/`) under a fingerprint of the code
+(`eval.code_fingerprint`, the package's `.py` files), the models, the settings and the set, so a re-run continues and a
+change starts that guard over. Names select guards (`--guards temporal cue-trigger`). **LoCoMo's guard**
+(`locomo.guard_locomo`, the first `--conversations`, default 1) checks more than J: each session is captured once
+(frozen), the merge's model checks are answered from `checks.jsonl` (`locomo.RecordedChecks`) and the vectors from
+`embeddings.npz` (`CachingEmbedder.save` / `load`), the memory is rebuilt with the current code into a fresh graph every
+run, and every question's assembled context must equal the recorded `baseline.jsonl` — LoCoMo has no sensors, so a
+moved context is a code change, never noise; answers are kept per question and context, so J is paired by construction;
+`--record` takes a new baseline after an adopted change. First run (2026-11-07, 37 scenarios, ~45 min): temporal 13/13,
+poisoning 0/5 leaks and 8/8 kept, cue-trigger 8/8 (answers 6/8, constraints 5/8 — info), cross-session **6/8** →
+undated captures invented dates (fixed: `memory.drop_guessed_dates`) and a scorer artifact → 8/8
+(`docs/path-b-memory.md` §13.37). LoCoMo's baseline is not recorded yet: the `%TEMP%` cleanup took its data and state.
 
 **Sleep — nightly memory maintenance + forgetting** (Path B++): one schedulable writable pass — fold what
 read-only processes queued (usage + journal) → redact credentials in facts stored before v0.99 → **forget** what the
@@ -959,7 +983,8 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   bi-temporal view (`as_of`/`known_at` → `in_view`, `status`, `superseded`). The first writable
   `remember` `ALTER`s the columns in + writes the derivation back (`_migrate_temporal`) — no rebuild.
   `recall(…, as_of=, known_at=)`, `timeline(query)`, `context_for(…, as_of=)`; `MemoryFact` gained
-  `valid_from`/`cardinality` (capture extracts *stated* dates only, resolved against the session date);
+  `valid_from`/`cardinality` (capture extracts *stated* dates only, resolved against the session date; without a
+  session date only those whose year the transcript states — `drop_guessed_dates`, path-b-memory §13.37);
   journal `remember` records carry them + the record time the fold now honors. **Coexistence check
   (v0.82):** the capture's per-fact `cardinality` tag is noisy (qwen3 tags "OpenWiki *also* uses
   Ollama" as `one` 2/3 times), so `remember(…, coexist=)` asks `memory.facts_coexist(chat, older,
@@ -1397,6 +1422,10 @@ also carry a `⏱ latency · tokens · tok/s` line
   something must take what's remembered about the user into account, in 1–3 sentences. **Measured
   (v0.82):** assembled task success **7/13 (v0.80.0, two runs) → 13/13** — backfill, point-in-time,
   change-date, known-at and multi-valued are where pre-B7 memory fails (`docs/path-b-memory.md` §12.1).
+  **The guard suite (M.2):** `GUARDS` (`Guard` + `GuardCheck`), `run_guards` (resumable per scenario, a work file per
+  guard under a fingerprint), `guard_tally` / `guard_rows` / `format_guards` / `guard_exit`, `code_fingerprint`;
+  `run_cross_session_eval(max_chars=)` fits the assembled context to the live path's budget. Behind `owiki eval
+  --guards` (`cli._guards_eval`, `GUARD_SETS` = the repository's `examples/`); LoCoMo's guard is in `locomo.py`.
 - **`openwiki/analysis/`** — the **world-model analysis** toolkit (`owiki analyze`). `coupling.py`
   is P1: **graph↔semantic coupling**, pure NumPy over `SemanticIndex.embeddings` (collapsed to a
   per-page mean vector, `page_vectors`) + `GraphStore.coupling_edges()` (undirected page-pair lists per

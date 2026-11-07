@@ -262,6 +262,30 @@ class Project:
         "off" simply means the memory tables stay empty."""
         return bool(self.setting("memory", "enabled", False))
 
+    # ----------------------------------------------------------- world model
+    @property
+    def world_enabled(self) -> bool:
+        """World-model mode (Path C, ``docs/path-c-world-model.md`` §2.3) — ``[world] enabled``, off by default.
+        Modes nest: it needs ``[memory] enabled``, since observations are memory-tier facts."""
+        return bool(self.setting("world", "enabled", False))
+
+    @property
+    def environments(self) -> list:
+        """The raw ``[[environments]]`` tables — what the world model observes (§2.3; parsed by
+        ``world.bindings.load_world``)."""
+        value = self.data.get("environments", [])
+        return [e for e in value if isinstance(e, dict)] if isinstance(value, list) else []
+
+    @property
+    def world_sensors(self) -> list:
+        """The raw ``[[world.sensors]]`` tables — the bindings (§6.2)."""
+        value = self.section("world").get("sensors", [])
+        return [s for s in value if isinstance(s, dict)] if isinstance(value, list) else []
+
+    def code_paths(self) -> list:
+        """The code sources' paths, resolved — a repository environment names one of them."""
+        return [self._resolve_path(s.path) for s in self.doc_sources() if s.type == "code"]
+
     # ---------------------------------------------------------------- layout
     @property
     def out_dir(self) -> Path:
@@ -421,6 +445,10 @@ enabled = {str(memory).lower()}
 # markdown_dir = "memory" # sleep writes a readable Markdown view of the memory here ("" = off)
 # backups = 7             # full memory backups sleep keeps in .openwiki/backups/ (0 = off)
 # transcripts = []        # more transcripts for session search (files / folders); hooked sessions are found anyway
+
+# [world]                 # World model (Path C): observe the code sources with built-in sensors — `owiki world status`
+# enabled = false         # needs [memory] enabled; each code source gets default sensors (version file, latest tag)
+# [[environments]] and [[world.sensors]] declare more — see docs/path-c-world-model.md §2.3, §6.2
 
 [serve]
 port = {port}

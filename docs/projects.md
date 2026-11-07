@@ -132,7 +132,10 @@ under a synthetic top-level outline node (its name) so slugs don't collide.
 - [x] **Phase 4 — multi-source merge**
   - [x] `combine_documents` (page/table/image offset + synthetic per-source top node; single source = passthrough)
   - [x] per-source cross-references (`extract_references_multi`, resolved within each source's span via retained per-source IR)
-- [ ] **Phase 5 — environments (Path C, planned; `docs/path-c-world-model.md` §2.3, ADR-53, ADR-54)**
+- [ ] **Phase 5 — environments (Path C, under way; `docs/path-c-world-model.md` §2.3, ADR-53, ADR-54)**
+  - [x] v0.123: `[[environments]]` and `[[world.sensors]]` parsed and validated (`Project.environments`,
+    `world_sensors`, `world_enabled`, `code_paths`; `world.bindings.load_world`), each code source a repository
+    environment by default; `[world] enabled` needs `[memory] enabled`; `owiki world status` (read-only)
   - [ ] a third input class next to sources and sessions: `[[environments]]` — a repository, or a running twin reached by URL on localhost (`url` + `token_env`; `command` only for twins OpenWiki owns) — feeding a world tier the graph keeps across rebuilds like the memory tier
   - [ ] nested modes: Wiki ⊂ Second Brain ⊂ World model (`[world] enabled` requires `[memory] enabled`)
   - [ ] authoritative tables in one registry that the rebuild's snapshot / restore reads; `Session.kind`

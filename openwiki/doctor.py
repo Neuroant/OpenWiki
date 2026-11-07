@@ -310,6 +310,19 @@ def check_wiki(project, repos) -> list:
     return out
 
 
+def check_world(project) -> list:
+    """Path C: the world model's configuration — every validation problem fails (the sensors aren't read here:
+    `owiki world status` does that)."""
+    from .world.bindings import load_world
+    world = load_world(project)
+    if world.problems:
+        return [Check("world", "fail", problem, "fix [[environments]] / [[world.sensors]] in openwiki.toml")
+                for problem in world.problems]
+    slow = sum(1 for b in world.bindings if b.slow)
+    return [Check("world", "ok", f"{len(world.environments)} environment(s), {len(world.bindings)} sensor(s)"
+                  + (f" ({slow} slow)" if slow else ""), "`owiki world status` reads them")]
+
+
 def run_checks(project, probes: Probes, repos=()) -> list:
     """Every check, in order; a check that raises is reported as a warning, never stops the rest."""
     from . import __version__
@@ -318,6 +331,8 @@ def run_checks(project, probes: Probes, repos=()) -> list:
     if project.memory_enabled:
         steps += [lambda: check_writes(project, probes), lambda: check_schedule(project, probes),
                   lambda: check_backups(project, probes)]
+    if project.world_enabled:
+        steps.append(lambda: check_world(project))
     steps += [lambda: check_runs(project, probes), lambda: check_hook_log(project), lambda: check_wiki(project, repos)]
     out = []
     for step in steps:

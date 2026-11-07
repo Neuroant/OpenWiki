@@ -776,6 +776,21 @@ def _build_argparser() -> argparse.ArgumentParser:
                                 "the newest backup, failed runs, the hook log. Exit 1 if something is broken.")
     doc_p.add_argument("--json", action="store_true", help="Print the checks as JSON.")
 
+    world_p = sub.add_parser("world", parents=[common],
+                             help="The world model (Path C): the project's environments, the built-in sensors that "
+                                  "read them and the remembered facts each one governs. v0.123 only reads.")
+    world_p.add_argument("action", choices=["status"],
+                         help="status = read every sensor now and show its value, the fact it would write and the "
+                              "current facts it governs — agreeing, differing (the dry run) or unclear.")
+    world_p.add_argument("--sensor", action="append", default=None, metavar="ID",
+                         help="Only this sensor (repeatable).")
+    world_p.add_argument("--fast", action="store_true", help="Skip slow sensors (pytest-collect).")
+    world_p.add_argument("--all", action="store_true",
+                         help="List every governed fact, not only those that differ.")
+    world_p.add_argument("--json", action="store_true", help="Print the status as JSON.")
+    world_p.add_argument("--graph", type=Path, default=None, help="Graph dir (default: the project's).")
+    world_p.add_argument("--host", default=None, help="Ollama host URL for ollama sensors (default: the project's).")
+
     sch_p = sub.add_parser("schedule", parents=[common],
                            help="Install, remove or check the project's scheduled tasks — the nightly `sleep` "
                                 "(Task Scheduler on Windows, cron elsewhere), run by this interpreter.")
@@ -1775,6 +1790,9 @@ def _apply_project(args: argparse.Namespace, project: Optional[Project],
         path("graph", p.graph_path if p else None, Path("output") / "graph")
     elif cmd == "cochange":
         path("graph", p.graph_path if p else None, Path("output") / "graph")
+    elif cmd == "world":                    # the graph holds the facts sensors govern; ollama sensors use the host
+        path("graph", p.graph_path if p else None, Path("output") / "graph")
+        val("host", "models", "host", DEFAULT_HOST)
     elif cmd == "sessions":                 # lessons: the chat model phrases them, the index embeds them
         path("index", p.index_dir if p else None, Path("output") / "index")
         val("model", "models", "chat", DEFAULT_CHAT)
@@ -5111,6 +5129,55 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
     return 1 if any(c.level == "fail" for c in checks) else 0
 
 
+def _world_facts(graph_path, project: Project) -> Optional[list]:
+    """The current remembered facts, read-only — what the sensors govern (``None``: Wiki mode, no graph, locked)."""
+    if not project.memory_enabled:
+        return None
+    graph = _open_reader(graph_path, wait=5.0)
+    if graph is None:
+        return None
+    try:
+        return [f for f in graph.list_assertions(limit=10 ** 9) if f.get("status") == "current"]
+    except Exception:
+        return None
+    finally:
+        graph.close()
+
+
+def _cmd_world(args: argparse.Namespace) -> int:
+    """Path C, C1.7: ``owiki world status`` — read every sensor now, then show each reading, the fact it would write
+    and the current facts it governs. Reads only: nothing is written to memory (v0.123). Exit 1 on a configuration
+    problem."""
+    from .world import sensors as world_sensors
+    from .world.bindings import load_world
+    from .world.status import format_report, world_report
+
+    project = getattr(args, "project_obj", None)
+    if project is None:
+        print("error: owiki world needs a project — its openwiki.toml declares [world] and [[environments]].",
+              file=sys.stderr)
+        return 2
+    world = load_world(project)
+    chosen = [b for b in world.bindings if not args.sensor or b.id in args.sensor]
+    unknown = sorted(set(args.sensor or ()) - {b.id for b in world.bindings})
+    if unknown:
+        print(f"error: unknown sensor(s): {', '.join(unknown)} (known: {', '.join(b.id for b in world.bindings)}).",
+              file=sys.stderr)
+        return 2
+    if args.fast:
+        chosen = [b for b in chosen if not b.slow]
+    readings = {}
+    for b in chosen:
+        env = world.environment(b.environment)
+        readings[b.id] = world_sensors.read(b.id, b.type, b.params, root=env.root if env else None, host=args.host)
+    report = world_report(world, readings, _world_facts(args.graph, project), only={b.id for b in chosen})
+    if args.json:
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+    else:
+        print(format_report(report, project=project.name, show_all=args.all))
+    return 1 if world.problems else 0
+
+
 def task_arguments_of(project: Project, task: str) -> list:
     from .schedule import task_arguments
     return task_arguments(project.root, task)
@@ -5172,6 +5239,7 @@ _DISPATCH = {
     "sleep": _cmd_sleep,
     "schedule": _cmd_schedule,
     "doctor": _cmd_doctor,
+    "world": _cmd_world,
     "memory": _cmd_memory,
     "cochange": _cmd_cochange,
     "sessions": _cmd_sessions,

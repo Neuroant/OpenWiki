@@ -50,7 +50,7 @@ to the Ableton twin's review (`docs/Digital_Twin_Review.md` in `G:\Antigravity\a
 |---|---|---|---|---|
 | **M** — measurement harness | replay real prompts at their own time, in the repository; one guard command | — | ☑ M.1 – M.3 | v0.122.0 (M.1); M.2 and M.3 with C1's first release, v0.123 |
 | **C0** — inventory | is enough of the memory observable to build C1? | M.1 | ☑ **go** (2026-11-07) | docs only |
-| **C1** — observe, don't remember | observable state right by construction | C0 go ✓; decisions 5, 13 ✓ | ☐ next | v0.123 – v0.125 |
+| **C1** — observe, don't remember | observable state right by construction | C0 go ✓; decisions 5, 13 ✓ | ◐ C1.1, C1.2 ☑, C1.7 ◐ | v0.123.0 (C1.1, C1.2, C1.7); v0.124 – v0.125 |
 | **C2** — laws, drift, world slice | rules and decisions checkable; context built around what a prompt touches | C1 exit; decisions 10, 14, 15 | ☐ | v0.126 – v0.129 |
 | **C3** — predict and verify | the full loop on the repository | C2 exit; decisions 4, 8, 9 | ☐ | v0.130 – v0.132 |
 | **P** — playground prerequisites | the Ableton twin safe and trustworthy enough to play with | — (parallel; Ableton repository) | ☐ | Ableton releases |
@@ -58,8 +58,10 @@ to the Ableton twin's review (`docs/Digital_Twin_Review.md` in `G:\Antigravity\a
 | **O** — operations | scheduled tasks, a health check, a saved run log, rolling backups — for Path B now, and the loop's home between sessions (ADR-54) | — (parallel) | ☑ O.1 – O.4 (twin checks with C2) | v0.121.0 |
 | **C4** — physical twins | the twin contract on a working twin, then a machine | C3 exit; P; decisions 2, 3, 12 | ☐ | v0.133 + |
 
-**Next actions:** C1's first release, v0.123 (C1.1 sensor types, C1.2 environments and bindings, C1.7 `owiki world
-status` — read-only, nothing written). M.2 landed on 2026-11-07: `owiki eval --guards`, all five guards green,
+**Next actions:** C1's second release, v0.124 — observed facts, the authority rule, the `observe` op, session kinds
+(C1.3 – C1.5, C1.8, C1.9, C1.12), with a person's acceptance of a binding's dry run before it closes anything.
+v0.123 landed on 2026-11-07: `openwiki/world/` — the built-in sensors, environments and bindings, `owiki world
+status` (§7). M.2 landed on 2026-11-07: `owiki eval --guards`, all five guards green,
 LoCoMo's baseline recorded (§5). C0 closed with a **go** on
 2026-11-07, with the user's decisions 1, 5 and 13 (§6, §12); track O landed in v0.121.0 (§10b), M.1 in v0.122.0
 (§5). The release numbers below are moved up by one against the first plan, since track O took v0.121.
@@ -193,13 +195,13 @@ first.
 
 | WP | Tasks | Touches | Tests | Effort | Status |
 |---|---|---|---|---|---|
-| **C1.1 — sensor types** | The built-in types of WM §6.1 except `opcua` and `twin`: `git` (on `handoff.git_state`), `file-pattern`, `py-constant` (`ast`, no import), `toml-key`, `count`, `ollama` (on `handoff.ollama_state`), `http-json` (localhost only), `process` (a port, a live lock file), `gpu` (`nvidia-smi`, fixed arguments), `pytest-collect` (opt-in). Each returns a reading: value, time, quality (complete / partial / failed), and the change time when the source knows it (a commit date, `git blame` on the line). | `openwiki/world/sensors.py` (new), `handoff.py` | one test per type on temporary files, a temporary git repository, a fake Ollama | M | ☐ |
-| **C1.2 — environments and bindings** | `[[environments]]` in `openwiki.toml` — a name, a kind (`repository` or `twin`), a source's path, or a running twin's `url` (localhost only) and `token_env` (the variable that holds its token), with `command` only for twins OpenWiki owns (WM §2.3, ADR-54); `[[world.sensors]]` naming their environment (WM §6.2), and defaults for code sources (git state; the version file when one is found); validation — unknown type or environment, a path outside the sources, a non-localhost URL are errors; `governs` as a pattern over the wording with `excludes` (C0.4: attribute keys reach almost nothing — B9's groups are mostly single-member), listed as a dry run on activation and accepted by a person before the binding closes anything; `[world] enabled` (default off; on for openwiki-dev; requires `[memory] enabled`). | `openwiki/world/bindings.py` (new), `project.py` (`Project.environments`, `world_sensors`, `world_enabled`) | parsing, defaults, validation errors | S | ☐ |
+| **C1.1 — sensor types** | The built-in types of WM §6.1 except `opcua` and `twin`: `git` (on `handoff.git_state`), `file-pattern`, `py-constant` (`ast`, no import), `toml-key`, `count`, `ollama` (on `handoff.ollama_state`), `http-json` (localhost only), `process` (a port, a live lock file), `gpu` (`nvidia-smi`, fixed arguments), `pytest-collect` (opt-in). Each returns a reading: value, time, quality (complete / partial / failed), and the change time when the source knows it (a commit date, `git blame` on the line). | `openwiki/world/sensors.py` (new), `handoff.py` | one test per type on temporary files, a temporary git repository, a fake Ollama | M | ☑ |
+| **C1.2 — environments and bindings** | `[[environments]]` in `openwiki.toml` — a name, a kind (`repository` or `twin`), a source's path, or a running twin's `url` (localhost only) and `token_env` (the variable that holds its token), with `command` only for twins OpenWiki owns (WM §2.3, ADR-54); `[[world.sensors]]` naming their environment (WM §6.2), and defaults for code sources (git state; the version file when one is found); validation — unknown type or environment, a path outside the sources, a non-localhost URL are errors; `governs` as a pattern over the wording with `excludes` (C0.4: attribute keys reach almost nothing — B9's groups are mostly single-member), listed as a dry run on activation and accepted by a person before the binding closes anything; `[world] enabled` (default off; on for openwiki-dev; requires `[memory] enabled`). | `openwiki/world/bindings.py` (new), `project.py` (`Project.environments`, `world_sensors`, `world_enabled`) | parsing, defaults, validation errors | S | ☑ |
 | **C1.3 — observed facts** | `source = "observed"` (`memory.SOURCES`, `coerce_source`); one `Session` per sensor (`sensor:<id>`); `valid_from` from the reading's change time, else the first observation; confidence 1.0; readers show "observed" (recall lines, the Gedächtnis tab's badge, the timeline). | `graph/memory.py`, `graph/store.py`, `web/static/app.js` | source round-trip, recall rendering | S | ☐ |
 | **C1.4 — the authority rule** | `temporal.plan_merge` for governed attributes (WM §3.3, §6.4): observed > agent > user > assistant > material; rules 1–5 — re-affirm, a new value closes the previous observation, contradicted current beliefs close at the observation's `valid_from` with a `SUPERSEDES` edge, an agreeing belief is re-affirmed, a later contradicting belief becomes a zero-length interval (decision 13). Discrepancies are counted and reported until `Event` exists (C2). | `graph/temporal.py`, `graph/store.py` | each rule; attributes without a sensor unchanged (the temporal set 13 / 13) | M | ☐ |
 | **C1.5 — the `observe` op, written on change** | `journal.append_observe`; `fold_journal` applies it through the two-phase writer; the writers: the capture worker, `sleep`, `handoff prepare`, `owiki world observe`. Readings stay in the world cache; the graph is written only when a value changes, and `last_seen` is synced at `sleep` (WM §2.3). | `graph/journal.py`, `graph/store.py`, `cli.py` | journal round-trip, fold, two-phase | S | ☐ |
 | **C1.6 — the read-time overlay** | In `context_for`: fast sensors whose cached reading is older than `every` run within about 200 ms in total (cache in `<project>/.openwiki/world-cache.json`); a recalled fact in a governed attribute whose fresh reading differs is replaced in the assembled text by the observation ("… (observed just now: pyproject.toml)"), and an `observe` op is queued (WM §6.5). | `graph/store.py`, `cli.py` (the inject hook), `openwiki/world/observe.py` (new) | overlay replaces, cache, budget, fail-soft (a failing sensor never blocks the hook) | M | ☐ |
-| **C1.7 — CLI** | `owiki world status` (bindings, last readings with their age, governed attributes, discrepancies) and `owiki world observe [--sensor ID] [--dry-run]` (subcommands, ADR-13); `observe` is scheduled every few minutes between sessions with O.1 (ADR-54) and quiet unless something changed. | `cli.py` | output with a fake store | S | ☐ |
+| **C1.7 — CLI** | `owiki world status` (bindings, last readings with their age, governed attributes, discrepancies) and `owiki world observe [--sensor ID] [--dry-run]` (subcommands, ADR-13); `observe` is scheduled every few minutes between sessions with O.1 (ADR-54) and quiet unless something changed. | `cli.py` | output with a fake store | S | ◐ status ☑ |
 | **C1.8 — the review list** | Governed attributes leave `analyze memory --review` and the Pflege panel's "zu prüfen" list; `analyze memory` reports how many facts sensors govern. | `analysis/memory.py`, `memory_browse.py` | exclusion | S | ☐ |
 | **C1.9 — attribution, light** | The observe report names the commit that changed a value (git log on the source path), else "outside any commit" — the null prediction's first half (WM §3.4.3). Persistent attribution waits for `Action` (C3). | `openwiki/world/observe.py` | a temporary repository with two commits | S | ☐ |
 | **C1.10 — measure** | Replayed prompts (M.1): stale facts among the injected facts in governed attributes against C0.5's baseline; the lifetime of a stale belief; the inject hook's p95 latency; the review list's size; the guards (M.2). | WM §18.2 | — | M | ☐ |
@@ -207,10 +209,26 @@ first.
 | **C1.12 — sessions get a kind** | `Session.kind` — conversation, agent, sensor, twin, import — set on every write path (capture, `wiki_remember`, imports, sensors); the Sitzungen list, session search and the handoff show conversations (WM §2.3). | `graph/store.py`, `graph/builder.py`, `memory_browse.py`, `sessions.py` | migration of existing sessions (their ids tell the kind), filters | S | ☐ |
 | **C1.13 — the handoff reads the world model** | `handoff.environment` takes git state, Ollama, the wiki's freshness and the capture workers from the world model's observed state instead of its own probes; the brief at a session's start shows observed state and, from C2, open events (WM §2.3). Wiki freshness becomes a variable. | `handoff.py`, `openwiki/world/observe.py` | the brief with a fake world model | S | ☐ |
 
-**Releases (planned):** v0.123 — environments, sensors, bindings, `owiki world status` (C1.1, C1.2, C1.7; read-only,
-nothing written); v0.124 — observed facts, the authority rule, the `observe` op, session kinds (C1.3 – C1.5, C1.8,
-C1.9, C1.12); v0.125 — the overlay, the handoff on the world model, and the measurement; default on for code projects
-only if C1.10 holds (C1.6, C1.10, C1.11, C1.13).
+**Releases (planned):** ~~v0.123 — environments, sensors, bindings, `owiki world status`~~ (landed); v0.124 —
+observed facts, the authority rule, the `observe` op, session kinds (C1.3 – C1.5, C1.8, C1.9, C1.12); v0.125 — the
+overlay, the handoff on the world model, and the measurement; default on for code projects only if C1.10 holds (C1.6,
+C1.10, C1.11, C1.13).
+**Landed:** v0.123 on 2026-11-07 (C1.1, C1.2, C1.7's `status`) — `openwiki/world/`: `sensors.py` (the ten built-in
+types of WM §6.1 without `opcua` / `twin`; a `Reading` — value, quality, the change time from a commit or `git blame`;
+paths confined to the environment, HTTP and ports on localhost only, fixed argument lists, no shell, nothing written —
+pytest runs without its cache and bytecode; values redacted and screened by the P0 policy), `bindings.py`
+(`[[environments]]` and `[[world.sensors]]` parsed and validated, each code source a repository environment with two
+default sensors — its version file and its latest version tag —, `governs` / `excludes` / `belief` patterns over
+"subject | predicate | object", `compare` → agrees / differs / unclear), `status.py` (the report: each reading, the
+fact it would write, the current facts it governs — the dry run); `owiki world status [--sensor ID] [--fast] [--all]
+[--json]`; `[world] enabled` (default off; on for openwiki-dev, with C0.4's first slice: the test count, the
+release, the latest tag, the tabs, the build stages, two defaults); `owiki doctor` checks the configuration. On
+openwiki-dev the first status found the one stale governed fact: "test suite has passing tests 823" against 831
+collected — after C0.4's test-count pattern was narrowed (`test count` only before a claim; status summaries,
+measurements, history and statements about documents excluded): it had governed 10 current facts, 9 of them only
+talking about the count; the narrower one reaches the same 6 of the 7 labeled stale test-count facts. Also found:
+C0.4's patterns for C and P didn't cover their own facts — `world status` now flags that. `world observe` comes
+with C1.5 (v0.124). The guards (M.2) on the release code: all five green, LoCoMo's 199 contexts unchanged.
 **Exit:** WM §12's C1 exit — stale facts in governed attributes near zero on the replayed prompts; a stale belief in a
 governed attribute lives at most one sensor period; the review list shrinks by the governed share; hook p95 + ≤ 300 ms;
 the guards hold.
@@ -386,6 +404,7 @@ The open decisions of WM §15, and the phase that cannot start without them:
 | 2026-10-24 | L | Hybrid language models decided (ADR-52): track L added; decision 6 narrowed to the choice of providers | — |
 | 2026-10-24 | C1, C2, C3 | The project concept checked against Path C (WM §2.3, ADR-53): environments as a third input class; work packages C1.2 and C1.5 widened, C1.12, C1.13 and C3.9 added, C2.1, C2.10 and C3.1 widened | — |
 | 2026-10-24 | — | Deployment reviewed against Path C; two fixes landed at once: the global `owiki` reinstalled as an editable pipx install of the checkout (the old v0.45 one, older than B0, removed), and `docker-compose.yml` publishing on `127.0.0.1` only (`1b12eff`) | — |
+| 2026-11-07 | C1 | v0.123: `openwiki/world/` — sensors (C1.1), environments and bindings (C1.2), `owiki world status` (C1.7); openwiki-dev observes C0.4's first slice; the dry run finds the one stale governed fact (the test count) after the test-count pattern was narrowed (10 governed → 1) | C1.1, C1.2 ☑; C1.7 ◐ |
 | 2026-11-07 | M | LoCoMo's guard baseline recorded (§5): conv-26 in openwiki-dev's `.openwiki/pathc/guards/locomo/` (the user's decision); a rebuild matched all 199 contexts with no model call (8 s); J 65.1 %. All five guards green on b87d46b | — |
 | 2026-11-07 | M | M.2 done: `owiki eval --guards` — the four cross-session guards run resumably at the code's own defaults; LoCoMo's guard compares rebuilt contexts with a recorded baseline. First run: cross-session 6/8 — undated captures invented dates (fixed, PB §13.37) and a scorer artifact; then all green. LoCoMo's baseline waits for a home for its data | M.2 ☑ |
 | 2026-11-07 | C0, C1 | C0.6: **go** (WM §18.1) — the criterion holds on every reading, the baselines show a narrow but persistent error class; the user decided 1 (the repository first), 5 (facts corrected automatically only after an accepted dry run) and 13 (a contradicting late belief stored as a zero-length interval and reported). C1's gate met; release numbers moved up by one | C0 ☑ |

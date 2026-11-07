@@ -1200,6 +1200,10 @@ note per stage and in a measurements section (§18) created with C0's results.
 - **Exit:** stale facts among the injected facts in governed attributes fall to near zero on the replayed prompts
   (against C0's baseline); a stale belief in a governed attribute lives at most one sensor period (§13); the review list
   shrinks by the governed share; the inject hook's p95 latency grows by at most 300 ms; the guards hold (§13).
+- **Landed (v0.123, 2026-11-07):** the sensors, environments and bindings, and `owiki world status` — read-only: each
+  reading, the fact it would write and the current facts it governs, the dry run of §6.2. On openwiki-dev, C0.4's
+  first slice; the dry run found the one stale governed fact (the test count, 823 → 831) once the test-count pattern
+  was narrowed — C0.4's governed 10 current facts, 9 only talking about the count (`path-c-roadmap.md` §7).
 
 ### C2 — Laws, drift and the world slice
 - **Goal:** rules and decisions become checkable, and the context is built around what a prompt touches.

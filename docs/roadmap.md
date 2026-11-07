@@ -1319,7 +1319,10 @@ facts, stale governed facts in 13.7 % of the replayed prompts (`path-c-world-mod
 **M.2, the guard suite** (`owiki eval --guards`), runs the temporal, poisoning, cue-trigger and cross-session sets at
 the code's own memory defaults and checks LoCoMo's contexts against a recorded baseline; its first run caught a
 regression — an undated capture invented dates, so a rename lost to the older value — fixed before C1
-(`path-b-memory.md` §13.37).
+(`path-b-memory.md` §13.37). **C1's first release (v0.123):** `openwiki/world/` — ten built-in sensor types, the
+`[[environments]]` and `[[world.sensors]]` of a manifest (each code source with two default sensors: its version
+file, its latest tag), and `owiki world status`, which reads them and lists the remembered facts each one governs —
+agreeing, differing, unclear: the dry run a person accepts before v0.124 lets an observation close a stale fact.
 
 Path B remembers what was *said*; its weak spot is state that changes without anyone saying so (versions, counts,
 running services, plans that got done). Path C lets the world write too: built-in sensors over git, files, code,

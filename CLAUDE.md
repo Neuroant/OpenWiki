@@ -57,7 +57,8 @@ facts on the strictest reading; bindings govern by a pattern over the wording, n
 baselines: 13.7 % of the replayed prompts got a stale governed fact, a stale test count lives 4 days). C0 closed with
 a **go** on 2026-11-07 (WM §18.1), with the user's decisions 1, 5 and 13 (WM §15: the repository first; facts
 corrected automatically only once a person has accepted a binding's dry run; a contradicting late belief stored,
-never current). No world-model code yet: next is C1 (v0.123 – v0.125).
+never current). **C1's first release (v0.123):** `openwiki/world/` — the built-in sensors, environments and
+bindings, `owiki world status` (read-only; below); next v0.124 — observed facts, the authority rule, the `observe` op.
 Paths B and C use language models **hybrid** — local where possible, cloud where really needed — while Path A's
 pipeline stays local (ADR-52 amends ADR-2). Projects gain **environments** — a third input class next to sources and
 sessions; twins run as their own processes with OpenWiki as their client (§2.3, ADR-53; `docs/projects.md` Phase 5) —
@@ -402,6 +403,35 @@ merge checks, 199 contexts — in openwiki-dev's `.openwiki/pathc/guards/locomo/
 `%TEMP%`, whose cleanup took the earlier LoCoMo state; never in a repository — license); a rebuild matched all 199
 contexts with no model call, in 8 s; J 65.1 % (adversarial 83.0 %). Run it with
 `--locomo <project>\.openwiki\pathc\guards\locomo\locomo10.json`.
+
+**The world model — sensors and bindings (Path C, C1, v0.123)** — a project's **environments** (each code source a
+repository environment; `[[environments]]` declares more — a twin by its localhost `url` + `token_env`, read from C2
+on) observed by **built-in sensors** (`[[world.sensors]]`, `openwiki/world/`), each **binding** a sensor to the fact it
+writes and the remembered facts it **governs** — by a pattern over their wording (`"subject | predicate | object"`,
+case-insensitive) with `excludes`, and a `belief` pattern for the value a fact claims. v0.123 reads only:
+```
+.venv\Scripts\python -m openwiki world status                  # every sensor read now: value, fact, governed facts
+.venv\Scripts\python -m openwiki world status --sensor tests --all   # one sensor, every governed fact listed
+```
+Options: `--sensor ID` (repeatable), `--fast` (skip slow sensors), `--all` (agreeing / unclear facts too; default
+only those that differ), `--json`, `--graph`, `--host`; exit 1 on a configuration problem. Types (`world/sensors.py`,
+WM §6.1): `git` (`read` = branch / head / latest-tag / ahead / behind / dirty), `file-pattern` (`path`, `pattern` with
+a group `value`, `flags`), `py-constant` (`path`, `name` — `ast`, never imported), `toml-key` (`path`, `key`), `count`
+(`paths` globs, `pattern`), `ollama` (`read` = version / pulled / loaded, `model`), `http-json` (`url`, `key`),
+`process` (`port`, or a `lock` file with a live pid), `gpu` (`read` = total / free / used, `nvidia-smi`),
+`pytest-collect` (slow, opt-in — it runs the repository's test setup; never a default). A reading: value, quality
+(complete / partial / failed), the change time where the source knows it (a commit, `git blame` on the line). Safety
+(WM §6.6): built-in types only, paths confined to the environment, HTTP and ports on localhost only, fixed argument
+lists, nothing written (pytest without its cache or bytecode), values redacted and screened by the P0 policy; a
+sensor never raises. A binding: `id`, `environment` (default: the only one), `type`, its settings, `fact = { subject,
+predicate, object = "…{value}…" }`, `governs` / `excludes` / `belief`, `every` (`"1m"`; `0` = slow passes only).
+Defaults per code source: `version` (pyproject / Cargo / package.json) and `latest-tag` (git), a declared binding of
+the same id replaces one. The status shows, per binding, the current facts it governs as agreeing, **differing — the
+dry run** a person accepts before v0.124 lets an observation close them — or unclear, and flags a binding whose
+`governs` misses its own fact. `[world] enabled` (default off; needs `[memory] enabled`); `owiki doctor` checks the
+configuration. openwiki-dev observes C0.4's first slice (test count, release, latest tag, tabs, build stages, two
+defaults): the first status found the one stale governed fact ("test suite has passing tests 823" vs 831 collected),
+after C0.4's test-count pattern was narrowed (it governed 10 current facts, 9 only talking about the count).
 
 **Sleep — nightly memory maintenance + forgetting** (Path B++): one schedulable writable pass — fold what
 read-only processes queued (usage + journal) → redact credentials in facts stored before v0.99 → **forget** what the
@@ -826,7 +856,15 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   `Get-ScheduledTaskInfo`) or cron (`cron_line`, a marker comment); `TASKS` (today `sleep`). The runner is injected,
   so tests never touch the real scheduler.
 - **`openwiki/doctor.py`** — **`owiki doctor`** (O.2): `run_checks(project, Probes, repos)` → `Check(area, level,
-  message, hint)`s; `bound_hooks` (a repository's hooks bound to the project), `program_version`, `render` / `to_json`.
+  message, hint)`s; `bound_hooks` (a repository's hooks bound to the project), `program_version`, `render` / `to_json`;
+  `check_world` (the world model's configuration, when `[world] enabled`).
+- **`openwiki/world/`** — the **world model** (Path C, v0.123; `docs/path-c-world-model.md`). `sensors.py`: `read(id,
+  type, params, root, host, runner)` → `Reading` (never raises), one reader per built-in type (`READERS`), `inside`
+  (paths confined), `local_url`, `blame_time`, `render`, `_screen` (redaction + P0), `run_command` (fixed argument
+  lists, no bytecode); reuses `handoff.git` / `ollama_state` / `_pid_alive`. `bindings.py`: `Environment`, `Binding`
+  (`fact`, `target`, `governs_text`), `World`, `load_world(project)` (environments, declared + default bindings,
+  `problems`), `default_bindings`, `parse_every`, `normalize` / `compare` (agrees / differs / unclear). `status.py`:
+  `world_report(world, readings, facts)` / `format_report`. Pure apart from reading the environment; no Kuzu.
 - **`openwiki/agent.py`** — `RAGAgent`: retrieve top chunks → number them as
   excerpts → a grounded system prompt → `ChatModel` → `RAGAnswer` (answer +
   `Source`s). `<think>…</think>` is stripped; `cited_markers()` reports which
@@ -1333,7 +1371,8 @@ also carry a `⏱ latency · tokens · tok/s` line
   `[[sources]]` (a `type = "session"` source feeds the Path B memory tier, not the doc
   pipeline — `source_paths()` is doc-only, `session_paths()` the rest); `memory_enabled`
   is the Wiki-vs-Second-Brain **mode** (`[memory] enabled`, default off). `find_projects(roots, depth, limit)` finds
-  project folders below given folders (the web UI's switcher, v0.120). Only this
+  project folders below given folders (the web UI's switcher, v0.120). `world_enabled` / `environments` /
+  `world_sensors` / `code_paths()` hold the world model's configuration (Path C, v0.123). Only this
   module + `cli.py` (and the web UI's switcher) know about projects; the pipeline stays project-agnostic.
 - **`openwiki/pipeline.py`** — Phase 2 build orchestration *state*: a per-stage
   **fingerprint chain** (`compute_fingerprints`) over `STAGES` (ingest, wiki, index,
@@ -1571,7 +1610,8 @@ also carry a `⏱ latency · tokens · tok/s` line
   `build-wiki`, `index`, `search`, `eval`, `ask` (`--global` = global search),
   `chat`, `graph-build`, `references`, `communities`, `decay`, `remember`, `backfill`, `recall`,
   `consolidate`, `sleep` (nightly maintenance + forgetting), `schedule` (`install` / `remove` / `status` — the
-  project's scheduled tasks), `doctor` (one health check), `memory` (`export` / `import` — portable
+  project's scheduled tasks), `doctor` (one health check), `world` (`status` — the world model's sensors and the
+  facts they govern), `memory` (`export` / `import` — portable
   memory; `pending` / `approve` / `reject` — the approval step), `sessions` (`search` / `list` — session
   search), `context`,
   `analyze` (world-model analysis — `coupling` | `gaps` | `memory`, offline), `hook` (host-lifecycle

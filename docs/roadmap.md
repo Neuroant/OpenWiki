@@ -1338,7 +1338,14 @@ parses a small expression language and never evaluates code, each rule proven on
 a person accepts it (`owiki world laws`, `owiki world accept`; arc42 ADR-58); one `Variable` per sensor, linked to the
 page of the file it reads; the git state, Ollama, the wiki's freshness and the capture workers as built-in variables
 the handoff and the laws share; and one registry for the graph's tables, so a rebuild keeps and the export carries
-every table no rebuild can recompute (ADR-59).
+every table no rebuild can recompute (ADR-59). **Events, decisions and proposals (v0.127):** what the world model
+notices becomes an event for a person — a belief that contradicts an observation, an accepted law that fails, a
+decision whose precondition changed (*drift*), a law broken by a change in no commit (*exogenous*), a value that flips
+back within a day (*contested*) — one open per law or belief, resolved by the world when the law holds again or by a
+person in the Pflege panel (`owiki world events / resolve`; arc42 ADR-60); `wiki_remember` records the state a
+decision was made in (`depends_on`) as a law of its own; and `owiki world propose` mines the git history for laws a
+person accepts or rejects — ten conventions of this repository on the first run, while the local model found no law
+in its documents (71 of 74 candidates screened out), so documents are opt-in (`--documents`, ADR-61).
 
 Path B remembers what was *said*; its weak spot is state that changes without anyone saying so (versions, counts,
 running services, plans that got done). Path C lets the world write too: built-in sensors over git, files, code,
@@ -1349,7 +1356,7 @@ what a prompt touches. At the centre is one loop — predict, act, observe, comp
 per task, nightly, human) — that turns every observation into a test of the model and corrects automatically only
 what is deterministic (`path-c-world-model.md` §3.4). Repository first; machines (the LCU 9000 laser unit) federated with the sibling project
 Cognitive Substrate through one MCP contract. Staged C0 (an inventory, no code) → C4 (a physical twin), each with a
-measured exit. C0 and C1 are done (v0.123 – v0.125), C2 is under way (v0.126) — design in
+measured exit. C0 and C1 are done (v0.123 – v0.125), C2 is under way (v0.126 – v0.127) — design in
 **[`docs/path-c-world-model.md`](path-c-world-model.md)**.
 
 **Test playground — the Ableton Expert System** (`G:\Antigravity\ableton-expert-system`,

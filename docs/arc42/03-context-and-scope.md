@@ -139,7 +139,7 @@ the project's `handoff/` and is gated like the write tool (`[memory] agent_write
 | **Chat** | `POST {host}/api/chat` · `{model, messages:[{role, content}], stream:false, options:{temperature, …}, tools?}` | `{message:{role, content, tool_calls?}}` |
 
 Both via stdlib `urllib`, no API key; a `URLError`/`HTTPError` becomes a `RuntimeError` with a
-"is Ollama running / model pulled?" hint (§6.13).
+"is Ollama running / model pulled?" hint (§6.14).
 
 ## 3.3 Scope boundaries (what OpenWiki is *not*)
 
@@ -152,4 +152,4 @@ Both via stdlib `urllib`, no API key; a `URLError`/`HTTPError` becomes a `Runtim
 ---
 *Chapter complete. Payload shapes verified against `web/server.py`, `mcp_server.py`,
 `embeddings.py`, `llm.py` (re-checked for v0.113). Cross-refs: interfaces used at runtime → §6; error handling →
-§6.13/§8.*
+§6.14/§8.*

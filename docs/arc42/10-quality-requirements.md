@@ -54,6 +54,7 @@ Scenarios are written as *stimulus → expected response* so they can be checked
 | QS-18 | Usefulness (memory noise) | should | After `openwiki sleep`, the facts injected for real prompts contain no one-off session events ("vX was pushed and tagged", commit hashes), and no fact a person would keep was removed — forgotten facts stay in the graph (ADR-32). |
 | QS-21 | Efficiency (prompt context) | should | A prompt of a coding session gets the assembled memory injected (chore prompts get none, ADR-43 trims repeats) → its size stays within `[memory] context_budget` (3,000 chars ≈ 750 tokens; measured mean ≈ 710 tokens over 335 real prompts) while recalling `[memory] context_k` facts (16), and both are project settings a user can lower; a change to either is measured on the live path — cost, usefulness of the facts, effect on answers — before it ships (ADR-35). |
 | QS-22 | Usability (continuity) | should | A new Claude Code session starts in a repository whose last session wrote a handoff → before the first prompt the agent has the next steps and what changed since (commits, memory, environment), within 6,000 chars; a stale handoff says so (new commits, "already resumed"); a handoff line that would weaken security or address AI assistants never reaches it (ADR-36). |
+| QS-31 | Correctness (rules) | should | An accepted law breaks — the version files out of step, a release left untagged, a decision's precondition changed → the next observe pass raises one event for it (*violation*, *drift*, or *exogenous* when the change is in no commit), nothing is corrected (decision 5), and the event resolves itself once the law holds again; a proposed law reports nothing until a person accepts it; measured with C2.11 — at least 9 of 10 planted drifts detected, at most one false alarm a week in real use. |
 | QS-30 | Relevance (staleness) | should | A request touches a topic on which memory holds an old version, count or plan → recall ranks such facts of kinds that go stale below current ones, while an old decision or description competes by relevance alone; measured on real prompts — fewer stale-labeled facts in the context, judged helpfulness unchanged (ADR-49). |
 | QS-29 | Governance (memory writes) | could | With `[memory] approve_writes`, an agent's memory write → lands only after a person approves it (terminal or web UI), closes exactly the facts that were reviewed, counts as valid from when it was staged and as recorded when approved; a rejected write never lands and stays in an audit log (ADR-46). |
 | QS-28 | Recall (detail) | should | A later session asks for a detail an earlier one stated — an error, a number, a command, a reason → session search returns the turn that said it, verbatim and dated, with credentials redacted and instruction-like sentences withheld; nothing is injected unless the agent asks (ADR-44). |
@@ -67,7 +68,7 @@ Scenarios are written as *stimulus → expected response* so they can be checked
 
 ## 10.3 Current evidence & gaps
 
-- **Met:** QS-2 (the suite — **901 tests** — runs offline, and in **CI** on every push across Python
+- **Met:** QS-2 (the suite — **920 tests** — runs offline, and in **CI** on every push across Python
   3.11–3.13 + a Docker build, ADR-24); QS-5 (four findings in `docs/RAG-vs-GraphRAG.md`, incl. hybrid
   winning on a code corpus); QS-11 by the metrics collector (ADR-20 — per-call latency/tokens in the CLI,
   System tab, and per-build-stage); QS-13 by the world-model analysis toolkit (ADR-25, §8.19 — `owiki
@@ -97,7 +98,9 @@ Scenarios are written as *stimulus → expected response* so they can be checked
   useful new facts (ADR-43); QS-28 by LoCoMo's evidence turns — full text found them in the top 5 ±1 turn for 68 % of
   the questions — and 47 generated questions about coding-session details: the answer in the fact context 8 times, in
   the session excerpts 41 (ADR-44); QS-30 by recall's recency limited to volatile kinds — fewer stale-labeled facts in
-  67 of 267 real prompts, more in 6, judged helpfulness and LoCoMo coverage unchanged (ADR-49). All on small, hand-labeled sets (one annotator) — direction checks, not benchmarks.
+  67 of 267 real prompts, more in 6, judged helpfulness and LoCoMo coverage unchanged (ADR-49); QS-31 in part — on a
+  copy of openwiki-dev the release's own version bump raised one *exogenous* event that resolved itself when the second
+  version file followed (ADR-60); the planted-drift rate and the false alarms in real use come with C2.11. All on small, hand-labeled sets (one annotator) — direction checks, not benchmarks.
 - **Measured externally (memory):** LoCoMo (`owiki eval --locomo`, ADR-34) — all 10 conversations, 1,986 questions,
   a local 30B answering + judging: overall J **50.0 %** (multi-hop 54.3, temporal 34.0, open-domain 34.4, single-hop
   56.5; adversarial 89.2). Mem0 reports ≈ 67 % with GPT-4o-mini — a reference point, not a like-for-like comparison.

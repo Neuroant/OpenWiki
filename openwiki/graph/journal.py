@@ -50,10 +50,10 @@ def _append(path, obj: dict) -> None:
 
 def append_remember(path, session_id, facts, now: Optional[int] = None,
                     session_date: Optional[int] = None, correct: bool = False,
-                    retire=None, agent: bool = False) -> int:
+                    retire=None, agent: bool = False, preconditions: Optional[dict] = None) -> int:
     """Queue a ``remember`` op — see :func:`_remember_record`. Returns the number of triples written
     (0 → nothing queued)."""
-    rec = _remember_record(session_id, facts, now, session_date, correct, retire, agent)
+    rec = _remember_record(session_id, facts, now, session_date, correct, retire, agent, preconditions)
     if rec is None:
         return 0
     _append(path, rec)
@@ -61,7 +61,8 @@ def append_remember(path, session_id, facts, now: Optional[int] = None,
 
 
 def _remember_record(session_id, facts, now: Optional[int] = None, session_date: Optional[int] = None,
-                     correct: bool = False, retire=None, agent: bool = False) -> Optional[dict]:
+                     correct: bool = False, retire=None, agent: bool = False,
+                     preconditions: Optional[dict] = None) -> Optional[dict]:
     """Queue a ``remember`` op — (subject, predicate, object) triples for one session.
     ``facts`` may be ``MemoryFact``-likes (``.subject``/``.predicate``/``.object``) or
     ``(s, p, o)`` tuples. Returns the number of triples written (0 → nothing queued).
@@ -75,8 +76,9 @@ def _remember_record(session_id, facts, now: Optional[int] = None, session_date:
     the fold closes them at the op's time (valid time ends: the world changed). A record may carry
     only ``retire`` (the new state already remembered, or none needed). ``agent`` marks an op
     written by the host agent (``wiki_remember``): it names its replacements itself, so the fold
-    skips the model-based attribute resolution (B9) for its facts. ``None`` when there is nothing to
-    write."""
+    skips the model-based attribute resolution (B9) for its facts. ``preconditions`` (Path C, C2.5) =
+    ``{variable: value}`` the decision was made under — the fold records them as a precondition law. ``None`` when
+    there is nothing to write."""
     triples = []
     for f in facts:
         if hasattr(f, "subject"):
@@ -108,6 +110,8 @@ def _remember_record(session_id, facts, now: Optional[int] = None, session_date:
         rec["retire"] = retire
     if agent:
         rec["agent"] = True
+    if preconditions:
+        rec["preconditions"] = {str(k): v for k, v in preconditions.items()}
     if session_date is not None:
         rec["session_date"] = int(session_date)
     if correct:
@@ -115,12 +119,15 @@ def _remember_record(session_id, facts, now: Optional[int] = None, session_date:
     return rec
 
 
-ID_OPS = ("confirm", "forget")      # ops on facts named by id — the Memory tab's maintenance panel (M7)
+ID_OPS = ("confirm", "forget",      # ops on facts named by id — the Memory tab's maintenance panel (M7)
+          "resolve-event", "accept-law", "reject-law")    # … and on the world model's events and laws (C2.4, C2.6)
 
 
 def append_ids(path, op, ids, now: Optional[int] = None, reason: Optional[str] = None) -> int:
     """Queue an op on facts named by id: ``confirm`` (a person checked the fact still holds — the fold
-    re-affirms it, as if it were said again) or ``forget`` (archive it with ``reason``). Pinned by id like a
+    re-affirms it, as if it were said again) or ``forget`` (archive it with ``reason``); on the world model's events
+    (``resolve-event``, ``reason`` = the resolution) and laws held in the graph (``accept-law`` / ``reject-law`` —
+    a person's review, C2.4). Pinned by id like a
     ``remember`` record's ``retire``: the fold touches exactly the facts the reviewer saw, and a fact's content
     never changes. Returns how many ids were queued (0 → nothing)."""
     if op not in ID_OPS:
@@ -179,7 +186,7 @@ def read_journal(path) -> list:
 def queued_ids(path) -> dict:
     """The fact ids pending in the journal per action — ``close`` (a ``remember`` record's ``retire``),
     ``confirm``, ``forget`` — until a fold applies them (the maintenance panel marks them queued)."""
-    out: dict = {"close": [], "confirm": [], "forget": []}
+    out: dict = {"close": [], "confirm": [], "forget": [], "resolve-event": [], "accept-law": [], "reject-law": []}
     for rec in read_journal(path):
         if rec.get("op") == "remember":
             out["close"].extend(rec.get("retire") or [])
@@ -245,10 +252,10 @@ def _locked(path, wait: float = 5.0, stale: float = 60.0):
 
 
 def stage_remember(path, session_id, facts, now: Optional[int] = None, session_date: Optional[int] = None,
-                   retire=None, agent: bool = True) -> tuple:
+                   retire=None, agent: bool = True, preconditions: Optional[dict] = None) -> tuple:
     """Stage a ``remember`` op for approval instead of queueing it → ``(triples staged, id)`` (``(0, "")``
-    when there is nothing to stage)."""
-    rec = _remember_record(session_id, facts, now, session_date, False, retire, agent)
+    when there is nothing to stage). A decision's ``preconditions`` (C2.5) travel with it into the journal."""
+    rec = _remember_record(session_id, facts, now, session_date, False, retire, agent, preconditions)
     if rec is None:
         return 0, ""
     rec["id"] = hashlib.sha1(json.dumps(rec, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()[:8]

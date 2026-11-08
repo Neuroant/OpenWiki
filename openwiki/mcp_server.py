@@ -119,13 +119,15 @@ class MCPStdioServer:
 # Build the OpenWiki toolset over the existing library.
 # ---------------------------------------------------------------------------
 
-def _remember(graph, index, a: dict, on_queued=None, stage: bool = False) -> str:
+def _remember(graph, index, a: dict, on_queued=None, stage: bool = False, world_values=None) -> str:
     """``wiki_remember``: screen the agent's facts (P0 security policy; one-off events are
     refused with a hint to record the resulting state), resolve ``replaces`` against the
     believed facts *now* (exact lines only — near misses come back with suggestions), and
     queue one journal op; ``on_queued`` (the CLI's fold worker) folds it within seconds —
     remember + close the replaced — else the next writable pass does. With ``stage``
-    (``[memory] approve_writes``) the op is staged for a person's approval instead (v0.110)."""
+    (``[memory] approve_writes``) the op is staged for a person's approval instead (v0.110). ``depends_on`` (Path C,
+    C2.5): the world model's variables a decision rests on — ``world_values(names) -> (values, missing)`` reads them
+    now, and the values are recorded with the decision as a precondition law (a change raises a drift event)."""
     import time as _time
     from .graph.memory import MemoryFact, is_ephemeral, is_secret_only, is_unsafe_instruction, redact_fact
     from .graph.temporal import parse_date
@@ -154,20 +156,39 @@ def _remember(graph, index, a: dict, on_queued=None, stage: bool = False) -> str
             facts.append(fact)
     matched, unmatched = graph.match_facts(a.get("replaces") or [])
     retire = [i for ids in matched.values() for i in ids]
+    depends = [str(x).strip() for x in a.get("depends_on") or [] if str(x).strip()]
+    preconditions = None
+    if depends and world_values is None:
+        notes.append("depends_on ignored — this project has no world model ([world] enabled)")
+    elif depends:
+        try:
+            got, missing = world_values(depends)
+        except Exception as exc:          # a sensor problem never costs the write
+            got, missing = {}, depends
+            notes.append(f"depends_on: the variables couldn't be read ({type(exc).__name__})")
+        if missing:
+            notes.append(f"depends_on: no reading of {', '.join(missing)} — not recorded (`owiki world status` "
+                         f"lists the sensors, `owiki world laws` the built-in variables)")
+        preconditions = got or None
     out = []
     if facts or retire:
         session = "agent-" + _time.strftime("%Y-%m-%d", _time.gmtime(now))
         if stage:
-            _n, op_id = graph.stage_remember(session, facts, session_date=now, retire=retire, agent=True)
+            _n, op_id = graph.stage_remember(session, facts, session_date=now, retire=retire, agent=True,
+                                             preconditions=preconditions if facts else None)
             out.append(f"Staged {len(facts)} fact(s)"
                        + (f", closing {len(retire)} replaced fact(s)" if retire else "")
                        + f" for approval (id {op_id}) — they land in memory once a person approves them "
                          f"(`openwiki memory pending`, then `openwiki memory approve {op_id}`).")
             out += [f"  + {f.subject} {f.predicate} {f.object}" for f in facts]
             out += [f"  − {line}" for line in matched]
+            if preconditions and facts:
+                out.append("  made while " + ", ".join(f"{k} = {v!r}" for k, v in preconditions.items())
+                           + " — once approved, a change raises a drift event")
             return "\n".join(out + [f"No current fact matches “{line}” — nothing closed" for line in unmatched]
                              + notes)
-        graph.queue_remember(session, facts, session_date=now, retire=retire, agent=True)
+        graph.queue_remember(session, facts, session_date=now, retire=retire, agent=True,
+                             preconditions=preconditions if facts else None)
         folding = False
         if on_queued is not None:
             try:
@@ -180,6 +201,9 @@ def _remember(graph, index, a: dict, on_queued=None, stage: bool = False) -> str
                       " — they land in memory at the next write pass (session end or `openwiki sleep`)."))
         out += [f"  + {f.subject} {f.predicate} {f.object}" for f in facts]
         out += [f"  − {line}" for line in matched]
+        if preconditions and facts:
+            out.append("  made while " + ", ".join(f"{k} = {v!r}" for k, v in preconditions.items())
+                       + " — a change raises a drift event")
     else:
         out.append("Nothing stored.")
     for line in unmatched:
@@ -207,7 +231,7 @@ def build_server(wiki_dir, index=None, graph=None, agent=None, name="openwiki",
                  memory_temporal: float = 0.0,
                  handoff: Optional[Callable] = None,
                  on_remember: Optional[Callable] = None, sessions=None,
-                 approve_writes: bool = False) -> MCPStdioServer:
+                 approve_writes: bool = False, world_values: Optional[Callable] = None) -> MCPStdioServer:
     """Assemble the MCP server from already-loaded OpenWiki components.
 
     `index` (SemanticIndex) enables search/ask; `graph` (GraphStore) enables the
@@ -331,11 +355,16 @@ def build_server(wiki_dir, index=None, graph=None, agent=None, name="openwiki",
                               "description": "Remembered facts this makes outdated, as wiki_memory "
                                              "prints them."},
                  "source": {"type": "string", "enum": ["assistant", "user"],
-                            "description": "Who established it: you (default) or the user's decision."}},
+                            "description": "Who established it: you (default) or the user's decision."},
+                 "depends_on": {"type": "array", "items": {"type": "string"},
+                                "description": "Optional, for a decision: the world model's variables it rests on — "
+                                               "sensor ids or built-in variables (git_dirty, wiki_commits_behind, …). "
+                                               "Their values now are recorded with it; a change raises a drift "
+                                               "event."}},
                 []))
             handlers["wiki_remember"] = lambda a: _remember(graph, index, a,
                                                             on_queued=None if approve_writes else on_remember,
-                                                            stage=approve_writes)
+                                                            stage=approve_writes, world_values=world_values)
 
         # Global search needs a chat model (from the agent) + community summaries.
         if agent is not None and _graph_has_communities(graph):

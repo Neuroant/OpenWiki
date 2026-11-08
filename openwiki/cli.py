@@ -44,7 +44,7 @@ from .graph import (
     extract_relations, format_memory, resolve_entities, summarize_community, summarize_facts,
 )
 from .embeddings import CachingEmbedder, OllamaEmbedder
-from .graph.journal import append_observe, append_remember, journal_path, pending_journal
+from .graph.journal import append_ids, append_observe, append_remember, journal_path, pending_journal
 from .lexical import RECALL_WEIGHT
 from .graph.lazy import LazyGraph
 from .graph.store import memoized
@@ -779,14 +779,29 @@ def _build_argparser() -> argparse.ArgumentParser:
     world_p = sub.add_parser("world", parents=[common],
                              help="The world model (Path C): the project's environments, the built-in sensors that "
                                   "read them and the remembered facts each one governs.")
-    world_p.add_argument("action", choices=["status", "observe", "accept", "revoke", "laws"],
+    world_p.add_argument("action", choices=["status", "observe", "accept", "revoke", "laws", "reject", "events",
+                                            "resolve", "propose"],
                          help="status = read every sensor now and show its value, the fact it would write and the "
                               "current facts it governs — agreeing, differing (the dry run) or unclear; accept ID… = "
                               "a person accepts a binding's dry run, so observing may close the facts it governs; "
                               "revoke ID… = take that back; observe = read the accepted sensors and write what "
                               "changed — the observation, and the governed facts it closes (scheduled between "
-                              "sessions with `owiki schedule install --task world-observe`); laws = check the "
-                              "manifest's [[world.laws]] now — each one's result, and why one isn't trusted.")
+                              "sessions with `owiki schedule install --task world-observe`); laws = check every "
+                              "law now — the manifest's [[world.laws]] and those held in the graph — each one's "
+                              "result, and why one isn't trusted; reject ID… = a person rejects a proposed law; "
+                              "events = the world model's events (open ones; --all for every one); resolve ID… = "
+                              "a person resolves events (--note); propose = candidate laws from the git co-change "
+                              "history (and with --documents from the wiki's pages, one model call per page with "
+                              "rule-like sentences), written as proposals for a person to review.")
+    world_p.add_argument("--note", default=None, help="resolve: the resolution (default: resolved by a person).")
+    world_p.add_argument("--wiki", type=Path, default=None, help="propose: the wiki dir (default: the project's).")
+    world_p.add_argument("--limit", type=int, default=20,
+                         help="propose --documents: at most this many pages asked (default 20).")
+    world_p.add_argument("--documents", action="store_true",
+                         help="propose: also ask the chat model about the wiki's pages — for a corpus that states "
+                              "rules (a manual); on this repository's own docs none of 74 candidates was a law.")
+    world_p.add_argument("--no-cochange", action="store_true", help="propose: skip the co-change history.")
+    world_p.add_argument("--model", default=None, help="propose: the chat model (default: the project's).")
     world_p.add_argument("ids", nargs="*", metavar="ID", help="accept / revoke: the bindings.")
     world_p.add_argument("--sensor", action="append", default=None, metavar="ID",
                          help="status / observe: only this sensor (repeatable).")
@@ -1806,6 +1821,7 @@ def _apply_project(args: argparse.Namespace, project: Optional[Project],
     elif cmd == "world":                    # the graph holds the facts sensors govern; ollama sensors use the host
         path("graph", p.graph_path if p else None, Path("output") / "graph")
         path("index", p.index_dir if p else None, Path("output") / "index")
+        path("wiki", p.wiki_dir if p else None, Path("output") / "wiki")       # propose reads its pages (C2.4)
         val("host", "models", "host", DEFAULT_HOST)
     elif cmd == "sessions":                 # lessons: the chat model phrases them, the index embeds them
         path("index", p.index_dir if p else None, Path("output") / "index")
@@ -3288,6 +3304,8 @@ def _memory_review(args: argparse.Namespace) -> int:
                 print(f"  + {f[0]} {f[1]} {f[2]}")
             for line in _staged_replaces(args.graph, rec.get("retire") or []):
                 print(f"  − {line}")
+            if rec.get("preconditions"):                # a decision's preconditions (C2.5)
+                print("  made while " + ", ".join(f"{k} = {v!r}" for k, v in rec["preconditions"].items()))
         print(f"\n{len(recs)} write(s) awaiting approval — `openwiki memory approve ID …` (or `--all`), "
               f"`openwiki memory reject ID …`.")
         return 0
@@ -4949,9 +4967,9 @@ def _hook_fold(project: Project, payload: dict) -> None:
                 break
             folded = res.get("folded") or {}
             runlog.note(folded=folded.get("records", 0), lock_s=res.get("lock_s"))
-            reviewed = "".join(f", {folded[k]} {label}" for k, label in (("confirmed", "confirmed"),
-                                                                        ("forgotten", "forgotten"))
-                               if folded.get(k))
+            reviewed = "".join(f", {folded[k]} {label}" for k, label in (
+                ("confirmed", "confirmed"), ("forgotten", "forgotten"), ("decided", "decision(s) with preconditions"),
+                ("resolved", "event(s) resolved"), ("reviewed", "law(s) reviewed")) if folded.get(k))
             print(f"openwiki hook: folded {folded.get('records', 0)} queued op(s) "
                   f"({folded.get('remembered', 0)} fact(s) added, {folded.get('retired', 0)} closed{reviewed}) — "
                   f"write lock held {res['lock_s']} s", file=sys.stderr)
@@ -5109,7 +5127,9 @@ def _cmd_mcp(args: argparse.Namespace) -> int:
                           memory_lexical=project.lexical_weight if project is not None else RECALL_WEIGHT,
                           memory_temporal=project.temporal_weight if project is not None else WINDOW_WEIGHT,
                           memory_writes=writes, handoff=handoff, on_remember=on_remember, sessions=sessions,
-                          approve_writes=bool(writes and project.approve_writes))
+                          approve_writes=bool(writes and project.approve_writes),
+                          world_values=_world_values(project, args.host)
+                          if project is not None and project.world_enabled else None)
     server.serve()   # blocks on stdio (JSON-RPC)
     return 0
 
@@ -5265,10 +5285,11 @@ def _world_observe(project, graph_path, index_dir, host, sensors=None, due: bool
     world = load_world(project)
     accepted = read_accepted(project.state_dir)
     active = active_bindings(world, accepted)
-    if not active and not world.laws:
+    held = _graph_laws(graph, graph_path)              # C2.4 / C2.5: decisions' preconditions, accepted proposals
+    if not active and not world.laws and not held:
         out["skipped"] = "no accepted binding — check `owiki world status`, then `owiki world accept ID`"
         return out
-    named = _law_names(world)
+    named = _law_names(world, held)
     for_laws = [b for b in world.bindings if b not in active and (b.id in named or b.id.replace("-", "_") in named)]
     now = int(time.time())
     cache = read_cache(project.state_dir)
@@ -5280,23 +5301,29 @@ def _world_observe(project, graph_path, index_dir, host, sensors=None, due: bool
     update_cache(project.state_dir, readings)
     obs = [observation(b, readings[b.id]) for b in chosen if readings[b.id].quality == "complete"]
     out["observations"] = obs
-    if not obs and not world.laws:
+    if not obs and not world.laws and not held:
         out["written"] = "Nothing to write (no complete reading)."
         return out
     authority = Authority(active)
     variables = [b.variable() for b in active + for_laws]    # C2.2: one Variable per binding the pass reads
-    law_inputs = _law_inputs(project, world, readings, read_cache(project.state_dir), host, now)
+    law_inputs = _law_inputs(project, world, readings, read_cache(project.state_dir), host, now, held)
 
     def laws_of() -> list:
-        out["law_results"] = _law_rows(world, law_inputs, accepted)
+        out["law_results"] = _law_rows(world, law_inputs, accepted, held)
         return out["law_results"]
+
+    def events_of(g, dry: bool = False) -> dict:      # C2.6: what the accepted laws' results raise or resolve
+        raise_, resolve = _law_events(out["law_results"], law_inputs)
+        return {"raised": g.raise_events(raise_, now=now, dry_run=dry)["raised"],
+                "resolved": g.resolve_events(keys=resolve, resolution="holds again", now=now, dry_run=dry)}
     if graph is not None:                              # the caller's writable graph (sleep)
         out["variables"] = graph.upsert_variables(variables, now=now)
         out["laws"] = graph.upsert_laws(laws_of(), now=now, sync=True)
+        out["events"] = events_of(graph)
         r = out["result"] = graph.observe(obs, embedder, authority, now=now)
         out["written"] = (f"observed {len(obs)} sensor(s): {r['added']} new value(s), {r['closed']} belief(s) "
                           f"closed, {r['agreed']} agreeing{_variables_note(out['variables'])}"
-                          f"{_laws_note(out['law_results'])}")
+                          f"{_laws_note(out['law_results'])}{_events_note(out['events'], r)}")
         return out
     reader = _open_reader(graph_path, wait=5.0)
     if reader is None:
@@ -5306,12 +5333,14 @@ def _world_observe(project, graph_path, index_dir, host, sensors=None, due: bool
         out["planned"] = reader.observe(obs, None, authority, now=now, dry_run=True)
         out["variables"] = reader.upsert_variables(variables, now=now, dry_run=True)
         out["laws"] = reader.upsert_laws(laws_of(), now=now, sync=sync, dry_run=True)
+        out["events"] = events_of(reader, dry=True)
     finally:
         reader.close()
     new_variables = out["variables"]["added"] + out["variables"]["updated"]
     new_laws = out["laws"]["added"] + out["laws"]["changed"] + out["laws"]["retired"]
+    new_events = out["events"]["raised"] + out["events"]["resolved"]
     resync = sync and (out["planned"]["unchanged"] or out["laws"]["unchanged"])
-    if dry_run or not (changes(out["planned"]) or new_variables or new_laws or resync):
+    if dry_run or not (changes(out["planned"]) or new_variables or new_laws or new_events or resync):
         out["result"] = out["planned"]
         written = "Dry run — nothing written." if dry_run else "Nothing changed — nothing written."
         out["written"] = written + _laws_note(out["law_results"])
@@ -5332,38 +5361,233 @@ def _world_observe(project, graph_path, index_dir, host, sensors=None, due: bool
     try:
         out["variables"] = graph.upsert_variables(variables, now=now)
         out["laws"] = graph.upsert_laws(laws_of(), now=now, sync=sync)
+        out["events"] = events_of(graph)
         out["result"] = graph.observe(obs, index.embedder if index is not None else None, authority, now=now)
     finally:
         graph.close()
     r = out["result"]
     out["written"] = (f"Written: {r['added']} new observation(s), {r['unchanged']} confirmed; {r['closed']} belief(s) "
                       f"closed ({r['discrepancies']} discrepanc{'y' if r['discrepancies'] == 1 else 'ies'}), "
-                      f"{r['agreed']} agreeing{_variables_note(out['variables'])}{_laws_note(out['law_results'])}.")
+                      f"{r['agreed']} agreeing{_variables_note(out['variables'])}{_laws_note(out['law_results'])}"
+                      f"{_events_note(out['events'], r)}.")
     return out
 
 
-def _law_names(world) -> set:
-    """The names the trusted laws read."""
-    return {n for law in world.laws if law.health == "ok" for n in law.names}
+def _world_values(project, host):
+    """``wiki_remember``'s ``depends_on`` (C2.5): ``names -> (values, missing)`` — each sensor's latest complete
+    reading (the world cache; a fast sensor not cached yet is read now, light) and the built-in variables."""
+    def values(names):
+        from .world import sensors
+        from .world.bindings import load_world
+        from .world.builtin import BUILTIN, read_builtin
+        from .world.observe import read_cache
+        world = load_world(project)
+        by_id = {b.id: b for b in world.bindings}
+        cache = read_cache(project.state_dir)
+        got, missing, builtins = {}, [], []
+        for name in names:
+            bid = name if name in by_id else name.replace("_", "-") if name.replace("_", "-") in by_id else None
+            if bid is None:
+                (builtins if name in BUILTIN else missing).append(name)
+                continue
+            entry = cache.get(bid) or {}
+            if entry.get("quality") == "complete":
+                got[bid] = entry.get("value")
+                continue
+            b = by_id[bid]
+            env = world.environment(b.environment)
+            if not b.slow:
+                r = sensors.read(b.id, b.type, b.params, root=env.root if env else None, host=host, light=True)
+                if r.quality == "complete":
+                    got[bid] = r.value
+                    continue
+            missing.append(name)
+        if builtins:
+            repo = next((e.root for e in world.environments if e.kind == "repository" and e.root), None)
+            models = [project.setting("models", "chat", DEFAULT_CHAT), project.setting("models", "embed", DEFAULT_EMBED)]
+            for name, r in read_builtin(project, repo, host, models, builtins).items():
+                if r["quality"] == "complete":
+                    got[name] = r["value"]
+                else:
+                    missing.append(name)
+        return got, missing
+    return values
 
 
-def _law_inputs(project, world, readings: dict, cache: dict, host, now: int) -> dict:
+def _graph_law_rows(graph_path) -> list:
+    """The graph's ``Law`` rows (read-only, for the call), ``[]`` without a graph."""
+    if not graph_path or not Path(graph_path).exists():
+        return []
+    reader = _open_reader(graph_path, wait=5.0)
+    if reader is None:
+        return []
+    try:
+        return reader.laws()
+    finally:
+        reader.close()
+
+
+def _world_write(graph_path, op: str, ids: list, what: str = "") -> str:
+    """A person's action on the world model's events or laws (``resolve-event`` / ``accept-law`` / ``reject-law`` /
+    ``propose`` — a law back to proposed): written at once when the graph can be opened writable, else queued in the
+    journal for the next writer (``journal.append_ids``). Returns what happened."""
+    graph = _open_writer(graph_path, wait=10.0) if graph_path and Path(graph_path).exists() else None
+    if graph is not None:
+        try:
+            if op == "resolve-event":
+                n = graph.resolve_events(ids, resolution=what)
+            else:
+                n = graph.review_laws(ids, {"accept-law": "accepted", "reject-law": "rejected"}.get(op, "proposed"))
+        finally:
+            graph.close()
+        return f"{n} written"
+    if op == "propose":
+        return "the graph is locked — try again when it is free"
+    n = append_ids(journal_path(graph_path), op, ids, reason=what if op == "resolve-event" else None)
+    return f"the graph is locked — {n} queued for the next writer"
+
+
+def _world_events(args, project) -> int:
+    """``owiki world events``: the world model's events, newest first — open ones (``--all``: every one)."""
+    reader = _open_reader(args.graph, wait=5.0) if args.graph and Path(args.graph).exists() else None
+    if reader is None:
+        print("World events: no readable graph.")
+        return 0
+    try:
+        rows = reader.events(open_only=not args.all, limit=200)
+    finally:
+        reader.close()
+    if args.json:
+        print(json.dumps(rows, ensure_ascii=False, indent=2, default=str))
+        return 0
+    from .graph.temporal import format_date
+    print(f"World events — {project.name}   {len(rows)} {'open' if not args.all else 'in all'}")
+    for r in rows:
+        state = f"resolved {format_date(r['resolved_at'])}: {r.get('resolution')}" if r.get("resolved_at") else "open"
+        print(f"  {r['kind']:<12}{format_date(r.get('at'))}   {r.get('detail') or ''}")
+        print(f"  {'':<12}{r['id']}   {state}")
+    if not rows:
+        print("  none" + ("" if args.all else " open — `owiki world events --all` lists resolved ones"))
+    return 0
+
+
+def _world_propose(args, project, world) -> int:
+    """``owiki world propose`` (C2.4): candidate laws — from the co-change history of each repository and, with
+    ``--documents``, from the wiki's pages (the sentences that read like rules and name a variable, one model call per
+    page, at most ``--limit`` pages; opt-in — on openwiki-dev's own docs none of 74 candidates was a law) — validated
+    like a manifest law and written as *proposed* laws for a person to review (`owiki world laws`, `owiki world
+    accept / reject ID`, the Pflege panel). Never proposes a law the graph already holds — a rejected one stays
+    rejected."""
+    from .graph.cochange import git_commits
+    from .world.builtin import BUILTIN
+    from .world.laws import check_key, cochange_candidates, extract_laws, law_from_row, rule_sentences, variable_terms
+    held_rows = _graph_law_rows(args.graph)
+    existing = {law["id"] for law in held_rows} | {law.id for law in world.laws}
+    declared = {(law.when, law.then) for law in world.laws if law.kind == "co-change"}   # by content, not id
+    proposals = []                                  # (law, page slugs)
+    if not args.no_cochange:
+        for env in world.environments:
+            if env.kind == "repository" and env.root:
+                proposals += [(law, []) for law in cochange_candidates(git_commits(env.root, 500),
+                                                                       environment=env.name,
+                                                                       skip=existing | declared)]
+    if args.documents:
+        now, _ = _world_values(project, args.host)([b.id for b in world.bindings])   # the model sees what holds now
+        variables = [dict(b.variable(), name=b.id.replace("-", "_"), value=now.get(b.id)) for b in world.bindings]
+        terms = variable_terms(variables)
+        known = {b.id for b in world.bindings} | set(BUILTIN)
+        pages = sorted(Path(args.wiki).glob("pages/*.md")) if args.wiki and Path(args.wiki).is_dir() else []
+        asked, dropped = 0, {}
+        seen = {check_key(law.tree) for law in list(world.laws) + [law_from_row(r) for r in held_rows]
+                if law.tree is not None}                # the same check, already declared or held: once
+        chat = OllamaChat(model=args.model or project.setting("models", "chat", DEFAULT_CHAT),
+                          host=args.host or project.setting("models", "host", DEFAULT_HOST), temperature=0.0)
+        for page in pages:
+            if asked >= max(0, args.limit):
+                break
+            sentences = rule_sentences(page.read_text(encoding="utf-8", errors="replace"), list(terms))
+            if not sentences:
+                continue
+            asked += 1
+            proposals += [(law, [page.stem]) for law in extract_laws(chat, page.stem, sentences, variables, known,
+                                                                     report=dropped, seen=seen)]
+        why = {"invalid": "invalid", "pinned": "only pinning a variable to a constant",
+               "constant": "comparing constants", "unrelated": "checking what their text doesn't name",
+               "violated_now": "violated by the current values",
+               "unknown_now": "not checkable on the current values",
+               "duplicate": "already declared, held or proposed"}
+        print(f"Asked the model about {asked} page(s) with rule-like sentences naming a variable"
+              + (f"; dropped {', '.join(f'{n} {why[k]}' for k, n in dropped.items())}" if dropped else "") + ".")
+    new = [(law, slugs) for law, slugs in proposals if law.id not in existing]
+    for law, slugs in new:
+        print(f"  proposed {law.id}: {law.described}\n    {law.text}" + (f"   (from {', '.join(slugs)})" if slugs else ""))
+    if not new:
+        print("No new law to propose.")
+        return 0
+    if args.dry_run:
+        print(f"Dry run — {len(new)} proposal(s), nothing written.")
+        return 0
+    graph = _open_writer(args.graph, wait=30.0)
+    if graph is None:
+        print("error: the graph is locked — try again when it is free.", file=sys.stderr)
+        return 1
+    try:
+        rows = [dict(law.row(), last_result="unknown", detail="proposed — not checked yet", variables=[],
+                     pages=slugs) for law, slugs in new]
+        graph.upsert_laws(rows, retire_missing=False)
+    finally:
+        graph.close()
+    print(f"Proposed {len(new)} law(s) — `owiki world laws` checks them, `owiki world accept ID` / `reject ID` "
+          f"decides.")
+    return 0
+
+
+def _law_names(world, held=()) -> set:
+    """The names the trusted laws read — the manifest's and those held in the graph."""
+    return {n for law in list(world.laws) + list(held) if law.health == "ok" for n in law.names}
+
+
+def _graph_laws(graph, graph_path) -> list:
+    """The laws held in the graph (C2.4, C2.5) — decisions' preconditions and proposals from documents or the
+    co-change history — that are accepted or proposed, as ``world.laws.Law`` (``graph`` = an open store, else the graph
+    at ``graph_path`` opened read-only for the call)."""
+    from .world.laws import law_from_row
+    rows = []
+    if graph is not None:
+        rows = graph.laws()
+    elif graph_path and Path(graph_path).exists():
+        reader = _open_reader(graph_path, wait=5.0)
+        if reader is not None:
+            try:
+                rows = reader.laws()
+            finally:
+                reader.close()
+    return [law_from_row(r) for r in rows if r.get("origin") not in (None, "manifest")
+            and r.get("status") in ("accepted", "proposed")]
+
+
+def _law_inputs(project, world, readings: dict, cache: dict, host, now: int, held=()) -> dict:
     """What the laws read (C2.3): ``values`` and ``ages`` of the sensors — this pass's readings, else the cached ones
     —, the built-in variables a law names (C2.14) and the git history of each environment a co-change law watches."""
     from .graph.cochange import git_commits
     from .world.builtin import BUILTIN, read_builtin
-    values, ages = {}, {}
+    from .world.sensors import render
+    values, ages, commits_of = {}, {}, {}
     for bid, entry in cache.items():
         if entry.get("quality") == "complete":
             values[bid] = entry.get("value")
+            commits_of[f"sensor:{bid}"] = entry.get("commit") or ""
             if entry.get("changed_at"):
                 ages[bid] = max(0, now - int(entry["changed_at"]))
     for bid, r in readings.items():
         if r.quality == "complete":
             values[bid] = r.value
-            if r.changed_at:
-                ages[bid] = max(0, now - int(r.changed_at))
-    named = _law_names(world)
+            commits_of[f"sensor:{bid}"] = r.commit or ""
+            entry = cache.get(bid) or {}            # undated by its source: since the cache first saw this value,
+            same = entry.get("quality") == "complete" and entry.get("rendered") == render(r.value)   # else now
+            when = r.changed_at or (entry.get("changed_at") if same else None) or r.time
+            ages[bid] = max(0, now - int(when))
+    named = _law_names(world, held)
     builtins = [n for n in BUILTIN if n in named]
     if builtins:
         repo = next((e.root for e in world.environments if e.kind == "repository" and e.root), None)
@@ -5372,27 +5596,61 @@ def _law_inputs(project, world, readings: dict, cache: dict, host, now: int) -> 
             if r["quality"] == "complete":
                 values[name] = r["value"]
     commits = {e.name: git_commits(e.root, 200) for e in world.environments if e.root and any(
-        law.kind == "co-change" and law.environment == e.name and law.health == "ok" for law in world.laws)}
-    return {"values": values, "ages": ages, "commits": commits}
+        law.kind == "co-change" and law.environment == e.name and law.health == "ok"
+        for law in list(world.laws) + list(held))}
+    return {"values": values, "ages": ages, "commits": commits, "commits_of": commits_of}
 
 
-def _law_rows(world, inputs: dict, accepted: Optional[dict] = None) -> list:
-    """Every law of the manifest with its result now — as ``GraphStore.upsert_laws`` takes them, its status from a
-    person's acceptance (proposed until accepted — decision 5). A co-change law reports over the git history until it
-    is accepted — its dry run — and watches the commits after its acceptance from then on."""
+def _law_rows(world, inputs: dict, accepted: Optional[dict] = None, held=()) -> list:
+    """Every law — the manifest's and those held in the graph — with its result now, as ``GraphStore.upsert_laws``
+    takes them. A manifest law's status comes from a person's acceptance (proposed until accepted — decision 5), a
+    held law's from the graph (a proposal a person reviews; a decision's precondition, accepted with it). A co-change
+    law reports over the git history until it is accepted — its dry run — and watches the commits after its
+    acceptance from then on."""
     from .world.laws import check_laws
     from .world.observe import LAW_KEY, law_acceptance
     accepted = accepted or {}
+    laws = list(world.laws) + list(held)
     statuses = {law.id: law_acceptance(law, accepted) for law in world.laws}
+    statuses.update({law.id: law.status for law in held})
     since = {law.id: int(accepted[LAW_KEY + law.id].get("accepted_at") or 0) for law in world.laws
              if statuses[law.id] == "accepted"}
-    results = check_laws(world.laws, inputs["values"], inputs["ages"], inputs["commits"], since)
+    since.update({law.id: int(law.accepted_at) for law in held if law.status == "accepted" and law.accepted_at})
+    results = check_laws(laws, inputs["values"], inputs["ages"], inputs["commits"], since)
     rows = []
-    for law in world.laws:
+    for law in laws:
         result, detail = results[law.id]
         reads = [f"sensor:{b.id}" for b in world.bindings if b.id in law.names or b.id.replace("-", "_") in law.names]
         rows.append(dict(law.row(), status=statuses[law.id], last_result=result, detail=detail, variables=reads))
     return rows
+
+
+def _law_events(rows, inputs: dict) -> tuple:
+    """C2.6: ``(events to raise, keys to resolve)`` from the accepted laws' results — a violated law raises a
+    *violation* (a decision's precondition: *drift*), an *exogenous* one when a variable it reads changed outside any
+    commit (§3.4.3 — until C3's action log, a commit is the only action); a law that holds again resolves its event."""
+    raise_, resolve = [], []
+    for r in rows:
+        if r.get("status") != "accepted" or r.get("health") != "ok":
+            continue
+        key = f"law:{r['id']}"
+        if r.get("last_result") == "violated":
+            outside = any(inputs.get("commits_of", {}).get(v) == "uncommitted" for v in r.get("variables") or ())
+            kind = "exogenous" if outside else ("drift" if r.get("kind") == "precondition" else "violation")
+            raise_.append({"kind": kind, "key": key, "law": r["id"], "concerns": r.get("variables") or [],
+                           "detail": f"{r['id']}: {r.get('detail') or r.get('check')}"})
+        elif r.get("last_result") == "holds":
+            resolve.append(key)
+    return raise_, resolve
+
+
+def _events_note(events: Optional[dict], observed: Optional[dict] = None) -> str:
+    """``"; events: 1 raised, 1 resolved"`` — the events this pass (C2.6): the laws' and the observations' own."""
+    raised = (events or {}).get("raised", 0) + ((observed or {}).get("events") or {}).get("raised", 0)
+    resolved = (events or {}).get("resolved", 0)
+    parts = [f"{raised} raised" if raised else "", f"{resolved} resolved" if resolved else ""]
+    parts = [x for x in parts if x]
+    return f"; events: {', '.join(parts)} — `owiki world events`" if parts else ""
 
 
 def _laws_note(rows) -> str:
@@ -5431,9 +5689,10 @@ def _cmd_world(args: argparse.Namespace) -> int:
         return 2
     world = load_world(project)
     known = {b.id for b in world.bindings}
-    law_ids = {law.id for law in world.laws}
+    held_ids = {law["id"] for law in _graph_law_rows(args.graph)}
+    law_ids = {law.id for law in world.laws} | held_ids
     unknown = sorted(set(args.sensor or []) - known)
-    if args.action in ("accept", "revoke"):
+    if args.action in ("accept", "revoke", "reject"):
         unknown += sorted(set(args.ids or []) - known - law_ids)
     if unknown:
         print(f"error: unknown sensor(s) or law(s): {', '.join(unknown)} "
@@ -5452,21 +5711,47 @@ def _cmd_world(args: argparse.Namespace) -> int:
             if res.get("law_results"):
                 print(format_laws(res["law_results"]))
         return 1 if world.problems else 0
+    held = _graph_laws(None, args.graph)
     if args.action == "laws":                       # Path C (C2.3): every law, checked now
-        named = _law_names(world)
+        named = _law_names(world, held)
         chosen = [b for b in world.bindings if (b.id in named or b.id.replace("-", "_") in named)
                   and not (args.fast and b.slow)]
         inputs = _law_inputs(project, world, _read_bindings(world, chosen, args.host), read_cache(project.state_dir),
-                             args.host, int(time.time()))
-        rows = _law_rows(world, inputs, read_accepted(project.state_dir))
+                             args.host, int(time.time()), held)
+        rows = _law_rows(world, inputs, read_accepted(project.state_dir), held)
         if args.json:
             print(json.dumps(rows, ensure_ascii=False, indent=2, default=str))
         else:
             print(format_laws(rows, project=project.name))
         return 1 if world.problems else 0
-    if args.action in ("accept", "revoke"):
+    if args.action == "events":                     # Path C (C2.6)
+        return _world_events(args, project)
+    if args.action == "resolve":
+        if not args.ids:
+            print("error: name the event(s) to resolve (ids from `owiki world events`).", file=sys.stderr)
+            return 2
+        how = _world_write(args.graph, "resolve-event", list(args.ids), args.note or "resolved by a person")
+        print(f"Resolved: {how}.")
+        return 0
+    if args.action == "propose":                    # Path C (C2.4)
+        return _world_propose(args, project, world)
+    if args.action in ("accept", "revoke", "reject"):
         if not args.ids and not args.all:
-            print(f"error: name the binding(s) to {args.action} (or --all).", file=sys.stderr)
+            print(f"error: name the binding(s) or law(s) to {args.action} (or --all).", file=sys.stderr)
+            return 2
+        mine = [i for i in (args.ids or []) if i in held_ids and i not in {law.id for law in world.laws}]
+        if mine:                                     # laws held in the graph: a person's review, written there
+            status = {"accept": "accepted", "reject": "rejected", "revoke": "proposed"}[args.action]
+            how = _world_write(args.graph, {"accepted": "accept-law", "rejected": "reject-law"}.get(status, "propose"),
+                               mine, status)
+            print(f"{status.capitalize()}: law {', law '.join(mine)} — {how}.")
+            args.ids = [i for i in args.ids if i not in mine]
+            if not args.ids:
+                return 0
+        if args.action == "reject":
+            print(f"error: only a proposed law held in the graph can be rejected — {', '.join(args.ids)} "
+                  f"{'is' if len(args.ids) == 1 else 'are'} declared in the manifest (remove it there, or revoke it).",
+                  file=sys.stderr)
             return 2
         chosen = [b for b in world.bindings if args.all or b.id in args.ids]
         chosen_laws = [law for law in world.laws if args.all or law.id in args.ids]

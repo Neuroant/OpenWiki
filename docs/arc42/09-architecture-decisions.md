@@ -70,13 +70,18 @@
 | [47](#adr-47) | Procedural lessons from failures: only what was learned twice, listed for a person | Accepted (Path B++) | correctness, Q5 |
 | [48](#adr-48) | A use signal first: git co-changes as edges for code corpora | Accepted | Q4, Q5 |
 | [49](#adr-49) | Recency only for the kinds of fact that go stale | Accepted (Path B++); refines [ADR-34](#adr-34) | correctness, Q5 |
-| [50](#adr-50) | Path C: the world model as a dynamical system with two boundaries — the main architectural plan | Accepted as the plan (2026-10-18); nothing built | correctness, Q4, Q5 |
+| [50](#adr-50) | Path C: the world model as a dynamical system with two boundaries — the main architectural plan | Accepted as the plan (2026-10-18); C0 – C1 built (v0.123 – v0.125), C2 under way (v0.126 – v0.127) | correctness, Q4, Q5 |
 | [51](#adr-51) | Digital twins are programs; language models at design time, code at run time | Accepted as the plan (2026-10-18); refines [ADR-50](#adr-50); see [ADR-52](#adr-52) | correctness, security, Q1 |
 | [52](#adr-52) | Hybrid language models for Paths B and C: local where possible, cloud where really needed | Accepted (2026-10-24); amends [ADR-2](#adr-2) for Paths B and C | Q1, correctness |
-| [53](#adr-53) | Projects gain environments — a third input class; twins as separate processes; actions through OpenWiki | Accepted as the plan (2026-10-24); nothing built; amended by [ADR-54](#adr-54) | Q4, security, correctness |
-| [54](#adr-54) | Path C deployment: a scheduled `owiki world observe` between sessions; twins as running services reached by URL; the world tier native | Accepted as the plan (2026-10-25); nothing built; amends [ADR-53](#adr-53) | security, Q4, correctness |
+| [53](#adr-53) | Projects gain environments — a third input class; twins as separate processes; actions through OpenWiki | Accepted as the plan (2026-10-24); environments built (v0.123), twins from C2.13; amended by [ADR-54](#adr-54) | Q4, security, correctness |
+| [54](#adr-54) | Path C deployment: a scheduled `owiki world observe` between sessions; twins as running services reached by URL; the world tier native | Accepted as the plan (2026-10-25); the scheduled `world observe` built (v0.124), twins from C2.13; amends [ADR-53](#adr-53) | security, Q4, correctness |
 | [55](#adr-55) | Operations: a saved run log, scheduled tasks from the CLI, rolling backups at `sleep`, one health check | Accepted (v0.121); extends [ADR-20](#adr-20) | Q5, correctness |
 | [56](#adr-56) | The authority rule: an accepted sensor's observation outranks what memory believes, in the facts it governs | Accepted (v0.124); refines [ADR-27](#adr-27) | correctness, Q5 |
+| [57](#adr-57) | The read-time overlay corrects what a prompt is shown at once; the world model on by default for a Second Brain with a code source | Accepted (v0.125); applies [ADR-56](#adr-56) | correctness, Q5 |
+| [58](#adr-58) | Laws are declarative checks, proven on a planted violation and accepted by a person | Accepted (v0.126); applies [ADR-51](#adr-51) | correctness, security |
+| [59](#adr-59) | One registry for the graph's tables: what a rebuild keeps and the export carries is declared once | Accepted (v0.126); refines [ADR-16](#adr-16) | Q4, correctness |
+| [60](#adr-60) | Events are few and first-class: one open per key, resolved by the world or by a person | Accepted (v0.127); applies [ADR-56](#adr-56), [ADR-58](#adr-58) | correctness, Q5 |
+| [61](#adr-61) | Laws are proposed from the git history; from documents only on request — measured | Accepted (v0.127); applies [ADR-48](#adr-48), [ADR-58](#adr-58) | correctness |
 
 ---
 
@@ -1353,6 +1358,65 @@ Brain with a code source.**
   Cognee's validator was last run against facts, episodes, memories and memory blocks (v0.102) — the `entity` records
   use the same minimal envelope.
 
+### ADR-60
+**Events are few and first-class: one open per key, resolved by the world or by a person.**
+*(2026-11-08, v0.127; applies [ADR-58](#adr-58) (laws only report) and [ADR-56](#adr-56) (the authority rule);
+decisions 5 and 13 of `path-c-world-model.md` §15)*
+- **Context:** C2's hard part is false alarms (`path-c-world-model.md` §12): a law that fires on every pass, or an
+  event raised again every 15 minutes, teaches people to ignore events. What the world model notices has to reach a
+  person — the Pflege panel, the handoff brief — without nagging, and its kind has to say what to look at: a broken
+  convention, a decision whose reason changed, a change made outside any commit.
+- **Decision:** (1) An `Event` has a `key` — a law's (`law:<id>`), a belief's (`belief:<id>`), a contested value's —
+  and only one event per key is open: a law failing on every pass is one event. (2) **The world resolves what it
+  raised**: a law's event closes ("holds again") when the law holds again; a person resolves any event (`owiki world
+  resolve`, the Pflege panel); resolved events stay as history. (3) **Kinds by evidence, never by a model**:
+  *violation* — an accepted law fails; *drift* — a decision's precondition fails; *exogenous* — either, when a variable
+  it reads changed outside any commit (the reading says "uncommitted"; until C3's action log a commit is the only
+  action OpenWiki sees); *discrepancy* — the authority rule closed a governed belief recorded after the change (rule 3)
+  or stored one said against a current observation (rule 5, decision 13); *contested* — a value returns to the one
+  before within 24 hours. (4) **A decision's preconditions are a law** accepted with the decision: the values of the
+  variables `wiki_remember`'s `depends_on` names, read when it is recorded, as `name == value` — it holds by
+  construction and only reports. (5) Events change no fact (decision 5).
+- **Alternatives:** an event per failing check — floods; a model judging an event's kind — not trusted (WM §3.2); an
+  exogenous event for every outside change — most are harmless edits (WM §8.3: only when one breaks a law or a
+  decision); taking the value of every variable a decision mentions — drift for unrelated changes.
+- **Consequences:** + On a copy of openwiki-dev the release's own version bump raised one *exogenous* event
+  (`pyproject.toml` ahead of `__version__`, uncommitted) that stayed one event across passes and resolved itself when
+  `__init__.py` followed; a decision recorded with `depends_on: ["context-budget"]` became a holding precondition law;
+  the Pflege panel's buttons landed through the fold worker (write lock 0.1 s). − "Exogenous" means "in no commit",
+  not "nobody here did it": an agent's uncommitted edit looks the same until C3.1's action log; the false-alarm rate in
+  real use is measured with C2.11; *miss* and *unresolved* wait for C3's predictions.
+
+### ADR-61
+**Laws are proposed from the history; from documents only on request — measured.**
+*(2026-11-08, v0.127; applies [ADR-58](#adr-58) (a person accepts) and [ADR-48](#adr-48) (git co-changes);
+`path-c-world-model.md` §7.3)*
+- **Context:** WM §7.3 planned laws extracted from documents — a pattern prefilter, one local-model call per page, a
+  person reviewing the candidates. Laws are few and consequential and the local model's judgment is not trusted (§3.2);
+  the question was where candidates worth a person's time come from.
+- **Decision:** (1) `owiki world propose` mines each repository's git history by default: a file changed in at least
+  8 commits, followed within 3 commits by another in at least 90 % of them and at 1.5 times that file's own rate, with
+  ADR-48's rules — a sweep of more than 40 files is no coupling, and a file changed in half the commits pairs only with
+  files as ubiquitous —; the strongest 10 not already held or declared. (2) Documents only with `--documents`: the
+  sentences that read like rules and name a variable (its id, subject or file), one model call per page with the
+  variables' current values; each candidate validated like a manifest law and screened — dropped when it only pins a
+  variable to a constant, compares constants, checks what its text doesn't name, is violated or can't be evaluated on
+  the current values, or repeats a law already held. (3) A proposal is a row in the graph (`status = proposed`); a
+  person accepts or rejects it (`owiki world accept / reject ID`, the Pflege panel); a rejected one is never proposed
+  again.
+- **Alternatives:** documents by default — measured below; the model's laws without review — decision 5, and the
+  measured candidates; the lift against the single-commit rate without ADR-48's rules — two of ten proposals only
+  restated the release bundle ("a change to `cli.py` comes with a version bump", 100 of 100); against the window's own
+  base rate — it also dropped the true version pair (lift 1.28) and the manifest's own `cli-docs` law (1.16).
+- **Consequences:** + On a copy of openwiki-dev the history proposed 10 conventions of the repository (the version
+  pair, the Path C tracker with its design document, `roadmap.md` with `CLAUDE.md`, `style.css` with `app.js` …); the
+  screens dropped 71 of the local model's 74 candidates from the 24 pages the prefilter passes (31 pinning a constant,
+  27 invalid, 5 contradicted or uncheckable now, 4 unrelated to their text, 4 repeats), the 3 left restate a reading as
+  a bound, and a positive control kept its three stated rules (3/3, 2/3, 2/3). − This repository's documents state
+  almost no rules about its variables, so the document path is untested where it should pay — a manual (C2.10); a
+  co-change proposal may carry exceptions from its history (16 of 17), shown in its dry run; the model's candidates
+  vary between runs even at temperature 0.
+
 ---
 *Chapter complete. The Path-B agent-memory direction landed via ADR-14/15/16/17/18/19; the graph then
 deepened (ADR-22 typed relations + relation-aware GraphRAG, ADR-23 entity resolution), gained
@@ -1385,5 +1449,7 @@ deployed — a scheduled `owiki world observe` between sessions, twins as runnin
 tier native; ADR-55 gives OpenWiki its operations — a run log, scheduled tasks, rolling backups, a health check;
 ADR-56 lets an accepted sensor's observation outrank memory's beliefs in the facts it governs, and ADR-57 applies it
 at read time and turns the world model on for code projects; ADR-58 makes laws declarative checks proven on a planted
-violation and accepted by a person, and ADR-59 declares the graph's tables in one registry. New significant decisions
-should be appended here with the next id.*
+violation and accepted by a person, and ADR-59 declares the graph's tables in one registry; ADR-60 turns what the laws
+and the authority rule notice into events — one open per key, resolved by the world or by a person — and ADR-61
+proposes laws from the git history, from documents only on request. New significant decisions should be appended here
+with the next id.*

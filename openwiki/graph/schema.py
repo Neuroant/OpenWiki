@@ -28,6 +28,7 @@ class Table:
     ends: tuple = ()               # rel tables: (from table, to table)
     props: tuple = ()              # rel tables: the edge's properties
     custom: bool = False           # kept by B0's memory reader, not by the generic snapshot
+    coltypes: tuple = ()           # node tables: each column's type, for ``ALTER TABLE … ADD`` on older graphs
 
     @property
     def rel(self) -> bool:
@@ -42,7 +43,7 @@ def _node(name, columns, group, key="id", authoritative=False, custom=False, typ
     types = types or {}
     cols = ", ".join(f"{c} {types.get(c, 'STRING')}" for c in columns)
     return Table(name, f"CREATE NODE TABLE {name}({cols}, PRIMARY KEY({key}));", group, authoritative,
-                 tuple(columns), key, custom=custom)
+                 tuple(columns), key, custom=custom, coltypes=tuple(types.get(c, "STRING") for c in columns))
 
 
 def _rel(name, src, dst, group, props=(), authoritative=False, custom=False, types=None) -> Table:
@@ -102,14 +103,16 @@ TABLES: tuple = (
           types={"created_at": _I, "updated_at": _I}),
     _rel("DESCRIBED_IN", "Variable", "Page", WORLD, authoritative=True),
     # a rule with its check (C2.3); status = proposed / accepted / rejected — the review is a person's work
+    # spec (v0.127, JSON): what a law held in the graph needs to be checked again — its fixtures, a co-change rule
     _node("Law", ("id", "text", "kind", "check", "origin", "status", "health", "last_result", "last_checked",
-                  "detail", "created_at", "updated_at"), WORLD, authoritative=True,
+                  "detail", "created_at", "updated_at", "spec"), WORLD, authoritative=True,
           types={"last_checked": _I, "created_at": _I, "updated_at": _I}),
     _rel("CONSTRAINS", "Law", "Variable", WORLD, authoritative=True),
     _rel("FROM_PAGE", "Law", "Page", WORLD, authoritative=True),
     _rel("FROM_FACT", "Law", "Assertion", WORLD, authoritative=True),
-    # discrepancy, violation, drift, exogenous, contested (C2.6); resolvable by a person
-    _node("Event", ("id", "kind", "at", "detail", "resolved_at", "resolution"), WORLD, authoritative=True,
+    # discrepancy, violation, drift, exogenous, contested (C2.6); resolvable by a person; key (v0.127) = what it is
+    # about — one open event per key
+    _node("Event", ("id", "kind", "at", "detail", "resolved_at", "resolution", "key"), WORLD, authoritative=True,
           types={"at": _I, "resolved_at": _I}),
     _rel("CONCERNS", "Event", "Variable", WORLD, authoritative=True),
     _rel("FROM_LAW", "Event", "Law", WORLD, authoritative=True),
@@ -117,6 +120,12 @@ TABLES: tuple = (
 )
 
 BY_NAME = {t.name: t for t in TABLES}
+
+
+def added_columns(table: Table, present: set) -> list:
+    """``ALTER TABLE … ADD`` statements for the columns ``table`` declares that an older graph's table lacks."""
+    return [f"ALTER TABLE {table.name} ADD {c} {t.replace('{dim}', '0')};"
+            for c, t in zip(table.columns, table.coltypes) if c not in present and "{dim}" not in t]
 
 
 def node_keys() -> dict:

@@ -983,6 +983,26 @@ mention resolved against `Variable` nodes and entities. A candidate becomes chec
 the Pflege panel. Laws are few and consequential and the model's judgment is not trusted (§3.2); a review queue costs
 little.
 
+**As built (v0.127, C2.4; arc42 ADR-61).** `owiki world propose` writes candidates as *proposed* laws held in the
+graph; a person accepts or rejects each (`owiki world accept / reject ID`, the Pflege panel's *Gesetze prüfen*), and a
+rejected one is never proposed again. Two sources. **History** (the default): co-change candidates from each
+repository — a file changed in at least 8 commits, followed within 3 commits by another in at least 90 % of them and at
+1.5 times that file's own rate, with ADR-48's rules (a sweep of more than 40 files is no coupling; a file changed in
+half the commits pairs only with files as ubiquitous — where nearly every commit is a release, the version files
+follow every file); the strongest 10 not already held or declared. **Documents** (`--documents`): the sentences that
+read like rules and name a variable — by its id, subject or file, not by the single words of its label, which matched
+nearly every sentence —, one model call per page with the variables' current values, each candidate validated like a
+manifest law (§7.2) and dropped when it only pins a variable to a constant (it restates a reading, which a binding
+already holds), compares constants, checks a variable its text doesn't name, is violated or can't be evaluated on the
+current values, or repeats a law already held. Measured on openwiki-dev: the history proposed 10 conventions of the
+repository — the version pair, the Path C tracker with this document, `roadmap.md` with `CLAUDE.md`, `style.css` with
+`app.js` —; before the ubiquitous rule two of them only said that every CLI change ships in a release commit. The
+documents gave none: the prefilter passes 24 of 181 pages, and of the local model's 74 candidates 71 were dropped (31
+pinning a constant, 27 invalid, 5 contradicted or uncheckable now, 4 unrelated to their text, 4 repeats); the 3 left
+restate a reading as a bound (`tabs <= 10`). A positive control that states three rules over the variables got them
+back (3/3, 2/3, 2/3). The extractor works where a document states rules about the variables, and this repository's
+documents state almost none beyond the version pair the manifest declares — so it is opt-in, for a manual (C2.10).
+
 ### 7.4 Decisions that remember their preconditions
 
 A decision is recorded with the state it was made in: the observed values of the variables it names, taken
@@ -996,6 +1016,14 @@ list). When a precondition changes, a *drift* event says the reason may no longe
 
 The other direction is the same check: the code leaving a decision — `RECENCY_FLOOR` changed without a new decision —
 is either a regression or a decision nobody recorded.
+
+**As built (v0.127, C2.5).** `wiki_remember` takes `depends_on` — sensor ids or built-in variables; the values are
+read when the decision is recorded (the world cache, else a light read of a fast sensor), a name without a reading is
+reported and left out, and the values travel with the facts through the journal (and through the approval step). The
+fold records a *precondition law* — id `decision:<hash>`, the check `name == value and …`, origin `decision`, its
+planted violation the first value changed — accepted with the decision (it holds by construction and only reports),
+`FROM_FACT` the decision's facts; every observe pass checks it, and a failure raises a *drift* event. Only named
+variables are recorded: the values of every variable a decision mentions are not taken automatically.
 
 ### 7.5 Documents drift too
 
@@ -1042,6 +1070,17 @@ Seven kinds, all first-class and all resolvable by a person:
 Events reach the world slice when a prompt touches their variable, the Pflege panel, and the handoff brief's "what
 changed since". This is the deterministic form of Nemori's predict–calibrate (MSR §10): what the
 model failed to predict is what deserves attention — found without a model call per session.
+
+**As built (v0.127, C2.6; arc42 ADR-60).** Five of the seven kinds — *miss* and *unresolved* come with C3's
+predictions. An `Event` has a `key`, and only one event per key is open: a law's (`law:<id>`) for as long as it fails,
+a belief's (`belief:<id>`), a contested value's. The observe pass raises *violation*, *drift* and *exogenous* from the
+accepted laws' results — *exogenous* when a variable the failing law reads changed outside any commit (its reading is
+"uncommitted"), since until C3's action log a commit is the only action we see — and resolves a law's event when the
+law holds again ("holds again"); the authority rule raises *discrepancy* (rule 3: a governed belief recorded after the
+change it contradicts; rule 5: a belief said against a current observation, decision 13) and *contested* (a value that
+returns to the one before within 24 hours). A person resolves an event with `owiki world resolve ID --note …` or in
+the Pflege panel (journal op `resolve-event`); resolved events stay as history (`owiki world events --all`). Events
+reach the Pflege panel and the handoff brief; the world slice follows with C2.7.
 
 ### 8.4 What is not predicted
 
@@ -1267,6 +1306,12 @@ note per stage and in a measurements section (§18) created with C0's results.
   built-in variables (git, Ollama, the wiki's freshness, the capture workers) for the handoff and the laws. On
   openwiki-dev the first slice's laws are proposed and hold. Events, extraction and the world slice follow (v0.127 –
   v0.128).
+- **Landed (v0.127, 2026-11-08):** events (§8.3, as built there; arc42 ADR-60) — five kinds, one open per key, resolved
+  by the world when a law holds again or by a person; decisions with their preconditions (§7.4) — precondition laws
+  that raise drift; law proposals and their review (§7.3; ADR-61) — from the co-change history by default, from
+  documents on request. On a copy of openwiki-dev the history proposed 10 conventions and the documents none (71 of 74
+  candidates screened out, the rest restating readings); the release's own version bump raised an exogenous event that
+  resolved itself when the second version file followed.
 
 ### C3 — Predict and verify changes
 - **Goal:** the model is judged by what it predicts — the full loop on the repository (§3.4).

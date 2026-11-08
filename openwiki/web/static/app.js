@@ -1149,7 +1149,7 @@ function renderMemoryView(data) {
     ${identity}${chips}
     <details id="mem-care" class="mem-care"${staged.length ? " open" : ""}>
       <summary><b>Pflege</b> <span class="muted" id="care-sum">${staged.length ? `· ${staged.length} zur Freigabe` : ""}</span></summary>
-      ${stagedBox}<div id="care-review"></div><div id="care-forget"></div></details>
+      ${stagedBox}<div id="care-world"></div><div id="care-review"></div><div id="care-forget"></div></details>
     <details id="mem-sess" class="mem-care">
       <summary><b>Sitzungen</b> <span class="muted" id="sess-sum"></span></summary>
       <div id="sess-body"><p class="muted">Wird geladen…</p></div></details>
@@ -1185,9 +1185,44 @@ function careRow(f, actions, queued, writable, extra = "") {
     ${extra}<span class="care-act">${acts}</span></div>`;
 }
 
+// Path C (C2.4, C2.6): the world model's events and the laws waiting for a person
+const CARE_EVENT = { discrepancy: ["Widerspruch", "eine Erinnerung widerspricht der Beobachtung"],
+                     violation: ["Verstoß", "ein angenommenes Gesetz gilt nicht mehr"],
+                     drift: ["Drift", "die Voraussetzung einer Entscheidung hat sich geändert"],
+                     exogenous: ["von außen", "eine Änderung außerhalb jedes Commits verletzt ein Gesetz oder eine Entscheidung"],
+                     contested: ["umkämpft", "ein Wert springt binnen eines Tages zurück"] };
+
+const LAW_RESULT = { holds: "gilt", violated: "verletzt", unknown: "unbekannt" };   // the law's result now
+
+function careItem(id, html, actions, queued, writable) {
+  const q = queued[id];
+  const acts = !writable ? "" : q
+    ? `<span class="mem-badge in" title="eingereiht — die Faltung wendet es in Sekunden an">eingereiht · ${q}</span>`
+    : actions.map(([act, label, cls, title]) => `<button class="care-btn${cls ? " " + cls : ""}" data-act="${act}" title="${title}">${label}</button>`).join("");
+  return `<div class="care-row${q ? " is-queued" : ""}" data-id="${escapeHtml(id)}"><span class="care-fact">${html}</span>
+    <span class="care-act">${acts}</span></div>`;
+}
+
+function careWorldHtml(d, queued, w) {
+  const evs = d.events || [], laws = d.laws || [];
+  const events = evs.length ? `
+    <h4 class="mem-h4">Ereignisse <span class="muted">· ${evs.length} offen — was das Weltmodell bemerkt hat; erledigt heißt: angesehen, es bleibt als Geschichte</span></h4>
+    <div class="care-list">${evs.map((e) => careItem(e.id,
+      `<span class="mem-badge kind" title="${(CARE_EVENT[e.kind] || ["", ""])[1]}">${(CARE_EVENT[e.kind] || [e.kind])[0]}</span> ${escapeHtml(e.detail || "")} <span class="mem-when">${memDate(e.at)}</span>`,
+      [["resolve-event", "erledigt", "", "als erledigt markieren"]], queued, w)).join("")}</div>` : "";
+  const review = laws.length ? `
+    <h4 class="mem-h4">Gesetze prüfen <span class="muted">· ${laws.length} vorgeschlagen — ein Gesetz meldet Verstöße erst, wenn ein Mensch es annimmt</span></h4>
+    <div class="care-list">${laws.map((l) => careItem(l.id,
+      `${escapeHtml(l.text || l.id)}${l.kind === "co-change" || !l.check ? "" : ` <code>${escapeHtml(l.check)}</code>`} <span class="mem-badge" title="${escapeHtml(l.detail || "das Ergebnis jetzt")}">${LAW_RESULT[l.last_result] || "?"}</span> <span class="muted">${escapeHtml(l.origin === "manifest" ? "openwiki.toml" : l.origin === "document" ? "aus einem Dokument" : l.origin === "co-change" ? "aus der Git-Geschichte" : l.origin || "")}</span>`,
+      [["accept-law", "annehmen", "", "annehmen — ein Verstoß wird dann zum Ereignis"],
+       ...(l.origin !== "manifest" ? [["reject-law", "ablehnen", "secondary", "ablehnen — wird nicht wieder vorgeschlagen"]] : [])], queued, w)).join("")}</div>` : "";
+  return events + review;
+}
+
 function careHtml(d) {
   const queued = {};
-  for (const [act, label] of [["close", "schließen"], ["confirm", "bestätigen"], ["forget", "vergessen"]])
+  for (const [act, label] of [["close", "schließen"], ["confirm", "bestätigen"], ["forget", "vergessen"],
+                              ["resolve-event", "erledigt"], ["accept-law", "annehmen"], ["reject-law", "ablehnen"]])
     for (const id of d.queued[act] || []) queued[id] = label;
   const r = d.review, w = d.writable;
   const kinds = Object.entries(r.by_kind || {}).map(([k, n]) => `${MF_KIND_LABEL[k] || k} ${n}`).join(" · ");
@@ -1208,7 +1243,8 @@ function careHtml(d) {
     <div class="care-list">${d.forget.map((f) => careRow(f, [["forget", "vergessen", "secondary", "archivieren — verlässt Abruf, Kontext und Themen"]], queued, w,
       `<span class="mem-badge fgt" title="${(CARE_REASON[f.reason] || ["", ""])[1]}">${(CARE_REASON[f.reason] || [f.reason])[0]}</span> ${memStatusBadge(f.status)}`)).join("")}</div>`
     : `<h4 class="mem-h4">Zum Vergessen <span class="muted">· nichts</span></h4>`;
-  return { review, forget, note: w ? "" : `<p class="muted">Nur lesend — der Server läuft mit <code>--dry-run</code> oder das Gedächtnis ist aus (Wiki-Modus).</p>` };
+  return { review, forget, world: careWorldHtml(d, queued, w),
+           note: w ? "" : `<p class="muted">Nur lesend — der Server läuft mit <code>--dry-run</code> oder das Gedächtnis ist aus (Wiki-Modus).</p>` };
 }
 
 async function loadCare() {
@@ -1222,10 +1258,13 @@ async function loadCare() {
   }
   if (!$("#mem-care")) return;
   const h = careHtml(d);
+  $("#care-world").innerHTML = h.world;
   $("#care-review").innerHTML = h.note + h.review;
   $("#care-forget").innerHTML = h.forget;
-  const parts = [d.staged.length ? `${d.staged.length} zur Freigabe` : "", `${d.review.count} zu prüfen`,
-                 `${d.forget.length} zum Vergessen`].filter(Boolean);
+  const parts = [d.staged.length ? `${d.staged.length} zur Freigabe` : "",
+                 (d.events || []).length ? `${d.events.length} Ereignis${d.events.length === 1 ? "" : "se"}` : "",
+                 (d.laws || []).length ? `${d.laws.length} Gesetz${d.laws.length === 1 ? "" : "e"} zu prüfen` : "",
+                 `${d.review.count} zu prüfen`, `${d.forget.length} zum Vergessen`].filter(Boolean);
   $("#care-sum").textContent = "· " + parts.join(" · ");
 }
 

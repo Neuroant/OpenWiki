@@ -61,6 +61,7 @@ LEXICAL_MAX_DF = 0.05                 # … on terms in at most 5 % of the facts
 TEMPORAL_POOL = 4                     # the question's time window may promote from the dense top (4 × k), §13.19
 ATTR_SEP = "\x1f"                     # canonical attribute key = normalized subject ␟ predicate
 RESOLVE_THRESHOLD = 0.75              # min fact-embedding cosine for an attribute candidate (B9)
+CONTESTED_WINDOW = 24 * 3600          # Path C (C2.6): a value back to the one before within a day is contested
 RESOLVE_K = 6                         # candidates shown to the attribute chooser
 
 
@@ -987,7 +988,8 @@ class GraphStore:
     # -- deferred-write journal (B1 concurrency) -----------------------
 
     def queue_remember(self, session_id: str, facts, session_date: Optional[int] = None,
-                       correct: bool = False, retire=None, agent: bool = False) -> int:
+                       correct: bool = False, retire=None, agent: bool = False,
+                       preconditions: Optional[dict] = None) -> int:
         """Append a `remember` op to the write-ahead journal (works read-only — that's the
         point: a locked-out writer queues instead of failing). Folded by ``fold_journal``,
         which honors the queued record time + validity (B7). ``retire`` = ids of facts the op
@@ -995,15 +997,15 @@ class GraphStore:
         B9 resolution at fold time — see ``fold_journal``). Returns the number of facts queued."""
         return append_remember(self._journal_path, session_id, facts,
                                session_date=session_date, correct=correct, retire=retire,
-                               agent=agent)
+                               agent=agent, preconditions=preconditions)
 
     def stage_remember(self, session_id: str, facts, session_date: Optional[int] = None,
-                       retire=None, agent: bool = True) -> tuple:
+                       retire=None, agent: bool = True, preconditions: Optional[dict] = None) -> tuple:
         """Stage a ``remember`` op for a person's approval (``[memory] approve_writes``) instead of
         queueing it → ``(facts staged, id)``. Works read-only; ``openwiki memory approve`` moves it into
         the journal."""
         return stage_remember(self._staged_path, session_id, facts, session_date=session_date,
-                              retire=retire, agent=agent)
+                              retire=retire, agent=agent, preconditions=preconditions)
 
     def staged_writes(self) -> list:
         """The staged writes awaiting approval, oldest first."""
@@ -1102,7 +1104,7 @@ class GraphStore:
             return {"records": 0, "remembered": 0, "reindexed": 0}
         from .memory import MemoryFact
         now = int(now if now is not None else time.time())
-        remembered = reindexed = retired = confirmed = forgotten = observed = 0
+        remembered = reindexed = retired = confirmed = forgotten = observed = resolved = reviewed = decided = 0
         for rec in records:
             try:
                 if rec.get("op") == "remember":
@@ -1126,6 +1128,9 @@ class GraphStore:
                     if rec.get("retire") and not dry_run:   # wiki_remember's replaces → close them
                         retired += self.retire(rec["retire"],     # an approved staged op: when it was staged
                                                at=int(rec.get("valid_at") or rec.get("t") or now))
+                    if rec.get("preconditions") and facts and not dry_run:   # C2.5: a decision's preconditions
+                        decided += self._record_preconditions(str(rec.get("session") or "session"), facts,
+                                                              rec["preconditions"], at=int(rec.get("t") or now))
                 elif rec.get("op") == "reindex" and not dry_run:
                     slug = str(rec.get("slug") or "")
                     if slug:
@@ -1136,6 +1141,14 @@ class GraphStore:
                 elif rec.get("op") == "forget" and not dry_run:      # a person archived it (M7)
                     forgotten += self.forget(rec.get("ids") or [], str(rec.get("reason") or "reviewed"),
                                              now=int(rec.get("t") or now))
+                elif rec.get("op") == "resolve-event" and not dry_run:   # a person resolved it (C2.6)
+                    resolved += self.resolve_events(rec.get("ids") or [],
+                                                    resolution=str(rec.get("reason") or "resolved by a person"),
+                                                    now=int(rec.get("t") or now))
+                elif rec.get("op") in ("accept-law", "reject-law") and not dry_run:   # a person's review (C2.4)
+                    reviewed += self.review_laws(rec.get("ids") or [],
+                                                 "accepted" if rec["op"] == "accept-law" else "rejected",
+                                                 now=int(rec.get("t") or now))
                 elif rec.get("op") == "observe" and not dry_run:     # a sensor's reading (Path C, C1.5)
                     res = self.observe(rec.get("observations") or [], embedder, authority=authority,
                                        now=int(rec.get("t") or now))
@@ -1145,7 +1158,33 @@ class GraphStore:
         if not dry_run:
             clear_journal(self._journal_path)
         return {"records": len(records), "remembered": remembered, "reindexed": reindexed,
-                "retired": retired, "confirmed": confirmed, "forgotten": forgotten, "observed": observed}
+                "retired": retired, "confirmed": confirmed, "forgotten": forgotten, "observed": observed,
+                "resolved": resolved, "reviewed": reviewed, "decided": decided}
+
+    def _record_preconditions(self, session_id: str, facts, preconditions: dict, at: int) -> int:
+        """Path C (C2.5): a decision recorded with the state it was made in — one ``precondition`` law over the
+        variables it names, holding while they keep the values observed when it was recorded, ``FROM_FACT`` the
+        decision's facts (found by their wording). A change raises a drift event (``world.laws.precondition_law``).
+        Returns 1 when a law was written."""
+        from ..world.laws import precondition_law
+        current = [r for r in self._load_assertions() if temporal_status(r, at) == "current"]
+        ids = []
+        for f in facts:
+            hits = [r for r in current if (r["subject"], r["predicate"], r["object"]) == (f.subject, f.predicate,
+                                                                                         f.object)]
+            mine = [r for r in hits if r.get("session_id") == session_id] or hits
+            ids += [r["id"] for r in mine[:1]]
+        law = precondition_law(" · ".join(f"{f.subject} {f.predicate} {f.object}" for f in facts), preconditions,
+                               ids)
+        if law is None:
+            return 0
+        row = dict(law.row(), status="accepted", last_result="holds", detail="recorded with the decision",
+                   variables=[f"sensor:{k}" for k in preconditions])
+        self.upsert_laws([row], now=at, retire_missing=False)
+        for aid in ids:
+            self._exec("MATCH (l:Law {id: $l}), (a:Assertion {id: $a}) MERGE (l)-[:FROM_FACT]->(a);",
+                       {"l": law.id, "a": aid})
+        return 1
 
     # -- remembered tier (Path B: session memory) ----------------------
 
@@ -1365,6 +1404,7 @@ class GraphStore:
         if not dry_run:
             self._ensure_memory_schema(emb.shape[1])
         n = dict(empty, facts=len(facts), scrubbed=scrubbed, redacted=redacted)
+        contradicted: list = []                # rule 5's discrepancies, raised as events once written (C2.6)
         with self._lock:
             run("MERGE (s:Session {id:$id}) ON CREATE SET s.created_at=$t, s.session_date=$d;",
                 {"id": session_id, "t": now, "d": sdate})
@@ -1429,6 +1469,11 @@ class GraphStore:
                     run("MATCH (n:Assertion {id:$n}),(o:Assertion {id:$o}) "
                         "CREATE (n)-[:SUPERSEDES]->(o);", {"n": against["id"], "o": aid})
                     n["contradicted"] += 1
+                    contradicted.append({"kind": "discrepancy", "key": f"belief:{aid}",       # C2.6, decision 13
+                                         "detail": f"said “{fact.subject} {fact.predicate} {fact.object}” while "
+                                                   f"{against['session_id'][len(SENSOR_SESSION):]} read "
+                                                   f"{against['object']}",
+                                         "concerns": [against["session_id"]], "involves": [aid, against["id"]]})
                     continue
 
                 def coexists(r, fact=fact, no=no):
@@ -1500,6 +1545,8 @@ class GraphStore:
                 for rid in [c[0] for c in plan["close"]] + plan["expire"]:
                     run("MATCH (n:Assertion {id:$n}),(o:Assertion {id:$o}) "
                         "CREATE (n)-[:SUPERSEDES]->(o);", {"n": aid, "o": rid})
+            if contradicted and not dry_run:
+                self.raise_events(contradicted, now=now)
         return n
 
     @staticmethod
@@ -1559,6 +1606,7 @@ class GraphStore:
             return out
         now = int(now if now is not None else time.time())
         run = (lambda query, params=None: None) if dry_run else self._exec
+        pending: list = []                     # C2.6: events this pass raises (discrepancies, contested values)
         with self._lock:
             recs = [r for r in self._load_assertions() if r.get("forgotten_at") is None]
             mine: dict = {}
@@ -1618,6 +1666,16 @@ class GraphStore:
                         run("MATCH (n:Assertion {id:$n}),(o:Assertion {id:$o}) CREATE (n)-[:SUPERSEDES]->(o);",
                             {"n": obs["id"], "o": r["id"]})
                         r["valid_to"] = vf
+                    for r in prev:                     # C2.6: back to the value before within a day — contested
+                        began = int(r.get("valid_from") or vf)
+                        before = [x for x in recs if x.get("session_id") == sid and x.get("valid_to") is not None
+                                  and int(x["valid_to"]) == began]
+                        if vf - began < CONTESTED_WINDOW and any(
+                                _normalize(x["object"]) == _normalize(o["object"]) for x in before):
+                            pending.append({"kind": "contested", "key": f"contested:{bid}:{vf}",
+                                            "detail": f"{bid} went {o['object']} → {r['object']} → {o['object']} "
+                                                      f"within {max(1, (vf - began) // 3600)} h",
+                                            "concerns": [sid], "involves": [obs["id"], r["id"]]})
                     mine[bid] = [obs]
                     entry["action"] = "added"
                     entry["replaced"] = [r["object"] for r in prev]
@@ -1639,6 +1697,10 @@ class GraphStore:
                             entry["closed"].append(_fact_brief(r))
                             if int(r.get("created_at") or 0) > start:     # believed after the world changed
                                 entry["discrepancies"].append(_fact_brief(r))
+                                pending.append({"kind": "discrepancy", "key": f"belief:{r['id']}",       # C2.6
+                                                "detail": f"believed “{r['subject']} {r['predicate']} {r['object']}” "
+                                                          f"after {bid} read {o['object']}",
+                                                "concerns": [sid], "involves": [r["id"], obs["id"]]})
                         elif verdict == "agrees":
                             seen = max(int(r.get("last_seen") or 0), read_at)
                             run("MATCH (a:Assertion {id:$id}) SET a.last_seen=$t;", {"id": r["id"], "t": seen})
@@ -1651,6 +1713,7 @@ class GraphStore:
                 out["unclear"] += entry["unclear"]
                 out["discrepancies"] += len(entry["discrepancies"])
                 out["observations"].append(entry)
+            out["events"] = self.raise_events(pending, now=now, dry_run=dry_run) if pending else {"raised": 0}
         return out
 
     @staticmethod
@@ -2113,15 +2176,22 @@ class GraphStore:
                 self._exec(table.create(0, if_not_exists=True))
             except Exception:        # read-only, or an older graph without the table an edge points to
                 ok = False
+        if self.writable:            # columns added since the table was created (v0.127: Law.spec, Event.key)
+            present = schema.present_columns(self._rows)
+            for table in schema.tables(group=schema.WORLD):
+                have = present(table.name) if not table.rel else None
+                for ddl in schema.added_columns(table, have) if have is not None else ():
+                    try:
+                        self._exec(ddl)
+                    except Exception:
+                        ok = False
         self._world_ensured = ok or not self.writable
 
     _VARIABLE_FIELDS = ("label", "subject", "predicate", "unit", "sensor", "kind", "environment")
 
     def variables(self) -> list:
         """The world model's variables (``Variable`` rows as dicts, with ``pages`` = the slugs that describe them)."""
-        fields = ("id",) + self._VARIABLE_FIELDS + ("created_at", "updated_at")
-        rows = [dict(zip(fields, r)) for r in self._read_or_empty(
-            "MATCH (v:Variable) RETURN " + ", ".join(f"v.{f}" for f in fields) + " ORDER BY v.id;")]
+        rows = self._world_rows("Variable", ("id",) + self._VARIABLE_FIELDS + ("created_at", "updated_at"), "id")
         pages: dict = {}
         for vid, slug in self._read_or_empty("MATCH (v:Variable)-[:DESCRIBED_IN]->(p:Page) RETURN v.id, p.slug;"):
             pages.setdefault(vid, []).append(slug)
@@ -2169,19 +2239,128 @@ class GraphStore:
                            {"id": v["id"], "slug": slug})
         return out
 
-    _LAW_FIELDS = ("text", "kind", "check", "origin", "status", "health", "last_result", "detail")
+    _LAW_FIELDS = ("text", "kind", "check", "origin", "status", "health", "last_result", "detail", "spec")
+
+    def _world_rows(self, table: str, fields: tuple, order: str = "") -> list:
+        """A world table's rows as dicts — only the columns the table has (an older graph opened read-only can't be
+        migrated), the others ``None``."""
+        from . import schema
+        have = schema.present_columns(self._rows)(table)
+        if have is None:
+            return []
+        cols = [f for f in fields if f in have]
+        alias = table[0].lower()
+        rows = self._read_or_empty(f"MATCH ({alias}:{table}) RETURN " + ", ".join(f"{alias}.{c}" for c in cols)
+                                   + (f" ORDER BY {alias}.{order}" if order else "") + ";")
+        return [dict({f: None for f in fields}, **dict(zip(cols, r))) for r in rows]
 
     def laws(self) -> list:
         """The world model's laws (``Law`` rows as dicts, ``variables`` = the ids they constrain)."""
-        fields = ("id",) + self._LAW_FIELDS + ("last_checked", "created_at", "updated_at")
-        rows = [dict(zip(fields, r)) for r in self._read_or_empty(
-            "MATCH (l:Law) RETURN " + ", ".join(f"l.{f}" for f in fields) + " ORDER BY l.id;")]
+        rows = self._world_rows("Law", ("id",) + self._LAW_FIELDS + ("last_checked", "created_at", "updated_at"), "id")
         links: dict = {}
         for lid, vid in self._read_or_empty("MATCH (l:Law)-[:CONSTRAINS]->(v:Variable) RETURN l.id, v.id;"):
             links.setdefault(lid, []).append(vid)
         for r in rows:
             r["variables"] = sorted(links.get(r["id"], []))
         return rows
+
+    def review_laws(self, ids, status: str, now: Optional[int] = None, dry_run: bool = False) -> int:
+        """Path C (C2.4): a person's review of laws held in the graph — ``accepted`` or ``rejected`` (a law from the
+        manifest is accepted through ``world-accepted.json`` instead). Returns how many changed."""
+        if status not in ("accepted", "rejected", "proposed"):
+            raise ValueError(f"unknown status {status!r}")
+        now = int(now if now is not None else time.time())
+        changed = 0
+        for law in self.laws():
+            if law["id"] in set(ids or ()) and law.get("origin") != "manifest" and law.get("status") != status:
+                changed += 1
+                try:
+                    spec = json.loads(law.get("spec") or "{}")
+                except ValueError:
+                    spec = {}
+                if status == "accepted":         # a co-change law watches the commits after this moment
+                    spec["accepted_at"] = now
+                if not dry_run:
+                    self._exec("MATCH (l:Law {id: $id}) SET l.status = $s, l.updated_at = $t, l.spec = $spec;",
+                               {"id": law["id"], "s": status, "t": now,
+                                "spec": json.dumps(spec, ensure_ascii=False, sort_keys=True)})
+        return changed
+
+    # -- events (Path C, C2.6) ---------------------------------------------------------------------------
+
+    _EVENT_FIELDS = ("id", "kind", "at", "detail", "resolved_at", "resolution", "key")
+
+    def events(self, open_only: bool = False, limit: int = 500) -> list:
+        """The world model's events, newest first — ``concerns`` (variable ids), ``law``, ``involves`` (assertion
+        ids) from their edges."""
+        rows = sorted(self._world_rows("Event", self._EVENT_FIELDS), key=lambda r: -(r.get("at") or 0))
+        if open_only:
+            rows = [r for r in rows if r.get("resolved_at") is None]
+        rows = rows[:limit]
+        links: dict = {}
+        for rel, field in (("CONCERNS", "concerns"), ("FROM_LAW", "law"), ("INVOLVES", "involves")):
+            for eid, other in self._read_or_empty(f"MATCH (e:Event)-[:{rel}]->(x) RETURN e.id, x.id;"):
+                links.setdefault(eid, {}).setdefault(field, []).append(other)
+        for r in rows:
+            got = links.get(r["id"], {})
+            r["concerns"] = sorted(got.get("concerns", []))
+            r["law"] = (got.get("law") or [None])[0]
+            r["involves"] = sorted(got.get("involves", []))
+        return rows
+
+    def raise_events(self, events, now: Optional[int] = None, dry_run: bool = False) -> dict:
+        """Path C (C2.6): record events — ``{"kind", "key", "detail", "concerns": [variable ids], "law": law id,
+        "involves": [assertion ids]}`` — one open event per ``key``: while one is open, the same key raises nothing
+        new. Edges only to what exists. Returns ``{"raised", "open"}``; ``dry_run`` counts without writing."""
+        out = {"raised": 0, "open": 0, "ids": []}
+        events = [e for e in events or () if e.get("kind") and e.get("key")]
+        if not events:
+            return out
+        if not dry_run and not self.writable:
+            raise RuntimeError("GraphStore is read-only; open it writable to raise events.")
+        now = int(now if now is not None else time.time())
+        open_keys = {r["key"] for r in self.events(open_only=True, limit=10 ** 6) if r.get("key")}
+        variables = {v["id"] for v in self.variables()}
+        laws = {law["id"] for law in self.laws()}
+        for e in events:
+            if e["key"] in open_keys:
+                out["open"] += 1
+                continue
+            eid = uuid.uuid4().hex
+            open_keys.add(e["key"])
+            out["raised"] += 1
+            out["ids"].append(eid)
+            if dry_run:
+                continue
+            self._ensure_world_schema()
+            self._exec("CREATE (:Event {id: $id, kind: $k, at: $t, detail: $d, key: $key});",
+                       {"id": eid, "k": e["kind"], "t": int(e.get("at") or now), "d": str(e.get("detail") or ""),
+                        "key": e["key"]})
+            for vid in sorted(set(e.get("concerns") or ()) & variables):
+                self._exec("MATCH (e:Event {id: $e}), (v:Variable {id: $v}) CREATE (e)-[:CONCERNS]->(v);",
+                           {"e": eid, "v": vid})
+            if e.get("law") in laws:
+                self._exec("MATCH (e:Event {id: $e}), (l:Law {id: $l}) CREATE (e)-[:FROM_LAW]->(l);",
+                           {"e": eid, "l": e["law"]})
+            for aid in e.get("involves") or ():
+                self._exec("MATCH (e:Event {id: $e}), (a:Assertion {id: $a}) CREATE (e)-[:INVOLVES]->(a);",
+                           {"e": eid, "a": aid})
+        return out
+
+    def resolve_events(self, ids=(), keys=(), resolution: str = "resolved", now: Optional[int] = None,
+                       dry_run: bool = False) -> int:
+        """Resolve open events by id (a person, in the Pflege panel or ``owiki world resolve``) or by key (the world
+        resolved it: a law holds again, a precondition returned). Returns how many were resolved."""
+        now = int(now if now is not None else time.time())
+        ids, keys = set(ids or ()), set(keys or ())
+        done = 0
+        for r in self.events(open_only=True, limit=10 ** 6):
+            if r["id"] in ids or (r.get("key") and r["key"] in keys):
+                done += 1
+                if not dry_run:
+                    self._exec("MATCH (e:Event {id: $id}) SET e.resolved_at = $t, e.resolution = $r;",
+                               {"id": r["id"], "t": now, "r": str(resolution)[:500]})
+        return done
 
     def upsert_laws(self, laws, now: Optional[int] = None, sync: bool = False, dry_run: bool = False,
                     retire_missing: bool = True) -> dict:
@@ -2220,6 +2399,9 @@ class GraphStore:
             for vid in links:
                 write("MATCH (l:Law {id: $id}), (v:Variable {id: $v}) MERGE (l)-[:CONSTRAINS]->(v);",
                       {"id": law["id"], "v": vid})
+            for slug in law.get("pages") or ():       # a proposal from a document (C2.4)
+                write("MATCH (l:Law {id: $id}), (p:Page {slug: $p}) MERGE (l)-[:FROM_PAGE]->(p);",
+                      {"id": law["id"], "p": slug})
         if retire_missing:
             declared = {law["id"] for law in laws}
             for old in known.values():

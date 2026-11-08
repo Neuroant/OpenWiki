@@ -355,7 +355,36 @@ prompt is shown, with the observation under an id of its own so "each fact once 
 sensors (`pytest-collect`) run only on the slow passes. On by default for a Second Brain with a code source — nothing
 happens until a person accepts a binding.
 
-## 6.13 Cross-cutting runtime aspects
+## 6.13 Scenario: A law breaks and becomes an event (`owiki world`, the Pflege panel — Path C, C2)
+
+A law only reports (ADR-58); what it reports is an event, one open per law, for a person to look at — or for the world
+to resolve when the law holds again (ADR-60). A decision recorded with `depends_on` becomes a law of its own.
+
+```mermaid
+sequenceDiagram
+  participant A as agent (wiki_remember)
+  participant J as graph.journal.jsonl
+  participant F as fold worker
+  participant O as observe pass
+  participant S as sensors + git
+  participant GS as GraphStore
+  participant P as Person (Pflege panel / owiki world)
+
+  A->>J: facts + depends_on → the values read now (preconditions)
+  F->>GS: remember the facts; a precondition law decision:… (accepted, FROM_FACT)
+  O->>S: read the sensors the accepted laws name
+  O->>O: check the laws; a failing one → violation, drift (a precondition), exogenous (its variable changed in no commit)
+  O->>GS: raise_events — one open per key; a law that holds again → resolve_events ("holds again")
+  P->>GS: events in the Pflege panel and the handoff brief
+  P->>J: "erledigt" → resolve-event; a proposal "annehmen" / "ablehnen" → accept-law / reject-law
+  F->>GS: fold — the event resolved, the proposal accepted or rejected
+```
+
+`owiki world propose` writes the proposals: from the co-change history by default, from the wiki's pages with
+`--documents` (ADR-61). The authority rule raises the other two kinds as it writes observations: *discrepancy* (rules 3
+and 5) and *contested* (a value back to the one before within a day).
+
+## 6.14 Cross-cutting runtime aspects
 
 ### Error / timeout handling (Ollama unreachable)
 Any embed or chat call goes through `urllib` to Ollama; on failure `OllamaEmbedder` /

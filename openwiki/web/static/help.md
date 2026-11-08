@@ -356,6 +356,16 @@ zusätzlich einen **Gedächtnis-Tier**: Fakten, die aus Sitzungen *erinnert* wer
     (`wiki_remember`) nur vor: was er hinzufügen (+) und was er schließen (−) will. **Freigeben** lässt den
     Vorgang ins Gedächtnis (gültig ab dem Zeitpunkt, an dem der Agent ihn vorgelegt hat), **Verwerfen** legt
     ihn in ein Prüfprotokoll. Auf der Kommandozeile: `openwiki memory pending` / `approve` / `reject`;
+  - **Ereignisse** (Weltmodell, Pfad C) — was das Weltmodell bemerkt hat: ein angenommenes Gesetz gilt nicht
+    mehr (**Verstoß**; **von außen**, wenn die Änderung in keinem Commit steckt), die Voraussetzung einer
+    Entscheidung hat sich geändert (**Drift**), eine Erinnerung widerspricht der Beobachtung (**Widerspruch**),
+    ein Wert springt binnen eines Tages zurück (**umkämpft**). **erledigt** markiert es als angesehen; ein
+    Verstoß erledigt sich von selbst, sobald das Gesetz wieder gilt. Kommandozeile: `owiki world events` /
+    `resolve`;
+  - **Gesetze prüfen** — vorgeschlagene Gesetze: aus `openwiki.toml`, aus der Git-Geschichte (`owiki world
+    propose`) und auf Wunsch aus den Seiten des Wikis (`--documents`), jedes mit seinem Ergebnis jetzt
+    (**gilt** / **verletzt** / **unbekannt**). Ein Gesetz meldet erst etwas, wenn ein Mensch es **annimmt**;
+    **ablehnen** verwirft einen Vorschlag für immer. Kommandozeile: `owiki world laws` / `accept` / `reject`;
   - **Zu prüfen** — die aktuellen Fakten der Arten, die von selbst veralten (Pläne, Zahlen, Lücken, Versionen,
     laufende Zustände), die wahrscheinlich veralteten Arten zuerst, darin die am längsten nicht bestätigten.
     **stimmt noch** merkt den Fakt als neu bestätigt (er rückt ans Ende), **nicht mehr wahr** beendet seine

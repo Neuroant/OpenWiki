@@ -30,6 +30,8 @@ from __future__ import annotations
 
 import ast
 import fnmatch
+import hashlib
+import json
 import re
 from dataclasses import dataclass, field
 from typing import Optional
@@ -72,6 +74,7 @@ class Law:
     tree: Optional[ast.Expression] = None
     names: tuple = ()                  # the variables the check reads
     health: str = OK                   # "ok", else why it can't be trusted
+    accepted_at: Optional[int] = None  # a law held in the graph: when a person accepted it (a co-change law watches on)
 
     @property
     def described(self) -> str:
@@ -81,10 +84,18 @@ class Law:
                     f"{self.window} commit{'' if self.window == 1 else 's'}")
         return self.check
 
+    def spec(self) -> str:
+        """What a law held in the graph needs to be checked again (v0.127): its fixtures and a co-change rule."""
+        spec = {"violation": self.violation, "example": self.example, "when": list(self.when),
+                "then": list(self.then), "window": self.window, "environment": self.environment}
+        if self.accepted_at:
+            spec["accepted_at"] = int(self.accepted_at)
+        return json.dumps(spec, ensure_ascii=False, sort_keys=True, default=str)
+
     def row(self) -> dict:
         """The ``Law`` node's fields (``GraphStore.upsert_laws``)."""
         return {"id": self.id, "text": self.text, "kind": self.kind, "check": self.described, "origin": self.origin,
-                "status": self.status, "health": self.health}
+                "status": self.status, "health": self.health, "spec": self.spec()}
 
 
 # -- the expression language ---------------------------------------------------------------------------------------
@@ -426,7 +437,7 @@ def format_laws(rows, project: str = "") -> str:
     for r in rows:
         mark = {HOLDS: "✓", VIOLATED: "✗"}.get(r.get("last_result"), "?")
         status = r.get("status") or ""
-        lines.append(f"  {mark} {r['id']:<22}{r.get('last_result') or UNKNOWN:<10}{r.get('check') or ''}"
+        lines.append(f"  {mark} {r['id']:<21} {r.get('last_result') or UNKNOWN:<9} {r.get('check') or ''}"
                      + (f"   [{status} — `owiki world accept {r['id']}`]" if status in ("proposed", "changed") else ""))
         if r.get("health") and r["health"] != OK:
             lines.append(f"    not trusted: {r['health']}")
@@ -435,3 +446,316 @@ def format_laws(rows, project: str = "") -> str:
         if r.get("text"):
             lines.append(f"    {r['text']}")
     return "\n".join(lines)
+
+
+# -- laws held in the graph: decisions' preconditions, proposals (C2.4, C2.5) ------------------------------------
+
+def law_from_row(row: dict) -> Law:
+    """A law held in the graph (a decision's precondition, a proposal from a document or the co-change history) as a
+    ``Law`` again — its check parsed, its fixtures from ``spec``, its health checked anew."""
+    try:
+        spec = json.loads(row.get("spec") or "{}")
+    except ValueError:
+        spec = {}
+    law = Law(id=str(row["id"]), text=str(row.get("text") or ""), kind=str(row.get("kind") or "equality"),
+              check="" if row.get("kind") == "co-change" else str(row.get("check") or ""),
+              origin=str(row.get("origin") or "graph"), status=str(row.get("status") or "proposed"),
+              violation=dict(spec.get("violation") or {}), example=dict(spec.get("example") or {}),
+              when=_globs(spec.get("when")), then=_globs(spec.get("then")), window=int(spec.get("window") or 1),
+              environment=str(spec.get("environment") or ""), accepted_at=spec.get("accepted_at"))
+    try:
+        if law.kind != "co-change":
+            law.tree, law.names = parse_check(law.check)
+        law.health = law_health(law)
+    except (CheckError, ValueError) as exc:
+        law.health = f"check: {exc}"
+    return law
+
+
+def _changed(value):
+    """Some other value of the same type — a decision's planted violation."""
+    if isinstance(value, bool):
+        return not value
+    if isinstance(value, (int, float)):
+        return value + 1
+    if isinstance(value, (list, tuple)):
+        return list(value) + ["·changed"]
+    return f"{value}·changed" if value is not None else "·changed"
+
+
+def precondition_law(decision: str, values: dict, fact_ids=()) -> Optional[Law]:
+    """Path C (C2.5): a decision recorded with the state it was made in — a ``precondition`` law that holds while
+    each variable keeps the value observed when the decision was recorded (``values``: ``{name: value}``). Its planted
+    violation changes the first one. ``None`` without values."""
+    values = {str(k): v for k, v in (values or {}).items()}
+    if not values:
+        return None
+    names = {k: k.replace("-", "_") for k in values}
+    check = " and ".join(f"{names[k]} == {v!r}" for k, v in values.items())
+    first = next(iter(values))
+    key = hashlib.sha1((decision + "|" + "|".join(sorted(fact_ids)) + "|" + check).encode("utf-8")).hexdigest()[:10]
+    law = Law(id=f"decision:{key}", text=f"{decision} — made while " + ", ".join(
+                  f"{k} = {v!r}" for k, v in values.items()),
+              kind="precondition", check=check, origin="decision", status="accepted",
+              violation={names[first]: _changed(values[first]), **{names[k]: v for k, v in values.items()
+                                                                   if k != first}},
+              example={names[k]: v for k, v in values.items()})
+    try:
+        law.tree, law.names = parse_check(check)
+        law.health = law_health(law)
+    except (CheckError, ValueError) as exc:
+        law.health = f"check: {exc}"
+    return law if law.health == OK else None
+
+
+RULE_WORDS = re.compile(
+    r"\b(?:must|never|only if|only when|at least|at most|no more than|above|below|requires?|always|exactly|"
+    r"muss|müssen|nie|niemals|nur wenn|mindestens|höchstens|immer|darf nicht|dürfen nicht|genau)\b", re.I)
+_SENTENCE = re.compile(r"(?<=[.!?])\s+|\n{2,}|\n(?=[-*#|])")
+EXTRACT_SYSTEM = (
+    "You turn rules stated in a document into checks over measured variables. You get sentences from one page and "
+    "a list of variables — each with its name, what it measures and its value now. For each sentence that states a "
+    "rule about these variables (a value, a limit, an equality, an implication), write one JSON object: "
+    '{"text": the rule in one sentence, "kind": "equality" | "comparison" | "implication" | "convention", '
+    '"check": a Python-like expression over the variable names only (==, !=, <, <=, >, >=, and, or, not, '
+    "implies(p, q), ver(x) to compare versions, len(x)), "
+    '"violation": {name: value, …} values that break the rule, "example": {name: value, …} values that keep it}. '
+    "Use only the given names. Skip sentences that state no checkable rule about them. "
+    "Answer with a JSON array only — [] when there is none.")
+
+
+def rule_sentences(text: str, terms=(), limit: int = 12) -> list:
+    """The sentences of ``text`` that read like rules (``RULE_WORDS``) and — when ``terms`` are given — mention one of
+    them (a variable's name, subject, label word or file), at most ``limit``."""
+    out = []
+    pats = [re.compile(r"(?<![\w-])" + re.escape(t) + r"(?![\w-])", re.I) for t in terms if len(t) >= 3]
+    for sent in _SENTENCE.split(str(text or "")):
+        sent = " ".join(sent.split())
+        if 20 <= len(sent) <= 400 and RULE_WORDS.search(sent) and (not pats or any(p.search(sent) for p in pats)):
+            out.append(sent)
+            if len(out) >= limit:
+                break
+    return out
+
+
+def variable_terms(variables) -> dict:
+    """``{term: variable name}`` — the words a sentence may name a variable by: its id (spaced too), its subject, the
+    file it reads. Not the single words of its label — "build", "code", "current", "file" matched nearly every
+    sentence of this repository's CLAUDE.md."""
+    out: dict = {}
+    for v in variables:
+        name = str(v["name"])
+        for term in [name, name.replace("-", " "), name.replace("_", " "), str(v.get("subject") or "")] + [
+                str(p).rsplit("/", 1)[-1] for p in v.get("paths") or ()]:
+            term = term.strip()
+            if len(term) >= 3 and term.lower() not in ("the", "has", "is", "openwiki"):
+                out.setdefault(term, name)
+    return out
+
+
+def _json_array(text: str) -> list:
+    """The objects of the first JSON array in a model's answer — one by one when the array as a whole doesn't parse,
+    so a candidate written in Python (``("a", "b")``) loses only itself, not the page."""
+    text = re.sub(r"<think>.*?</think>", "", str(text or ""), flags=re.S)
+    start, end = text.find("["), text.rfind("]")
+    if start < 0 or end <= start:
+        return []
+    try:
+        got = json.loads(text[start:end + 1])
+        return [g for g in got if isinstance(g, dict)] if isinstance(got, list) else []
+    except ValueError:
+        pass
+    out, decoder, i = [], json.JSONDecoder(), start + 1
+    while True:
+        i = text.find("{", i, end)
+        if i < 0:
+            return out
+        try:
+            obj, i = decoder.raw_decode(text, i)
+        except ValueError:
+            i = _skip_object(text, i)
+            continue
+        if isinstance(obj, dict):
+            out.append(obj)
+
+
+def _skip_object(text: str, i: int) -> int:
+    """The index after the ``{…}`` that starts at ``i`` (braces in strings ignored) — past a malformed candidate."""
+    depth, quoted, escaped = 0, False, False
+    for j in range(i, len(text)):
+        c = text[j]
+        if quoted:
+            escaped, quoted = (not escaped and c == "\\"), quoted and (escaped or c != '"')
+        elif c == '"':
+            quoted = True
+        elif c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                return j + 1
+    return len(text)
+
+
+def _variables(node) -> set:
+    return {n.id for n in ast.walk(node) if isinstance(n, ast.Name)} - set(FUNCTIONS)
+
+
+def tests_constants(tree) -> bool:
+    """Whether a check compares constants with each other somewhere (``'session' in ['session']``) — a part that
+    doesn't depend on the world, true or false whatever is read."""
+    return any(isinstance(n, ast.Compare) and not _variables(n) for n in ast.walk(tree))
+
+
+def check_key(tree) -> str:
+    """A canonical form of a check — operands of ``==`` / ``!=`` and of ``and`` / ``or`` in a fixed order — so the
+    same law found on two pages, or already declared (``code_version == version`` = ``version == code_version``),
+    is proposed once."""
+    def key(node) -> str:
+        if isinstance(node, ast.Expression):
+            return key(node.body)
+        if isinstance(node, ast.BoolOp):
+            return f"{type(node.op).__name__}({','.join(sorted(key(v) for v in node.values))})"
+        if isinstance(node, ast.Compare) and len(node.ops) == 1 and isinstance(node.ops[0], (ast.Eq, ast.NotEq)):
+            sides = sorted((key(node.left), key(node.comparators[0])))
+            return f"{type(node.ops[0]).__name__}({sides[0]},{sides[1]})"
+        if isinstance(node, ast.Compare):
+            return (f"Compare({key(node.left)},"
+                    + ",".join(f"{type(o).__name__}:{key(c)}" for o, c in zip(node.ops, node.comparators)) + ")")
+        if isinstance(node, (ast.Name, ast.Constant)):
+            return ast.dump(node, annotate_fields=False)
+        return f"{type(node).__name__}({','.join(key(c) for c in ast.iter_child_nodes(node))})"
+    return key(tree)
+
+
+def pins_constants(tree) -> bool:
+    """Whether a check only equates variables with constants (``version == '0.52'``, ``len(stages) == 5 and …``) —
+    it restates readings, which a binding's fact already holds, and breaks at the next change: no law."""
+    node = getattr(tree, "body", tree)
+    if isinstance(node, ast.BoolOp):
+        return all(pins_constants(v) for v in node.values)
+    if isinstance(node, ast.Compare) and len(node.ops) == 1 and isinstance(node.ops[0], ast.Eq):
+        names = [_variables(x) for x in (node.left, node.comparators[0])]
+        return bool(names[0]) != bool(names[1])          # a variable on one side, a literal on the other
+    return False
+
+
+def extract_laws(chat, page: str, sentences, variables, known: set, report: Optional[dict] = None,
+                 seen: Optional[set] = None) -> list:
+    """Path C (C2.4): one model call over a page's rule-like ``sentences`` → candidate laws — *proposed*, origin
+    ``document``, each validated like a manifest law (its check in the language, only ``known`` names, failing on its
+    planted violation); dropped besides: a check that only pins variables to constants (``pins_constants``) and one
+    the variables' current values violate — a misread sentence or a stale document, not a law to propose (measured
+    on this repository's CLAUDE.md: "B6 (v0.52) …" became ``version == 'v0.52'``) —, one comparing constants
+    (``tests_constants``) and one whose ``check_key`` is in ``seen`` (laws already held or proposed; extended with
+    each one kept), one the current values can't evaluate (``probes <= 3`` over a file pattern's ``'3'``), and one
+    whose text doesn't name a variable its check reads (the model paired a sentence about recall with a check of the
+    build's stages). ``report`` counts what was dropped (``invalid`` / ``pinned`` / ``constant`` / ``unrelated`` /
+    ``violated_now`` / ``unknown_now`` / ``duplicate``). Fail-soft: a failed call gives ``[]``."""
+    if not sentences:
+        return []
+    report = report if report is not None else {}
+    now = {v["name"]: v.get("value") for v in variables if v.get("value") is not None}
+    words: dict = {}                                # variable → the words that name it, as the prefilter matches them
+    for term, name in variable_terms(variables).items():
+        words.setdefault(name, []).append(re.compile(r"(?<![\w-])" + re.escape(term) + r"(?![\w-])", re.I))
+
+    def named(text: str, name: str) -> bool:
+        return name not in words or any(w.search(text) for w in words[name])
+    listing = "\n".join(f"- {v['name']}: {v.get('label') or v.get('subject') or ''} "
+                         f"(now {json.dumps(v.get('value'), ensure_ascii=False, default=str)})" for v in variables)
+    try:
+        reply = chat.chat([{"role": "system", "content": EXTRACT_SYSTEM},
+                           {"role": "user", "content": f"Variables:\n{listing}\n\nPage: {page}\nSentences:\n"
+                                                       + "\n".join(f"- {x}" for x in sentences)}])
+    except Exception:
+        return []
+    out = []
+    for cand in _json_array(reply if isinstance(reply, str) else getattr(reply, "content", "")):
+        text = str(cand.get("text") or "").strip()
+        if not text:
+            continue
+        key = hashlib.sha1(f"{page}|{text}".encode("utf-8")).hexdigest()[:10]
+        laws, problems = load_laws([{"id": f"doc:{key}", "text": text, "kind": cand.get("kind") or "equality",
+                                     "check": cand.get("check") or "", "violation": cand.get("violation") or {},
+                                     "example": cand.get("example") or {}}], known)
+        law = laws[0] if laws else None
+        if law is None or law.health != OK or problems or law.kind == "co-change":
+            report["invalid"] = report.get("invalid", 0) + 1
+            continue
+        result = evaluate(law.tree, now)[0] if all(n in now for n in law.names) else None
+        why = ("pinned" if pins_constants(law.tree) else "constant" if tests_constants(law.tree)
+               else "unrelated" if not all(named(text, n) for n in law.names)
+               else "violated_now" if result == VIOLATED else "unknown_now" if result == UNKNOWN
+               else "duplicate" if seen is not None and check_key(law.tree) in seen else "")
+        if why:
+            report[why] = report.get(why, 0) + 1
+            continue
+        if seen is not None:
+            seen.add(check_key(law.tree))
+        law.origin, law.status = "document", "proposed"
+        out.append(law)
+    return out
+
+
+# As ``graph.cochange``'s MAX_COMMIT_FILES / UBIQUITOUS_SHARE / UBIQUITOUS_MIN (ADR-48) — repeated here so this module
+# needs no graph import (``openwiki.graph`` loads Kuzu); a test keeps them equal.
+SWEEP_FILES = 40
+UBIQUITOUS_SHARE = 0.5
+UBIQUITOUS_MIN = 10
+
+
+def cochange_candidates(commits, min_changes: int = 8, share: float = 0.9, window: int = 3, lift: float = 1.5,
+                        limit: int = 10, environment: str = "", skip=()) -> list:
+    """Path C (C2.4): co-change laws learned from the git history (the log ``CO_CHANGED`` comes from) — a file changed
+    in at least ``min_changes`` commits, followed within ``window`` commits by a change to another file in at least
+    ``share`` of them, ``lift`` times as often as that file changes at all. As for ``CO_CHANGED`` (ADR-48), a commit
+    touching more than ``SWEEP_FILES`` files is a sweep, not a coupling, and a file changed in ``UBIQUITOUS_SHARE`` of
+    the commits pairs only with files as ubiquitous: where nearly every commit is a release, the version files follow
+    every file (measured on this repository: "a change to cli.py comes with a version bump", 100 of 100). *Proposed*,
+    origin ``co-change``; the strongest ``limit`` not in ``skip`` (ids, or ``(when, then)`` pairs — laws already held
+    or declared). Commits newest first, ``[(epoch, [paths])]``."""
+    rows = [list(c[1]) if isinstance(c, tuple) else list(c) for c in commits or ()]
+    rows = [files if len(set(files)) <= SWEEP_FILES else [] for files in rows]    # a sweep still counts as a commit
+    total = len(rows)
+    if not total:
+        return []
+    base: dict = {}
+    for files in rows:
+        for f in set(files):
+            base[f] = base.get(f, 0) + 1
+    changed = sum(1 for files in rows if files)
+    ubiquitous = {f for f, n in base.items() if changed >= UBIQUITOUS_MIN and n >= UBIQUITOUS_SHARE * changed}
+    scored = []
+    for a, n_a in base.items():
+        if n_a < min_changes:
+            continue
+        follows: dict = {}
+        for i, files in enumerate(rows):
+            if a not in files or i < window - 1:
+                continue
+            seen = set().union(*[set(f) for f in rows[max(0, i - window + 1): i + 1]]) - {a}
+            for b in seen:
+                follows[b] = follows.get(b, 0) + 1
+        counted = sum(1 for i, files in enumerate(rows) if a in files and i >= window - 1)
+        for b, n in follows.items():
+            if (a in ubiquitous) != (b in ubiquitous):
+                continue
+            p_b = base[b] / total
+            if counted and n / counted >= share and (n / counted) >= lift * p_b:
+                scored.append((counted * (n / counted) / max(p_b, 1e-9), a, b, n, counted))
+    out = []
+    skip = set(skip or ())
+    for _, a, b, n, counted in sorted(scored, reverse=True):
+        if len(out) >= limit:
+            break
+        if f"cochange:{a}=>{b}" in skip or ((a,), (b,)) in skip:
+            continue
+        law = Law(id=f"cochange:{a}=>{b}", text=f"A change to {a} comes with a change to {b} within {window} commits "
+                                                f"({n} of {counted} in the history).",
+                  kind="co-change", origin="co-change", status="proposed", when=(a,), then=(b,), window=window,
+                  environment=environment, violation={"commits": [["(another file)"]] * (window - 1) + [[a]]})
+        law.health = law_health(law)
+        if law.health == OK:
+            out.append(law)
+    return out

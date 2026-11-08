@@ -141,7 +141,8 @@ under a synthetic top-level outline node (its name) so slugs don't collide.
     on for a Second Brain with a code source — nothing written until a person accepts a binding)
   - [x] authoritative tables in one registry that the rebuild's snapshot / restore reads (v0.126: `graph/schema.py`,
     arc42 ADR-59); `Session.kind` still derived from the session id
-  - [x] `[[world.laws]]` — rules over the variables, proposed until a person accepts them (v0.126, ADR-58)
+  - [x] `[[world.laws]]` — rules over the variables, proposed until a person accepts them (v0.126, ADR-58); law
+    proposals from the git history held in the graph, decisions' preconditions, events (v0.127, ADR-60, ADR-61)
   - [ ] twins as separate processes, OpenWiki their client; actions through OpenWiki's `act`
   - [x] between sessions the loop runs as a scheduled `owiki world observe` (v0.124: `owiki schedule install --task
     world-observe`, every 15 minutes)

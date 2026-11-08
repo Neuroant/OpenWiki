@@ -62,6 +62,8 @@ Core use cases (most map to a runtime scenario in §6, the rest to their decisio
 | U13 | Review the agent's memory writes before they land | `memory pending` / `approve` / `reject`, the Gedächtnis tab | §6.10 (ADR-46) |
 | U14 | Back up the memory, or move it to another engine | `memory export` / `import` (COGX), the Markdown view at `sleep` | ADR-39 |
 | U15 | Turn recurring tool failures into lessons a person records | `sessions lessons` | ADR-47 |
+| U16 | Let what sensors read outrank stale beliefs in memory, once a person accepts a binding | `world status` / `accept` / `observe`, the inject hook's overlay | §6.12 (ADR-56, ADR-57) |
+| U17 | Check rules and decisions against the world, and see what broke | `world laws` / `propose` / `events` / `resolve`, `wiki_remember(depends_on)`, the Pflege panel | §6.13 (ADR-58 – ADR-61) |
 
 ## 1.2 Quality Goals
 

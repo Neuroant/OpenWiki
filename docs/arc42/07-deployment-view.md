@@ -140,5 +140,5 @@ nothing is built — the work is tracked in `docs/path-c-roadmap.md` (C1, C2.13,
   extraction, summaries — runs at night in `sleep`, in phases (§7.3), with track L's cloud route for what doesn't fit.
 
 ---
-*Chapter complete. Cross-refs: process behaviour → §6.13 (concurrency/fallback); the
+*Chapter complete. Cross-refs: process behaviour → §6.14 (concurrency/fallback); the
 no-auth exposure risk → §11 R1; resource assumptions → §2 TC9; Path C's deployment → §7.5, ADR-54.*

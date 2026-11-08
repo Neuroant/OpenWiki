@@ -51,7 +51,7 @@ to the Ableton twin's review (`docs/Digital_Twin_Review.md` in `G:\Antigravity\a
 | **M** — measurement harness | replay real prompts at their own time, in the repository; one guard command | — | ☑ M.1 – M.3 | v0.122.0 (M.1); M.2 and M.3 with C1's first release, v0.123 |
 | **C0** — inventory | is enough of the memory observable to build C1? | M.1 | ☑ **go** (2026-11-07) | docs only |
 | **C1** — observe, don't remember | observable state right by construction | C0 go ✓; decisions 5, 13 ✓ | ☑ (C1.12 derived from the id; C1.13 in part — the rest is C2.14) | v0.123.0 – v0.125.0 |
-| **C2** — laws, drift, world slice | rules and decisions checkable; context built around what a prompt touches | C1 exit ✓; decisions 10, 14, 15 ✓ | ◐ C2.1 – C2.3, C2.14 ☑ | v0.126.0; v0.127 – v0.129 |
+| **C2** — laws, drift, world slice | rules and decisions checkable; context built around what a prompt touches | C1 exit ✓; decisions 10, 14, 15 ✓ | ◐ C2.1 – C2.6, C2.14 ☑ | v0.126.0, v0.127.0; v0.128 – v0.129 |
 | **C3** — predict and verify | the full loop on the repository | C2 exit; decisions 4, 8, 9 | ☐ | v0.130 – v0.132 |
 | **P** — playground prerequisites | the Ableton twin safe and trustworthy enough to play with | — (parallel; Ableton repository) | ☐ | Ableton releases |
 | **L** — language-model routing | the hybrid approach: a cloud model per task where really needed | decision 6 (parallel; before the first cloud use) | ☐ | with its first use |
@@ -59,9 +59,11 @@ to the Ableton twin's review (`docs/Digital_Twin_Review.md` in `G:\Antigravity\a
 | **C4** — physical twins | the twin contract on a working twin, then a machine | C3 exit; P; decisions 2, 3, 12 | ☐ | v0.133 + |
 
 **Next actions:** a person accepts openwiki-dev's bindings (`owiki world status`, then `owiki world accept ID`) and
-schedules the loop (`owiki schedule install --task world-observe`), and accepts the laws worth keeping (`owiki world
-laws`, then `owiki world accept ID`); then C2's v0.127 — law extraction and review, decisions with preconditions,
-events (C2.4 – C2.6). v0.126 landed on 2026-11-08: the table registry, variables, laws, built-in variables (§8).
+schedules the loop (`owiki schedule install --task world-observe`), accepts the laws worth keeping (`owiki world
+laws`, then `owiki world accept ID`) and reviews the co-change proposals (`owiki world propose`, then `accept` /
+`reject` — or the Pflege panel); then C2's v0.128 — the world slice, the world tools, the *Welt* tab (C2.7 – C2.9).
+v0.127 landed on 2026-11-08: events, decisions with their preconditions, law proposals and their review (§8). v0.126
+landed on 2026-11-08: the table registry, variables, laws, built-in variables (§8).
 C1 closed with v0.125 on 2026-11-08: the read-time overlay, the observed state in the handoff, the measurement —
 stale governed facts in the replayed prompts 15.1 % → 0.5 – 1.2 %, the exit holds, so the world model is on by
 default for a Second Brain with a code source (§7, WM §18.2). v0.124 landed on 2026-11-07: observed facts, the
@@ -285,9 +287,9 @@ Pflege panel.
 | **C2.1 — schema and the authoritative registry** | `Variable`, `Law`, `Event` and their relationships (WM §5.2); always created, lazily migrated, carried by `memory export --full`. Tables declare themselves authoritative in one registry that B0's snapshot / restore reads — the memory tables move onto it too, so no hand-kept list remains (WM §2.3). | `graph/builder.py`, `graph/store.py`, `memory_export.py` | creation, migration, snapshot / restore, export | M | ☑ |
 | **C2.2 — variables** | One `Variable` per binding; `DESCRIBED_IN` the page that documents it (the code file's page, a manual section). | `openwiki/world/bindings.py`, `graph/store.py` | variables from bindings | S | ☑ |
 | **C2.3 — generic law checkers** | Declarative first (ADR-51): a small expression language over observed variables — equality, comparison, implication — parsed with `ast` against a whitelist of node types (never `eval`); built-in checkers for conventions ("every released version has a tag") and co-change laws (from `CO_CHANGED`). Each law needs a planted violation it fails on before it counts (WM §2.2). | `openwiki/world/laws.py` (new) | the whitelist rejects everything else; each checker on fixtures; the planted-violation rule | M | ☑ (law proposals from `CO_CHANGED` → C2.4) |
-| **C2.4 — law extraction and review** | Candidate laws from documents: a pattern prefilter (WM §7.3), one local-model call per candidate page, variables resolved against `Variable` nodes and entities; candidates reviewed in the Pflege panel ("Gesetze prüfen": accept / reject); an accepted law gets its planted-violation fixture. | `openwiki/world/laws.py`, `web/server.py`, `web/static/app.js` | extraction with a fake chat; review endpoints | M | ☐ |
-| **C2.5 — decisions with preconditions** | `wiki_remember` accepts `depends_on` (variables); the observed values of the variables a decision names are recorded with it; a change raises a drift event (WM §7.4). | `mcp_server.py`, `graph/store.py` | precondition snapshot, drift | S | ☐ |
-| **C2.6 — events** | Discrepancy, violation, drift, exogenous (only when an outside change breaks a law or a decision), contested (WM §8.3); raised at fold; shown in the Pflege panel and the handoff brief's "what changed since"; resolvable by a person. | `graph/store.py`, `handoff.py`, `web/` | each kind; resolution | M | ☐ |
+| **C2.4 — law extraction and review** | Candidate laws from documents: a pattern prefilter (WM §7.3), one local-model call per candidate page, variables resolved against `Variable` nodes and entities; candidates reviewed in the Pflege panel ("Gesetze prüfen": accept / reject); an accepted law gets its planted-violation fixture. | `openwiki/world/laws.py`, `web/server.py`, `web/static/app.js` | extraction with a fake chat; review endpoints | M | ☑ (proposals from the co-change history by default; from documents opt-in — none of 74 candidates on this repository's docs was a law, ADR-61) |
+| **C2.5 — decisions with preconditions** | `wiki_remember` accepts `depends_on` (variables); the observed values of the variables a decision names are recorded with it; a change raises a drift event (WM §7.4). | `mcp_server.py`, `graph/store.py` | precondition snapshot, drift | S | ☑ (named variables only — none taken automatically) |
+| **C2.6 — events** | Discrepancy, violation, drift, exogenous (only when an outside change breaks a law or a decision), contested (WM §8.3); raised at fold; shown in the Pflege panel and the handoff brief's "what changed since"; resolvable by a person. | `graph/store.py`, `handoff.py`, `web/` | each kind; resolution | M | ☑ (raised by the observe pass and the merge; ADR-60) |
 | **C2.7 — the world slice** | `context_for` assembles the touched variables — file paths and identifiers in the prompt, the working tree's changes, BM25 over variable labels, the recalled facts' subjects — with their state, laws, open events and the decisions about them, in at most a third of the budget; skipped when nothing touched is known (WM §9). | `graph/store.py`, `graph/memory.py` (`assemble_context`) | assembly, budget, the fallback is today's context | M | ☐ |
 | **C2.8 — read-only world tools** | The contract's read verbs (WM §10.1) — `entities`, `state`, `history`, `laws` — as MCP tools (names: decision 10). | `mcp_server.py` | `MCPStdioServer.handle` with fakes | S | ☐ |
 | **C2.9 — the web UI** | Variables with their values and age, laws with their status, open events — as a *Welt* tab or as panels in Gedächtnis (decision 15). | `web/` | `test_web.py` round-trips; a Playwright check | M | ☐ |
@@ -298,8 +300,8 @@ Pflege panel.
 | **C2.14 — the handoff's probes on the world model** | From C1.13: `handoff.environment` takes the git state, Ollama, the wiki's freshness and the capture workers from the world model's observed state instead of its own probes — built-in variables of the repository environment, read without acceptance since they write no fact; wiki freshness becomes a variable. | `handoff.py`, `openwiki/world/` | the brief with a fake world model | S | ☑ |
 
 **Releases (planned):** ~~v0.126 — schema, variables, generic checkers, the handoff's probes (C2.1 – C2.3, C2.14)~~
-(landed); v0.127 — law extraction and
-review, decisions with preconditions, events (C2.4 – C2.6); v0.128 — the world slice, the world tools, the UI (C2.7 –
+(landed); ~~v0.127 — law extraction and
+review, decisions with preconditions, events (C2.4 – C2.6)~~ (landed); v0.128 — the world slice, the world tools, the UI (C2.7 –
 C2.9); v0.129 — the twin client, the playground's laws and the measurement (C2.10 – C2.13).
 **Landed:** v0.126 on 2026-11-08 (C2.1 – C2.3, C2.14) — **the table registry** (`openwiki/graph/schema.py`, arc42
 ADR-59): every node and rel table declared once with its standing; the builder creates the schema from it, `GraphStore`
@@ -328,6 +330,35 @@ rule (`cli.py` ⇒ `CLAUDE.md` within three commits — 82 changes in the histor
 On a copy of its graph the observe pass created the world tables, wrote the three laws and their variables (each linked
 to its file's page), and no fact changed. Not yet: law proposals from `CO_CHANGED` (with C2.4's review queue). 901
 tests; the guards (M.2) on the release code: all five green, LoCoMo's 199 contexts unchanged.
+**Landed:** v0.127 on 2026-11-08 (C2.4 – C2.6) — **events** (C2.6, arc42 ADR-60): an `Event` per thing the world model
+noticed, one open per key, linked to its variables (`CONCERNS`), its law (`FROM_LAW`) and its facts (`INVOLVES`) —
+*discrepancy* (rule 3: a governed belief recorded after the change it contradicts; rule 5: a belief said against a
+current observation), *violation* (an accepted law fails), *drift* (a decision's precondition fails), *exogenous* (a
+law or precondition breaks through a change in no commit — until C3's action log a commit is the only action) and
+*contested* (a value returns within 24 h, A → B → A); *miss* and *unresolved* come with C3's predictions. The observe
+pass raises them and resolves a law's event when the law holds again; a person resolves one (`owiki world resolve ID
+--note …`, the Pflege panel's *Ereignisse*); `owiki world events`; the handoff brief lists the open ones.
+**Decisions with preconditions** (C2.5): `wiki_remember` takes `depends_on` — the values read now are recorded with
+the decision as an accepted precondition law (`decision:…`, `name == value`, `FROM_FACT` its facts; through the
+approval step too), checked by every observe pass. **Law proposals and their review** (C2.4, ADR-61): `owiki world
+propose` mines the git history — co-change candidates with ADR-48's rules (sweeps skipped, ubiquitous files paired
+only with each other), the strongest 10 not held or declared — and with `--documents` the wiki's pages: rule-like
+sentences naming a variable, one model call per page, each candidate validated like a manifest law and screened
+(pinning a constant, comparing constants, a check its text doesn't name, contradicted or uncheckable now, a repeat);
+proposals are accepted or rejected with `owiki world accept / reject ID` or the Pflege panel's *Gesetze prüfen*, a
+rejected one never proposed again. The world cache dates a value its source can't date from when it was first read
+(as C1's observations), so `age()` holds while a change waits for its commit. **Measured** on a copy of
+openwiki-dev's graph: the co-change history proposed 10 conventions of the repository (the version pair, this tracker
+with its design document, `roadmap.md` with `CLAUDE.md`, `style.css` with `app.js` …) — before the ubiquitous-file rule
+two only said that every CLI change ships in a release commit (100 of 100, lift 1.67 against the single-commit rate);
+the documents gave no law: on the 24 of 181 pages the prefilter passes, 71 of the local model's 74 candidates were
+dropped (31 pinning a constant, 27 invalid, 5 contradicted or uncheckable now, 4 unrelated to their text, 4 repeats)
+and the 3 left restate a reading as a bound (`tabs <= 10`); a positive control stating three rules got them back
+(3/3, 2/3, 2/3) — so `--documents` is opt-in, for a corpus that states rules (C2.10's manual). The release's own
+version bump raised an *exogenous* event (`pyproject.toml` ahead of `__version__`, uncommitted) that resolved itself
+when `__init__.py` followed; a decision recorded with `depends_on: ["context-budget"]` became `decision:…
+context_budget == 3000`, holding; the Pflege panel listed the event and the proposals, and its buttons landed through
+the fold worker (write lock 0.1 s). 920 tests; the guards (M.2) on the release code: all five green, LoCoMo's 199 contexts unchanged (J 65.1 %, as recorded).
 **Exit:** WM §12's C2 exit.
 
 ## 9. Phase C3 — Predict and verify
@@ -475,6 +506,7 @@ The open decisions of WM §15, and the phase that cannot start without them:
 | 2026-10-24 | L | Hybrid language models decided (ADR-52): track L added; decision 6 narrowed to the choice of providers | — |
 | 2026-10-24 | C1, C2, C3 | The project concept checked against Path C (WM §2.3, ADR-53): environments as a third input class; work packages C1.2 and C1.5 widened, C1.12, C1.13 and C3.9 added, C2.1, C2.10 and C3.1 widened | — |
 | 2026-10-24 | — | Deployment reviewed against Path C; two fixes landed at once: the global `owiki` reinstalled as an editable pipx install of the checkout (the old v0.45 one, older than B0, removed), and `docker-compose.yml` publishing on `127.0.0.1` only (`1b12eff`) | — |
+| 2026-11-08 | C2 | v0.127: events (C2.6, ADR-60 — discrepancy, violation, drift, exogenous, contested; one open per key, resolved by the world or a person), decisions with their preconditions (C2.5, `wiki_remember(depends_on)` → an accepted precondition law), law proposals and their review (C2.4, ADR-61 — from the co-change history with ADR-48's rules; from documents opt-in: none of 74 candidates on this repository's docs was a law, a positive control 3/3; `owiki world propose / reject / events / resolve`, the Pflege panel); an uncommitted change dated from when it was first read | C2.4 – C2.6 ☑ |
 | 2026-11-08 | C2 | v0.126: the table registry (ADR-59; the new tables in B0's snapshot and in `--full` as decision 14 says), variables (C2.2), laws (C2.3, ADR-58 — a whitelisted expression language, planted violations, proposed until a person accepts them, co-change rules; `owiki world laws`), built-in variables for the handoff and the laws (C2.14); openwiki-dev's first three laws proposed, all holding | C2.1 – C2.3, C2.14 ☑ |
 | 2026-11-08 | C2 | Gate passed: the user decided 10 (a `world_*` tool family: `world_entities` / `state` / `history` / `laws`), 14 (the new tables travel in COGX as standard record kinds with `metadata.openwiki` — variables as entities, laws and events as memories; the default export adds only accepted laws) and 15 (a *Welt* tab, the Pflege panel keeping what needs a person) | C2 started |
 | 2026-11-08 | C1 | v0.125: the read-time overlay (C1.6 — light reads, a replacement's own id, an `observe` op for a new value), the observed state in the handoff (C1.13, in part — its other probes moved to C2.14), a list counts as its length; the world model on by default for a Second Brain with a code source. Measured (WM §18.2): stale governed facts 15.1 % → 0.5 – 1.2 % of the replayed prompts (C0.5's tab series corrected: 13.7 → 15.1 %); the overlay +56 ms p50 where a sensor is due, +1 ms with a fresh cache; the review list 408 → 403; all five guards green, LoCoMo's 199 contexts unchanged | C1.6, C1.10, C1.11 ☑; C1.13 ◐; C1 exit ✓ |

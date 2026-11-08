@@ -69,8 +69,9 @@ prompts (WM §18.2): stale governed facts 15.1 % → 0.5 – 1.2 %, so the world
 with a code source (nothing corrected until a person accepts a binding; below). **C2 is under way:** the user
 decided 10, 14 and 15 on 2026-11-08 (a `world_*` MCP tool family; the new tables in COGX as standard record kinds with
 `metadata.openwiki`; a *Welt* tab beside the Pflege panel); v0.126 built the table registry, variables, laws and the
-environment's built-in variables (arc42 ADR-58, ADR-59; below); next v0.127 — law extraction and review, decisions with
-preconditions, events (C2.4 – C2.6).
+environment's built-in variables (arc42 ADR-58, ADR-59), v0.127 events, decisions with their preconditions and law
+proposals with their review (ADR-60, ADR-61; below); next v0.128 — the world slice, the world tools, the *Welt* tab
+(C2.7 – C2.9).
 Paths B and C use language models **hybrid** — local where possible, cloud where really needed — while Path A's
 pipeline stays local (ADR-52 amends ADR-2). Projects gain **environments** — a third input class next to sources and
 sessions; twins run as their own processes with OpenWiki as their client (§2.3, ADR-53; `docs/projects.md` Phase 5) —
@@ -526,8 +527,47 @@ generically — an edge only where both ends survived), and `memory export --ful
 the default export adds only accepted laws).
 openwiki-dev declares the first slice's laws (C0.6) — `version-in-code` (pyproject = `__version__`), `release-tagged`
 (`ver(version) == ver(release) or age(version) < days(1)`) and a co-change rule (`cli.py` ⇒ `CLAUDE.md` within three
-commits; 82 changes in the history, none missed) —, all proposed and holding. Law proposals from `CO_CHANGED`, laws
-extracted from documents and the events a violation raises come with v0.127.
+commits; 82 changes in the history, none missed) —, all proposed and holding.
+
+**Events, decisions and law proposals (v0.127, arc42 ADR-60 / ADR-61)** — what the world model noticed, for a person
+to look at; the state a decision was made in; candidate laws for a person to review:
+```
+.venv\Scripts\python -m openwiki world events                   # the open events (--all: resolved ones too)
+.venv\Scripts\python -m openwiki world resolve ID --note "seen" # a person resolves an event
+.venv\Scripts\python -m openwiki world propose                  # law proposals from the git history (--dry-run)
+.venv\Scripts\python -m openwiki world reject ID                # a person rejects a proposal (accept as before)
+```
+**Events** (`Event`, one open per `key`; `CONCERNS` its variables, `FROM_LAW` its law, `INVOLVES` its facts —
+`GraphStore.raise_events` / `resolve_events` / `events`): *discrepancy* (rule 3 — a governed belief recorded after the
+change it contradicts; rule 5 — a belief said against a current observation), *violation* (an accepted law fails),
+*drift* (a decision's precondition fails), *exogenous* (a law or precondition breaks through a change in no commit — the
+failing variable's reading is "uncommitted"; until C3's action log a commit is the only action), *contested* (a value
+returns within 24 h, A → B → A). The observe pass raises them and resolves a law's event when the law holds again
+("holds again"); a person resolves one with `world resolve` or in the Pflege panel (journal op `resolve-event`); the
+handoff brief lists the open ones. **Decisions with preconditions** (C2.5): `wiki_remember` takes `depends_on` — sensor
+ids or built-in variables; the values read now (`cli._world_values`: the world cache, else a light read of a fast
+sensor) travel with the facts (`queue_remember(preconditions=)`, also through `[memory] approve_writes`' staging) and
+the fold records a **precondition law** — `decision:<hash>`, `name == value …`, origin `decision`, accepted with the
+decision, `FROM_FACT` its facts — that every observe pass checks; a change raises a *drift* event. **Law proposals**
+(C2.4, `world propose`): co-change candidates from each repository's history (`laws.cochange_candidates`: a file changed
+in ≥ 8 commits, followed within 3 by another in ≥ 90 % of them at 1.5× that file's own rate; sweeps of > 40 files
+skipped and ubiquitous files — changed in half the commits — paired only with each other, as for `CO_CHANGED`; the
+strongest 10 not already held or declared), and with `--documents` from the wiki's pages (`rule_sentences` — rule
+words + a variable's id, subject or file —, one model call per page, `extract_laws`: validated like a manifest law and
+dropped when it only pins a variable to a constant, compares constants, checks what its text doesn't name, is violated
+or not checkable on the current values, or repeats a law already held — `check_key`). A proposal is held in the graph
+as *proposed*; `world accept / reject ID` or the Pflege panel's *Gesetze prüfen* decide (journal ops `accept-law` /
+`reject-law`; a rejected one is never proposed again; a manifest law is accepted there directly). The world cache
+dates a value its source can't date (an uncommitted line) from when it was first read, so `age()` holds while a change
+waits for its commit. **Measured** on a copy of openwiki-dev: 10 co-change proposals, all conventions of this
+repository (the version pair, the Path C tracker with its design doc, `roadmap.md` with `CLAUDE.md`, `style.css` with
+`app.js` …; before the ubiquitous-file rule two said only that every CLI change ships in a release commit); from its
+documents no law — on the 24 of 181 pages the prefilter passes, 71 of the local model's 74 candidates were dropped (31
+pinning a constant, 27 invalid, 4 unrelated to their text, 5 contradicted or uncheckable now, 4 repeats) and the 3 left
+restate a reading as a bound (`tabs <= 10`), while a positive control stating three rules got them back (3/3, 2/3, 2/3)
+— hence `--documents` is opt-in, for a corpus that states rules (a manual). The release's own version bump raised an
+*exogenous* event (`pyproject.toml` ahead of `__version__`, uncommitted) that resolved itself when `__init__.py`
+followed.
 
 **Sleep — nightly memory maintenance + forgetting** (Path B++): one schedulable writable pass — fold what
 read-only processes queued (usage + journal) → redact credentials in facts stored before v0.99 → **forget** what the
@@ -966,10 +1006,16 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   `observation`, `governed_predicate`, `format_observe`; `Overlay` (v0.125 — the read-time overlay, `OVERLAY_BUDGET_MS`)
   and `world_state` (the handoff's observed state); law acceptance (`law_fingerprint` / `law_acceptance` /
   `accept_laws`, keys `law:<id>`). `laws.py` (v0.126): `parse_check` / `evaluate` / `check_cochange` / `law_health` /
-  `load_laws` / `check_laws` / `format_laws`; `builtin.py` (v0.126): `BUILTIN`, `read_builtin`. Pure apart from reading
-  the environment and two JSON files; no Kuzu. The graph side: `GraphStore.observe` / `observations` /
-  `remember(authority=)` / `fold_journal(authority=)` / `variables` / `upsert_variables` / `laws` / `upsert_laws`,
-  `journal.append_observe`; the CLI's `_world_observe` / `_world_authority` / `_law_inputs` / `_law_rows`.
+  `load_laws` / `check_laws` / `format_laws`; v0.127: `law_from_row` (a law held in the graph), `precondition_law`
+  (C2.5), `rule_sentences` / `variable_terms` / `extract_laws` (C2.4; `pins_constants`, `tests_constants`, `check_key`,
+  `_json_array` — candidate by candidate) and `cochange_candidates` (`SWEEP_FILES` / `UBIQUITOUS_SHARE` /
+  `UBIQUITOUS_MIN`, kept equal to `graph.cochange`'s); `builtin.py` (v0.126): `BUILTIN`, `read_builtin`. Pure apart
+  from reading the environment and two JSON files; no Kuzu. The graph side: `GraphStore.observe` / `observations` /
+  `remember(authority=)` / `fold_journal(authority=)` / `variables` / `upsert_variables` / `laws` / `upsert_laws`;
+  v0.127: `events` / `raise_events` / `resolve_events` / `review_laws`, `queue_remember(preconditions=)`, the journal
+  ops `resolve-event` / `accept-law` / `reject-law` (`journal.ID_OPS`), `journal.append_observe`; the CLI's
+  `_world_observe` / `_world_authority` / `_law_inputs` / `_law_rows` / `_law_events` / `_world_propose` /
+  `_world_values`.
 - **`openwiki/agent.py`** — `RAGAgent`: retrieve top chunks → number them as
   excerpts → a grounded system prompt → `ChatModel` → `RAGAnswer` (answer +
   `Source`s). `<think>…</think>` is stripped; `cited_markers()` reports which
@@ -1343,8 +1389,10 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   supersedes / superseded-by, kind, theme — plus `said`, the session excerpts around when it was said, via the
   `SessionCorpus` `serve` passes in; 404 for an unknown id),
   `/api/memory/maintenance?offset=&limit=` = the **maintenance panel** (M7, v0.117: `staged`, `review` —
-  `memory_browse.review_queue`, `forget` — `forget_candidates`, `queued` — `journal.queued_ids`, `writable`),
-  `/api/memory/maintain` (POST `{action: close|confirm|forget, ids}`) = act on facts through the journal, pinned by id,
+  `memory_browse.review_queue`, `forget` — `forget_candidates`, `queued` — `journal.queued_ids`, `writable`; v0.127:
+  `events` — the world model's open events, `laws` — the laws waiting for a person, `_laws_to_review`),
+  `/api/memory/maintain` (POST `{action: close|confirm|forget|resolve-event|accept-law|reject-law, ids}`) = act on facts,
+  events and laws through the journal, pinned by id (a manifest law accepted directly),
   and start a fold (`memory_maintain`; 400 bad input, 409 no graph / `--dry-run` / Wiki mode),
   `/api/recall` (POST) = decay-weighted `recall` (B7 `as_of`/`known_at`), **explained** (M4, v0.115: each hit's
   `parts` + `explain` — `recall(report=)`), `/api/context` (POST) = the assembled three-tier `context_for`
@@ -1415,7 +1463,9 @@ filters the facts by either), what it replaced / what replaced it — each click
 excerpts where it was said; Esc closes), and a collapsible **Pflege** (maintenance) panel near the top (M7,
 v0.117: the staged agent writes, the facts of kinds that go stale — "stimmt noch" re-affirms, "nicht mehr wahr"
 closes — and what the sleep pass would forget — "vergessen" / "alle vergessen"; each action goes through the
-journal and starts a fold, rows show "eingereiht" until it lands; `careHtml` / `loadCare` / `careAct`), and a
+journal and starts a fold, rows show "eingereiht" until it lands; `careHtml` / `loadCare` / `careAct`; v0.127:
+**Ereignisse** — the open events, "erledigt" — and **Gesetze prüfen** — the proposed laws with their result now,
+"annehmen" / "ablehnen" — `careWorldHtml`), and a
 collapsible **Sitzungen** list (M8, v0.119: the conversation by day — turns, the user's share, facts learned; a click
 opens the day in a **session viewer** in the same drawer: the turns as escaped plain text, never HTML — a transcript can
 hold pasted pages —, "frühere / spätere Beiträge", "ganz zeigen" for a cut turn, the day's facts; the recall box's

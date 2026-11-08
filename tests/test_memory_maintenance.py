@@ -20,7 +20,8 @@ def test_id_ops_queue_and_read_back(tmp_path):
     recs = read_journal(j)
     assert [r["op"] for r in recs] == ["confirm", "forget"] and recs[0] == {"op": "confirm", "t": 5, "ids": ["a", "b"]}
     assert recs[1]["reason"] == "reviewed"
-    assert queued_ids(j) == {"close": [], "confirm": ["a", "b"], "forget": ["c"]}
+    assert queued_ids(j) == {"close": [], "confirm": ["a", "b"], "forget": ["c"], "resolve-event": [],
+                             "accept-law": [], "reject-law": []}               # + the world model's (C2.4, C2.6)
 
 
 def test_review_queue_orders_by_kind_then_least_recently_confirmed():
@@ -69,7 +70,9 @@ def test_maintenance_panel_closes_confirms_and_forgets_through_the_journal(tmp_p
         for action, fid in (("close", release), ("confirm", pages), ("forget", pushed)):
             assert app.memory_maintain(action, [fid]) == {"action": action, "queued": [fid], "folding": True}
         assert len(folds) == 3                                                 # each starts a fold
-        assert app.memory_maintenance()["queued"] == {"close": [release], "confirm": [pages], "forget": [pushed]}
+        queued = app.memory_maintenance()["queued"]
+        assert {k: queued[k] for k in ("close", "confirm", "forget")} == {"close": [release], "confirm": [pages],
+                                                                          "forget": [pushed]}
 
         before = {r["id"]: r for r in store.list_assertions()}
         res = store.fold_journal(emb)
@@ -80,7 +83,7 @@ def test_maintenance_panel_closes_confirms_and_forgets_through_the_journal(tmp_p
         assert after[pages]["confidence"] > before[pages]["confidence"]        # re-affirmed …
         assert after[pages]["last_seen"] > before[pages]["last_seen"]
         m = app.memory_maintenance()
-        assert m["queued"] == {"close": [], "confirm": [], "forget": []}
+        assert not any(m["queued"].values())
         assert [f["object"] for f in m["review"]["facts"] if f["kind"] == "count"] == ["12 tests", "51 pages"]
         assert "yes" not in {f["object"] for f in m["forget"]}                 # … and moved to the end
     finally:

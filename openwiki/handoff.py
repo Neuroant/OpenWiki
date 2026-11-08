@@ -869,6 +869,11 @@ def _env_lines(env: dict) -> list:
             held = sum(1 for law in laws if law.get("last_result") == "holds")
             out.append(f"  - Laws: {held} of {len(laws)} hold" + (f"; violated: {'; '.join(broken)}" if broken else "")
                        + " — `owiki world laws`")
+        events = world.get("events") or []
+        if events:                                     # Path C (C2.6): what a person should look at
+            out.append(f"  - Events: {len(events)} open — " + "; ".join(
+                f"{e['kind']} {_when(e.get('at'))}: {e.get('detail') or ''}".strip() for e in events[:5])
+                + (" …" if len(events) > 5 else "") + " — `owiki world events`, the Pflege panel")
     out.append(f"- openwiki {env.get('openwiki')} · Python {env.get('python')}")
     return out
 

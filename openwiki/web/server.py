@@ -881,7 +881,7 @@ class WikiWebApp:
         done = reject_staged(staged_path(path), rejected_path(path), ids)
         return {"rejected": [r["id"] for r in done]}
 
-    MAINTAIN_ACTIONS = ("close", "confirm", "forget")
+    MAINTAIN_ACTIONS = ("close", "confirm", "forget", "resolve-event", "accept-law", "reject-law")
 
     def _governed(self):
         """Path C (C1.8): the facts an accepted sensor governs leave the review list (``None`` = none)."""
@@ -904,7 +904,28 @@ class WikiWebApp:
         forget = [dict(c, status=status.get(c["id"])) for c in self.graph.forget_candidates()]
         return {"staged": self.memory_staged(), "review": review_queue(rows, offset, limit, governed=self._governed()),
                 "forget": forget, "queued": queued_ids(journal_path(path)),
+                "events": self.graph.events(open_only=True, limit=50),          # Path C (C2.6)
+                "laws": self._laws_to_review(),                                  # Path C (C2.4)
                 "writable": not self.dry_run and (self.project is None or self.project.memory_enabled)}
+
+    def _laws_to_review(self) -> list:
+        """The laws waiting for a person (C2.4): proposals held in the graph and the manifest's laws not accepted —
+        each with its check, its last result and where it came from."""
+        rows = [r for r in self.graph.laws() if r.get("status") == "proposed" and r.get("origin") != "manifest"]
+        if self.project is not None and getattr(self.project, "world_enabled", False):
+            try:
+                from ..world.bindings import load_world
+                from ..world.observe import law_acceptance, read_accepted
+                accepted = read_accepted(self.project.state_dir)
+                stored = {r["id"]: r for r in self.graph.laws()}
+                for law in load_world(self.project).laws:
+                    state = law_acceptance(law, accepted)
+                    if law.health == "ok" and state in ("proposed", "changed"):
+                        rows.append(dict(stored.get(law.id) or {}, **law.row(), status=state))
+            except Exception:              # a broken manifest costs the list, not the panel
+                pass
+        return [{k: r.get(k) for k in ("id", "text", "kind", "check", "origin", "status", "last_result", "detail")}
+                for r in rows]
 
     def memory_maintain(self, action: str, ids) -> dict:
         """Act on facts from the maintenance panel (M7): ``close`` (no longer true — its valid time ends now),
@@ -914,6 +935,22 @@ class WikiWebApp:
         run or in Wiki mode."""
         if action not in self.MAINTAIN_ACTIONS:
             raise ValueError(f"unknown action {action!r} (one of {', '.join(self.MAINTAIN_ACTIONS)})")
+        if action in ("accept-law", "reject-law") and self.project is not None:   # a manifest law: no graph write
+            from ..world.bindings import load_world
+            from ..world.observe import accept_laws
+            declared = {law.id: law for law in load_world(self.project).laws}
+            mine = [declared[i] for i in ids or () if i in declared]
+            if mine:
+                if action == "reject-law":
+                    raise ValueError("a law declared in openwiki.toml is removed there, not rejected")
+                if any(law.health != "ok" for law in mine):
+                    raise ValueError("a law that isn't trusted can't be accepted")
+                if self.dry_run:
+                    raise RuntimeError("dry run: nothing is accepted")
+                accept_laws(self.project.state_dir, mine)
+                ids = [i for i in ids if i not in declared]
+                if not ids:
+                    return {"action": action, "queued": [], "accepted": [law.id for law in mine], "folding": False}
         ids = [str(i).strip() for i in (ids or []) if str(i).strip()]
         if not ids:
             raise ValueError("name the facts (ids)")
@@ -930,7 +967,8 @@ class WikiWebApp:
             append_remember(journal, f"review-{time.strftime('%Y-%m-%d', time.gmtime())}", [], retire=ids,
                             agent=True)
         else:
-            append_ids(journal, action, ids, reason="reviewed" if action == "forget" else None)
+            reason = {"forget": "reviewed", "resolve-event": "resolved in the Pflege panel"}.get(action)
+            append_ids(journal, action, ids, reason=reason)
         folding = False
         if self.on_approved is not None:  # starts a fold worker — the same as after an approval
             try:

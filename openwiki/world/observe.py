@@ -177,11 +177,18 @@ def read_cache(state_dir) -> dict:
 
 
 def update_cache(state_dir, readings: dict) -> dict:
-    """Keep each binding's latest reading (``readings`` = Reading by id) → the cache."""
+    """Keep each binding's latest reading (``readings`` = Reading by id) → the cache. Where the source can't date a
+    complete reading (an uncommitted line), ``changed_at`` is when this value was first read — as an observation's
+    ``valid_from`` (C1) — so a law's ``age()`` holds while a change waits for its commit (v0.127)."""
     cache = read_cache(state_dir)
     for bid, r in readings.items():
+        changed = r.changed_at
+        if changed is None and r.quality == "complete":
+            prev = cache.get(bid) or {}
+            same = prev.get("quality") == "complete" and prev.get("rendered") == render(r.value)
+            changed = prev.get("changed_at") if same and prev.get("changed_at") else r.time
         cache[bid] = {"value": jsonable(r.value), "rendered": render(r.value), "time": r.time, "quality": r.quality,
-                      "changed_at": r.changed_at, "commit": r.commit, "ms": r.ms, "detail": r.detail,
+                      "changed_at": changed, "commit": r.commit, "ms": r.ms, "detail": r.detail,
                       "source": r.source}
     _write_json(Path(state_dir) / CACHE_FILE, cache)
     return cache
@@ -374,7 +381,9 @@ def world_state(project, graph=None) -> Optional[dict]:
                                and compare(b, f, entry.get("value")) == "differs")
         laws = [{"id": law["id"], "last_result": law.get("last_result"), "detail": law.get("detail")}
                 for law in (graph.laws() if graph is not None else []) if law.get("status") == "accepted"]
-        return {"bindings": rows, "differs": differs, "laws": laws, "problems": list(world.problems)}
+        events = [{"id": e["id"], "kind": e["kind"], "at": e.get("at"), "detail": e.get("detail")}
+                  for e in (graph.events(open_only=True, limit=20) if graph is not None else [])]
+        return {"bindings": rows, "differs": differs, "laws": laws, "events": events, "problems": list(world.problems)}
     except Exception:
         return None
 

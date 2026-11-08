@@ -223,14 +223,17 @@ def test_a_code_source_is_an_environment_with_default_sensors(tmp_path, repo):
     assert world.problems == [] and world.enabled
     (env,) = world.environments
     assert (env.name, env.kind, env.root, env.subject) == ("repo", "repository", repo.resolve(), "repo")
-    by = {b.id: b for b in world.bindings}
-    assert set(by) == {"version", "latest-tag"} and all(b.default for b in by.values())
-    assert (by["version"].type, by["version"].params) == ("toml-key", {"path": "pyproject.toml",
-                                                                         "key": "project.version"})
-    assert by["version"].governs_text("repo | has version | v1.1.0")
-    assert not by["version"].governs_text("repo | has version | 1.1 was added")         # excludes
-    assert not by["version"].governs_text("other | has version | v1.1.0")              # another subject
-    assert by["latest-tag"].governs_text("Repo | latest release tag is | v1.0.0")
+    (release,) = world.bindings                          # the release from the latest tag: the repo has one
+    assert (release.id, release.type, release.params, release.default) == ("release", "git", {"read": "latest-tag"},
+                                                                          True)
+    assert release.governs_text("repo | has version | v1.1.0")
+    assert release.governs_text("Repo | latest release tag is | v1.0.0")
+    assert not release.governs_text("repo | has version | 1.1 was added")               # excludes
+    assert not release.governs_text("other | has version | v1.1.0")                     # another subject
+    _git(repo, "tag", "-d", "v1.2.0")                    # no tag: the version file (it runs ahead while preparing)
+    (release,) = load_world(_project(tmp_path, _source(repo) + "[world]\nenabled = true\n")).bindings
+    assert (release.type, release.params, release.object) == ("toml-key", {"path": "pyproject.toml",
+                                                                         "key": "project.version"}, "v{value}")
 
 
 def test_declared_environments_and_sensors_are_validated(tmp_path, repo):
@@ -336,7 +339,7 @@ fact = {{ subject = "a", predicate = "b", object = "c" }}
     names = {e.name: e for e in world.environments}
     assert set(names) == {"demo", "live"} and names["live"].token_env == "LIVE_TOKEN"
     by = {b.id: b for b in world.bindings}
-    assert set(by) == {"version", "latest-tag"}                          # the declared version replaced the default
+    assert set(by) == {"release", "version"}                             # the default + the declared one
     assert by["version"].type == "file-pattern" and by["version"].every == 300 and not by["version"].default
     text = "\n".join(world.problems)
     for expected in ("elsewhere: C:/not/a/source is not one of the project's code sources",
@@ -357,7 +360,7 @@ def test_world_needs_memory(tmp_path, repo):
 def test_doctor_reports_the_world_config(tmp_path, repo):
     from openwiki import doctor
     good = doctor.check_world(_project(tmp_path, _source(repo) + "[world]\nenabled = true\n"))
-    assert [(c.level, c.message) for c in good] == [("ok", "1 environment(s), 2 sensor(s)")]
+    assert [(c.level, c.message) for c in good] == [("ok", "1 environment(s), 1 sensor(s)")]
     bad = doctor.check_world(_project(tmp_path, _source(repo) + '[world]\nenabled = true\n\n[[world.sensors]]\n'
                                                                'id = "x"\ntype = "shell"\n'))
     assert [c.level for c in bad] == ["fail"] and "unknown type 'shell'" in bad[0].message

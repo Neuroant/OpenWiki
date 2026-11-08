@@ -145,6 +145,17 @@ def append_reindex(path, slug, text, now: Optional[int] = None) -> int:
     return 1
 
 
+def append_observe(path, observations, now: Optional[int] = None) -> int:
+    """Queue an ``observe`` op (Path C, C1.5) — sensors' readings to write when the graph is locked; the fold applies
+    them with the authority rule (``GraphStore.observe``). Each observation is self-contained: ``{"binding",
+    "subject", "predicate", "object", "value", "valid_from", "read_at", …}``. Returns how many were queued."""
+    obs = [o for o in (observations or []) if isinstance(o, dict) and o.get("binding")]
+    if not obs:
+        return 0
+    _append(path, {"op": "observe", "t": _now(now), "observations": obs})
+    return len(obs)
+
+
 def read_journal(path) -> list:
     """Read all pending op records. Lenient — skips blank/corrupt lines and unknown ops;
     ``[]`` if the journal is absent."""
@@ -160,7 +171,7 @@ def read_journal(path) -> list:
             obj = json.loads(line)
         except ValueError:
             continue
-        if isinstance(obj, dict) and obj.get("op") in ("remember", "reindex") + ID_OPS:
+        if isinstance(obj, dict) and obj.get("op") in ("remember", "reindex", "observe") + ID_OPS:
             records.append(obj)
     return records
 

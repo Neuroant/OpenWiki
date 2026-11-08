@@ -197,7 +197,8 @@ def choose_attribute(chat, fact: str, candidates: list) -> Optional[int]:
     return pick - 1 if 1 <= pick <= len(candidates) else None
 
 
-SOURCES = ("user", "assistant", "material")
+SOURCES = ("user", "assistant", "material", "observed")
+OBSERVED = "observed"           # Path C (C1.3): a sensor read it — written by `GraphStore.observe`, never by capture
 _SOURCE_ALIASES = {"user": "user", "human": "user", "assistant": "assistant", "ai": "assistant",
                    "model": "assistant", "agent": "assistant", "material": "material",
                    "document": "material", "doc": "material", "external": "material",
@@ -206,8 +207,26 @@ _SOURCE_ALIASES = {"user": "user", "human": "user", "assistant": "assistant", "a
 
 
 def coerce_source(value) -> Optional[str]:
-    """Capture's provenance tag → ``"user"`` / ``"assistant"`` / ``"material"`` (``None`` if unknown)."""
+    """Capture's provenance tag → ``"user"`` / ``"assistant"`` / ``"material"`` (``None`` if unknown). Never
+    ``"observed"``: only a sensor's observation carries it (``GraphStore.observe``) — a captured fact, or a pasted
+    text claiming to be one, can't take the authority of an observation."""
     return _SOURCE_ALIASES.get(str(value or "").strip().lower())
+
+
+SESSION_KINDS = ("conversation", "agent", "sensor", "twin")
+SENSOR_SESSION = "sensor:"      # a sensor's observations: one session per binding, ``sensor:<id>``
+
+
+def session_kind(session_id) -> str:
+    """What wrote a session (Path C, C1.12): ``sensor`` (``sensor:<id>``), ``twin`` (``twin:<env>``), ``agent``
+    (``agent-YYYY-MM-DD``, the coding agent's ``wiki_remember``) or ``conversation`` (captures, backfills, imports) —
+    told by the id, which every write path sets."""
+    sid = str(session_id or "")
+    if sid.startswith(SENSOR_SESSION):
+        return "sensor"
+    if sid.startswith("twin:"):
+        return "twin"
+    return "agent" if sid.startswith("agent-") else "conversation"
 
 
 # P0 memory scrubbing: the security-sensitive memory policy lives in ``openwiki.policy`` (pure, shared
@@ -426,6 +445,8 @@ def _provenance(f: dict) -> str:
     sid = f.get("session_id", "?")
     if f.get("source") == "material":        # P0: a claim from discussed material, not a decision
         sid = f"{sid}; from discussed material"
+    elif f.get("source") == OBSERVED:        # Path C: read by a sensor, not said by anyone
+        sid = f"{sid}; observed"
     return f"({when}; {sid})" if when else f"({sid})"
 
 

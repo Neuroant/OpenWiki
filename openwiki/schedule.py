@@ -30,7 +30,10 @@ from xml.sax.saxutils import escape
 TASKS = {
     "sleep": {"args": ["sleep"], "at": "03:30", "about": "nightly memory maintenance (owiki sleep)",
               "limit": "PT2H"},
-    # Path C, C1 (ADR-54): "world-observe": {"args": ["world", "observe"], "every_minutes": 15, ...}
+    # Path C, C1 (ADR-54): the loop between sessions — the accepted sensors whose period is due, quiet unless
+    # something changed; slow sensors (pytest-collect) are left to sleep
+    "world-observe": {"args": ["world", "observe", "--due", "--fast"], "at": "00:00", "every_minutes": 15,
+                      "about": "the world model's observations (owiki world observe)", "limit": "PT10M"},
 }
 TASK_FOLDER = "OpenWiki"
 CRON_MARK = "# openwiki-schedule"

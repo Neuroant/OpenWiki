@@ -226,6 +226,8 @@ def check_schedule(project, probes: Probes) -> list:
     out = []
     sched = probes.scheduler(project.name, project.root)
     for task, spec in sorted(TASKS.items()):
+        if spec["args"][0] == "world" and not getattr(project, "world_enabled", False):
+            continue                                       # the world model's loop: only for a world project
         try:
             info = sched.status(task)
         except Exception as exc:
@@ -238,16 +240,17 @@ def check_schedule(project, probes: Probes) -> list:
             out.append(Check("schedule", "fail", f"{task}: its interpreter no longer exists ({info.get('command')})",
                              "`owiki schedule install` again"))
             continue
-        runs = [r for r in runlog.read_runs(project.state_dir, name=" ".join(spec["args"]))
-                if r.get("trigger") == "schedule"]
+        name = " ".join(a for a in spec["args"] if not a.startswith("-"))      # the run log's name: no options
+        runs = [r for r in runlog.read_runs(project.state_dir, name=name) if r.get("trigger") == "schedule"]
         when = info.get("at") or info.get("interval") or "?"
         if runs:
             last = runs[-1]
             age = probes.now - last["t"]
+            stale = (spec["every_minutes"] * 60 * 8) if spec.get("every_minutes") else SLEEP_STALE_S
             if last.get("outcome", "ok") != "ok":
                 out.append(Check("schedule", "warn", f"{task} (at {when}): the last run {_age(age)} ago ended "
                                                      f"{last['outcome']}", "see `.openwiki/schedule.log`"))
-            elif age > SLEEP_STALE_S:
+            elif age > stale:
                 out.append(Check("schedule", "warn", f"{task} (at {when}): last ran {_age(age)} ago",
                                  "is the machine on, and the user logged on, at that time?"))
             else:

@@ -22,7 +22,8 @@ from .sensors import (GIT_READS, GPU_READS, LATER_TYPES, LOCAL_HOSTS, OLLAMA_REA
 KINDS = ("repository", "twin")
 DEFAULT_EVERY = 60                      # seconds — a fast sensor at most once a minute (§6.2's example)
 VERSION = r"v?\d+\.\d+(?:\.\d+)?"
-VERSION_PREDICATES = r"is versioned|has version|has release|current release is|latest release is|version is"
+VERSION_PREDICATES = (r"is versioned|has version|has latest version|has release|current release is|latest release is"
+                      r"|version is|latest (?:release )?tag(?: is)?")
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
 _ENV_VAR = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _EVERY = re.compile(r"^(\d+(?:\.\d+)?)\s*([smhd])?$")
@@ -231,26 +232,25 @@ def _has_version_tag(root: Path) -> bool:
 
 
 def default_bindings(env: Environment, single: bool = True) -> list:
-    """A repository's default sensors: its version file and its latest version tag, each with a conservative
-    governs pattern scoped to the environment's subject (§6.2: "git state, a version file when one is found")."""
+    """A repository's default sensor, ``release``: its current release — the latest version tag when the repository
+    has one, else its version file (§6.2: "git state, a version file when one is found"). The tag first, because a
+    version file runs ahead of the release while one is being prepared (v0.123: the bump came before the tag, and the
+    file said 0.123.0 while 0.122.0 was still the release). Its governs pattern is scoped to the environment's
+    subject."""
     if env.kind != "repository" or env.root is None or not env.defaults:
         return []
     prefix = "" if single else f"{env.name}-"
     subject = env.subject or env.name
     names = f"{_names(subject)}|project|package"
-    belief = rf"(?P<value>{VERSION})"
-    out = []
+    common = {"id": f"{prefix}release", "environment": env.name, "subject": subject, "predicate": "current release is",
+              "governs": rf"^(?:{names}) \| (?:{VERSION_PREDICATES})\b.*{VERSION}",
+              "excludes": r"contains|was added|introduced", "belief": rf"(?P<value>{VERSION})", "default": True}
+    if _has_version_tag(env.root):
+        return [Binding(type="git", params={"read": "latest-tag"}, object="{value}", **common)]
     found = _version_file(env.root)
     if found:
-        out.append(Binding(id=f"{prefix}version", environment=env.name, type=found[0], params=found[1],
-                           subject=subject, predicate="current release is", object="v{value}",
-                           governs=rf"^(?:{names}) \| (?:{VERSION_PREDICATES})\b.*{VERSION}",
-                           excludes=r"contains|was added|introduced", belief=belief, default=True))
-    if _has_version_tag(env.root):
-        out.append(Binding(id=f"{prefix}latest-tag", environment=env.name, type="git", params={"read": "latest-tag"},
-                           subject=subject, predicate="latest release tag is", object="{value}",
-                           governs=rf"^(?:{names}) \| latest (?:release )?tag\b", belief=belief, default=True))
-    return out
+        return [Binding(type=found[0], params=found[1], object="v{value}", **common)]
+    return []
 
 
 # -- declared sensors ---------------------------------------------------------------------------------
@@ -411,4 +411,17 @@ def compare(binding: Binding, fact: dict, value) -> str:
     claimed = m.group("value") if "value" in m.re.groupindex else (m.group(1) if m.re.groups else m.group(0))
     if isinstance(value, (list, tuple)):
         return "agrees" if _words(normalize(claimed)) == _words(normalize(value)) else "differs"
-    return "agrees" if normalize(claimed) == normalize(value) else "differs"
+    if normalize(claimed) == normalize(value):
+        return "agrees"
+    words = _words(normalize(value))           # the same list written another way: "a → b" / "a, b"
+    return "agrees" if len(words) > 1 and _words(normalize(claimed)) == words else "differs"
+
+
+def observed_claim(binding: Binding, text: str) -> str:
+    """The value an observation's own wording claims — the binding's ``belief`` match in it, else the whole text —
+    so a later belief can be compared with an observation the graph holds (rule 5) without its raw reading."""
+    if binding.belief:
+        m = re.search(binding.belief, str(text), re.I)
+        if m:
+            return m.group("value") if "value" in m.re.groupindex else (m.group(1) if m.re.groups else m.group(0))
+    return str(text)

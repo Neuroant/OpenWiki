@@ -76,6 +76,7 @@
 | [53](#adr-53) | Projects gain environments — a third input class; twins as separate processes; actions through OpenWiki | Accepted as the plan (2026-10-24); nothing built; amended by [ADR-54](#adr-54) | Q4, security, correctness |
 | [54](#adr-54) | Path C deployment: a scheduled `owiki world observe` between sessions; twins as running services reached by URL; the world tier native | Accepted as the plan (2026-10-25); nothing built; amends [ADR-53](#adr-53) | security, Q4, correctness |
 | [55](#adr-55) | Operations: a saved run log, scheduled tasks from the CLI, rolling backups at `sleep`, one health check | Accepted (v0.121); extends [ADR-20](#adr-20) | Q5, correctness |
+| [56](#adr-56) | The authority rule: an accepted sensor's observation outranks what memory believes, in the facts it governs | Accepted (v0.124); refines [ADR-27](#adr-27) | correctness, Q5 |
 
 ---
 
@@ -1230,6 +1231,44 @@ world tier native.**
   intervals, the 15 unforgotten, the 172 themes; one command answers "is this setup healthy?".
   − Seven full exports on disk (25 MB each for the dev memory's 2,609 facts with embeddings); `doctor` starts the
   interpreters it checks (seconds); the hooks add ~200 bytes per prompt to the run log (rotated).
+
+### ADR-56
+**The authority rule: an accepted sensor's observation outranks what memory believes, in the facts it governs.**
+*(2026-11-07, v0.124; refines [ADR-27](#adr-27); applies [ADR-38](#adr-38); decisions 5 and 13 of
+`path-c-world-model.md` §15)*
+- **Context:** Path B remembers what was said; state that changes without anyone saying so goes stale — C0 measured it
+  on the dev memory: 13.7 % of the replayed prompts got a stale governed fact, a stale test count lived 4 days
+  (median), UI and build facts weeks to months (`path-c-world-model.md` §18.1). v0.123 read the repository with
+  built-in sensors; v0.124 has to decide what an observation does to the beliefs it contradicts.
+- **Decision:** (1) **Observations are their own facts** — `source = "observed"`, one session per binding
+  (`sensor:<id>`), in the binding's own attribute group (no belief ever joins it, so B7's merge can't close one); only
+  `GraphStore.observe` writes them — capture can't tag a fact "observed" and `remember` demotes one. (2) **Rules 1 – 4**
+  (`observe`): the same value re-affirms (`last_seen`); a new value closes the previous observation where the new one
+  starts (the change time the source knows — a commit, `git blame` — else when it was read); a current belief the
+  binding governs that claims another value closes there, kept as history, superseded by the observation, a
+  *discrepancy* when it was recorded after the value began; an agreeing belief is re-affirmed and kept (recall shows it
+  once, through the observation). (3) **Rule 5** (`remember(…, authority=)`): a belief contradicting a current
+  observation becomes a zero-length interval, never current — **only if it was said while the observation was known
+  to hold** (between its start and its last confirmation); a belief said later may be news the sensor hasn't seen, so it
+  merges as usual and the next observation confirms or closes it. (4) **A person accepts first** (decision 5):
+  `owiki world status` lists what a binding governs (the dry run), `owiki world accept ID` records it with the
+  binding's fingerprint — a changed binding needs a new acceptance; an unaccepted binding is read, never written.
+  (5) **Write on change:** readings stay in a world cache; the graph is written when an observation or a governed belief
+  changes; `sleep` syncs `last_seen`. Writers: `owiki world observe` (scheduled every 15 minutes, ADR-54), `sleep`, the
+  capture worker, `handoff prepare`; a locked graph gets an `observe` journal op (ADR-38). (6) **The release comes
+  from the latest tag** when a repository has one: a version file runs ahead of the release while one is prepared.
+- **Alternatives:** governing by B9's attribute groups — measured in C0.4: mostly single-member, they reach almost
+  nothing; rule 5 for every later belief — would suppress a true belief recorded before the sensor caught up (the
+  agent records the release the minute it tags); closing beliefs without a person's look — C0.4's test-count pattern
+  governed 10 current facts, 9 of them only talking about the count; a stored session kind — imports keep their
+  archive's ids, but the column would touch B0's snapshot and the COGX format; derived from the id it serves every
+  path this release writes (stored with C2.1's table registry).
+- **Consequences:** + On a copy of the dev memory, accepting C0.4's first slice and observing wrote 6 observations
+  (each attributed to the commit that made its value), closed 3 stale beliefs ("848 tests" against 860 collected, two
+  "v0.120.0" release facts) and confirmed 5; a second pass wrote nothing. Observations leave the review list and the
+  forgetting pass; the guards hold (no sensors in the eval sets). − A binding's pattern is a judgment a person makes
+  once and must revisit when it changes; facts a sensor can't read stay with people and `wiki_remember`; the dedup in
+  recall only removes beliefs that say exactly what an observation says.
 
 ---
 *Chapter complete. The Path-B agent-memory direction landed via ADR-14/15/16/17/18/19; the graph then

@@ -64,6 +64,7 @@ class Reading:
     source: str = ""                    # what was read: "pyproject.toml:3", "git tags", "tcp 127.0.0.1:8137"
     detail: str = ""                    # why it is partial or failed, or what screening changed
     ms: int = 0
+    commit: str = ""                    # the commit that made the value ("a1b2c3d subject"), "uncommitted", or ""
 
     @property
     def ok(self) -> bool:
@@ -118,17 +119,25 @@ def local_url(url: str) -> str:
     return str(url).rstrip("/")
 
 
-def blame_time(root, rel, line: int) -> Optional[int]:
-    """The committer time of the commit that last changed line ``line`` (1-based) of ``rel`` — ``None`` when the line
-    is not committed yet or git can't tell."""
+def blame(root, rel, line: int) -> tuple:
+    """``(committer time, "a1b2c3d subject")`` of the commit that last changed line ``line`` (1-based) of ``rel`` —
+    ``(None, "uncommitted")`` when the line is not in any commit yet, ``(None, "")`` when git can't tell. The light
+    attribution of C1.9: which commit made a value, else outside any commit."""
     out = _git(root, "blame", "--porcelain", "-L", f"{int(line)},{int(line)}", "--", str(rel).replace("\\", "/"))
     if not out:
-        return None
+        return None, ""
     head = out.split(None, 1)[0] if out.strip() else ""
     if head and set(head) == {"0"}:                      # "Not Committed Yet"
-        return None
+        return None, "uncommitted"
     m = re.search(r"^committer-time (\d+)$", out, re.M)
-    return int(m.group(1)) if m else None
+    summary = re.search(r"^summary (.*)$", out, re.M)
+    commit = f"{head[:7]} {summary.group(1).strip()}" if summary else head[:7]
+    return (int(m.group(1)) if m else None), commit
+
+
+def blame_time(root, rel, line: int) -> Optional[int]:
+    """The committer time of the commit that last changed line ``line`` of ``rel`` (``None``: not committed, unknown)."""
+    return blame(root, rel, line)[0]
 
 
 def _plain(value):
@@ -175,7 +184,8 @@ def _read_git(root, params, ctx) -> dict:
     if read == "head":
         stamp = _git(top, "log", "-1", "--format=%ct")
         return {"value": _git(top, "rev-parse", "--short", "HEAD") or "", "source": "git HEAD",
-                "changed_at": int(stamp) if stamp and stamp.isdigit() else None}
+                "changed_at": int(stamp) if stamp and stamp.isdigit() else None,
+                "commit": _git(top, "log", "-1", "--format=%h %s") or ""}
     if read == "latest-tag":
         tags = [t.strip() for t in (_git(top, "tag", "--list", "--sort=-v:refname") or "").splitlines()]
         versions = [t for t in tags if _VERSION_TAG.fullmatch(t)]
@@ -183,7 +193,8 @@ def _read_git(root, params, ctx) -> dict:
             raise SensorError("no version tag")
         stamp = _git(top, "for-each-ref", f"refs/tags/{versions[0]}", "--format=%(creatordate:unix)")
         return {"value": versions[0], "source": "git tags",
-                "changed_at": int(stamp) if stamp and stamp.isdigit() else None}
+                "changed_at": int(stamp) if stamp and stamp.isdigit() else None,
+                "commit": _git(top, "log", "-1", "--format=%h %s", versions[0]) or ""}
     if read in ("ahead", "behind"):
         upstream = _git(top, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
         if not upstream:
@@ -209,7 +220,8 @@ def _read_file_pattern(root, params, ctx) -> dict:
         raise SensorError(f"{rel}: the pattern matched nothing")
     group = "value" if "value" in rx.groupindex else (1 if rx.groups else 0)
     line = text.count("\n", 0, m.start(group)) + 1
-    return {"value": m.group(group).strip(), "changed_at": blame_time(root, rel, line), "source": f"{rel}:{line}"}
+    changed, commit = blame(root, rel, line)
+    return {"value": m.group(group).strip(), "changed_at": changed, "commit": commit, "source": f"{rel}:{line}"}
 
 
 def _read_py_constant(root, params, ctx) -> dict:
@@ -231,8 +243,8 @@ def _read_py_constant(root, params, ctx) -> dict:
         value = ast.literal_eval(found.value)
     except ValueError:
         raise SensorError(f"{rel}: {name} is not a literal")
-    return {"value": _plain(value), "changed_at": blame_time(root, rel, found.lineno),
-            "source": f"{rel}:{found.lineno}"}
+    changed, commit = blame(root, rel, found.lineno)
+    return {"value": _plain(value), "changed_at": changed, "commit": commit, "source": f"{rel}:{found.lineno}"}
 
 
 def _read_toml_key(root, params, ctx) -> dict:
@@ -246,7 +258,8 @@ def _read_toml_key(root, params, ctx) -> dict:
     last = re.escape(key.split(".")[-1])
     m = re.search(rf"^\s*[\"']?{last}[\"']?\s*=", text, re.M)
     line = text.count("\n", 0, m.start()) + 1 if m else None
-    return {"value": _plain(cur), "changed_at": blame_time(root, rel, line) if line else None,
+    changed, commit = blame(root, rel, line) if line else (None, "")
+    return {"value": _plain(cur), "changed_at": changed, "commit": commit,
             "source": f"{rel}:{line}" if line else str(rel)}
 
 
@@ -423,4 +436,4 @@ def read(sensor: str, type_: str, params: dict, root=None, now=None, host: Optio
         return done(quality="failed", detail=note, source=got.get("source", ""))
     detail = "; ".join(x for x in (got.get("detail", ""), note) if x)
     return done(value=value, quality=got.get("quality", "complete"), changed_at=got.get("changed_at"),
-                source=got.get("source", ""), detail=detail)
+                source=got.get("source", ""), detail=detail, commit=got.get("commit", ""))

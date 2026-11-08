@@ -768,7 +768,7 @@ function memPeriodHtml(d) {
     return `<h4 class="mem-h4">${title} <span class="muted">· ${total}${note ? " — " + note : ""}${total > rows.length ? ` (die ersten ${rows.length})` : ""}</span></h4>
       <div class="ot-list">${rows.map((f) => `<div class="ot-fact mem-click" data-fact="${escapeHtml(f.id)}" title="Details im Reiter Gedächtnis">
         <b>${escapeHtml(f.subject)}</b> ${escapeHtml(f.predicate)} <b>${escapeHtml(f.object)}</b>
-        <span class="mem-when">${memInterval(f)}</span> ${memStatusBadge(f.status)}${f.source === "material" ? " " + MEM_MATERIAL_BADGE : ""}</div>`).join("")}</div>`;
+        <span class="mem-when">${memInterval(f)}</span> ${memStatusBadge(f.status)}${memSourceBadge(f)}</div>`).join("")}</div>`;
   };
   const any = d.counts.learned + d.counts.closed + d.counts.retracted + d.counts.forgotten;
   const talk = d.bucket === "day"                // M8: the conversation of that day, in the Gedächtnis tab
@@ -978,6 +978,11 @@ const MEM_STATUS = {
 };
 // P0 provenance: a claim from a pasted document / email / web page under discussion — not a decision
 const MEM_MATERIAL_BADGE = `<span class="mem-badge mat" title="aus besprochenem Material (Dokument, E-Mail, Webseite) — keine Entscheidung">Material</span>`;
+// Path C: read by a sensor (owiki world observe), not said by anyone — it outranks what memory believed
+const MEM_OBSERVED_BADGE = `<span class="mem-badge obs" title="von einem Sensor beobachtet (owiki world observe) — nicht gesagt, sondern gelesen">beobachtet</span>`;
+function memSourceBadge(f) {
+  return f.source === "material" ? " " + MEM_MATERIAL_BADGE : f.source === "observed" ? " " + MEM_OBSERVED_BADGE : "";
+}
 function memStatusBadge(status) {
   const b = MEM_STATUS[status];
   return b ? `<span class="mem-badge ${b[0]}" title="${b[2]}">${b[1]}</span>` : "";
@@ -989,6 +994,7 @@ function memFactRow(f, extra = "") {
   if (out) badges.push(memStatusBadge(f.status || "past"));
   if (f.confidence > 1) badges.push(`<span class="mem-badge conf" title="mehrfach bestätigt">×${f.confidence}</span>`);
   if (f.source === "material") badges.push(MEM_MATERIAL_BADGE);
+  if (f.source === "observed") badges.push(MEM_OBSERVED_BADGE);
   const sc = (f.score != null) ? `<span class="mem-score" title="Relevanz (cos ${f.cos})">${memNum(f.score)}</span>` : "";
   const when = memInterval(f);
   return `<div class="mem-fact mem-click${out ? " is-sup" : ""}" data-fact="${escapeHtml(f.id || "")}" title="Details">${sc}
@@ -1265,13 +1271,14 @@ const memState = { q: "", status: "current", source: "", kind: "", sort: "recent
 const MF_STATUS = [["current", "aktuell"], ["", "alle"], ["past", "überholt"], ["retracted", "zurückgezogen"],
                    ["future", "geplant"], ["forgotten", "vergessen"]];
 const MF_SOURCE = [["", "alle Quellen"], ["user", "vom Nutzer"], ["assistant", "vom Assistenten"],
-                   ["material", "aus Material"]];
+                   ["material", "aus Material"], ["observed", "beobachtet"]];
 const MF_KIND = [["", "alle Arten"], ["volatile", "veränderlich"], ["timeless", "zeitlos"]];
 const MF_SORT = [["recent", "zuletzt gesagt"], ["valid", "gültig seit"], ["subject", "Subjekt A–Z"],
                  ["confidence", "Konfidenz"]];
 const MF_KIND_LABEL = { plan: "Plan", count: "Anzahl", gap: "Lücke", version: "Version", state: "Zustand" };
 const MF_SOURCE_LABEL = { user: "vom Nutzer — Entscheidung oder Wunsch", assistant: "vom Assistenten — festgestellt",
-                          material: "aus besprochenem Material — keine Entscheidung" };
+                          material: "aus besprochenem Material — keine Entscheidung",
+                          observed: "von einem Sensor beobachtet — gelesen, nicht gesagt" };
 
 function memOptions(list, cur) {
   return list.map(([v, l]) => `<option value="${v}"${v === cur ? " selected" : ""}>${l}</option>`).join("");
@@ -1462,7 +1469,7 @@ function renderFactList(d) {
       <td><b>${escapeHtml(f.subject)}</b></td><td>${escapeHtml(f.predicate)}</td><td><b>${escapeHtml(f.object)}</b></td>
       <td class="m-when">${memInterval(f)}</td>
       <td>${f.kind ? `<span class="mem-badge kind" title="veränderliche Art — kann von selbst veralten">${MF_KIND_LABEL[f.kind] || f.kind}</span>` : ""}</td>
-      <td>${memStatusBadge(f.status)}${f.source === "material" ? " " + MEM_MATERIAL_BADGE : ""}</td></tr>`).join("");
+      <td>${memStatusBadge(f.status)}${memSourceBadge(f)}</td></tr>`).join("");
   $("#mf-list").innerHTML = d.total
     ? `<table class="mem-table mf-table"><thead><tr><th>Subjekt</th><th>Prädikat</th><th>Objekt</th>
         <th>Gültig</th><th>Art</th><th></th></tr></thead><tbody>${rows}</tbody></table>`
@@ -1732,7 +1739,7 @@ function memDetailHtml(d) {
   const links = (d.supersedes.length ? `<h4>Hat ersetzt</h4>${memLinkList(d.supersedes)}` : "") +
     (d.superseded_by.length ? `<h4>Ersetzt durch</h4>${memLinkList(d.superseded_by)}` : "");
   return `<div class="md-head"><div class="md-title"><b>${escapeHtml(f.subject)}</b> ${escapeHtml(f.predicate)}
-      <b>${escapeHtml(f.object)}</b> ${memStatusBadge(f.status)}${f.source === "material" ? " " + MEM_MATERIAL_BADGE : ""}</div>
+      <b>${escapeHtml(f.object)}</b> ${memStatusBadge(f.status)}${memSourceBadge(f)}</div>
       <button class="linkish md-close" title="Schließen (Esc)">✕</button></div>
     <dl class="md-dl">${dl}</dl>
     <h4>Verlauf dieses Attributs <span class="muted">· ${d.group.length} ${d.group.length === 1 ? "Wert" : "Werte"}</span></h4>

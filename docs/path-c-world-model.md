@@ -866,7 +866,10 @@ every       = "1m"                                                # at most once
 
 Code sources get a small default set without configuration (git state, a version file when one is found); C0 decides
 which. Bindings can also be *proposed* from memory — facts whose object matches a constant in the code
-("RECENCY_FLOOR is 0.9") — but a person accepts them, as with laws (§7.3).
+("RECENCY_FLOOR is 0.9") — but a person accepts them, as with laws (§7.3). *As built:* one default per repository,
+`release` — from the latest version tag when there is one, else the version file, which runs ahead of the release
+while one is being prepared (v0.123: the bump came before the tag). A binding writes nothing until a person accepts
+it (`owiki world accept`), pinned to a fingerprint of the binding (v0.124).
 
 ### 6.3 When sensors run
 
@@ -890,7 +893,10 @@ An observation enters `temporal.plan_merge` with `source = "observed"` and its b
 4. **A belief that agrees** is re-affirmed and kept; it is still the user's or the agent's statement.
 5. **A later belief that contradicts a current observation** (decision 13, 2026-11-07) never becomes current. It is
    stored as a zero-length interval — the device B9 already uses for ordered changes within one capture — and raises a
-   discrepancy event: "the session said v0.119.0; `pyproject.toml` says 0.120.0".
+   discrepancy event: "the session said v0.119.0; `pyproject.toml` says 0.120.0". *As built (v0.124):* only for a
+   belief said while the observation was known to hold — between its start and its last confirmation; one said later
+   may be news the sensor hasn't seen yet (the agent records a release the minute it tags), so it merges as usual and
+   the next observation confirms it or closes it by rule 3.
 
 The temporal set (13 / 13) guards these rules: they may not change what B7 decides for attributes without a sensor.
 
@@ -1204,6 +1210,9 @@ note per stage and in a measurements section (§18) created with C0's results.
   reading, the fact it would write and the current facts it governs, the dry run of §6.2. On openwiki-dev, C0.4's
   first slice; the dry run found the one stale governed fact (the test count, 823 → 831) once the test-count pattern
   was narrowed — C0.4's governed 10 current facts, 9 only talking about the count (`path-c-roadmap.md` §7).
+- **Landed (v0.124, 2026-11-07):** observed facts and the authority rule (§6.4, arc42 ADR-56), a person's acceptance
+  before a binding writes, `owiki world observe` written on change and scheduled every 15 minutes, attribution to the
+  commit that made a value. On a copy of openwiki-dev: 6 observations, 3 stale beliefs closed, 5 confirmed.
 
 ### C2 — Laws, drift and the world slice
 - **Goal:** rules and decisions become checkable, and the context is built around what a prompt touches.

@@ -90,16 +90,20 @@ def map_points(rows, positions: dict, assignment: Optional[dict] = None) -> list
     return out
 
 
-def review_queue(rows, offset: int = 0, limit: int = 20) -> dict:
+def review_queue(rows, offset: int = 0, limit: int = 20, governed=None) -> dict:
     """The maintenance panel's review list (M7): the current facts of a kind that goes stale on its own
     (``memory.volatile_kind`` — the ``analyze memory --review`` rule), the most likely stale kinds first
     (``VOLATILE_KINDS``), within a kind the least recently said or confirmed first — so a fact a person confirms
-    moves to the end. ``{"count", "by_kind", "offset", "limit", "facts"}``; each fact gains ``kind``."""
-    from .graph.memory import VOLATILE_KINDS
+    moves to the end. ``{"count", "by_kind", "offset", "limit", "facts"}``; each fact gains ``kind``. Path C (C1.8):
+    observations and the facts an accepted sensor governs (``governed(row) -> bool``) aren't listed — a sensor keeps
+    them right."""
+    from .graph.memory import OBSERVED, VOLATILE_KINDS
     rank = {k: i for i, k in enumerate(VOLATILE_KINDS)}
     facts = []
     for row in rows:
         if row.get("status") != "current":
+            continue
+        if row.get("source") == OBSERVED or (governed is not None and governed(row)):
             continue
         kind = volatile_kind(row)
         if kind is not None:

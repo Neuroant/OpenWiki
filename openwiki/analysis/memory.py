@@ -129,9 +129,10 @@ def _theme_size_stats(sizes: list) -> dict:
 
 
 def analyze_memory(graph, now: "int | None" = None, half_life: "float | None" = None,
-                   top_predicates: int = 8) -> dict:
+                   top_predicates: int = 8, governed=None) -> dict:
     """Compute the memory-tier dynamics over a ``GraphStore`` (read-only). ``available: false``
-    (with a ``reason``) when the graph has no remembered tier."""
+    (with a ``reason``) when the graph has no remembered tier. ``governed(fact) -> bool`` (Path C,
+    ``world.observe.governed_predicate``): facts an accepted sensor governs leave the review list."""
     if not graph.has_memory():
         return {"available": False, "reason": "empty"}
 
@@ -232,15 +233,20 @@ def analyze_memory(graph, now: "int | None" = None, half_life: "float | None" = 
 
     # -- review: current facts of a kind that goes stale (plans, counts, gaps, versions, running states) — the
     # list to check against the project and correct with wiki_remember; each line is in the form `replaces` matches
-    from ..graph.memory import VOLATILE_KINDS, fact_line, volatile_kind
+    # Path C (C1.8): a fact an accepted sensor governs is kept by the sensor, so it leaves the list
+    from ..graph.memory import OBSERVED, VOLATILE_KINDS, fact_line, volatile_kind
     rank = {k: i for i, k in enumerate(VOLATILE_KINDS)}
+    sensed = [f for f in current if f.get("source") == OBSERVED or (governed is not None and governed(f))]
+    kept_by_sensor = {f["id"] for f in sensed}
     to_check = sorted(({"kind": k, "line": fact_line(f), "id": f["id"], "valid_from": f.get("valid_from")}
-                       for f in current if (k := volatile_kind(f)) is not None),
+                       for f in current if f["id"] not in kept_by_sensor and (k := volatile_kind(f)) is not None),
                       key=lambda r: (rank[r["kind"]], r["valid_from"] or 0))
     review = {"count": len(to_check),
               "share": round(len(to_check) / n_current, 3) if n_current else 0.0,
               "by_kind": {k: n for k in VOLATILE_KINDS if (n := sum(1 for r in to_check if r["kind"] == k))},
-              "facts": to_check}
+              "facts": to_check,
+              "sensed": {"observed": sum(1 for f in sensed if f.get("source") == OBSERVED),
+                         "governed": sum(1 for f in sensed if f.get("source") != OBSERVED)}}
 
     return {
         "available": True,

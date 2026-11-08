@@ -330,8 +330,9 @@ zusätzlich einen **Gedächtnis-Tier**: Fakten, die aus Sitzungen *erinnert* wer
   „heute" setzt beide zurück;
 - die **Fakten** — alle, nicht nur die ersten: ein Suchfeld (jedes Wort muss vorkommen) und Filter
   für Status (aktuell / alle / überholt / zurückgezogen / geplant / vergessen), Quelle (Nutzer /
-  Assistent / Material), Sitzung und Art (die Arten, die von selbst veralten: Pläne, Zahlen, Lücken,
-  Versionen, laufende Zustände), dazu Sortierung und Blättern. **Liste | Karte** schaltet auf die
+  Assistent / Material / **beobachtet** — von einem Sensor gelesen, `owiki world observe`), Sitzung
+  und Art (die Arten, die von selbst veralten: Pläne, Zahlen, Lücken, Versionen, laufende Zustände),
+  dazu Sortierung und Blättern. **Liste | Karte** schaltet auf die
   **Gedächtniskarte**: alle Fakten nach ihrer Bedeutung in zwei Dimensionen — nah beieinander heißt
   ähnlich. Was die Filter wählen, ist farbig nach Thema (grau: ohne Thema, hohl: nicht mehr aktuell),
   die übrigen aktuellen Fakten bleiben als blasse Punkte stehen; die Karte verschiebt sich nicht, wenn

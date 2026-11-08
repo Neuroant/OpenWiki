@@ -108,6 +108,12 @@ def _line_key(line: str) -> str:
     return " ".join(t.lower().split())
 
 
+def _fact_brief(r: dict) -> dict:
+    """A fact as an observe report names it."""
+    return {k: r.get(k) for k in ("id", "subject", "predicate", "object", "valid_from", "session_id", "source",
+                                  "created_at")}
+
+
 def _summarized(summary) -> bool:
     """A theme with a summary; an empty one is **pending** (a ``--budget`` consolidation ran out)."""
     return bool((summary or "").strip())
@@ -1073,7 +1079,7 @@ class GraphStore:
         return pending_journal(self._journal_path)
 
     def fold_journal(self, embedder, now: Optional[int] = None, coexist=None,
-                     resolve=None, dry_run: bool = False) -> dict:
+                     resolve=None, dry_run: bool = False, authority=None) -> dict:
         """B1: drain the write-ahead journal (queued `remember` + `reindex` ops) into the
         graph and clear it. Writable-only; needs an ``embedder`` (facts + page chunks are
         embedded at fold time). A queued `remember` keeps the time it was *queued* as its
@@ -1082,7 +1088,10 @@ class GraphStore:
 
         ``dry_run`` plans the fold on any store (read-only is enough): each queued `remember` runs
         its merge — model checks included — without writing, nothing is retired or reindexed, and the
-        journal stays; with memoized checks it is the plan pass of a two-phase write (``remember``)."""
+        journal stays; with memoized checks it is the plan pass of a two-phase write (``remember``).
+
+        ``authority`` (Path C): the accepted bindings — queued `observe` ops close the beliefs they govern, and
+        queued `remember` ops meet rule 5 (``remember(…, authority=)``)."""
         if not self.writable and not dry_run:
             raise RuntimeError("GraphStore is read-only; open it writable to fold the journal.")
         if embedder is None:
@@ -1092,7 +1101,7 @@ class GraphStore:
             return {"records": 0, "remembered": 0, "reindexed": 0}
         from .memory import MemoryFact
         now = int(now if now is not None else time.time())
-        remembered = reindexed = retired = confirmed = forgotten = 0
+        remembered = reindexed = retired = confirmed = forgotten = observed = 0
         for rec in records:
             try:
                 if rec.get("op") == "remember":
@@ -1111,7 +1120,7 @@ class GraphStore:
                                             # model's attribute matching grouped "web UI has ten
                                             # tabs" with "has project-aware UI" and closed it
                                             resolve=None if rec.get("agent") else resolve,
-                                            dry_run=dry_run)
+                                            dry_run=dry_run, authority=authority)
                         remembered += res.get("added", 0)
                     if rec.get("retire") and not dry_run:   # wiki_remember's replaces → close them
                         retired += self.retire(rec["retire"],     # an approved staged op: when it was staged
@@ -1126,12 +1135,16 @@ class GraphStore:
                 elif rec.get("op") == "forget" and not dry_run:      # a person archived it (M7)
                     forgotten += self.forget(rec.get("ids") or [], str(rec.get("reason") or "reviewed"),
                                              now=int(rec.get("t") or now))
+                elif rec.get("op") == "observe" and not dry_run:     # a sensor's reading (Path C, C1.5)
+                    res = self.observe(rec.get("observations") or [], embedder, authority=authority,
+                                       now=int(rec.get("t") or now))
+                    observed += res.get("added", 0) + res.get("unchanged", 0)
             except Exception:      # pragma: no cover - one bad op never aborts the fold
                 continue
         if not dry_run:
             clear_journal(self._journal_path)
         return {"records": len(records), "remembered": remembered, "reindexed": reindexed,
-                "retired": retired, "confirmed": confirmed, "forgotten": forgotten}
+                "retired": retired, "confirmed": confirmed, "forgotten": forgotten, "observed": observed}
 
     # -- remembered tier (Path B: session memory) ----------------------
 
@@ -1266,7 +1279,7 @@ class GraphStore:
     def remember(self, session_id: str, facts, embedder, now: Optional[int] = None,
                  session_date: Optional[int] = None, correct: bool = False,
                  coexist=None, resolve=None, resolve_threshold: float = RESOLVE_THRESHOLD,
-                 dry_run: bool = False) -> dict:
+                 dry_run: bool = False, authority=None) -> dict:
         """B3 merge + B4 contradiction handling + **B7 bi-temporal validity**: embed each fact,
         persist Session + Assertion + ASSERTS, and slot each fact into the history of its
         (subject, predicate) by **valid time** (``temporal.plan_merge``), not processing order —
@@ -1299,12 +1312,25 @@ class GraphStore:
         read-only connection, then ``remember`` again on a writable one — the same merge, its model
         answers served from the cache, so Kuzu's exclusive write lock is held for the writes alone
         (seconds), not for the model calls. Planning reads the current state each time, so the write
-        pass is never stale: anything another writer changed in between is simply planned anew."""
+        pass is never stale: anything another writer changed in between is simply planned anew.
+
+        ``authority`` (Path C, rule 5 of ``docs/path-c-world-model.md`` §6.4 — the accepted bindings, see
+        ``world.observe.Authority``): a fact a binding governs that contradicts its current observation, and was
+        said while that observation was known to hold (between its start and its last confirmation), never becomes
+        current — it is stored as a zero-length interval, superseded by the observation, and counted
+        ``contradicted`` (a discrepancy). A fact said later, when the world may have changed unseen, merges as
+        usual; the next observation confirms or closes it. Observations themselves are written only by
+        :meth:`observe`: they never join a belief's attribute group, so no belief closes one."""
         if not self.writable and not dry_run:
             raise RuntimeError("GraphStore is read-only; open it writable to remember.")
-        facts = list(facts)
+        from dataclasses import replace as _replace
+
+        from .memory import OBSERVED, SENSOR_SESSION
+        # only a sensor writes an observation: a fact arriving here as "observed" is demoted
+        facts = [_replace(f, source=None) if getattr(f, "source", None) == OBSERVED else f for f in facts]
         empty = {"facts": 0, "added": 0, "duplicates": 0, "superseded": 0,
-                 "retracted": 0, "historical": 0, "resolved": 0, "scrubbed": 0, "redacted": 0}
+                 "retracted": 0, "historical": 0, "resolved": 0, "scrubbed": 0, "redacted": 0,
+                 "contradicted": 0}
         if not facts:
             return empty
         if embedder is None:
@@ -1346,8 +1372,15 @@ class GraphStore:
             groups: dict = {}
             aliases: dict = {}                             # B9: exact key → the attribute it resolved to
             members: list = []                             # (key, normalized emb) — for B9 candidates
+            observed: dict = {}                            # Path C: binding id → its current observation
             for r in self._load_assertions(with_emb=resolve is not None):
                 if r.get("forgotten_at") is not None:      # archived by sleep: a re-said fact is new
+                    continue
+                if r.get("source") == OBSERVED:            # a sensor's: outside every belief's group
+                    sid = str(r.get("session_id") or "")
+                    if sid.startswith(SENSOR_SESSION) and temporal_status(r, now) == "current":
+                        observed[sid[len(SENSOR_SESSION):]] = r
+                    r.pop("emb", None)
                     continue
                 r["okey"] = _normalize(r["object"])
                 key = _key_of(r)
@@ -1380,6 +1413,22 @@ class GraphStore:
                 if (fact.valid_from is not None and sdate is not None
                         and fact.valid_from // DAY_SECONDS == sdate // DAY_SECONDS):
                     vf = sdate
+                against = self._contradicting(fact, said_at, observed, authority) if observed else None
+                if against is not None:                    # rule 5: never current, kept as a discrepancy
+                    aid = uuid.uuid4().hex
+                    run("CREATE (:Assertion {id:$id, subject:$s, predicate:$p, object:$o, "
+                        "session_id:$sid, created_at:$t, confidence:1.0, last_seen:$ls, "
+                        "valid_from:$vf, valid_to:$vf, cardinality:$card, attr:$attr, "
+                        "source:$src, emb:$e});",
+                        {"id": aid, "s": fact.subject, "p": fact.predicate, "o": fact.object, "sid": session_id,
+                         "t": now, "ls": said_at, "vf": int(vf), "card": fact.cardinality or ONE, "attr": key,
+                         "src": getattr(fact, "source", None), "e": vec.astype(float).tolist()})
+                    run("MATCH (s:Session {id:$sid}),(a:Assertion {id:$id}) "
+                        "CREATE (s)-[:ASSERTS]->(a);", {"sid": session_id, "id": aid})
+                    run("MATCH (n:Assertion {id:$n}),(o:Assertion {id:$o}) "
+                        "CREATE (n)-[:SUPERSEDES]->(o);", {"n": against["id"], "o": aid})
+                    n["contradicted"] += 1
+                    continue
 
                 def coexists(r, fact=fact, no=no):
                     key = (r["okey"], no)
@@ -1453,6 +1502,157 @@ class GraphStore:
         return n
 
     @staticmethod
+    def _contradicting(fact, said_at: int, observed: dict, authority) -> Optional[dict]:
+        """Rule 5: the current observation that ``fact`` contradicts — if it was said while that observation was
+        known to hold (between its start and its last confirmation); else ``None``."""
+        if authority is None:
+            return None
+        text = f"{fact.subject} | {fact.predicate} | {fact.object}"
+        row = {"subject": fact.subject, "predicate": fact.predicate, "object": fact.object}
+        for bid in authority.governing(text):
+            obs = observed.get(bid)
+            if obs is None:
+                continue
+            start = int(obs.get("valid_from") or 0)
+            confirmed = int(obs.get("last_seen") or obs.get("created_at") or 0)
+            if start <= said_at <= confirmed and authority.verdict(bid, row, obs) == "differs":
+                return obs
+        return None
+
+    def observations(self) -> dict:
+        """The current observation of each binding — ``{binding id: record}`` (Path C)."""
+        from .memory import OBSERVED, SENSOR_SESSION
+        now = int(time.time())
+        out = {}
+        for r in self._load_assertions():
+            sid = str(r.get("session_id") or "")
+            if r.get("source") == OBSERVED and sid.startswith(SENSOR_SESSION) and temporal_status(r, now) == "current":
+                out[sid[len(SENSOR_SESSION):]] = r
+        return out
+
+    def observe(self, observations, embedder=None, authority=None, now: Optional[int] = None,
+                dry_run: bool = False) -> dict:
+        """Path C (C1.3 – C1.4): write sensors' observations under the authority rule (``docs/path-c-world-model.md``
+        §6.4). An observation is one binding's current value — ``{"binding", "subject", "predicate", "object",
+        "value", "valid_from", "read_at"}`` — kept in the session ``sensor:<binding>`` with ``source = "observed"``,
+        in the binding's own attribute group (no belief joins it):
+
+        1. the same value as its current observation → re-affirmed (``last_seen`` = when it was read);
+        2. a new value → the previous observation closes where the new one starts (``valid_from``: the change time
+           the source knows, else when it was read);
+        3. a current belief the binding governs (``authority`` — the accepted bindings) that claims another value
+           closes at the observation's start (at its own, if it began later) — kept as history, superseded by the
+           observation; recorded after the observed value began, it is a *discrepancy*;
+        4. a governed belief that agrees is re-affirmed (``last_seen``) and kept — still a person's or the agent's.
+
+        Rule 5 — a later belief against a current observation — lives in ``remember(…, authority=)``. Without
+        ``authority`` only the observations are written. Writes no model call; embeds only new observations.
+        ``dry_run`` plans without writing (read-only is enough). Returns per binding what happened, and totals."""
+        from .memory import OBSERVED, SENSOR_SESSION, MemoryFact
+        if not self.writable and not dry_run:
+            raise RuntimeError("GraphStore is read-only; open it writable to observe.")
+        observations = [o for o in observations or [] if isinstance(o, dict) and o.get("binding")]
+        out = {"observations": [], "added": 0, "unchanged": 0, "closed": 0, "agreed": 0, "unclear": 0,
+               "discrepancies": 0}
+        if not observations:
+            return out
+        now = int(now if now is not None else time.time())
+        run = (lambda query, params=None: None) if dry_run else self._exec
+        with self._lock:
+            recs = [r for r in self._load_assertions() if r.get("forgotten_at") is None]
+            mine: dict = {}
+            for r in recs:
+                sid = str(r.get("session_id") or "")
+                if r.get("source") == OBSERVED and sid.startswith(SENSOR_SESSION) \
+                        and temporal_status(r, now) == "current":
+                    mine.setdefault(sid[len(SENSOR_SESSION):], []).append(r)
+            new = [o for o in observations
+                   if not any(_normalize(r["object"]) == _normalize(o["object"]) for r in mine.get(o["binding"], []))]
+            vectors = {}
+            if new and not dry_run:
+                if embedder is None:
+                    raise ValueError("observe needs an embedder for new observations.")
+                emb = embedder.embed_documents([MemoryFact(o["subject"], o["predicate"], o["object"]).text()
+                                                for o in new]).astype(np.float32)
+                norms = np.linalg.norm(emb, axis=1, keepdims=True)
+                norms[norms == 0] = 1.0
+                emb = emb / norms
+                self._ensure_memory_schema(emb.shape[1])
+                vectors = {id(o): v for o, v in zip(new, emb)}
+            for o in observations:
+                bid, sid = str(o["binding"]), f"{SENSOR_SESSION}{o['binding']}"
+                read_at = int(o.get("read_at") or now)
+                entry = {"binding": bid, "object": o["object"], "action": "", "closed": [], "agreed": [],
+                         "unclear": 0, "discrepancies": []}
+                prev = sorted(mine.get(bid, []), key=lambda r: r.get("valid_from") or 0)
+                same = [r for r in prev if _normalize(r["object"]) == _normalize(o["object"])]
+                if same:                                                   # rule 1
+                    obs = same[-1]
+                    seen = max(int(obs.get("last_seen") or 0), read_at)
+                    run("MATCH (a:Assertion {id:$id}) SET a.last_seen=$t;", {"id": obs["id"], "t": seen})
+                    obs["last_seen"] = seen
+                    entry["action"] = "unchanged"
+                    out["unchanged"] += 1
+                else:                                                      # rule 2
+                    vf = int(o.get("valid_from") or read_at)
+                    if prev:
+                        vf = max(vf, max(int(r.get("valid_from") or 0) for r in prev))
+                    obs = {"id": uuid.uuid4().hex, "subject": o["subject"], "predicate": o["predicate"],
+                           "object": o["object"], "session_id": sid, "created_at": now, "confidence": 1.0,
+                           "last_seen": read_at, "valid_from": vf, "valid_to": None, "expired_at": None,
+                           "cardinality": ONE, "attr": sid, "source": OBSERVED}
+                    run("MERGE (s:Session {id:$id}) ON CREATE SET s.created_at=$t, s.session_date=$d;",
+                        {"id": sid, "t": now, "d": None})
+                    if not dry_run:
+                        run("CREATE (:Assertion {id:$id, subject:$s, predicate:$p, object:$o, session_id:$sid, "
+                            "created_at:$t, confidence:1.0, last_seen:$ls, valid_from:$vf, cardinality:$card, "
+                            "attr:$attr, source:$src, emb:$e});",
+                            {"id": obs["id"], "s": obs["subject"], "p": obs["predicate"], "o": obs["object"],
+                             "sid": sid, "t": now, "ls": read_at, "vf": vf, "card": ONE, "attr": sid, "src": OBSERVED,
+                             "e": vectors[id(o)].astype(float).tolist()})
+                        run("MATCH (s:Session {id:$sid}),(a:Assertion {id:$id}) CREATE (s)-[:ASSERTS]->(a);",
+                            {"sid": sid, "id": obs["id"]})
+                    for r in prev:                                         # the previous value ends here
+                        run("MATCH (a:Assertion {id:$id}) SET a.valid_to=$vt;", {"id": r["id"], "vt": vf})
+                        run("MATCH (n:Assertion {id:$n}),(o:Assertion {id:$o}) CREATE (n)-[:SUPERSEDES]->(o);",
+                            {"n": obs["id"], "o": r["id"]})
+                        r["valid_to"] = vf
+                    mine[bid] = [obs]
+                    entry["action"] = "added"
+                    entry["replaced"] = [r["object"] for r in prev]
+                    out["added"] += 1
+                if authority is not None and bid in getattr(authority, "bindings", {}):   # rules 3 and 4
+                    start = int(obs.get("valid_from") or read_at)
+                    for r in recs:
+                        if r.get("source") == OBSERVED or temporal_status(r, now) != "current":
+                            continue
+                        if bid not in authority.governing(f"{r['subject']} | {r['predicate']} | {r['object']}"):
+                            continue
+                        verdict = authority.verdict(bid, r, o.get("value"))
+                        if verdict == "differs":
+                            at = max(start, int(r.get("valid_from") or 0))
+                            run("MATCH (a:Assertion {id:$id}) SET a.valid_to=$vt;", {"id": r["id"], "vt": at})
+                            run("MATCH (n:Assertion {id:$n}),(o:Assertion {id:$o}) CREATE (n)-[:SUPERSEDES]->(o);",
+                                {"n": obs["id"], "o": r["id"]})
+                            r["valid_to"] = at
+                            entry["closed"].append(_fact_brief(r))
+                            if int(r.get("created_at") or 0) > start:     # believed after the world changed
+                                entry["discrepancies"].append(_fact_brief(r))
+                        elif verdict == "agrees":
+                            seen = max(int(r.get("last_seen") or 0), read_at)
+                            run("MATCH (a:Assertion {id:$id}) SET a.last_seen=$t;", {"id": r["id"], "t": seen})
+                            r["last_seen"] = seen
+                            entry["agreed"].append(_fact_brief(r))
+                        else:
+                            entry["unclear"] += 1
+                out["closed"] += len(entry["closed"])
+                out["agreed"] += len(entry["agreed"])
+                out["unclear"] += entry["unclear"]
+                out["discrepancies"] += len(entry["discrepancies"])
+                out["observations"].append(entry)
+        return out
+
+    @staticmethod
     def _resolve_attribute(fact, vec, groups: dict, members: list, resolve,
                            threshold: float) -> Optional[str]:
         """B9: the existing attribute key ``fact`` should join, or ``None``. Candidates = groups
@@ -1514,9 +1714,16 @@ class GraphStore:
         self._view(recs, now, as_of=as_of, known_at=known_at)
         q = np.asarray(embedder.embed_query(query), dtype=np.float32)
         q = q / (np.linalg.norm(q) or 1.0)
+        # Path C: a belief that says exactly what an observation in view says adds nothing — the observation stands
+        # in for it (rule 4 keeps the belief, as the person's or agent's statement; recall needs it only once)
+        seen = {(_normalize(r["subject"]), _normalize(r["predicate"]), _normalize(r["object"]))
+                for r in recs if r.get("source") == "observed" and r["in_view"]}
         scored = []
         for r in recs:
             if not (r["in_view"] or include_superseded):
+                continue
+            if seen and r.get("source") != "observed" and (
+                    _normalize(r["subject"]), _normalize(r["predicate"]), _normalize(r["object"])) in seen:
                 continue
             ref = r["last_seen"] or r["created_at"]                # last affirmed, else first stated
             cos = float(q @ np.asarray(r["emb"], dtype=np.float32))  # stored normalized
@@ -1754,10 +1961,12 @@ class GraphStore:
         policy, re-applied to facts captured before it existed) or ``"ephemeral"`` (a one-off session
         event: "was pushed / tagged", a commit hash, "server is serving v0.78.0"). Pure policy, no LLM
         (an LLM review was measured unstable and harmful). Read-only."""
-        from .memory import MemoryFact, is_ephemeral, is_unsafe_instruction
+        from .memory import OBSERVED, MemoryFact, is_ephemeral, is_unsafe_instruction
         out = []
         for r in self._load_assertions():
             if r.get("forgotten_at") is not None or r.get("expired_at") is not None:
+                continue
+            if r.get("source") == OBSERVED:      # a sensor keeps it (Path C) — its values were screened when read
                 continue
             fact = MemoryFact(r["subject"], r["predicate"], r["object"])
             why = ("unsafe" if is_unsafe_instruction(fact)

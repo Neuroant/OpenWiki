@@ -57,8 +57,9 @@ facts on the strictest reading; bindings govern by a pattern over the wording, n
 baselines: 13.7 % of the replayed prompts got a stale governed fact, a stale test count lives 4 days). C0 closed with
 a **go** on 2026-11-07 (WM §18.1), with the user's decisions 1, 5 and 13 (WM §15: the repository first; facts
 corrected automatically only once a person has accepted a binding's dry run; a contradicting late belief stored,
-never current). **C1's first release (v0.123):** `openwiki/world/` — the built-in sensors, environments and
-bindings, `owiki world status` (read-only; below); next v0.124 — observed facts, the authority rule, the `observe` op.
+never current). **C1 (v0.123, v0.124):** `openwiki/world/` — the built-in sensors, environments and
+bindings, `owiki world status`, and the authority rule — observations outrank beliefs in the facts an accepted binding
+governs (`owiki world observe / accept`, arc42 ADR-56; below); next v0.125 — the overlay, the handoff, the measurement.
 Paths B and C use language models **hybrid** — local where possible, cloud where really needed — while Path A's
 pipeline stays local (ADR-52 amends ADR-2). Projects gain **environments** — a third input class next to sources and
 sessions; twins run as their own processes with OpenWiki as their client (§2.3, ADR-53; `docs/projects.md` Phase 5) —
@@ -432,6 +433,33 @@ dry run** a person accepts before v0.124 lets an observation close them — or u
 configuration. openwiki-dev observes C0.4's first slice (test count, release, latest tag, tabs, build stages, two
 defaults): the first status found the one stale governed fact ("test suite has passing tests 823" vs 831 collected),
 after C0.4's test-count pattern was narrowed (it governed 10 current facts, 9 only talking about the count).
+
+**Observations and the authority rule (v0.124, arc42 ADR-56)** — a binding writes nothing until a person accepts its
+dry run; then observing writes what it reads and closes the governed beliefs that say otherwise:
+```
+.venv\Scripts\python -m openwiki world accept tests release      # after checking `world status`; --all = every one
+.venv\Scripts\python -m openwiki world observe                   # read the accepted sensors, write what changed
+.venv\Scripts\python -m openwiki schedule install --task world-observe   # every 15 min: --due --fast
+```
+`accept` / `revoke` (`.openwiki/world-accepted.json`, pinned to a fingerprint of the binding — a changed pattern,
+fact or sensor reads "changed since accepted" and writes nothing until accepted again). `observe` options: `--sensor
+ID`, `--due` (only sensors whose `every` has passed), `--fast` (no slow sensors), `--dry-run`, `--json`; it keeps each
+reading in `.openwiki/world-cache.json`, plans on a read-only graph and writes only when an observation or a governed
+belief changes (a locked graph gets an `observe` journal op), naming the commit behind each change or "outside any
+commit". `sleep` (re-affirmations too: `last_seen`), the capture worker and `handoff prepare` run it as well. The
+rules (`GraphStore.observe`, WM §6.4): an observation is a fact with `source = "observed"` in the session
+`sensor:<id>` and its binding's own attribute group (no belief joins it); the same value re-affirms; a new value closes
+the previous observation where it starts (`valid_from` = the commit's time, else when read); a governed current belief
+that differs closes there, superseded by the observation — a *discrepancy* if recorded after the change; an agreeing
+one is re-affirmed and kept, and recall shows it once, through the observation. Rule 5 (`remember(…, authority=)`): a
+belief against a current observation becomes a zero-length interval — only when it was said between the observation's
+start and its last confirmation (a later one may be news; the next observation settles it). Only `observe` writes
+"observed" (capture can't, `remember` demotes it); observations leave the review list (`memory_browse.review_queue`,
+`analyze memory` — with the governed facts) and the forgetting pass; the Gedächtnis tab badges them "beobachtet".
+Session kinds (`memory.session_kind`: sensor / twin / agent / conversation) come from the session id. The default
+`release` sensor reads the latest version tag (a version file runs ahead while a release is prepared). Checked on a
+copy of openwiki-dev: accepting the first slice and observing wrote 6 observations, closed 3 stale beliefs and
+confirmed 5; a second pass wrote nothing.
 
 **Sleep — nightly memory maintenance + forgetting** (Path B++): one schedulable writable pass — fold what
 read-only processes queued (usage + journal) → redact credentials in facts stored before v0.99 → **forget** what the
@@ -864,7 +892,12 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   lists, no bytecode); reuses `handoff.git` / `ollama_state` / `_pid_alive`. `bindings.py`: `Environment`, `Binding`
   (`fact`, `target`, `governs_text`), `World`, `load_world(project)` (environments, declared + default bindings,
   `problems`), `default_bindings`, `parse_every`, `normalize` / `compare` (agrees / differs / unclear). `status.py`:
-  `world_report(world, readings, facts)` / `format_report`. Pure apart from reading the environment; no Kuzu.
+  `world_report(world, readings, facts, accepted=)` / `format_report`. `observe.py` (v0.124): acceptance
+  (`accept` / `revoke` / `acceptance` / `active_bindings`, `binding_fingerprint`), the world cache (`read_cache` /
+  `update_cache`, `due`), `Authority` (`governing`, `verdict` — what `GraphStore.observe` / `remember` ask),
+  `observation`, `governed_predicate`, `format_observe`. Pure apart from reading the environment and two JSON files;
+  no Kuzu. The graph side: `GraphStore.observe` / `observations` / `remember(authority=)` / `fold_journal(authority=)`,
+  `journal.append_observe`; the CLI's `_world_observe` / `_world_authority`.
 - **`openwiki/agent.py`** — `RAGAgent`: retrieve top chunks → number them as
   excerpts → a grounded system prompt → `ChatModel` → `RAGAnswer` (answer +
   `Source`s). `<think>…</think>` is stripped; `cited_markers()` reports which

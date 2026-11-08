@@ -586,7 +586,8 @@ class WikiWebApp:
         if self.graph is None:
             return {"available": False, "reason": "no_graph"}
         from ..analysis.memory import analyze_memory
-        return analyze_memory(self.graph)
+        from ..world.observe import governed_predicate
+        return analyze_memory(self.graph, governed=governed_predicate(self.project))
 
     def memory_period(self, start, bucket: str = "day") -> dict:
         """The facts behind one period of the Dynamik chart (`/api/analyze/memory/period`, M5): learned in it, or
@@ -882,6 +883,11 @@ class WikiWebApp:
 
     MAINTAIN_ACTIONS = ("close", "confirm", "forget")
 
+    def _governed(self):
+        """Path C (C1.8): the facts an accepted sensor governs leave the review list (``None`` = none)."""
+        from ..world.observe import governed_predicate
+        return governed_predicate(self.project)
+
     def memory_maintenance(self, offset: int = 0, limit: int = 20) -> dict:
         """The Memory tab's maintenance panel (M7): what needs a person's look, together — ``staged`` agent
         writes awaiting approval, ``review`` (current facts of a kind that goes stale, the most likely stale
@@ -896,7 +902,7 @@ class WikiWebApp:
         rows = self.graph.list_assertions(limit=10**9, include_superseded=True)
         status = {r["id"]: r["status"] for r in rows}
         forget = [dict(c, status=status.get(c["id"])) for c in self.graph.forget_candidates()]
-        return {"staged": self.memory_staged(), "review": review_queue(rows, offset, limit),
+        return {"staged": self.memory_staged(), "review": review_queue(rows, offset, limit, governed=self._governed()),
                 "forget": forget, "queued": queued_ids(journal_path(path)),
                 "writable": not self.dry_run and (self.project is None or self.project.memory_enabled)}
 

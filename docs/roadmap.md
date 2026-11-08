@@ -1323,6 +1323,10 @@ regression — an undated capture invented dates, so a rename lost to the older 
 `[[environments]]` and `[[world.sensors]]` of a manifest (each code source with two default sensors: its version
 file, its latest tag), and `owiki world status`, which reads them and lists the remembered facts each one governs —
 agreeing, differing, unclear: the dry run a person accepts before v0.124 lets an observation close a stale fact.
+**v0.124 — the authority rule:** once a person accepts a binding (`owiki world accept`), `owiki world observe` —
+scheduled every 15 minutes, and run by `sleep`, the capture worker and the handoff — writes what the sensor read as an
+observed fact and closes the remembered facts it governs that say otherwise (arc42 ADR-56); on a copy of the dev
+memory, 3 stale beliefs closed and 5 confirmed.
 
 Path B remembers what was *said*; its weak spot is state that changes without anyone saying so (versions, counts,
 running services, plans that got done). Path C lets the world write too: built-in sensors over git, files, code,

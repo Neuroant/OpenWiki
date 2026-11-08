@@ -44,7 +44,7 @@ from .graph import (
     extract_relations, format_memory, resolve_entities, summarize_community, summarize_facts,
 )
 from .embeddings import CachingEmbedder, OllamaEmbedder
-from .graph.journal import append_remember, journal_path, pending_journal
+from .graph.journal import append_observe, append_remember, journal_path, pending_journal
 from .lexical import RECALL_WEIGHT
 from .graph.lazy import LazyGraph
 from .graph.store import memoized
@@ -778,17 +778,28 @@ def _build_argparser() -> argparse.ArgumentParser:
 
     world_p = sub.add_parser("world", parents=[common],
                              help="The world model (Path C): the project's environments, the built-in sensors that "
-                                  "read them and the remembered facts each one governs. v0.123 only reads.")
-    world_p.add_argument("action", choices=["status"],
+                                  "read them and the remembered facts each one governs.")
+    world_p.add_argument("action", choices=["status", "observe", "accept", "revoke"],
                          help="status = read every sensor now and show its value, the fact it would write and the "
-                              "current facts it governs — agreeing, differing (the dry run) or unclear.")
+                              "current facts it governs — agreeing, differing (the dry run) or unclear; accept ID… = "
+                              "a person accepts a binding's dry run, so observing may close the facts it governs; "
+                              "revoke ID… = take that back; observe = read the accepted sensors and write what "
+                              "changed — the observation, and the governed facts it closes (scheduled between "
+                              "sessions with `owiki schedule install --task world-observe`).")
+    world_p.add_argument("ids", nargs="*", metavar="ID", help="accept / revoke: the bindings.")
     world_p.add_argument("--sensor", action="append", default=None, metavar="ID",
-                         help="Only this sensor (repeatable).")
+                         help="status / observe: only this sensor (repeatable).")
     world_p.add_argument("--fast", action="store_true", help="Skip slow sensors (pytest-collect).")
+    world_p.add_argument("--due", action="store_true",
+                         help="observe: only the sensors whose period (every) has passed — the scheduled pass.")
+    world_p.add_argument("--dry-run", action="store_true", help="observe: show what would be written; write nothing.")
     world_p.add_argument("--all", action="store_true",
-                         help="List every governed fact, not only those that differ.")
+                         help="status: list every governed fact, not only those that differ; accept / revoke: "
+                              "every binding.")
     world_p.add_argument("--json", action="store_true", help="Print the status as JSON.")
     world_p.add_argument("--graph", type=Path, default=None, help="Graph dir (default: the project's).")
+    world_p.add_argument("-i", "--index", type=Path, default=None,
+                         help="Index dir — its embedder embeds new observations (default: the project's).")
     world_p.add_argument("--host", default=None, help="Ollama host URL for ollama sensors (default: the project's).")
 
     sch_p = sub.add_parser("schedule", parents=[common],
@@ -1567,7 +1578,8 @@ def _cmd_build(args: argparse.Namespace) -> int:
                     if rep.get("redacted"):
                         print(f"    · '{sid}': {rep['redacted']} credential(s) redacted before capture",
                               file=sys.stderr)
-                    res = graph.remember(sid, facts, index.embedder, coexist=coexist, resolve=resolve)
+                    res = graph.remember(sid, facts, index.embedder, coexist=coexist, resolve=resolve,
+                                         authority=_world_authority(project))
                     total += res["added"]
                     print(f"    · '{sid}' → {res['added']} new, {res['duplicates']} dup "
                           f"({res['facts']} captured)", file=sys.stderr)
@@ -1792,6 +1804,7 @@ def _apply_project(args: argparse.Namespace, project: Optional[Project],
         path("graph", p.graph_path if p else None, Path("output") / "graph")
     elif cmd == "world":                    # the graph holds the facts sensors govern; ollama sensors use the host
         path("graph", p.graph_path if p else None, Path("output") / "graph")
+        path("index", p.index_dir if p else None, Path("output") / "index")
         val("host", "models", "host", DEFAULT_HOST)
     elif cmd == "sessions":                 # lessons: the chat model phrases them, the index embeds them
         path("index", p.index_dir if p else None, Path("output") / "index")
@@ -2725,7 +2738,7 @@ def _open_reader(path: Path, wait: float = READ_WAIT):
 
 def _write_memory(path: Path, embedder, session_id: Optional[str] = None, facts=None,
                   session_date: Optional[int] = None, correct: bool = False, coexist=None,
-                  resolve=None, fold: bool = True, wait: float = WRITE_WAIT) -> Optional[dict]:
+                  resolve=None, fold: bool = True, wait: float = WRITE_WAIT, authority=None) -> Optional[dict]:
     """Write to the remembered tier in **two phases**, so Kuzu's exclusive write lock is held for the
     writes alone, not for the model calls: (1) plan on a read-only connection — ``remember`` /
     ``fold_journal`` with ``dry_run``, the merge in full with its model checks memoized and its
@@ -2733,7 +2746,8 @@ def _write_memory(path: Path, embedder, session_id: Optional[str] = None, facts=
     (``GraphStore.remember``). Folds queued usage and journal ops too (``fold``). Returns
     ``{"remembered", "folded", "usage", "lock_s"}`` (``lock_s`` = how long the write lock was held), or
     ``None`` when no writer could open the graph within ``wait`` — the facts are then queued to the
-    journal, nothing is lost."""
+    journal, nothing is lost. ``authority`` (Path C): the accepted bindings — rule 5 for the facts, and the
+    governed beliefs queued observations close (``_world_authority``)."""
     facts = list(facts or [])
     cache = CachingEmbedder(embedder) if embedder is not None else None
     coexist, resolve = memoized(coexist), memoized(resolve)
@@ -2742,9 +2756,9 @@ def _write_memory(path: Path, embedder, session_id: Optional[str] = None, facts=
         try:     # the plan pass is an optimization: if it fails, the write pass asks the model itself
             if facts and cache is not None:
                 reader.remember(session_id, facts, cache, session_date=session_date, correct=correct,
-                                coexist=coexist, resolve=resolve, dry_run=True)
+                                coexist=coexist, resolve=resolve, dry_run=True, authority=authority)
             if fold and cache is not None and reader.pending_ops():
-                reader.fold_journal(cache, coexist=coexist, resolve=resolve, dry_run=True)
+                reader.fold_journal(cache, coexist=coexist, resolve=resolve, dry_run=True, authority=authority)
         except Exception:
             pass
         finally:
@@ -2760,12 +2774,14 @@ def _write_memory(path: Path, embedder, session_id: Optional[str] = None, facts=
     try:
         if facts:
             out["remembered"] = graph.remember(session_id, facts, cache, session_date=session_date,
-                                               correct=correct, coexist=coexist, resolve=resolve)
+                                               correct=correct, coexist=coexist, resolve=resolve,
+                                               authority=authority)
         if fold:
             try:
                 out["usage"] = graph.fold_usage()
                 if cache is not None and graph.pending_ops():
-                    out["folded"] = graph.fold_journal(cache, coexist=coexist, resolve=resolve)
+                    out["folded"] = graph.fold_journal(cache, coexist=coexist, resolve=resolve,
+                                                       authority=authority)
             except Exception:
                 pass
     finally:
@@ -2774,7 +2790,7 @@ def _write_memory(path: Path, embedder, session_id: Optional[str] = None, facts=
     return out
 
 
-def _transient_fold(path: Path, embedder) -> None:
+def _transient_fold(path: Path, embedder, authority=None) -> None:
     """Open the graph writable *transiently* (retry-with-backoff), fold the write-ahead
     journals (usage pairs + queued remember/reindex ops), and close — so a read-only
     ``serve``/``chat`` absorbs deferred writes at start and shutdown. Best-effort: if the
@@ -2783,7 +2799,7 @@ def _transient_fold(path: Path, embedder) -> None:
     if path is None or not Path(path).exists():
         return
     try:
-        res = _write_memory(Path(path), embedder, fold=True, wait=5.0)
+        res = _write_memory(Path(path), embedder, fold=True, wait=5.0, authority=authority)
     except Exception:      # pragma: no cover - maintenance must never crash the command
         return
     if res is not None:
@@ -2814,7 +2830,7 @@ def _cmd_chat(args: argparse.Namespace) -> int:
             except Exception:
                 pass
     else:
-        _transient_fold(args.graph, embedder)
+        _transient_fold(args.graph, embedder, authority=_world_authority(getattr(args, "project_obj", None)))
         # opened per call (LazyGraph): a long chat no longer locks out writers
         graph = LazyGraph(args.graph, log_usage=mem) if args.graph.exists() else None
     tools = WikiTools(args.wiki, index=index, graph=graph, embedder=embedder, dry_run=args.dry_run)
@@ -2850,7 +2866,7 @@ def _cmd_chat(args: argparse.Namespace) -> int:
         if graph is not None:
             graph.close()
         if not sync:
-            _transient_fold(args.graph, embedder)
+            _transient_fold(args.graph, embedder, authority=_world_authority(getattr(args, "project_obj", None)))
 
 
 def _cmd_cochange(args: argparse.Namespace) -> int:
@@ -3148,7 +3164,15 @@ def _cmd_sleep(args: argparse.Namespace) -> int:
         embedder = _decay_embedder(args)
         if embedder is not None and graph.pending_ops():
             ops = graph.fold_journal(embedder, coexist=_coexist_check(args.model, args.host),
-                                     resolve=_attribute_resolver(args.model, args.host))
+                                     resolve=_attribute_resolver(args.model, args.host),
+                                     authority=_world_authority(project))
+        world = None                           # Path C: every accepted sensor, slow ones too; last_seen synced
+        if project is not None and project.world_enabled and embedder is not None:
+            try:
+                world = _world_observe(project, args.graph, args.index, args.host, slow=True, sync=True,
+                                       graph=graph, embedder=embedder)
+            except Exception as exc:           # a sensor problem must not cost the night's maintenance
+                world = {"written": f"world observe failed: {type(exc).__name__}: {exc}", "skipped": ""}
         secrets = graph.redact_credentials()   # P0 for facts stored before redaction existed
         cands = graph.forget_candidates()
         for reason in ("unsafe", "ephemeral"):
@@ -3170,6 +3194,8 @@ def _cmd_sleep(args: argparse.Namespace) -> int:
         print(f"  {backup}")
     if folded["records"] or ops.get("records"):
         print(f"  folded {folded['records']} usage record(s), {ops.get('records', 0)} queued op(s)")
+    if world is not None and (world.get("skipped") or world.get("written")):
+        print(f"  world: {world.get('skipped') or world.get('written')}")
     if secrets:
         print(f"  redacted credentials in {secrets} stored fact(s)")
     print(f"  forgot {sum(forgotten.values())} fact(s): {forgotten.get('ephemeral', 0)} one-off event(s), "
@@ -3386,7 +3412,8 @@ def _memory_import(args: argparse.Namespace) -> int:
             skipped += closed
             coexist, resolve = _coexist_check(args.model, args.host), _attribute_resolver(args.model, args.host)
             for sid, facts in groups.items():
-                merged.append(graph.remember(sid, facts, embedder, coexist=coexist, resolve=resolve))
+                merged.append(graph.remember(sid, facts, embedder, coexist=coexist, resolve=resolve,
+                                             authority=_world_authority(getattr(args, "project_obj", None))))
     finally:
         graph.close()
     origin = manifest.get("source_system") or "unknown"
@@ -3487,7 +3514,7 @@ def _cmd_decay(args: argparse.Namespace) -> int:
         embedder = _decay_embedder(args)
         if embedder is not None and graph.pending_ops():
             try:
-                ops = graph.fold_journal(embedder)
+                ops = graph.fold_journal(embedder, authority=_world_authority(getattr(args, "project_obj", None)))
             except Exception:
                 pass
         result = graph.decay(half_life_days=args.half_life, floor=args.floor)
@@ -3550,7 +3577,8 @@ def _cmd_remember(args: argparse.Namespace) -> int:
     res = _write_memory(args.graph, index.embedder, session_id=session_id, facts=facts,
                         session_date=sdate, correct=args.correct,
                         coexist=_coexist_check(args.model, args.host),
-                        resolve=_attribute_resolver(args.model, args.host))
+                        resolve=_attribute_resolver(args.model, args.host),
+                        authority=_world_authority(getattr(args, "project_obj", None)))
     if res is None:
         # the graph stayed locked (a build, `serve --sync`, a long `sleep`): the facts are queued to the
         # journal — the next writable pass folds them in. Writes are deferred, never lost.
@@ -3644,7 +3672,8 @@ def _cmd_backfill(args: argparse.Namespace) -> int:
                     totals["scrubbed"] += len(dropped)
                     totals["redacted"] += rep.get("redacted", 0)
                     res = graph.remember(sid, facts, index.embedder, session_date=wdate,
-                                         coexist=coexist, resolve=resolve)
+                                         coexist=coexist, resolve=resolve,
+                                         authority=_world_authority(getattr(args, "project_obj", None)))
                 except Exception as exc:
                     failed.append(f"{sid}#{j}")
                     print(f"  ! {sid} window {j}/{len(windows)} failed: {exc}", file=sys.stderr, flush=True)
@@ -4165,7 +4194,8 @@ def _cmd_analyze(args: argparse.Namespace) -> int:
                   file=sys.stderr)
             return 2
         try:
-            res = analyze_memory(graph)
+            from .world.observe import governed_predicate
+            res = analyze_memory(graph, governed=governed_predicate(getattr(args, "project_obj", None)))
         finally:
             graph.close()
         if not res.get("available"):
@@ -4593,7 +4623,8 @@ def _write_captured(project: Project, sid: str, facts, embedder, wdate: int,
     if not project.graph_path.exists():
         return
     res = _write_memory(project.graph_path, embedder, session_id=sid, facts=facts, session_date=wdate,
-                        coexist=_coexist_check(model, host), resolve=_attribute_resolver(model, host))
+                        coexist=_coexist_check(model, host), resolve=_attribute_resolver(model, host),
+                        authority=_world_authority(project))
     if res is None:
         print(f"openwiki hook: graph locked — {len(facts)} fact(s) of session {sid} queued to the journal",
               file=sys.stderr)
@@ -4671,6 +4702,13 @@ def _hook_capture(project: Project, payload: dict) -> None:
                 _save_capture_watermark(project, sid, last)
         if not wrote and pending_journal(journal_path(project.graph_path)):
             _write_captured(project, sid, [], embedder, int(time.time()), model, host)  # fold queued ops
+        if project.world_enabled:              # Path C (C1.5): a session's end observes, slow sensors too
+            try:
+                seen = _world_observe(project, project.graph_path, project.index_dir, host, slow=True)
+                if seen.get("written") and not seen.get("skipped"):
+                    print(f"openwiki hook: world — {seen['written']}", file=sys.stderr)
+            except Exception as exc:          # a sensor problem never costs the capture
+                print(f"openwiki hook: world observe failed: {type(exc).__name__}: {exc}", file=sys.stderr)
     finally:
         runlog.note(**counts)
         try:
@@ -4799,6 +4837,14 @@ def _cmd_handoff(args: argparse.Namespace) -> int:
         except OSError as exc:
             print(f"error: can't read the note: {exc}", file=sys.stderr)
             return 2
+    if args.mode == "prepare" and not args.dry_run and project.world_enabled:   # Path C (C1.5): observe first
+        try:
+            seen = _world_observe(project, project.graph_path, project.index_dir,
+                                  project.setting("models", "host", DEFAULT_HOST), slow=True)
+            if seen.get("written") and not seen.get("skipped"):
+                print(f"[openwiki] world — {seen['written']}", file=sys.stderr)
+        except Exception as exc:              # a sensor problem never costs the handoff
+            print(f"[openwiki] world observe failed: {type(exc).__name__}: {exc}", file=sys.stderr)
     env = _handoff_env(project, repo)
     try:
         if args.mode == "resume":
@@ -4869,7 +4915,8 @@ def _hook_fold(project: Project, payload: dict) -> None:
                 break
             res = _write_memory(project.graph_path, embedder, fold=True,
                                 coexist=_coexist_check(model, host),
-                                resolve=_attribute_resolver(model, host))
+                                resolve=_attribute_resolver(model, host),
+                                authority=_world_authority(project))
             if res is None:
                 print(f"openwiki hook: graph locked — {queued} queued op(s) stay in the journal",
                       file=sys.stderr)
@@ -4931,7 +4978,7 @@ def _serve_app(args: argparse.Namespace) -> tuple:
             except Exception:
                 pass
     else:
-        _transient_fold(args.graph, embedder)      # absorb pending deferred writes first
+        _transient_fold(args.graph, embedder, authority=_world_authority(getattr(args, "project_obj", None)))      # absorb pending deferred writes first
         # opened per request (LazyGraph): a running server no longer locks out writers — captures,
         # wiki_remember folds and `sleep` land while it serves
         graph = LazyGraph(args.graph, log_usage=mem) if args.graph.exists() else None
@@ -5144,12 +5191,111 @@ def _world_facts(graph_path, project: Project) -> Optional[list]:
         graph.close()
 
 
-def _cmd_world(args: argparse.Namespace) -> int:
-    """Path C, C1.7: ``owiki world status`` — read every sensor now, then show each reading, the fact it would write
-    and the current facts it governs. Reads only: nothing is written to memory (v0.123). Exit 1 on a configuration
-    problem."""
+def _world_authority(project):
+    """The accepted bindings as the graph store's authority (Path C — rules 3 to 5), or ``None``: world model off,
+    nothing accepted, a broken configuration. Never raises — a memory write must not fail on it."""
+    if project is None or not getattr(project, "world_enabled", False) or not project.memory_enabled:
+        return None
+    try:
+        from .world.bindings import load_world
+        from .world.observe import Authority, active_bindings, read_accepted
+        active = active_bindings(load_world(project), read_accepted(project.state_dir))
+        return Authority(active) if active else None
+    except Exception:
+        return None
+
+
+def _read_bindings(world, bindings, host) -> dict:
     from .world import sensors as world_sensors
+    out = {}
+    for b in bindings:
+        env = world.environment(b.environment)
+        out[b.id] = world_sensors.read(b.id, b.type, b.params, root=env.root if env else None, host=host)
+    return out
+
+
+def _world_observe(project, graph_path, index_dir, host, sensors=None, due: bool = False, slow: bool = True,
+                   dry_run: bool = False, sync: bool = False, graph=None, embedder=None) -> dict:
+    """The observe pass (C1.5): read the accepted sensors (``sensors`` = ids; ``due`` = only those whose period has
+    passed), keep the readings in the world cache, plan on a read-only graph, and write only when something changed —
+    a new value, or a governed belief to close (``sync`` — the ``sleep`` pass — also writes the re-affirmations:
+    ``last_seen``). A locked graph gets the observations through the journal. ``graph`` + ``embedder`` = a writable
+    graph the caller holds (``sleep``): written on directly, re-affirmations included. Returns ``{"observations",
+    "planned", "result", "written", "skipped"}``."""
     from .world.bindings import load_world
+    from .world.observe import (Authority, active_bindings, changes, due as is_due, observation, read_accepted,
+                                read_cache, update_cache)
+    out = {"observations": [], "planned": None, "result": None, "written": "", "skipped": ""}
+    if not project.world_enabled:
+        out["skipped"] = "[world] enabled = false"
+        return out
+    if not project.memory_enabled:
+        out["skipped"] = "[world] needs [memory] enabled"
+        return out
+    world = load_world(project)
+    active = active_bindings(world, read_accepted(project.state_dir))
+    if not active:
+        out["skipped"] = "no accepted binding — check `owiki world status`, then `owiki world accept ID`"
+        return out
+    now = int(time.time())
+    cache = read_cache(project.state_dir)
+    chosen = [b for b in active if (not sensors or b.id in sensors) and (slow or not b.slow)
+              and (not due or is_due(b, cache, now, slow=slow))]
+    readings = _read_bindings(world, chosen, host)
+    update_cache(project.state_dir, readings)
+    obs = [observation(b, readings[b.id]) for b in chosen if readings[b.id].quality == "complete"]
+    out["observations"] = obs
+    if not obs:
+        out["written"] = "Nothing to write (no complete reading)."
+        return out
+    authority = Authority(active)
+    if graph is not None:                              # the caller's writable graph (sleep)
+        r = out["result"] = graph.observe(obs, embedder, authority, now=now)
+        out["written"] = (f"observed {len(obs)} sensor(s): {r['added']} new value(s), {r['closed']} belief(s) "
+                          f"closed, {r['agreed']} agreeing")
+        return out
+    reader = _open_reader(graph_path, wait=5.0)
+    if reader is None:
+        out["skipped"] = f"the graph can't be read ({graph_path})"
+        return out
+    try:
+        out["planned"] = reader.observe(obs, None, authority, now=now, dry_run=True)
+    finally:
+        reader.close()
+    if dry_run or not (changes(out["planned"]) or (sync and out["planned"]["unchanged"])):
+        out["result"] = out["planned"]
+        out["written"] = "Dry run — nothing written." if dry_run else "Nothing changed — nothing written."
+        return out
+    index = SemanticIndex.load(index_dir) if (Path(index_dir) / "index.json").is_file() else None
+    if index is None:
+        out["skipped"] = f"no index at {index_dir} (its embedder embeds new observations)"
+        return out
+    if isinstance(index.embedder, OllamaEmbedder) and host:
+        index.embedder.host = str(host).rstrip("/")
+    graph = _open_writer(graph_path, wait=30.0)
+    if graph is None:
+        n = append_observe(journal_path(graph_path), obs, now=now)
+        out["result"] = out["planned"]
+        out["written"] = f"The graph is locked — {n} observation(s) queued for the next writer."
+        return out
+    try:
+        out["result"] = graph.observe(obs, index.embedder, authority, now=now)
+    finally:
+        graph.close()
+    r = out["result"]
+    out["written"] = (f"Written: {r['added']} new observation(s), {r['unchanged']} confirmed; {r['closed']} belief(s) "
+                      f"closed ({r['discrepancies']} discrepanc{'y' if r['discrepancies'] == 1 else 'ies'}), "
+                      f"{r['agreed']} agreeing.")
+    return out
+
+
+def _cmd_world(args: argparse.Namespace) -> int:
+    """Path C: ``owiki world status | observe | accept | revoke``. ``status`` reads every sensor now and shows each
+    reading, the fact it would write, the current facts it governs and whether a person accepted it — the dry run;
+    ``accept`` / ``revoke`` record that decision; ``observe`` writes what the accepted sensors read. Exit 1 on a
+    configuration problem."""
+    from .world.bindings import load_world
+    from .world.observe import accept, format_observe, read_accepted, revoke
     from .world.status import format_report, world_report
 
     project = getattr(args, "project_obj", None)
@@ -5158,19 +5304,49 @@ def _cmd_world(args: argparse.Namespace) -> int:
               file=sys.stderr)
         return 2
     world = load_world(project)
-    chosen = [b for b in world.bindings if not args.sensor or b.id in args.sensor]
-    unknown = sorted(set(args.sensor or ()) - {b.id for b in world.bindings})
+    known = {b.id for b in world.bindings}
+    asked = list(args.sensor or []) + (list(args.ids or []) if args.action in ("accept", "revoke") else [])
+    unknown = sorted(set(asked) - known)
     if unknown:
-        print(f"error: unknown sensor(s): {', '.join(unknown)} (known: {', '.join(b.id for b in world.bindings)}).",
-              file=sys.stderr)
+        print(f"error: unknown sensor(s): {', '.join(unknown)} (known: {', '.join(sorted(known))}).", file=sys.stderr)
         return 2
+    if args.action == "observe":
+        res = _world_observe(project, args.graph, args.index, args.host, sensors=args.sensor, due=args.due,
+                             slow=not args.fast, dry_run=args.dry_run)
+        if res["skipped"]:
+            print(f"World observe: {res['skipped']}.")
+            return 0
+        if args.json:
+            print(json.dumps(res, ensure_ascii=False, indent=2, default=str))
+        else:
+            print(format_observe(res["result"] or {}, res["observations"], res["written"], project=project.name))
+        return 1 if world.problems else 0
+    if args.action in ("accept", "revoke"):
+        if not args.ids and not args.all:
+            print(f"error: name the binding(s) to {args.action} (or --all).", file=sys.stderr)
+            return 2
+        chosen = [b for b in world.bindings if args.all or b.id in args.ids]
+        if args.action == "revoke":
+            gone = revoke(project.state_dir, [b.id for b in chosen])
+            print(f"Revoked: {', '.join(gone) or 'nothing was accepted'} — those bindings are read, never written.")
+            return 0
+        report = world_report(world, _read_bindings(world, chosen, args.host), _world_facts(args.graph, project),
+                              only={b.id for b in chosen})
+        counts = {s["id"]: {"governed": len((s["governed"] or {}).get("facts") or []),
+                            "differs": (s["governed"] or {}).get("differs", 0)} for s in report["sensors"]}
+        accept(project.state_dir, chosen, counts)
+        for b in chosen:
+            c = counts.get(b.id) or {}
+            print(f"Accepted {b.id}: governs {c.get('governed', 0)} current fact(s), {c.get('differs', 0)} differing "
+                  f"— `owiki world observe` writes the observation and closes those.")
+        if not project.world_enabled:
+            print("Note: [world] enabled = false — nothing is observed until it is on.")
+        return 0
+    chosen = [b for b in world.bindings if not args.sensor or b.id in args.sensor]
     if args.fast:
         chosen = [b for b in chosen if not b.slow]
-    readings = {}
-    for b in chosen:
-        env = world.environment(b.environment)
-        readings[b.id] = world_sensors.read(b.id, b.type, b.params, root=env.root if env else None, host=args.host)
-    report = world_report(world, readings, _world_facts(args.graph, project), only={b.id for b in chosen})
+    report = world_report(world, _read_bindings(world, chosen, args.host), _world_facts(args.graph, project),
+                          only={b.id for b in chosen}, accepted=read_accepted(project.state_dir))
     if args.json:
         print(json.dumps(report, ensure_ascii=False, indent=2))
     else:
@@ -5308,7 +5484,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 _LOGGED_RUNS = {"build", "sleep", "consolidate", "decay", "communities", "remember", "backfill", "cochange",
                 "references", "graph-build", "index"}
 _LOGGED_SUBRUNS = {("memory", "memory_cmd"): {"export", "import", "approve", "reject"},
-                   ("handoff", "mode"): {"prepare"}}
+                   ("handoff", "mode"): {"prepare"}, ("world", "action"): {"observe", "accept", "revoke"}}
 
 
 def _run_name(args: argparse.Namespace) -> Optional[str]:

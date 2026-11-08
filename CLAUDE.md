@@ -40,6 +40,10 @@ risks) is in `docs/arc42/`.
 A comparative review of eighteen other **agent-memory systems** (plus a design report, §13, and a survey of the
 field, §20) is in `docs/memory-systems-review.md`; its summary — where they agree, where OpenWiki stands, and
 the ranked plan for Path B's next steps — is `docs/agent-memory-summary.md`.
+A **neuroscience reading** of the architecture — the context window as a viewport onto an unbounded memory, where
+emotion and intuition sit, what emotion does to memory formation, the limbic–cortical loops, what we apply and what
+isn't mapped — with an **experiment plan** (E1 – E17: stress tests, signals in our data, extensions, Path C) is
+`docs/path-b-memory.md` §14.
 A **user guide to the Second Brain** — architecture, a working day, CLI + web UI tutorials with real
 `openwiki-dev` output and screenshots (`docs/img/second-brain/`), a cheat sheet — is `docs/second-brain-guide.md`.
 The design of **Path C — world models** (observed state from built-in sensors, laws, predictions, events, a world

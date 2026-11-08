@@ -287,6 +287,12 @@ class Project:
         value = self.section("world").get("sensors", [])
         return [s for s in value if isinstance(s, dict)] if isinstance(value, list) else []
 
+    @property
+    def world_laws(self) -> list:
+        """The raw ``[[world.laws]]`` tables — rules over the variables (Path C, C2.3; ``world/laws.py``)."""
+        value = self.section("world").get("laws", [])
+        return [s for s in value if isinstance(s, dict)] if isinstance(value, list) else []
+
     def code_paths(self) -> list:
         """The code sources' paths, resolved — a repository environment names one of them."""
         return [self._resolve_path(s.path) for s in self.doc_sources() if s.type == "code"]

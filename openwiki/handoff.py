@@ -340,9 +340,14 @@ def environment(env: HandoffEnv, log_offset: Optional[int] = None, repo_root=Non
         graph = f"not readable — {env.graph_note or 'unavailable'}"
     else:
         graph = "not built yet"
+    from .world.builtin import read_builtin
     from .world.observe import world_state
-    return {"ollama": ollama_state(env.host, [env.chat_model, env.embed_model]), "graph": graph,
-            "wiki": wiki_freshness(env.project, repo_root), "workers": capture_workers(state_dir),
+    # Path C (C2.14): Ollama, the wiki's freshness and the capture workers as the world model's built-in variables —
+    # the same probes, read through the world model, so a law can read them too
+    seen = read_builtin(env.project, repo_root, env.host, [env.chat_model, env.embed_model],
+                        names=("ollama_reachable", "wiki_commits_behind", "capture_workers"))
+    return {"ollama": seen["ollama_reachable"]["raw"] or {"reachable": False, "models": {}}, "graph": graph,
+            "wiki": seen["wiki_commits_behind"]["raw"], "workers": seen["capture_workers"]["raw"] or [],
             "hook_log": {"offset": size, "since": log_offset, "problems": problems},
             "world": world_state(env.project, env.graph),          # Path C (C1.13): the observed state
             "openwiki": __version__, "python": platform.python_version()}
@@ -857,6 +862,13 @@ def _env_lines(env: dict) -> list:
         if world.get("differs"):
             out.append(f"  - {world['differs']} remembered fact(s) differ from what the sensors read — "
                        + ("`owiki world observe` closes them" if accepted else "`owiki world status` lists them"))
+        laws = world.get("laws") or []
+        if laws:                                       # Path C (C2.3): the laws' last results
+            broken = [f"{law['id']} ({law['detail']})" if law.get("detail") else law["id"]
+                      for law in laws if law.get("last_result") == "violated"]
+            held = sum(1 for law in laws if law.get("last_result") == "holds")
+            out.append(f"  - Laws: {held} of {len(laws)} hold" + (f"; violated: {'; '.join(broken)}" if broken else "")
+                       + " — `owiki world laws`")
     out.append(f"- openwiki {env.get('openwiki')} · Python {env.get('python')}")
     return out
 

@@ -66,8 +66,11 @@ never current). **C1 is done (v0.123 – v0.125):** `openwiki/world/` — the bu
 bindings, `owiki world status`, the authority rule — observations outrank beliefs in the facts an accepted binding
 governs (`owiki world observe / accept`, arc42 ADR-56) — and the read-time overlay (ADR-57); measured on the replayed
 prompts (WM §18.2): stale governed facts 15.1 % → 0.5 – 1.2 %, so the world model is on by default for a Second Brain
-with a code source (nothing corrected until a person accepts a binding; below). Next: C2 (laws, drift, the world
-slice — its gate needs decisions 10, 14, 15).
+with a code source (nothing corrected until a person accepts a binding; below). **C2 is under way:** the user
+decided 10, 14 and 15 on 2026-11-08 (a `world_*` MCP tool family; the new tables in COGX as standard record kinds with
+`metadata.openwiki`; a *Welt* tab beside the Pflege panel); v0.126 built the table registry, variables, laws and the
+environment's built-in variables (arc42 ADR-58, ADR-59; below); next v0.127 — law extraction and review, decisions with
+preconditions, events (C2.4 – C2.6).
 Paths B and C use language models **hybrid** — local where possible, cloud where really needed — while Path A's
 pipeline stays local (ADR-52 amends ADR-2). Projects gain **environments** — a third input class next to sources and
 sessions; twins run as their own processes with OpenWiki as their client (§2.3, ADR-53; `docs/projects.md` Phase 5) —
@@ -440,8 +443,8 @@ governs as agreeing, **differing — the dry run** a person accepts before v0.12
 unclear, and flags a binding whose `governs` misses its own fact. `[world] enabled` (needs `[memory] enabled`; unset,
 on for a Second Brain with a code source since v0.125, else off); `owiki doctor` checks the configuration and lists
 the sensors not accepted. openwiki-dev observes C0.4's first slice (test count, release, latest tag, tabs, build
-stages, two defaults): the first status found the one stale governed fact ("test suite has passing tests 823" vs 831 collected),
-after C0.4's test-count pattern was narrowed (it governed 10 current facts, 9 only talking about the count).
+stages, two defaults): the first status found the one stale governed fact ("test suite has passing tests 823" vs 831
+collected), after C0.4's test-count pattern was narrowed (it governed 10 current facts, 9 only talking about the count).
 
 **Observations and the authority rule (v0.124, arc42 ADR-56)** — a binding writes nothing until a person accepts its
 dry run; then observing writes what it reads and closes the governed beliefs that say otherwise:
@@ -490,6 +493,41 @@ is due, 1 ms with a fresh cache (the hook itself: p50 2.5 s); the review list 40
 world model is **on by default for a Second Brain with a code source** — its sensors exist and `world status` shows
 their dry run, but nothing is written or corrected until a person accepts a binding (decision 5); `doctor` checks the
 `world-observe` task only once one is.
+
+**Laws, variables and the table registry (v0.126, arc42 ADR-58 / ADR-59)** — rules over the world model's variables,
+declared in the manifest, checked by a generic checker, proposed until a person accepts them:
+```
+.venv\Scripts\python -m openwiki world laws                     # every law checked now: holds / violated / unknown
+.venv\Scripts\python -m openwiki world accept version-in-code   # a person accepts a law (pinned to its fingerprint)
+```
+A law (`[[world.laws]]`, `openwiki/world/laws.py`): `id`, `text`, `kind` (equality · comparison · implication ·
+convention · co-change · precondition), `check` — a small expression over the sensors' values (a sensor's id, `-`
+written `_`) and the **built-in variables** (`git_branch` / `git_head` / `git_dirty` / `git_ahead` / `git_behind`,
+`ollama_reachable` / `ollama_models`, `wiki_commits_behind`, `capture_workers` — `world/builtin.py`, read through the
+handoff's own probes without acceptance, since they write no fact; the handoff takes them from there), parsed with `ast`
+against a whitelist and interpreted node by node, never `eval`'d (comparisons, `and` / `or` / `not`, arithmetic, lists
+for `in`; `implies`, `age` — seconds since a value changed —, `ver`, `num`, `lower`, `len`, `abs`, `min`, `max`,
+`minutes` / `hours` / `days`; a missing value or a type mismatch is *unknown*, never a violation) — and `violation`, the
+planted violation it must fail on (values, or `{ value, age }` for `age()`), plus an optional `example` it must hold on:
+a law whose check can't fail is reported and never trusted. A `co-change` law (`when` ⇒ `then` file globs within
+`window` commits) checks the git history. A law is **proposed** until `owiki world accept ID` (as a binding is —
+decision 5; `revoke` takes it back): before that it is checked and shown but reports nothing, and a co-change law
+reports over the last 200 commits (its dry run), watching only the commits after its acceptance once accepted. The
+observe pass
+reads the sensors the laws name (no acceptance needed — a law writes no fact), checks the laws and writes each result
+on change (`Law` nodes; a law dropped from the manifest is *retired*, not deleted); `world status` points to them,
+`doctor` lists the laws not accepted, the handoff brief shows the accepted ones' results. **Variables** (C2.2): one
+`Variable` per binding the pass reads — id `sensor:<binding>`, the attribute key its observations carry —,
+`DESCRIBED_IN` the page of the file it reads, written on change. **The registry** (`graph/schema.py`): every table
+declared once — the builder creates the schema from it, `GraphStore` creates the world tables lazily on older graphs,
+B0's snapshot keeps every authoritative table across a rebuild (the memory tables by their own reader, the rest
+generically — an edge only where both ends survived), and `memory export --full` carries `Variable` / `Law` /
+`Event` as COGX `entity` / `memory` records with the row and its edges under `metadata.openwiki` (decision 14;
+the default export adds only accepted laws).
+openwiki-dev declares the first slice's laws (C0.6) — `version-in-code` (pyproject = `__version__`), `release-tagged`
+(`ver(version) == ver(release) or age(version) < days(1)`) and a co-change rule (`cli.py` ⇒ `CLAUDE.md` within three
+commits; 82 changes in the history, none missed) —, all proposed and holding. Law proposals from `CO_CHANGED`, laws
+extracted from documents and the events a violation raises come with v0.127.
 
 **Sleep — nightly memory maintenance + forgetting** (Path B++): one schedulable writable pass — fold what
 read-only processes queued (usage + journal) → redact credentials in facts stored before v0.99 → **forget** what the
@@ -926,9 +964,12 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   (`accept` / `revoke` / `acceptance` / `active_bindings`, `binding_fingerprint`), the world cache (`read_cache` /
   `update_cache`, `due`), `Authority` (`governing`, `verdict` — what `GraphStore.observe` / `remember` ask),
   `observation`, `governed_predicate`, `format_observe`; `Overlay` (v0.125 — the read-time overlay, `OVERLAY_BUDGET_MS`)
-  and `world_state` (the handoff's observed state). Pure apart from reading the environment and two JSON files;
-  no Kuzu. The graph side: `GraphStore.observe` / `observations` / `remember(authority=)` / `fold_journal(authority=)`,
-  `journal.append_observe`; the CLI's `_world_observe` / `_world_authority`.
+  and `world_state` (the handoff's observed state); law acceptance (`law_fingerprint` / `law_acceptance` /
+  `accept_laws`, keys `law:<id>`). `laws.py` (v0.126): `parse_check` / `evaluate` / `check_cochange` / `law_health` /
+  `load_laws` / `check_laws` / `format_laws`; `builtin.py` (v0.126): `BUILTIN`, `read_builtin`. Pure apart from reading
+  the environment and two JSON files; no Kuzu. The graph side: `GraphStore.observe` / `observations` /
+  `remember(authority=)` / `fold_journal(authority=)` / `variables` / `upsert_variables` / `laws` / `upsert_laws`,
+  `journal.append_observe`; the CLI's `_world_observe` / `_world_authority` / `_law_inputs` / `_law_rows`.
 - **`openwiki/agent.py`** — `RAGAgent`: retrieve top chunks → number them as
   excerpts → a grounded system prompt → `ChatModel` → `RAGAnswer` (answer +
   `Source`s). `<think>…</think>` is stripped; `cited_markers()` reports which
@@ -958,7 +999,9 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
 - **`openwiki/chat_agent.py`** — `WikiAgent`: the multi-turn tool loop (model →
   tool calls → results → model …) with persistent history. Uses `chat_raw()`
   (tool calling) rather than `chat()`.
-- **`openwiki/graph/`** — the Kuzu graph layer. `builder.py` (`GraphBuilder`)
+- **`openwiki/graph/`** — the Kuzu graph layer. `schema.py` (v0.126, ADR-59) is the **table registry**: every node and
+  rel table with its DDL, group (documents / memory / world) and whether it is authoritative; `snapshot` / `restore`
+  keep the authoritative tables without a custom reader across a rebuild. `builder.py` (`GraphBuilder`)
   reads a `Wiki` + `SemanticIndex` and writes a property graph to `output/graph/`
   (Page/Chunk nodes; CHILD_OF/NEXT/PART_OF/SIMILAR_TO/REFERENCES edges; an HNSW
   index on `Chunk.emb` — embeddings **mirrored** from the index, which stays

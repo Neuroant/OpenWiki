@@ -139,7 +139,9 @@ under a synthetic top-level outline node (its name) so slugs don't collide.
   - [ ] a third input class next to sources and sessions: `[[environments]]` — a repository, or a running twin reached by URL on localhost (`url` + `token_env`; `command` only for twins OpenWiki owns) — feeding a world tier the graph keeps across rebuilds like the memory tier
   - [x] nested modes: Wiki ⊂ Second Brain ⊂ World model (`[world] enabled` requires `[memory] enabled`; v0.125: unset,
     on for a Second Brain with a code source — nothing written until a person accepts a binding)
-  - [ ] authoritative tables in one registry that the rebuild's snapshot / restore reads; `Session.kind`
+  - [x] authoritative tables in one registry that the rebuild's snapshot / restore reads (v0.126: `graph/schema.py`,
+    arc42 ADR-59); `Session.kind` still derived from the session id
+  - [x] `[[world.laws]]` — rules over the variables, proposed until a person accepts them (v0.126, ADR-58)
   - [ ] twins as separate processes, OpenWiki their client; actions through OpenWiki's `act`
   - [x] between sessions the loop runs as a scheduled `owiki world observe` (v0.124: `owiki schedule install --task
     world-observe`, every 15 minutes)

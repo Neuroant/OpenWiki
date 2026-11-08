@@ -58,7 +58,8 @@ def world_report(world: World, readings: dict, facts: Optional[list], only=None,
     return {"enabled": world.enabled, "memory": world.memory, "problems": list(world.problems),
             "environments": [{"name": e.name, "kind": e.kind, "where": e.describe(), "subject": e.subject}
                              for e in world.environments],
-            "sensors": sensors, "facts_read": facts is not None, "totals": totals}
+            "sensors": sensors, "facts_read": facts is not None, "totals": totals,
+            "laws": [law.id for law in getattr(world, "laws", [])]}
 
 
 def _every(seconds: int) -> str:
@@ -140,4 +141,6 @@ def format_report(report: dict, project: str = "", show_all: bool = False) -> st
                      f"is accepted, `owiki world observe` closes them, kept as history.")
     else:
         lines.append("No current fact differs from what the sensors read.")
+    if report.get("laws"):                            # Path C (C2.3)
+        lines.append(f"{len(report['laws'])} law(s) declared — `owiki world laws` checks them.")
     return "\n".join(lines)

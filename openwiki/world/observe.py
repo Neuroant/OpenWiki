@@ -98,6 +98,35 @@ def accept(state_dir, bindings, counts: Optional[dict] = None, now: Optional[int
     return [b.id for b in bindings]
 
 
+LAW_KEY = "law:"                       # a law's acceptance, next to the bindings' (decision 5)
+
+
+def law_fingerprint(law) -> str:
+    """What a person accepted of a law: its kind, its check (or co-change rule) and its environment."""
+    spec = [law.kind, law.described, law.environment]
+    return hashlib.sha256(json.dumps(spec, ensure_ascii=False).encode("utf-8")).hexdigest()[:12]
+
+
+def law_acceptance(law, accepted: dict) -> str:
+    """``accepted`` / ``changed`` (accepted, then edited) / ``proposed`` — a law changes nothing before a person
+    accepts it (decision 5): it is checked and shown, but raises no event and stays out of the handoff."""
+    rec = accepted.get(LAW_KEY + law.id)
+    if not rec:
+        return "proposed"
+    return "accepted" if rec.get("fingerprint") == law_fingerprint(law) else "changed"
+
+
+def accept_laws(state_dir, laws, results: Optional[dict] = None, now: Optional[int] = None) -> list:
+    """Record a person's acceptance of ``laws`` (with the result they saw: ``results[id]``) → the accepted ids."""
+    now = int(time.time() if now is None else now)
+    data = read_accepted(state_dir)
+    for law in laws:
+        data[LAW_KEY + law.id] = {"fingerprint": law_fingerprint(law), "accepted_at": now,
+                                  "result": str(((results or {}).get(law.id) or ("",))[0])}
+    _write_json(Path(state_dir) / ACCEPTED_FILE, data)
+    return [law.id for law in laws]
+
+
 def revoke(state_dir, ids) -> list:
     data = read_accepted(state_dir)
     gone = [i for i in ids if data.pop(i, None) is not None]
@@ -343,7 +372,9 @@ def world_state(project, graph=None) -> Optional[dict]:
                     continue
                 differs += sum(1 for f in facts if b.governs_text(_text(f))
                                and compare(b, f, entry.get("value")) == "differs")
-        return {"bindings": rows, "differs": differs, "problems": list(world.problems)}
+        laws = [{"id": law["id"], "last_result": law.get("last_result"), "detail": law.get("detail")}
+                for law in (graph.laws() if graph is not None else []) if law.get("status") == "accepted"]
+        return {"bindings": rows, "differs": differs, "laws": laws, "problems": list(world.problems)}
     except Exception:
         return None
 

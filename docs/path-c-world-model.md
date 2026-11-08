@@ -961,6 +961,20 @@ A law without a check stays text; it still informs the world slice. Declarative 
 expression for a generic checker, and a reviewed test function only where an expression can't say it. A check counts
 only after it has failed on a planted violation.
 
+**As built (v0.126, C2.3).** A law is a `[[world.laws]]` table: `id`, `text`, `kind`, `check`, `violation` (the
+planted violation — values, or `{ value, age }` for `age()`) and optionally an `example` it must hold on. The check is
+parsed with `ast` against a whitelist and interpreted node by node — names (a sensor's id, `-` written `_`, or a
+built-in variable such as `git_dirty` or `wiki_commits_behind`), constants, comparisons, `and` / `or` / `not`,
+arithmetic, lists for `in`, and the functions `implies`, `age`, `ver`, `num`, `lower`, `len`, `abs`, `min`, `max`,
+`minutes`, `hours`, `days`; attributes, subscripts, lambdas, comprehensions, keyword arguments and unknown functions are
+refused, `eval` is never called. A missing value, a type mismatch or a non-boolean result is *unknown*, never a
+violation. "Every released version has a tag" is the convention `ver(version) == ver(release) or age(version) <
+days(1)`. A co-change law (`when` ⇒ `then` within `window` commits) checks the git history. A law is *proposed* until a
+person accepts it with `owiki world accept ID` (pinned to its fingerprint, as a binding is — decision 5); before that it
+is checked and shown but reports nothing, and a co-change law reports over the recent history (its dry run), watching
+only the commits after its acceptance once accepted. Results are written on change by the observe pass; `owiki world
+laws` checks them now.
+
 ### 7.3 Extraction and review
 
 Candidate laws come from one model call per page whose sentences look like rules, pre-filtered by patterns (*must,
@@ -1246,6 +1260,13 @@ note per stage and in a measurements section (§18) created with C0's results.
   touch a governed variable, the world slice judged more helpful than today's context at equal size (paired,
   significant); on the playground, every planted violation (a fader above unity, a value outside its range) raises an
   event and the interlock refuses the write.
+- **Landed (v0.126, 2026-11-08):** the tables of §5.2 in one registry (`graph/schema.py`, arc42 ADR-59) — created
+  lazily on older graphs, kept across a rebuild, carried by `--full` as standard COGX kinds (decision 14); a variable
+  per binding the observe pass reads, `DESCRIBED_IN` its file's page; laws as declarative checks (§7.2, as built
+  there; arc42 ADR-58) — proposed until a person accepts them, each proven on a planted violation; the environment's
+  built-in variables (git, Ollama, the wiki's freshness, the capture workers) for the handoff and the laws. On
+  openwiki-dev the first slice's laws are proposed and hold. Events, extraction and the world slice follow (v0.127 –
+  v0.128).
 
 ### C3 — Predict and verify changes
 - **Goal:** the model is judged by what it predicts — the full loop on the repository (§3.4).
@@ -1372,6 +1393,19 @@ frozen captures, must equal the recorded baseline.
 - **13 — a contradicting late belief:** stored as a zero-length interval, never current, and reported as a
   discrepancy (§6.4, rule 5).
 
+**Decided on 2026-11-08** (by the user, at C2's gate)
+
+- **10 — the world tools' names:** a `world_*` family — `world_entities`, `world_state`, `world_history`, `world_laws`,
+  later `world_predict`, `world_explain`, `world_act` — the contract's verbs one to one (§10.1), apart from the wiki and
+  memory tools, as the CLI's `owiki world …`.
+- **14 — the new tables in COGX:** standard record kinds with OpenWiki's payload under `metadata.openwiki`, as facts and
+  themes already travel: variables as `entity` records, laws as `memory` records (their text as content), events (and
+  later predictions and actions) as `memory` records tagged with their table — all of it lossless in `--full`, which is
+  also the rolling backup; the default (believed) export adds only accepted laws, as plain memories.
+- **15 — the web UI:** a *Welt* tab — sensors (accepted or not, their dry run, accept / revoke by a person), variables,
+  laws, events, with room for predictions and twins — while the Gedächtnis tab's Pflege panel keeps what needs a
+  person (law candidates, events to resolve) and links into it.
+
 **Open — for the user**
 
 1. *(The first environment — decided 2026-11-07, above.)*
@@ -1394,12 +1428,12 @@ frozen captures, must equal the recorded baseline.
    laws? *Recommended: system-made first; the tool once C3's scores show what the agent's own predictions would add.*
 9. Where the slow loop runs: inside `sleep`, or as its own `owiki world review`? *Recommended: inside `sleep`, like
    forgetting and consolidation, with `owiki world review` for runs on demand.*
-10. Names of the world tools (`wiki_state` and siblings, or a `world_*` family).
+10. *(The world tools' names — decided 2026-11-08, above.)*
 11. Bindings only in the manifest, or also proposed from memory (§6.2)?
 12. The telemetry store, SQLite or Parquet (C4).
 13. *(Whether a contradicting late belief is stored — decided 2026-11-07, above.)*
-14. How laws, predictions, actions and events travel in COGX (e.g. in `--full` metadata).
-15. A *Welt* (world) tab in the web UI, or panels inside Gedächtnis.
+14. *(How the new tables travel in COGX — decided 2026-11-08, above.)*
+15. *(A *Welt* tab or panels — decided 2026-11-08, above.)*
 
 ## 16. Relationship to the current code
 

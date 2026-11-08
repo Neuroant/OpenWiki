@@ -132,7 +132,57 @@ def to_cogx(snap: dict, themes=(), theme_members=None, identity: str = "",
     if identity:
         records.append({"kind": "memory_block", "external_system": SYSTEM, "external_id": "identity",
                         "label": "identity", "value": identity})
-    return records
+    return records + world_records(snap.get("world") or {})
+
+
+# Path C (decision 14, 2026-11-08): the world model's node tables, their COGX kind and external-id prefix, and the
+# edges each one starts — carried in its record's metadata, as theme members and SUPERSEDES already are.
+WORLD_TABLES = {"Variable": ("entity", "variable"), "Law": ("memory", "law"), "Event": ("memory", "event")}
+WORLD_EDGES = {"Variable": ("DESCRIBED_IN",), "Law": ("CONSTRAINS", "FROM_PAGE", "FROM_FACT"),
+               "Event": ("CONCERNS", "FROM_LAW", "INVOLVES")}
+
+
+def world_records(world: dict) -> list:
+    """The world model's tables (``GraphStore.world_snapshot``) as standard COGX kinds — variables as ``entity``
+    records, laws and events as ``memory`` records — with each row and the edges it starts under
+    ``metadata.openwiki`` (``table``, ``row``, one id list per edge type), so ``from_cogx`` restores them
+    losslessly and another system still reads a law's text as a memory."""
+    out = []
+    for table, (kind, prefix) in WORLD_TABLES.items():
+        for row in world.get(table) or []:
+            meta = {"table": table, "row": dict(row)}
+            for edge in WORLD_EDGES[table]:
+                targets = sorted(str(e["to"]) for e in world.get(edge) or () if e.get("from") == row.get("id"))
+                if targets:
+                    meta[edge.lower()] = targets
+            rec = {"kind": kind, "external_system": SYSTEM, "external_id": f"{prefix}:{row['id']}",
+                   "metadata": {SYSTEM: meta}}
+            if table == "Variable":
+                rec["name"] = row.get("label") or row["id"]
+            elif table == "Law":
+                rec.update(content=row.get("text") or row.get("check") or row["id"],
+                           categories=["law", row.get("kind") or "law"])
+            else:
+                rec.update(content=f"{row.get('kind') or 'event'}: {row.get('detail') or ''}".strip(),
+                           categories=["event", row.get("kind") or "event"], created_at=iso(row.get("at")))
+            out.append(_clean(rec))
+    return out
+
+
+def world_from_records(records: list) -> dict:
+    """``world_records`` read back: ``{table: rows}`` as ``GraphStore.restore_world`` takes them."""
+    world: dict = {}
+    for r in records:
+        meta = (r.get("metadata") or {}).get(SYSTEM) or {}
+        table = meta.get("table")
+        if r.get("external_system") != SYSTEM or table not in WORLD_TABLES or not isinstance(meta.get("row"), dict):
+            continue
+        row = dict(meta["row"])
+        world.setdefault(table, []).append(row)
+        for edge in WORLD_EDGES[table]:
+            for target in meta.get(edge.lower()) or ():
+                world.setdefault(edge, []).append({"from": row.get("id"), "to": target})
+    return world
 
 
 def write_cogx(records: list, out, embedding_model: Optional[str] = None, notes=()) -> Path:
@@ -269,22 +319,37 @@ def from_cogx(records: list) -> tuple:
                            "summary": r.get("content") or "", "members": list(meta.get("members") or [])})
     snap = {"sessions": sorted(sessions.values()), "assertions": assertions, "asserts": asserts,
             "supersedes": supersedes, "themes": sorted(themes, key=lambda t: t["id"])}
+    world = world_from_records(records)
+    if world:                                         # Path C: an archive from v0.126 on
+        snap["world"] = world
     return snap, foreign
 
 
 def believed_only(snap: dict) -> dict:
     """The part of a snapshot OpenWiki believes: retracted (``expired_at``) and forgotten facts left out —
     what another system should import, since COGX has no notion of either. Current, past (a closed
-    interval — COGX ``invalid_at``) and planned facts stay."""
+    interval — COGX ``invalid_at``) and planned facts stay; of the world model only the accepted laws (decision
+    14) — variables come from a manifest, events are working state."""
     keep = [a for a in snap.get("assertions", []) if a[11] is None and a[15] is None]
     ids = {a[0] for a in keep}
     used = {a[4] for a in keep}
-    return {"sessions": [s for s in snap.get("sessions", []) if s[0] in used],
-            "assertions": keep,
-            "asserts": [e for e in snap.get("asserts", []) if e[1] in ids],
-            "supersedes": [e for e in snap.get("supersedes", []) if e[0] in ids and e[1] in ids],
-            "themes": [dict(t, members=[m for m in t.get("members", []) if m in ids])
-                       for t in snap.get("themes", [])]}
+    world = snap.get("world") or {}
+    laws = [law for law in world.get("Law") or () if law.get("status") == "accepted"]
+    law_ids = {law["id"] for law in laws}
+    believed_world = {"Law": laws} if laws else {}         # Path C: accepted laws only — no variables, no events
+    for edge in ("CONSTRAINS", "FROM_PAGE", "FROM_FACT"):
+        rows = [e for e in world.get(edge) or () if e.get("from") in law_ids and (edge != "FROM_FACT" or e["to"] in ids)]
+        if rows:
+            believed_world[edge] = rows
+    out = {"sessions": [s for s in snap.get("sessions", []) if s[0] in used],
+           "assertions": keep,
+           "asserts": [e for e in snap.get("asserts", []) if e[1] in ids],
+           "supersedes": [e for e in snap.get("supersedes", []) if e[0] in ids and e[1] in ids],
+           "themes": [dict(t, members=[m for m in t.get("members", []) if m in ids])
+                      for t in snap.get("themes", [])]}
+    if believed_world:
+        out["world"] = believed_world
+    return out
 
 
 def current_facts(snap: dict) -> tuple:

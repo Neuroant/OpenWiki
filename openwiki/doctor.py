@@ -334,6 +334,12 @@ def check_world(project) -> list:
         out.append(Check("world", "info", f"{states.count('not accepted')} sensor(s) not accepted — they write and "
                                           "correct nothing", "`owiki world status` shows each one's dry run; "
                                                              "`owiki world accept ID` activates it"))
+    from .world.observe import law_acceptance
+    laws = [law_acceptance(law, read_accepted(project.state_dir)) for law in world.laws if law.health == "ok"]
+    if laws.count("proposed") or laws.count("changed"):     # Path C (C2.3)
+        out.append(Check("world", "info", f"{laws.count('proposed') + laws.count('changed')} law(s) not accepted — "
+                                          "checked and shown, they report nothing",
+                         "`owiki world laws` shows each one's result; `owiki world accept ID` accepts it"))
     return out
 
 

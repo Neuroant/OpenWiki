@@ -145,6 +145,7 @@ class GraphStore:
         self._lock = threading.RLock()
         self._reinforce_ensured = False   # lazy REINFORCES-table check (old graphs)
         self._memory_ensured = False      # lazy Session/Assertion-table check (old graphs)
+        self._world_ensured = False       # lazy Variable/Law/Event-table check (graphs before v0.126)
         self._page_comm: Optional[dict] = None   # lazy {slug: community_id} for coloring
         # B1 read-path reinforcement: a read-only store may append usage to a sidecar
         # log (opt-in via log_usage) that a writable process folds in (fold_usage).
@@ -2051,6 +2052,7 @@ class GraphStore:
             "asserts": [list(r) for r in self._read_or_empty(
                 "MATCH (s:Session)-[:ASSERTS]->(a:Assertion) RETURN s.id, a.id;")],
             "supersedes": [list(r) for r in self._supersedes_edges()],
+            "world": self.world_snapshot(),            # Path C (C2.1): variables, laws, events
         }
 
     def restore_memory(self, snap: dict, embedder=None) -> int:
@@ -2068,6 +2070,8 @@ class GraphStore:
                              "(merge imports go through remember instead)")
         rows = [list(a) for a in snap.get("assertions", [])]
         if not rows:
+            if snap.get("world"):
+                self.restore_world(snap["world"])
             return 0
         dim = self._assertion_dim()
         # no embedding, or one of another model (another dimension) → embed with this graph's embedder
@@ -2091,7 +2095,159 @@ class GraphStore:
             assignment = {aid: t["id"] for t in themes for aid in t.get("members", []) if aid in ids}
             self.upsert_memory_concepts(assignment, {t["id"]: t.get("summary") or "" for t in themes},
                                         {t["id"]: t.get("label") or "" for t in themes})
+        if snap.get("world"):            # Path C: the variables, laws (a person's review) and events
+            self.restore_world(snap["world"])
         return kept
+
+    # -- the world model's tables (Path C, C2.1) --------------------------------------------------------
+
+    def _ensure_world_schema(self) -> None:
+        """Create the world model's tables (``graph/schema.py``, group *world*) in a graph built before v0.126 —
+        lazily, once. A read-only connection can't: its reads just find them absent."""
+        if self._world_ensured:
+            return
+        from . import schema
+        ok = True
+        for table in schema.tables(group=schema.WORLD):
+            try:
+                self._exec(table.create(0, if_not_exists=True))
+            except Exception:        # read-only, or an older graph without the table an edge points to
+                ok = False
+        self._world_ensured = ok or not self.writable
+
+    _VARIABLE_FIELDS = ("label", "subject", "predicate", "unit", "sensor", "kind", "environment")
+
+    def variables(self) -> list:
+        """The world model's variables (``Variable`` rows as dicts, with ``pages`` = the slugs that describe them)."""
+        fields = ("id",) + self._VARIABLE_FIELDS + ("created_at", "updated_at")
+        rows = [dict(zip(fields, r)) for r in self._read_or_empty(
+            "MATCH (v:Variable) RETURN " + ", ".join(f"v.{f}" for f in fields) + " ORDER BY v.id;")]
+        pages: dict = {}
+        for vid, slug in self._read_or_empty("MATCH (v:Variable)-[:DESCRIBED_IN]->(p:Page) RETURN v.id, p.slug;"):
+            pages.setdefault(vid, []).append(slug)
+        for r in rows:
+            r["pages"] = sorted(pages.get(r["id"], []))
+        return rows
+
+    def upsert_variables(self, variables, now: Optional[int] = None, dry_run: bool = False) -> dict:
+        """Path C (C2.2): one ``Variable`` per accepted binding (``Binding.variable``) — merged on its id, the
+        attribute key its observations carry, and written only when new or changed; ``DESCRIBED_IN`` links it to the
+        page of each file it reads (a code corpus titles a page by its path). ``dry_run`` counts without writing.
+        Returns ``{"added", "updated", "unchanged"}``."""
+        out = {"added": 0, "updated": 0, "unchanged": 0}
+        variables = [v for v in variables or () if v.get("id")]
+        if not variables:
+            return out
+        if not dry_run and not self.writable:
+            raise RuntimeError("GraphStore is read-only; open it writable to write variables.")
+        now = int(now if now is not None else time.time())
+        known = {v["id"]: v for v in self.variables()}
+        wanted = {p for v in variables for p in v.get("paths") or ()}
+        by_title: dict = {}
+        if wanted:
+            for slug, title in self._read_or_empty("MATCH (p:Page) RETURN p.slug, p.title;"):
+                path = str(title or "").replace("\\", "/")
+                if path in wanted:
+                    by_title.setdefault(path, []).append(slug)
+        for v in variables:
+            row = {f: v.get(f) for f in self._VARIABLE_FIELDS}
+            old = known.get(v["id"])
+            pages = sorted({s for p in v.get("paths") or () for s in by_title.get(p, ())})
+            if old is not None and all(old.get(f) == row[f] for f in self._VARIABLE_FIELDS) \
+                    and set(pages) <= set(old["pages"]):
+                out["unchanged"] += 1
+                continue
+            out["added" if old is None else "updated"] += 1
+            if dry_run:
+                continue
+            self._ensure_world_schema()
+            self._exec("MERGE (v:Variable {id: $id}) ON CREATE SET v.created_at = $t SET "
+                       + ", ".join(f"v.{f} = ${f}" for f in self._VARIABLE_FIELDS) + ", v.updated_at = $t;",
+                       dict(row, id=v["id"], t=now))
+            for slug in pages:
+                self._exec("MATCH (v:Variable {id: $id}), (p:Page {slug: $slug}) MERGE (v)-[:DESCRIBED_IN]->(p);",
+                           {"id": v["id"], "slug": slug})
+        return out
+
+    _LAW_FIELDS = ("text", "kind", "check", "origin", "status", "health", "last_result", "detail")
+
+    def laws(self) -> list:
+        """The world model's laws (``Law`` rows as dicts, ``variables`` = the ids they constrain)."""
+        fields = ("id",) + self._LAW_FIELDS + ("last_checked", "created_at", "updated_at")
+        rows = [dict(zip(fields, r)) for r in self._read_or_empty(
+            "MATCH (l:Law) RETURN " + ", ".join(f"l.{f}" for f in fields) + " ORDER BY l.id;")]
+        links: dict = {}
+        for lid, vid in self._read_or_empty("MATCH (l:Law)-[:CONSTRAINS]->(v:Variable) RETURN l.id, v.id;"):
+            links.setdefault(lid, []).append(vid)
+        for r in rows:
+            r["variables"] = sorted(links.get(r["id"], []))
+        return rows
+
+    def upsert_laws(self, laws, now: Optional[int] = None, sync: bool = False, dry_run: bool = False,
+                    retire_missing: bool = True) -> dict:
+        """Path C (C2.3): the laws with their latest result — ``{"id", "text", "kind", "check", "origin", "status",
+        "health", "last_result", "detail", "variables"}`` each — merged on the id and written only when more than the
+        check time changed; ``sync`` (the sleep pass) also stamps ``last_checked`` on the unchanged ones. ``CONSTRAINS``
+        links a law to the variables it reads that exist. A manifest law no longer declared is *retired*, not deleted
+        (``retire_missing``). ``dry_run`` counts without writing. Returns ``{"added", "changed", "unchanged",
+        "retired"}``."""
+        out = {"added": 0, "changed": 0, "unchanged": 0, "retired": 0}
+        laws = [law for law in laws or () if law.get("id")]
+        if not dry_run and not self.writable:
+            raise RuntimeError("GraphStore is read-only; open it writable to write laws.")
+        now = int(now if now is not None else time.time())
+        known = {law["id"]: law for law in self.laws()}
+        variables = {v["id"] for v in self.variables()}
+
+        def write(query: str, params: dict) -> None:
+            if not dry_run:
+                self._ensure_world_schema()
+                self._exec(query, params)
+        for law in laws:
+            row = {f: law.get(f) for f in self._LAW_FIELDS}
+            old = known.get(law["id"])
+            links = sorted(set(law.get("variables") or ()) & variables)
+            if old is not None and all(old.get(f) == row[f] for f in self._LAW_FIELDS) \
+                    and set(links) <= set(old["variables"]):
+                out["unchanged"] += 1
+                if sync:
+                    write("MATCH (l:Law {id: $id}) SET l.last_checked = $t;", {"id": law["id"], "t": now})
+                continue
+            out["added" if old is None else "changed"] += 1
+            write("MERGE (l:Law {id: $id}) ON CREATE SET l.created_at = $t SET "
+                  + ", ".join(f"l.{f} = ${f}" for f in self._LAW_FIELDS) + ", l.last_checked = $t, l.updated_at = $t;",
+                  dict(row, id=law["id"], t=now))
+            for vid in links:
+                write("MATCH (l:Law {id: $id}), (v:Variable {id: $v}) MERGE (l)-[:CONSTRAINS]->(v);",
+                      {"id": law["id"], "v": vid})
+        if retire_missing:
+            declared = {law["id"] for law in laws}
+            for old in known.values():
+                if old["id"] not in declared and old.get("origin") == "manifest" and old.get("status") != "retired":
+                    out["retired"] += 1
+                    write("MATCH (l:Law {id: $id}) SET l.status = 'retired', l.updated_at = $t;",
+                          {"id": old["id"], "t": now})
+        return out
+
+    def world_snapshot(self) -> dict:
+        """The world model's authoritative tables — variables, laws, events and their edges — as ``schema.snapshot``
+        rows: what B0 keeps across a rebuild and ``memory export --full`` carries. Read-only."""
+        from . import schema
+        return schema.snapshot(self._rows, schema.present_columns(self._rows))
+
+    def restore_world(self, snap: Optional[dict]) -> dict:
+        """Write ``world_snapshot`` rows back (writable): nodes merged on their key, edges where both ends exist —
+        an edge to a page or an assertion this graph doesn't hold is left out. Returns ``{table: rows}``."""
+        from . import schema
+        if not snap:
+            return {}
+        if not self.writable:
+            raise RuntimeError("GraphStore is read-only; open it writable to restore the world model.")
+        self._ensure_world_schema()
+        known = {"Page": {r[0] for r in self._read_or_empty("MATCH (p:Page) RETURN p.slug;")},
+                 "Assertion": {r[0] for r in self._read_or_empty("MATCH (a:Assertion) RETURN a.id;")}}
+        with self._lock:
+            return schema.restore(self._exec, snap, known)
 
     def _assertion_dim(self) -> Optional[int]:
         """The embedding dimension the Assertion table was created with (``None`` if unknown)."""

@@ -92,6 +92,32 @@ class Binding:
             return ", ".join(p.get("paths") or []) or "the test suite"
         return ""
 
+    def variable(self) -> dict:
+        """Path C (C2.2): the ``Variable`` this binding observes — its id is the attribute key the binding's
+        observations carry (``sensor:<id>``), ``paths`` the files it reads (a code corpus has a page for each, its
+        ``DESCRIBED_IN``). ``kind``: version, count, state or setting."""
+        p = self.params
+        raw = (p.get("paths") or p.get("path")) if self.type == "count" else p.get("path")
+        paths = [raw] if isinstance(raw, str) else list(raw or [])
+        paths = [q[2:] if q.startswith("./") else q for q in (str(x).replace("\\", "/") for x in paths)
+                 if "*" not in q and "?" not in q]
+        wording = f"{self.subject} {self.predicate} {self.object}".lower()
+        named = str(p.get("name") or p.get("key") or "")
+        if (self.type == "git" and p.get("read") == "latest-tag") or re.search(VERSION_PREDICATES, wording) or (
+                self.type in ("py-constant", "toml-key") and "version" in named):
+            kind = "version"
+        elif self.type in ("count", "pytest-collect") or (self.type == "git" and p.get("read") in
+                                                          ("dirty", "ahead", "behind")):
+            kind = "count"
+        elif self.type in ("py-constant", "toml-key", "file-pattern"):
+            kind = "setting"
+        else:
+            kind = "state"
+        return {"id": f"sensor:{self.id}", "label": f"{self.subject} {self.predicate}".strip(),
+                "subject": self.subject, "predicate": self.predicate, "unit": "",
+                "sensor": f"{self.type} {self.target()}".strip(), "kind": kind, "environment": self.environment,
+                "paths": paths}
+
     def governs_text(self, text: str) -> bool:
         """Does this binding govern a fact worded ``text`` (``"subject | predicate | object"``)?"""
         if not self.governs or not re.search(self.governs, text, re.I):
@@ -105,6 +131,7 @@ class World:
     memory: bool = False
     environments: list = field(default_factory=list)
     bindings: list = field(default_factory=list)
+    laws: list = field(default_factory=list)          # Path C (C2.3): world.laws.Law, the manifest's rules
     problems: list = field(default_factory=list)      # validation errors — one line each
 
     def environment(self, name: str) -> Optional[Environment]:
@@ -372,6 +399,11 @@ def load_world(project) -> World:
     for env in world.environments:
         world.bindings += [b for b in default_bindings(env, single=len(repos) == 1) if b.id not in taken]
         world.bindings += [b for b in declared if b.environment == env.name]
+    from .builtin import BUILTIN
+    from .laws import load_laws
+    world.laws, problems = load_laws(getattr(project, "world_laws", []), {b.id for b in world.bindings} | set(BUILTIN),
+                                     world.environments)
+    world.problems += problems
     return world
 
 

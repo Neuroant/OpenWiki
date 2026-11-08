@@ -34,6 +34,7 @@ except ImportError as exc:  # pragma: no cover
 
 from ..search import SemanticIndex
 from ..wiki import Wiki
+from . import schema
 
 logger = logging.getLogger(__name__)
 
@@ -158,6 +159,9 @@ class GraphBuilder:
                 "reinforces": self._read_rows(
                     conn, "MATCH (a:Page)-[r:REINFORCES]->(b:Page) "
                           "RETURN a.slug, b.slug, r.weight, r.last_seen;"),
+                # Path C (C2.1): every other authoritative table of the registry — variables, laws, events
+                "world": schema.snapshot(lambda q: _all_rows(conn, q), schema.present_columns(
+                    lambda q: _all_rows(conn, q))),
             }
         finally:
             conn.close()
@@ -165,8 +169,17 @@ class GraphBuilder:
         return snap if any(snap.values()) else None
 
     def _restore_memory(self, conn, snap: Optional[dict], dim: int) -> tuple:
-        """Re-insert a snapshot into the fresh schema (``restore_memory_snapshot``)."""
-        return restore_memory_snapshot(conn, snap, dim, self._existing_page_slugs(conn))
+        """Re-insert a snapshot into the fresh schema (``restore_memory_snapshot``), then the world model's tables
+        (``schema.restore``) — edges only where both ends survived the rebuild."""
+        slugs = self._existing_page_slugs(conn)
+        result = restore_memory_snapshot(conn, snap, dim, slugs)
+        if snap and snap.get("world"):
+            kept = {r[0] for r in self._read_rows(conn, "MATCH (a:Assertion) RETURN a.id;")}
+            counts = schema.restore(lambda q, params: conn.execute(q, parameters=params), snap["world"],
+                                    {"Page": set(slugs), "Assertion": kept})
+            if counts:
+                logger.info("preserved world model: %s", ", ".join(f"{n} {t}" for t, n in sorted(counts.items())))
+        return result
 
     @staticmethod
     def _read_rows(conn, query: str) -> list:
@@ -183,64 +196,9 @@ class GraphBuilder:
     # -- schema ---------------------------------------------------------
 
     def _create_schema(self, conn, dim: int) -> None:
-        conn.execute(
-            "CREATE NODE TABLE Page("
-            "slug STRING, title STRING, level INT64, "
-            "pdf_start INT64, pdf_end INT64, seq INT64, PRIMARY KEY(slug));"
-        )
-        conn.execute(
-            f"CREATE NODE TABLE Chunk("
-            f"id STRING, page_slug STRING, text STRING, emb FLOAT[{dim}], PRIMARY KEY(id));"
-        )
-        conn.execute("CREATE REL TABLE CHILD_OF(FROM Page TO Page);")
-        conn.execute("CREATE REL TABLE NEXT(FROM Page TO Page);")
-        conn.execute("CREATE REL TABLE PART_OF(FROM Chunk TO Page);")
-        conn.execute("CREATE REL TABLE SIMILAR_TO(FROM Page TO Page, score DOUBLE);")
-        # labels = the citation phrases ("Abschnitt 1.6", JSON list) the web UI links inline (ADR-28)
-        conn.execute("CREATE REL TABLE REFERENCES(FROM Page TO Page, labels STRING);")
-        conn.execute("CREATE NODE TABLE Entity(key STRING, name STRING, type STRING, "
-                     "description STRING, aliases STRING, PRIMARY KEY(key));")
-        conn.execute("CREATE REL TABLE MENTIONS(FROM Page TO Entity);")
-        # Typed Entity->Entity relations (Direction B) — always created, empty without
-        # --relations, so store code degrades gracefully (as with Entity/MENTIONS).
-        conn.execute("CREATE REL TABLE RELATED_TO(FROM Entity TO Entity, "
-                     "predicate STRING, weight INT64, pages STRING);")
-        # Consolidation layer (populated by `openwiki communities`, empty otherwise),
-        # so store code degrades gracefully — as with Entity/MENTIONS above.
-        conn.execute("CREATE NODE TABLE Community("
-                     "id INT64, label STRING, summary STRING, size INT64, PRIMARY KEY(id));")
-        conn.execute("CREATE REL TABLE IN_COMMUNITY(FROM Page TO Community);")
-        # Usage-memory overlay: reinforced page↔page edges that decay over time
-        # (empty until `reinforce()` runs; see openwiki/graph/decay.py).
-        conn.execute("CREATE REL TABLE REINFORCES(FROM Page TO Page, weight DOUBLE, last_seen INT64);")
-        # v0.112: git co-changes between the pages of a code corpus (empty for other corpora)
-        conn.execute("CREATE REL TABLE CO_CHANGED(FROM Page TO Page, count INT64, weight DOUBLE, last INT64);")
-        # Remembered tier (Path B, B2/B3/B6): sessions + reified assertions (empty until
-        # `remember()` runs; see openwiki/graph/memory.py). Assertions carry a mirrored
-        # embedding so `recall()` can brute-force cosine over them.
-        # B7 bi-temporal: valid time (valid_from/valid_to — when the fact held in the world) +
-        # transaction time (created_at/expired_at — when we recorded / stopped believing it);
-        # cardinality "many" = a multi-valued predicate (values coexist, no supersession);
-        # forgotten_at/forgotten = the sleep pass archived it (when / why) — kept, out of every view.
-        conn.execute("CREATE NODE TABLE Session(id STRING, created_at INT64, session_date INT64, "
-                     "PRIMARY KEY(id));")
-        conn.execute(
-            f"CREATE NODE TABLE Assertion(id STRING, subject STRING, predicate STRING, "
-            f"object STRING, session_id STRING, created_at INT64, "
-            f"confidence DOUBLE, last_seen INT64, valid_from INT64, valid_to INT64, "
-            f"expired_at INT64, cardinality STRING, attr STRING, source STRING, "
-            f"forgotten_at INT64, forgotten STRING, emb FLOAT[{dim}], PRIMARY KEY(id));")
-        conn.execute("CREATE REL TABLE ASSERTS(FROM Session TO Assertion);")
-        # B4/B7 provenance: (n)-[:SUPERSEDES]->(o) = n closed or retracted o's validity
-        # (same subject+predicate, different object). 'Current' is decided by the B7
-        # validity columns; nothing is deleted, so the history stays queryable.
-        conn.execute("CREATE REL TABLE SUPERSEDES(FROM Assertion TO Assertion);")
-        # B5 consolidation ("sleep"): topical MemoryConcept summaries over clusters of current
-        # assertions (populated by `openwiki consolidate`, empty otherwise). Like Community, a
-        # *derived* view — recomputed by the sleep pass, not snapshotted across rebuilds.
-        conn.execute("CREATE NODE TABLE MemoryConcept("
-                     "id INT64, label STRING, summary STRING, size INT64, created_at INT64, PRIMARY KEY(id));")
-        conn.execute("CREATE REL TABLE CONSOLIDATES(FROM MemoryConcept TO Assertion);")
+        """Every table of the registry (``graph/schema.py``): the documents, the remembered tier, the world model."""
+        for table in schema.TABLES:
+            conn.execute(table.create(dim))
 
     # -- nodes / structural edges --------------------------------------
 
@@ -419,6 +377,15 @@ def insert_cochanges(conn, edges) -> int:
             rows.get_next()
             n += 1
     return n
+
+
+def _all_rows(conn, query: str) -> list:
+    """Run a read query and return every row (raises when the query fails — ``schema.present_columns`` needs that)."""
+    res = conn.execute(query)
+    rows = []
+    while res.has_next():
+        rows.append(res.get_next())
+    return rows
 
 
 def restore_memory_snapshot(conn, snap: Optional[dict], dim: int, page_slugs=None) -> tuple:

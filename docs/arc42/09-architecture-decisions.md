@@ -1302,6 +1302,57 @@ Brain with a code source.**
   release has a tag* reports the gap; the overlay corrects only what an accepted binding governs, and the review list
   shrinks only by that share (408 → 403 on the dev memory).
 
+### ADR-58
+**Laws are declarative checks, proven on a planted violation and accepted by a person.**
+*(2026-11-08, v0.126; applies [ADR-51](#adr-51) (declarative first); decision 5 of `path-c-world-model.md` §15)*
+- **Context:** C2 makes rules checkable — the version file equals `__version__`, every release gets a tag, a CLI
+  change is documented (`path-c-world-model.md` §7). A check that runs code from a manifest would be code execution; a
+  check nobody has seen fail may be one that can't; and a rule that fires wrongly teaches people to ignore it (§12's
+  hard part).
+- **Decision:** (1) **A law is data**: `[[world.laws]]` with a `check` in a small expression language — parsed with
+  `ast` against a whitelist (names, constants, comparisons, boolean and arithmetic operators, lists, and a dozen
+  functions: `implies`, `age`, `ver`, …), interpreted node by node, never `eval`'d; a missing value or a type mismatch
+  is *unknown*, never a violation. A co-change law checks the git history instead. (2) **Proven before trusted**: every
+  law carries a planted violation it must fail on, and may carry an example it must hold on; a law whose check can't
+  fail is reported and never evaluated. (3) **A person accepts**: a law is *proposed* until `owiki world accept ID`
+  records it, pinned to its fingerprint (as a binding is — ADR-56); before that it is checked and shown but reports
+  nothing, and a co-change law's result over the recent history is its dry run — once accepted it watches only the
+  commits after the acceptance. (4) **Laws only report**: a violation changes no fact and remedies nothing (decision 5);
+  C2.6 turns it into an event. Their sensors are read without acceptance, since a law writes no fact.
+- **Alternatives:** Python test functions as laws — code execution from a manifest; a reviewed test function stays for
+  what an expression can't say (§2.2); `eval` with a restricted namespace — escapable; laws active as soon as declared —
+  the agent writes manifests too, and decision 5 leaves laws to a person; a co-change law over the whole history after
+  acceptance — it would report the past the person already accepted.
+- **Consequences:** + On openwiki-dev the first slice's laws (C0.6) — `version-in-code`, `release-tagged` and a
+  co-change rule (`cli.py` ⇒ `CLAUDE.md` within three commits, 82 changes in the history and none missed) — are proposed
+  and hold; the whitelist refuses attributes, subscripts, lambdas, comprehensions, keyword arguments and unknown
+  functions. − A law is as good as the variables it reads; laws extracted from documents (C2.4) and law proposals from
+  `CO_CHANGED` come with the review queue; false alarms are measured with C2.11.
+
+### ADR-59
+**One registry for the graph's tables: what a rebuild keeps and the export carries is declared once.**
+*(2026-11-08, v0.126; refines [ADR-16](#adr-16) (B0: the graph keeps the remembered tier); decision 14 of
+`path-c-world-model.md` §15)*
+- **Context:** since B0 a doc rebuild has kept the remembered tier through a hand-kept list of tables. Path C adds
+  tables of its own (variables, laws, events; predictions and actions later), each of them a person's or a sensor's work
+  that no rebuild can recompute — a hand-kept list would forget one.
+- **Decision:** (1) `graph/schema.py` declares every node and rel table once — its DDL, its group (documents, memory,
+  world) and whether it is *authoritative*. The builder creates the schema from it; `GraphStore` creates the world
+  tables lazily on older graphs (`CREATE … IF NOT EXISTS`). (2) B0's snapshot keeps every authoritative table: the
+  memory tables through their own reader (every schema generation since v0.48), the rest through a generic snapshot /
+  restore (nodes merged on their key, an edge kept only where both ends survived the rebuild). (3) **COGX (decision
+  14)**: standard record kinds with OpenWiki's payload under `metadata.openwiki` — variables as `entity` records, laws
+  and events as `memory` records, each row and the edges it starts in its record; `--full` (also the rolling backup)
+  carries them losslessly, the default export only the accepted laws.
+- **Alternatives:** a second hand-kept list for the world tables — the failure mode it replaces; moving the memory
+  tables onto the generic reader — it would lose the generation fallbacks that read graphs back to v0.48; an
+  OpenWiki-only file in the archive — outside the format, invisible to other systems.
+- **Consequences:** + A new table is declared once and every path follows; on a copy of openwiki-dev (built before
+  v0.126) the observe pass created the world tables in place; a rebuild keeps variables, laws and events (an edge to a
+  page that is gone goes with it); an archive round-trips them. − The memory tables keep a reader of their own;
+  Cognee's validator was last run against facts, episodes, memories and memory blocks (v0.102) — the `entity` records
+  use the same minimal envelope.
+
 ---
 *Chapter complete. The Path-B agent-memory direction landed via ADR-14/15/16/17/18/19; the graph then
 deepened (ADR-22 typed relations + relation-aware GraphRAG, ADR-23 entity resolution), gained
@@ -1333,5 +1384,6 @@ project concept — environments as a third input class next to sources and sess
 deployed — a scheduled `owiki world observe` between sessions, twins as running services reached by URL, the world
 tier native; ADR-55 gives OpenWiki its operations — a run log, scheduled tasks, rolling backups, a health check;
 ADR-56 lets an accepted sensor's observation outrank memory's beliefs in the facts it governs, and ADR-57 applies it
-at read time and turns the world model on for code projects. New significant decisions should be appended here with
-the next id.*
+at read time and turns the world model on for code projects; ADR-58 makes laws declarative checks proven on a planted
+violation and accepted by a person, and ADR-59 declares the graph's tables in one registry. New significant decisions
+should be appended here with the next id.*

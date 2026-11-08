@@ -145,3 +145,34 @@ def test_the_hook_preview_shows_exactly_what_the_hook_injects(tmp_path, monkeypa
         assert recall["explain"]["k"] == 2 and all("parts" in f for f in recall["facts"])
     finally:
         store.close()
+
+
+def test_the_hook_preview_marks_what_the_overlay_replaced(tmp_path, monkeypatch):
+    """Path C (C1.6): a fact the world model's overlay replaced is "ersetzt", not "cut by the budget"."""
+    import time
+
+    from openwiki import cli
+    from openwiki.world.bindings import VERSION, Binding, Environment, World
+    from openwiki.world.observe import Overlay, accept, read_accepted
+    from openwiki.world.sensors import Reading
+    app, project, store = _project_app(tmp_path, monkeypatch)
+    release = Binding("release", "repo", "git", params={"read": "latest-tag"}, subject="OpenWiki",
+                      predicate="current release is", object="{value}", governs=r"current release",
+                      belief=f"(?P<value>{VERSION})", every=60)
+    world = World(bindings=[release], environments=[Environment("repo", root=tmp_path)])
+    accept(project.state_dir, [release])
+
+    def overlay(_project):
+        return Overlay(world, read_accepted(project.state_dir), project.state_dir, journal=None,
+                       reader=lambda bid, *a, **kw: Reading(bid, "v0.2.0", int(time.time()), source="git tags"))
+    monkeypatch.setattr(cli, "_world_overlay", overlay)
+    try:
+        d = app.memory_context("Which release is current?")
+        old = next(f for f in d["recalled"] if f["object"] == "v0.1.0")
+        assert not old["shown"] and old["replaced_by"] == "OpenWiki | current release is | v0.2.0"
+        assert "- OpenWiki current release is v0.2.0  (observed just now; git tags)" in d["context"]
+        assert "v0.1.0" not in d["context"]
+        assert d["overlay"]["read"] == ["release"]
+        assert all("replaced_by" not in f for f in d["recalled"] if f["object"] != "v0.1.0")
+    finally:
+        store.close()

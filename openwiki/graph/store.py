@@ -2261,7 +2261,7 @@ class GraphStore:
                     k: int = 16, max_themes: int = 4, max_chars=None,
                     as_of: Optional[int] = None, probes=None, lexical: float = 0.0,
                     temporal: float = 0.0, exclude: Optional[dict] = None, report: Optional[dict] = None,
-                    now: Optional[int] = None, known_at: Optional[int] = None) -> str:
+                    now: Optional[int] = None, known_at: Optional[int] = None, overlay=None) -> str:
         """B6: assemble a session's context for ``query`` from the three memory tiers —
         identity + decay-weighted ``recall`` (activation) + the relevant consolidated themes
         (attractors), optionally fit within a ``max_chars`` budget. Facts carry their validity
@@ -2273,8 +2273,10 @@ class GraphStore:
         (``facts``, ``themes``, ``identity``) and how: ``recalled`` (every recalled fact, its score
         explained — before ``exclude`` and the budget), ``recall`` (the recall's report) and
         ``theme_labels``. ``now`` and ``known_at`` go to ``recall`` — the replay harness (M.1) assembles a prompt's
-        context at its own time. Read-only + **fail-soft** (missing embedder / empty memory → identity only,
-        or ``""``)."""
+        context at its own time. ``overlay`` (Path C, C1.6 — ``world.observe.Overlay``) is applied to the recalled
+        facts before they are assembled: a governed fact that a fresh reading contradicts is replaced by the
+        observation (``report["overlay"]`` = what it did). Read-only + **fail-soft** (missing embedder / empty memory →
+        identity only, or ``""``)."""
         from .memory import assemble_context
         facts = []
         explained: Optional[dict] = {} if report is not None else None
@@ -2288,6 +2290,11 @@ class GraphStore:
             except Exception:      # never let a memory read break the caller
                 facts = []
         recalled = list(facts)
+        if overlay is not None and facts:
+            try:                       # a sensor problem must never cost the context
+                facts = overlay(facts)
+            except Exception:
+                pass
         exclude = exclude or {}
         seen_facts, seen_themes = set(exclude.get("facts") or ()), set(exclude.get("themes") or ())
         facts = [f for f in facts if f["id"] not in seen_facts]
@@ -2301,7 +2308,8 @@ class GraphStore:
         if report is not None:         # what the text holds — a fact the budget cut is not "given"
             report.update({"facts": [f["id"] for f in shown["facts"]], "themes": [t["id"] for t in shown["themes"]],
                            "identity": shown["identity"], "recalled": recalled, "recall": explained or {},
-                           "theme_labels": {t["id"]: t.get("label") for t in themes}})
+                           "theme_labels": {t["id"]: t.get("label") for t in themes},
+                           "overlay": getattr(overlay, "report", None)})
         return text
 
     def hybrid_search(self, vector, k: int = 5) -> list[dict]:

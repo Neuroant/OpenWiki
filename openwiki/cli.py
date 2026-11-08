@@ -4420,14 +4420,33 @@ def hook_probes(project: Project, prompt: str) -> Optional[list]:
                           project.setting("models", "host", DEFAULT_HOST))
 
 
+def _world_overlay(project):
+    """The read-time overlay (Path C, C1.6) for a prompt's context — the accepted bindings — or ``None``. Never
+    raises: a broken world configuration costs the overlay, not the prompt."""
+    if project is None or not getattr(project, "world_enabled", False) or not project.memory_enabled:
+        return None
+    try:
+        from .world.observe import Overlay, read_accepted
+        accepted = read_accepted(project.state_dir)
+        if not accepted:                       # nothing accepted: no sensor setup (a git call) on the hook path
+            return None
+        from .world.bindings import load_world
+        overlay = Overlay(load_world(project), accepted, project.state_dir, journal=journal_path(project.graph_path),
+                          host=project.setting("models", "host", DEFAULT_HOST))
+        return overlay if overlay.active else None
+    except Exception:
+        return None
+
+
 def inject_context(project: Project, graph, embedder, prompt: str, probes=None, exclude=None,
                    report: Optional[dict] = None) -> str:
     """The memory context the inject hook gives ``prompt``: ``context_for`` with the project's identity, fact count,
-    budget and recall aids. Shared with the web UI's hook preview (M4), so the preview shows what the hook does."""
+    budget and recall aids, and the world model's read-time overlay. Shared with the web UI's hook preview (M4), so the
+    preview shows what the hook does."""
     return graph.context_for(prompt, embedder, identity=project.identity, k=project.context_k,
                              max_chars=project.context_budget, probes=probes,
                              lexical=project.lexical_weight, temporal=project.temporal_weight,
-                             exclude=exclude, report=report)
+                             exclude=exclude, report=report, overlay=_world_overlay(project))
 
 
 def _hook_inject(project: Project, payload: dict) -> None:
@@ -4464,7 +4483,10 @@ def _hook_inject(project: Project, payload: dict) -> None:
                       "identity": bool(given.get("identity") or used.get("identity")),
                       "updated": int(time.time())}
         _save_inject_state(project, state)
-    runlog.note(chars=len(context.strip()), facts=len(used.get("facts") or ()))
+    overlay = used.get("overlay") or {}
+    runlog.note(chars=len(context.strip()), facts=len(used.get("facts") or ()),
+                **({"overlay_ms": overlay.get("ms"), "overlaid": len(overlay.get("replaced") or ()),
+                    "sensors_read": len(overlay.get("read") or ())} if overlay else {}))
     if context.strip():
         sys.stdout.write(INJECT_HEADER + context + "\n")
 
@@ -5197,9 +5219,12 @@ def _world_authority(project):
     if project is None or not getattr(project, "world_enabled", False) or not project.memory_enabled:
         return None
     try:
-        from .world.bindings import load_world
         from .world.observe import Authority, active_bindings, read_accepted
-        active = active_bindings(load_world(project), read_accepted(project.state_dir))
+        accepted = read_accepted(project.state_dir)
+        if not accepted:
+            return None
+        from .world.bindings import load_world
+        active = active_bindings(load_world(project), accepted)
         return Authority(active) if active else None
     except Exception:
         return None

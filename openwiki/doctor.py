@@ -226,8 +226,8 @@ def check_schedule(project, probes: Probes) -> list:
     out = []
     sched = probes.scheduler(project.name, project.root)
     for task, spec in sorted(TASKS.items()):
-        if spec["args"][0] == "world" and not getattr(project, "world_enabled", False):
-            continue                                       # the world model's loop: only for a world project
+        if spec["args"][0] == "world" and not _world_active(project):
+            continue                                       # the world model's loop: once a person accepted a sensor
         try:
             info = sched.status(task)
         except Exception as exc:
@@ -321,9 +321,31 @@ def check_world(project) -> list:
     if world.problems:
         return [Check("world", "fail", problem, "fix [[environments]] / [[world.sensors]] in openwiki.toml")
                 for problem in world.problems]
+    from .world.observe import acceptance, read_accepted
     slow = sum(1 for b in world.bindings if b.slow)
-    return [Check("world", "ok", f"{len(world.environments)} environment(s), {len(world.bindings)} sensor(s)"
-                  + (f" ({slow} slow)" if slow else ""), "`owiki world status` reads them")]
+    out = [Check("world", "ok", f"{len(world.environments)} environment(s), {len(world.bindings)} sensor(s)"
+                 + (f" ({slow} slow)" if slow else ""), "`owiki world status` reads them")]
+    states = [acceptance(b, read_accepted(project.state_dir)) for b in world.bindings]
+    if states.count("changed"):
+        out.append(Check("world", "warn", f"{states.count('changed')} sensor(s) changed since accepted — they write "
+                                          "nothing until accepted again", "`owiki world status`, then "
+                                                                          "`owiki world accept ID`"))
+    if states.count("not accepted"):
+        out.append(Check("world", "info", f"{states.count('not accepted')} sensor(s) not accepted — they write and "
+                                          "correct nothing", "`owiki world status` shows each one's dry run; "
+                                                             "`owiki world accept ID` activates it"))
+    return out
+
+
+def _world_active(project) -> bool:
+    """Has a person accepted one of the world model's sensors? (Only then has its scheduled loop work to do.)"""
+    if not getattr(project, "world_enabled", False):
+        return False
+    try:
+        from .world.observe import read_accepted
+        return bool(read_accepted(project.state_dir))
+    except Exception:
+        return False
 
 
 def run_checks(project, probes: Probes, repos=()) -> list:

@@ -1270,6 +1270,38 @@ world tier native.**
   once and must revisit when it changes; facts a sensor can't read stay with people and `wiki_remember`; the dedup in
   recall only removes beliefs that say exactly what an observation says.
 
+### ADR-57
+**The read-time overlay — what a prompt is shown is corrected at once; the world model is on by default for a Second
+Brain with a code source.**
+*(2026-11-08, v0.125; applies [ADR-56](#adr-56) at read time; keeps [ADR-38](#adr-38); decision 5 of
+`path-c-world-model.md` §15)*
+- **Context:** readers can't write (ADR-38), so a governed belief stays in the hook's context until the next writer
+  observes — for a slow sensor up to a day. WM §6.5 planned an overlay; C1's exit (WM §12) — stale facts near zero, a
+  stale belief living one sensor period, the hook at most 300 ms slower at p95, the guards — decides whether the world
+  model turns on without a person asking.
+- **Decision:** (1) **The overlay** — `GraphStore.context_for(…, overlay=)` hands the recalled facts to
+  `world.observe.Overlay`: for the accepted bindings that govern one of them, a fast sensor whose cached reading is
+  older than its period is read at the prompt, *light* (the value without the git processes its provenance costs),
+  within 200 ms in all; the others come from the world cache. A fact that differs is shown as the observation ("…
+  (observed just now; git tags)"), with an id of its own (`obs:<binding>:<value>`); an outdated observation is replaced
+  the same way. A new value is read again in full (when, which commit) and queued as an `observe` op for the next
+  writer — the graph catches up, the context is right at once. Slow sensors stay off the hook path. Fail-soft.
+  (2) **A listed object counts as its length** for a count sensor ("tab bar with Wiki · Hilfe · Tutorial" = 3).
+  (3) **On by default** for a Second Brain with a code source (`[world] enabled` unset): the repository's sensors exist
+  and `owiki world status` shows their dry run, but none writes or corrects anything until a person accepts it
+  (decision 5); `owiki doctor` lists the sensors not accepted; the hook builds no sensors while nothing is accepted.
+- **Alternatives:** writing from the hook — a reader takes no write lock (ADR-38) and the prompt must not wait for one;
+  reading every sensor per prompt — the test count takes seconds; full reads on the hook path — 171 ms against 56 ms;
+  keeping the belief's id — "each fact once per stretch" (v0.107) would hide the correction from a session that had
+  seen the stale fact; on by default everywhere — a document corpus has no repository to observe; accepting the default
+  bindings automatically — decision 5.
+- **Consequences:** + On C0.5's 410 replayed prompts (WM §18.2) stale governed facts fell from 15.1 % of the prompts
+  to 0.5 % (1.2 % if the slow test count wasn't read since the change); the overlay costs 56 ms (p50) where a sensor is
+  due, 1 ms with a fresh cache, against an inject hook of 2.5 s (p50); the guards hold. − The release read from the
+  latest tag lags a release tagged late (one disputed replacement, 4 beliefs ahead of the tag) — C2's law *every
+  release has a tag* reports the gap; the overlay corrects only what an accepted binding governs, and the review list
+  shrinks only by that share (408 → 403 on the dev memory).
+
 ---
 *Chapter complete. The Path-B agent-memory direction landed via ADR-14/15/16/17/18/19; the graph then
 deepened (ADR-22 typed relations + relation-aware GraphRAG, ADR-23 entity resolution), gained
@@ -1299,5 +1331,7 @@ and that language models work at design time, code at run time (§2.2); ADR-52 m
 where possible, cloud where really needed — while Path A stays local (ADR-2); ADR-53 places the world model in the
 project concept — environments as a third input class next to sources and sessions; ADR-54 decides how Path C is
 deployed — a scheduled `owiki world observe` between sessions, twins as running services reached by URL, the world
-tier native; ADR-55 gives OpenWiki its operations — a run log, scheduled tasks, rolling backups, a health check.
-New significant decisions should be appended here with the next id.*
+tier native; ADR-55 gives OpenWiki its operations — a run log, scheduled tasks, rolling backups, a health check;
+ADR-56 lets an accepted sensor's observation outrank memory's beliefs in the facts it governs, and ADR-57 applies it
+at read time and turns the world model on for code projects. New significant decisions should be appended here with
+the next id.*

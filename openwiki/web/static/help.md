@@ -308,7 +308,9 @@ zusätzlich einen **Gedächtnis-Tier**: Fakten, die aus Sitzungen *erinnert* wer
     aber nie die Reihenfolge. Was dafür weichen musste, steht unter **Verdrängt**;
   - **Hook-Vorschau** zeigt, was der Hook dieser Eingabe jetzt in den Prompt einfügen würde — den
     Text samt Kopfzeile, Zeichen gegen das Budget, jeden abgerufenen Fakt mit „im Text" oder
-    „gekürzt" (Budget aufgebraucht) und seiner Bewertung. Bei einer Routine-Eingabe („push", ein
+    „gekürzt" (Budget aufgebraucht) und seiner Bewertung. Mit dem Weltmodell (Pfad C) ersetzt der Hook einen
+    Fakt, dem ein angenommener Sensor gerade widerspricht, durch dessen Lesung — im Text „(observed …)",
+    in der Liste „ersetzt". Bei einer Routine-Eingabe („push", ein
     Slash-Befehl) sagt sie, dass der Hook nichts einfügt. Sie zeigt den Anfang einer Sitzung;
     danach gibt der Hook jeden Fakt nur einmal;
   - **Verlauf** zeigt die ganze Geschichte der passendsten Fakten (jedes Gültigkeitsintervall,

@@ -137,8 +137,10 @@ under a synthetic top-level outline node (its name) so slugs don't collide.
     `world_sensors`, `world_enabled`, `code_paths`; `world.bindings.load_world`), each code source a repository
     environment by default; `[world] enabled` needs `[memory] enabled`; `owiki world status` (read-only)
   - [ ] a third input class next to sources and sessions: `[[environments]]` — a repository, or a running twin reached by URL on localhost (`url` + `token_env`; `command` only for twins OpenWiki owns) — feeding a world tier the graph keeps across rebuilds like the memory tier
-  - [ ] nested modes: Wiki ⊂ Second Brain ⊂ World model (`[world] enabled` requires `[memory] enabled`)
+  - [x] nested modes: Wiki ⊂ Second Brain ⊂ World model (`[world] enabled` requires `[memory] enabled`; v0.125: unset,
+    on for a Second Brain with a code source — nothing written until a person accepts a binding)
   - [ ] authoritative tables in one registry that the rebuild's snapshot / restore reads; `Session.kind`
   - [ ] twins as separate processes, OpenWiki their client; actions through OpenWiki's `act`
-  - [ ] between sessions the loop runs as a scheduled `owiki world observe` (`owiki schedule`, track O)
+  - [x] between sessions the loop runs as a scheduled `owiki world observe` (v0.124: `owiki schedule install --task
+    world-observe`, every 15 minutes)
   - [ ] tracked in `docs/path-c-roadmap.md` (C1.2, C1.12, C1.13, C2.1, C3.1, C3.9)

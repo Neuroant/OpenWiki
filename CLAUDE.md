@@ -48,18 +48,22 @@ the sibling project `G:\Antigravity\ableton-expert-system` as its test playgroun
 its §2.1 is the **main architectural plan** (approved 2026-10-18, ADR-50: the world model as a dynamical system with
 two boundaries), §2.2 adds that twins are programs and that language models work at design time while the twins run
 as code (ADR-51). Its implementation is tracked in `docs/path-c-roadmap.md` (phases M, C0 – C4, P and tracks L and O
-as work packages with gates, status and a log). **State (2026-11-07):** built — track O (operations, v0.121; the
+as work packages with gates, status and a log). **State (2026-11-08):** built — track O (operations, v0.121; the
 nightly `sleep` with a backup runs on openwiki-dev), M.1 (prompts replayed at their own time, `owiki eval --replay`,
 v0.122), M.2 (the guard suite, `owiki eval --guards`, in `main` — its first run caught and fixed undated captures
 inventing dates, path-b-memory §13.37) and M.3 (the private label files, in `main`); measured — the C0 inventory,
 C0.1 – C0.5 (`path-c-world-model.md` §18.1: testable share 43.5 %; nine bindings reach 18 of the 54 labeled stale
 facts on the strictest reading; bindings govern by a pattern over the wording, not B9's attribute groups — §6.2;
-baselines: 13.7 % of the replayed prompts got a stale governed fact, a stale test count lives 4 days). C0 closed with
+baselines: 13.7 % of the replayed prompts got a stale governed fact — 15.1 % with the tab series corrected, §18.2 —, a
+stale test count lives 4 days). C0 closed with
 a **go** on 2026-11-07 (WM §18.1), with the user's decisions 1, 5 and 13 (WM §15: the repository first; facts
 corrected automatically only once a person has accepted a binding's dry run; a contradicting late belief stored,
-never current). **C1 (v0.123, v0.124):** `openwiki/world/` — the built-in sensors, environments and
-bindings, `owiki world status`, and the authority rule — observations outrank beliefs in the facts an accepted binding
-governs (`owiki world observe / accept`, arc42 ADR-56; below); next v0.125 — the overlay, the handoff, the measurement.
+never current). **C1 is done (v0.123 – v0.125):** `openwiki/world/` — the built-in sensors, environments and
+bindings, `owiki world status`, the authority rule — observations outrank beliefs in the facts an accepted binding
+governs (`owiki world observe / accept`, arc42 ADR-56) — and the read-time overlay (ADR-57); measured on the replayed
+prompts (WM §18.2): stale governed facts 15.1 % → 0.5 – 1.2 %, so the world model is on by default for a Second Brain
+with a code source (nothing corrected until a person accepts a binding; below). Next: C2 (laws, drift, the world
+slice — its gate needs decisions 10, 14, 15).
 Paths B and C use language models **hybrid** — local where possible, cloud where really needed — while Path A's
 pipeline stays local (ADR-52 amends ADR-2). Projects gain **environments** — a third input class next to sources and
 sessions; twins run as their own processes with OpenWiki as their client (§2.3, ADR-53; `docs/projects.md` Phase 5) —
@@ -426,12 +430,13 @@ a group `value`, `flags`), `py-constant` (`path`, `name` — `ast`, never import
 lists, nothing written (pytest without its cache or bytecode), values redacted and screened by the P0 policy; a
 sensor never raises. A binding: `id`, `environment` (default: the only one), `type`, its settings, `fact = { subject,
 predicate, object = "…{value}…" }`, `governs` / `excludes` / `belief`, `every` (`"1m"`; `0` = slow passes only).
-Defaults per code source: `version` (pyproject / Cargo / package.json) and `latest-tag` (git), a declared binding of
-the same id replaces one. The status shows, per binding, the current facts it governs as agreeing, **differing — the
-dry run** a person accepts before v0.124 lets an observation close them — or unclear, and flags a binding whose
-`governs` misses its own fact. `[world] enabled` (default off; needs `[memory] enabled`); `owiki doctor` checks the
-configuration. openwiki-dev observes C0.4's first slice (test count, release, latest tag, tabs, build stages, two
-defaults): the first status found the one stale governed fact ("test suite has passing tests 823" vs 831 collected),
+Default per code source: `release` — the latest version tag, else the version file (pyproject / Cargo /
+package.json); a declared binding of the same id replaces it. The status shows, per binding, the current facts it
+governs as agreeing, **differing — the dry run** a person accepts before v0.124 lets an observation close them — or
+unclear, and flags a binding whose `governs` misses its own fact. `[world] enabled` (needs `[memory] enabled`; unset,
+on for a Second Brain with a code source since v0.125, else off); `owiki doctor` checks the configuration and lists
+the sensors not accepted. openwiki-dev observes C0.4's first slice (test count, release, latest tag, tabs, build
+stages, two defaults): the first status found the one stale governed fact ("test suite has passing tests 823" vs 831 collected),
 after C0.4's test-count pattern was narrowed (it governed 10 current facts, 9 only talking about the count).
 
 **Observations and the authority rule (v0.124, arc42 ADR-56)** — a binding writes nothing until a person accepts its
@@ -460,6 +465,27 @@ Session kinds (`memory.session_kind`: sensor / twin / agent / conversation) come
 `release` sensor reads the latest version tag (a version file runs ahead while a release is prepared). Checked on a
 copy of openwiki-dev: accepting the first slice and observing wrote 6 observations, closed 3 stale beliefs and
 confirmed 5; a second pass wrote nothing.
+
+**The read-time overlay (v0.125, arc42 ADR-57)** — the inject hook (and the web UI's hook preview, through
+`cli.inject_context`) corrects what a prompt is shown before the graph has caught up: `context_for(…, overlay=)` hands
+the recalled facts to `world.observe.Overlay` — for the accepted bindings that govern one of them, a fast sensor whose
+cached reading is older than its `every` is read **light** (`sensors.read(…, light=True)`: the value, without the
+`git blame` / tag-date calls of its provenance) within `OVERLAY_BUDGET_MS` (200) in all, the rest come from
+`.openwiki/world-cache.json`; a fact that differs is shown as the observation — `- OpenWiki current release is v0.124.0
+(observed just now; git tags)` — under an id of its own (`obs:<binding>:<value>`, so "each fact once per stretch"
+never hides a correction), an outdated observation likewise, a belief whose observation is shown is dropped; a new
+value is read again in full and queued as an `observe` journal op. Slow sensors never run on the hook path; fail-soft;
+the run log notes `overlay_ms` / `overlaid` / `sensors_read`; with nothing accepted the hook builds no sensors. A
+listed object counts as its length for a count sensor ("Wiki · Hilfe · Tutorial" claims 3 tabs). The session handoff
+shows the observed state (each sensor's last reading, accepted or not, how many remembered facts differ —
+`observe.world_state`). **Measured** on C0.5's 410 replayed prompts with openwiki-dev's six bindings accepted (WM
+§18.2): stale governed facts 15.1 % → **0.5 %** of the prompts (1.2 % if the slow test count wasn't read since the
+change; C0.5's tab series had missed the active tab — its 13.7 % is 15.1 %); 78 of 80 stale facts replaced, the rest
+turn on the release read from the tag (a tag created late); the overlay costs 56 / 59 ms (p50 / p95) where a sensor
+is due, 1 ms with a fresh cache (the hook itself: p50 2.5 s); the review list 408 → 403; the guards hold. So the
+world model is **on by default for a Second Brain with a code source** — its sensors exist and `world status` shows
+their dry run, but nothing is written or corrected until a person accepts a binding (decision 5); `doctor` checks the
+`world-observe` task only once one is.
 
 **Sleep — nightly memory maintenance + forgetting** (Path B++): one schedulable writable pass — fold what
 read-only processes queued (usage + journal) → redact credentials in facts stored before v0.99 → **forget** what the
@@ -895,7 +921,8 @@ PDF ──PDFParser──▶ ParsedDocument (IR) ──▶ JSON / Markdown
   `world_report(world, readings, facts, accepted=)` / `format_report`. `observe.py` (v0.124): acceptance
   (`accept` / `revoke` / `acceptance` / `active_bindings`, `binding_fingerprint`), the world cache (`read_cache` /
   `update_cache`, `due`), `Authority` (`governing`, `verdict` — what `GraphStore.observe` / `remember` ask),
-  `observation`, `governed_predicate`, `format_observe`. Pure apart from reading the environment and two JSON files;
+  `observation`, `governed_predicate`, `format_observe`; `Overlay` (v0.125 — the read-time overlay, `OVERLAY_BUDGET_MS`)
+  and `world_state` (the handoff's observed state). Pure apart from reading the environment and two JSON files;
   no Kuzu. The graph side: `GraphStore.observe` / `observations` / `remember(authority=)` / `fold_journal(authority=)`,
   `journal.append_observe`; the CLI's `_world_observe` / `_world_authority`.
 - **`openwiki/agent.py`** — `RAGAgent`: retrieve top chunks → number them as
@@ -1405,7 +1432,8 @@ also carry a `⏱ latency · tokens · tok/s` line
   pipeline — `source_paths()` is doc-only, `session_paths()` the rest); `memory_enabled`
   is the Wiki-vs-Second-Brain **mode** (`[memory] enabled`, default off). `find_projects(roots, depth, limit)` finds
   project folders below given folders (the web UI's switcher, v0.120). `world_enabled` / `environments` /
-  `world_sensors` / `code_paths()` hold the world model's configuration (Path C, v0.123). Only this
+  `world_sensors` / `code_paths()` hold the world model's configuration (Path C, v0.123; `world_enabled` unset = on for
+  a Second Brain with a code source, v0.125). Only this
   module + `cli.py` (and the web UI's switcher) know about projects; the pipeline stays project-agnostic.
 - **`openwiki/pipeline.py`** — Phase 2 build orchestration *state*: a per-stage
   **fingerprint chain** (`compute_fingerprints`) over `STAGES` (ingest, wiki, index,

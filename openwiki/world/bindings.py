@@ -397,6 +397,13 @@ def _words(text) -> list:
     return re.findall(r"[a-z0-9]+", str(text).lower())
 
 
+def _listed(text) -> int:
+    """How many items an object lists ("Wiki · Hilfe · Tutorial" → 3; prose → 0) — a count sensor reads such a list
+    as the claim of its length, as C0.5's ground truth did (C1.10)."""
+    parts = [p for p in re.split(r"\s*(?:·|,|;|/|\band\b)\s*", str(text or "").split(":", 1)[-1]) if p.strip()]
+    return len(parts) if len(parts) > 1 and all(len(p.split()) <= 3 for p in parts) else 0
+
+
 def compare(binding: Binding, fact: dict, value) -> str:
     """``agrees`` / ``differs`` / ``unclear`` — does the remembered ``fact`` claim the value its sensor read? Its
     claim is the binding's ``belief`` match (in the object first, else anywhere in the wording); with no belief
@@ -407,6 +414,9 @@ def compare(binding: Binding, fact: dict, value) -> str:
         return "agrees" if normalize(value) and normalize(value) in normalize(text) else "unclear"
     m = re.search(binding.belief, obj, re.I) or re.search(binding.belief, text, re.I)
     if not m:
+        listed = _listed(obj)
+        if isinstance(value, int) and not isinstance(value, bool) and listed > 1:
+            return "agrees" if listed == value else "differs"      # "tabs: Wiki · Hilfe · Tutorial" claims 3
         return "unclear"
     claimed = m.group("value") if "value" in m.re.groupindex else (m.group(1) if m.re.groups else m.group(0))
     if isinstance(value, (list, tuple)):

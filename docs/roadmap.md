@@ -1326,7 +1326,12 @@ agreeing, differing, unclear: the dry run a person accepts before v0.124 lets an
 **v0.124 — the authority rule:** once a person accepts a binding (`owiki world accept`), `owiki world observe` —
 scheduled every 15 minutes, and run by `sleep`, the capture worker and the handoff — writes what the sensor read as an
 observed fact and closes the remembered facts it governs that say otherwise (arc42 ADR-56); on a copy of the dev
-memory, 3 stale beliefs closed and 5 confirmed.
+memory, 3 stale beliefs closed and 5 confirmed. **v0.125 — the read-time overlay, C1 done:** the inject hook shows an
+accepted sensor's reading in place of a remembered fact that says otherwise — fast sensors read at the prompt within
+200 ms, the rest from the world cache — before the graph has caught up (arc42 ADR-57); the handoff shows the observed
+state. Measured on C0.5's replayed prompts: stale governed facts 15.1 % → 0.5 % of the prompts (C0.5's 13.7 % had
+missed a tab), +56 ms where a sensor is due, the guards unmoved — so the world model is on by default for a Second
+Brain with a code source, with nothing corrected until a person accepts a binding (`path-c-world-model.md` §18.2).
 
 Path B remembers what was *said*; its weak spot is state that changes without anyone saying so (versions, counts,
 running services, plans that got done). Path C lets the world write too: built-in sensors over git, files, code,
@@ -1337,7 +1342,7 @@ what a prompt touches. At the centre is one loop — predict, act, observe, comp
 per task, nightly, human) — that turns every observation into a test of the model and corrects automatically only
 what is deterministic (`path-c-world-model.md` §3.4). Repository first; machines (the LCU 9000 laser unit) federated with the sibling project
 Cognitive Substrate through one MCP contract. Staged C0 (an inventory, no code) → C4 (a physical twin), each with a
-measured exit. Nothing built yet — design in **[`docs/path-c-world-model.md`](path-c-world-model.md)**.
+measured exit. C0 and C1 are done (v0.123 – v0.125) — design in **[`docs/path-c-world-model.md`](path-c-world-model.md)**.
 
 **Test playground — the Ableton Expert System** (`G:\Antigravity\ableton-expert-system`,
 `github.com/Neuroant/Ableton-Live-Expert-System`). A sibling project with a **working two-way digital twin** of Ableton

@@ -340,9 +340,11 @@ def environment(env: HandoffEnv, log_offset: Optional[int] = None, repo_root=Non
         graph = f"not readable — {env.graph_note or 'unavailable'}"
     else:
         graph = "not built yet"
+    from .world.observe import world_state
     return {"ollama": ollama_state(env.host, [env.chat_model, env.embed_model]), "graph": graph,
             "wiki": wiki_freshness(env.project, repo_root), "workers": capture_workers(state_dir),
             "hook_log": {"offset": size, "since": log_offset, "problems": problems},
+            "world": world_state(env.project, env.graph),          # Path C (C1.13): the observed state
             "openwiki": __version__, "python": platform.python_version()}
 
 
@@ -845,6 +847,16 @@ def _env_lines(env: dict) -> list:
     problems = (env.get("hook_log") or {}).get("problems") or []
     out.append("- Hook log: " + ("problems:" if problems else "no problems"))
     out += [f"  - {line}" for line in problems]
+    world = env.get("world")
+    if world:                                          # Path C (C1.13): what the sensors last read
+        rows = world.get("bindings") or []
+        accepted = sum(1 for r in rows if r.get("acceptance") == "accepted")
+        read = [f"{r['id']} {r['value']} ({_when(r['read_at'])})" for r in rows if r.get("value") not in (None, "")]
+        out.append(f"- Observed state ({accepted} of {len(rows)} sensor(s) accepted): "
+                   + ("; ".join(read) if read else "nothing read yet — `owiki world status`"))
+        if world.get("differs"):
+            out.append(f"  - {world['differs']} remembered fact(s) differ from what the sensors read — "
+                       + ("`owiki world observe` closes them" if accepted else "`owiki world status` lists them"))
     out.append(f"- openwiki {env.get('openwiki')} · Python {env.get('python')}")
     return out
 

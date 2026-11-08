@@ -78,11 +78,15 @@ def test_file_and_code_sensors_read_values_and_when_they_changed(repo):
     (repo / "pyproject.toml").write_text('[project]\nname = "demo"\nversion = "1.3.0"\n', encoding="utf-8")
     moved = _read("file-pattern", {"path": "pyproject.toml", "pattern": r'^version = "(?P<value>[^"]+)"'}, repo)
     assert moved.value == "1.3.0" and moved.changed_at is None                   # not committed yet
+    light = _read("py-constant", {"path": "pkg/mod.py", "name": "STAGES"}, repo, light=True)
+    assert light.value == ("a", "b") and (light.changed_at, light.commit) == (None, "")   # the value only, no blame
 
 
 def test_git_sensor(repo):
     tag = _read("git", {"read": "latest-tag"}, repo)
     assert (tag.value, tag.quality) == ("v1.2.0", "complete") and tag.changed_at
+    light = _read("git", {"read": "latest-tag"}, repo, light=True)
+    assert light.value == "v1.2.0" and (light.changed_at, light.commit) == (None, "")
     assert _read("git", {"read": "branch"}, repo).value == "main"
     head = _read("git", {"read": "head"}, repo)
     assert len(head.value) >= 7 and head.changed_at == COMMITTED
@@ -351,6 +355,17 @@ fact = {{ subject = "a", predicate = "b", object = "c" }}
         assert expected in text, expected
 
 
+def test_the_world_model_is_on_by_default_for_a_second_brain_with_code(tmp_path, repo):
+    def project(name, body, memory=True):
+        (tmp_path / name).mkdir()
+        return _project(tmp_path / name, body, memory=memory)
+    assert project("a", _source(repo)).world_enabled                             # memory + a repository: on
+    assert not project("b", _source(repo), memory=False).world_enabled            # Wiki mode: off
+    assert not project("c", "").world_enabled                                     # no code source: off
+    assert not project("d", _source(repo) + "[world]\nenabled = false\n").world_enabled
+    assert project("e", "[world]\nenabled = true\n").world_enabled                # explicit wins
+
+
 def test_world_needs_memory(tmp_path, repo):
     world = load_world(_project(tmp_path, _source(repo) + "[world]\nenabled = true\n", memory=False))
     assert any("[world] enabled needs [memory] enabled" in p for p in world.problems)
@@ -359,8 +374,17 @@ def test_world_needs_memory(tmp_path, repo):
 
 def test_doctor_reports_the_world_config(tmp_path, repo):
     from openwiki import doctor
-    good = doctor.check_world(_project(tmp_path, _source(repo) + "[world]\nenabled = true\n"))
-    assert [(c.level, c.message) for c in good] == [("ok", "1 environment(s), 1 sensor(s)")]
+    project = _project(tmp_path, _source(repo) + "[world]\nenabled = true\n")
+    good = doctor.check_world(project)
+    assert [(c.level, c.message) for c in good] == [
+        ("ok", "1 environment(s), 1 sensor(s)"), ("info", "1 sensor(s) not accepted — they write and correct nothing")]
+    from openwiki.world.observe import accept
+    accept(project.state_dir, load_world(project).bindings)
+    assert [c.level for c in doctor.check_world(project)] == ["ok"]
+    changed = _project(tmp_path, _source(repo) + '[world]\nenabled = true\n\n[[world.sensors]]\nid = "release"\n'
+                                                'environment = "repo"\ntype = "git"\nread = "head"\n'
+                                                'fact = { subject = "repo", predicate = "is at", object = "{value}" }\n')
+    assert [c.level for c in doctor.check_world(changed)] == ["ok", "warn"]           # edited after acceptance
     bad = doctor.check_world(_project(tmp_path, _source(repo) + '[world]\nenabled = true\n\n[[world.sensors]]\n'
                                                                'id = "x"\ntype = "shell"\n'))
     assert [c.level for c in bad] == ["fail"] and "unknown type 'shell'" in bad[0].message
@@ -389,6 +413,10 @@ def test_what_a_governed_fact_claims():
                             "object": "ingest → wiki → index → graph → memory"}, observed) == "agrees"
     assert compare(stages, {"subject": "build", "predicate": "runs stages",
                             "object": "ingest, wiki, index, graph"}, observed) == "differs"
+    listing = {"subject": "web UI", "predicate": "has tab bar with", "object": "Wiki · Hilfe · Tutorial"}
+    assert compare(tabs, listing, 10) == "differs" and compare(tabs, listing, 3) == "agrees"   # a list claims its length
+    assert compare(tabs, {"subject": "web UI", "predicate": "shows", "object": "a tab per source, then more"},
+                   10) == "unclear"                                      # prose is no list
     plain = Binding("p", "e", "count")                                   # no belief: contained or unclear, never a guess
     assert compare(plain, {"subject": "a", "predicate": "has", "object": "12 items"}, 12) == "agrees"
     assert compare(plain, {"subject": "a", "predicate": "has", "object": "many items"}, 12) == "unclear"

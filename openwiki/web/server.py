@@ -1020,9 +1020,19 @@ class WikiWebApp:
                                              temporal=self._temporal_weight(), report=report)
         shown = set(report.get("facts") or ())
         labels = report.get("theme_labels") or {}
+        overlay = report.get("overlay") or {}
+        replaced = {r.get("was"): r.get("now") or "" for r in overlay.get("replaced") or ()}
+
+        def recalled(f):                    # Path C (C1.6): a fact the overlay replaced isn't "cut by the budget"
+            row = dict(f, shown=f["id"] in shown)
+            was = f"{f.get('subject')} | {f.get('predicate')} | {f.get('object')}"
+            if was in replaced:
+                row["replaced_by"] = replaced[was]       # "" — dropped: its observation is shown already
+            return row
         return {"query": query, "context": context, "identity": identity, "budget": budget, "k": k,
                 "hook": hook, "chore": chore, "header": header if context.strip() else "",
-                "recalled": [dict(f, shown=f["id"] in shown) for f in report.get("recalled") or ()],
+                "recalled": [recalled(f) for f in report.get("recalled") or ()],
+                "overlay": {"read": overlay.get("read") or [], "ms": overlay.get("ms")} if overlay else None,
                 "themes": [{"id": t, "label": labels.get(t)} for t in report.get("themes") or ()],
                 "identity_shown": bool(report.get("identity")), "probes": probes or [],
                 "explain": report.get("recall") or {}}

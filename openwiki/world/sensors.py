@@ -135,6 +135,11 @@ def blame(root, rel, line: int) -> tuple:
     return (int(m.group(1)) if m else None), commit
 
 
+def _provenance(ctx, root, rel, line: int) -> tuple:
+    """``blame`` — unless the read is light (``read(…, light=True)``: the value only, no git process)."""
+    return (None, "") if ctx.get("light") else blame(root, rel, line)
+
+
 def blame_time(root, rel, line: int) -> Optional[int]:
     """The committer time of the commit that last changed line ``line`` of ``rel`` (``None``: not committed, unknown)."""
     return blame(root, rel, line)[0]
@@ -182,6 +187,8 @@ def _read_git(root, params, ctx) -> dict:
     if read == "branch":
         return {"value": _git(top, "rev-parse", "--abbrev-ref", "HEAD") or "", "source": "git branch"}
     if read == "head":
+        if ctx.get("light"):
+            return {"value": _git(top, "rev-parse", "--short", "HEAD") or "", "source": "git HEAD"}
         stamp = _git(top, "log", "-1", "--format=%ct")
         return {"value": _git(top, "rev-parse", "--short", "HEAD") or "", "source": "git HEAD",
                 "changed_at": int(stamp) if stamp and stamp.isdigit() else None,
@@ -191,6 +198,8 @@ def _read_git(root, params, ctx) -> dict:
         versions = [t for t in tags if _VERSION_TAG.fullmatch(t)]
         if not versions:
             raise SensorError("no version tag")
+        if ctx.get("light"):
+            return {"value": versions[0], "source": "git tags"}
         stamp = _git(top, "for-each-ref", f"refs/tags/{versions[0]}", "--format=%(creatordate:unix)")
         return {"value": versions[0], "source": "git tags",
                 "changed_at": int(stamp) if stamp and stamp.isdigit() else None,
@@ -220,7 +229,7 @@ def _read_file_pattern(root, params, ctx) -> dict:
         raise SensorError(f"{rel}: the pattern matched nothing")
     group = "value" if "value" in rx.groupindex else (1 if rx.groups else 0)
     line = text.count("\n", 0, m.start(group)) + 1
-    changed, commit = blame(root, rel, line)
+    changed, commit = _provenance(ctx, root, rel, line)
     return {"value": m.group(group).strip(), "changed_at": changed, "commit": commit, "source": f"{rel}:{line}"}
 
 
@@ -243,7 +252,7 @@ def _read_py_constant(root, params, ctx) -> dict:
         value = ast.literal_eval(found.value)
     except ValueError:
         raise SensorError(f"{rel}: {name} is not a literal")
-    changed, commit = blame(root, rel, found.lineno)
+    changed, commit = _provenance(ctx, root, rel, found.lineno)
     return {"value": _plain(value), "changed_at": changed, "commit": commit, "source": f"{rel}:{found.lineno}"}
 
 
@@ -258,7 +267,7 @@ def _read_toml_key(root, params, ctx) -> dict:
     last = re.escape(key.split(".")[-1])
     m = re.search(rf"^\s*[\"']?{last}[\"']?\s*=", text, re.M)
     line = text.count("\n", 0, m.start()) + 1 if m else None
-    changed, commit = blame(root, rel, line) if line else (None, "")
+    changed, commit = _provenance(ctx, root, rel, line) if line else (None, "")
     return {"value": _plain(cur), "changed_at": changed, "commit": commit,
             "source": f"{rel}:{line}" if line else str(rel)}
 
@@ -414,11 +423,13 @@ def _screen(value) -> tuple:
 
 
 def read(sensor: str, type_: str, params: dict, root=None, now=None, host: Optional[str] = None,
-         runner: Optional[Callable] = None) -> Reading:
-    """Read one sensor → a :class:`Reading` (never raises: a failure is a ``failed`` reading with its reason)."""
+         runner: Optional[Callable] = None, light: bool = False) -> Reading:
+    """Read one sensor → a :class:`Reading` (never raises: a failure is a ``failed`` reading with its reason).
+    ``light`` = the value only: no provenance (``changed_at`` / ``commit``), which costs a git process or more — the
+    read-time overlay's way on the hook path (C1.10)."""
     t0 = time.perf_counter()
     stamp = int(time.time()) if now is None else int(now)
-    ctx = {"host": host, "runner": runner or run_command}
+    ctx = {"host": host, "runner": runner or run_command, "light": light}
 
     def done(**kw) -> Reading:
         return Reading(sensor=sensor, time=stamp, ms=round((time.perf_counter() - t0) * 1000), **kw)

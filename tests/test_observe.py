@@ -265,6 +265,104 @@ def test_world_observe_is_a_scheduled_task():
     assert "<Interval>PT15M</Interval>" in xml and "world observe --due --fast" in xml and "PT10M" in xml
 
 
+# -- the read-time overlay (C1.6) --------------------------------------------------------------------------
+
+def _overlay(tmp_path, binding=TESTS, value=860, accepted=True, budget_ms=200, calls=None, quality="complete",
+             now=1_000):
+    from openwiki.world.bindings import Environment
+    from openwiki.world.observe import Overlay
+
+    def reader(bid, type_, params, root=None, host=None, light=False):
+        if calls is not None:
+            calls.append(bid + (" light" if light else ""))
+        return Reading(bid, value, now, quality=quality, source="pytest --collect-only",
+                       changed_at=None if light else 900, commit="" if light else "abc1234 Add tests")
+    world = World(bindings=[binding], environments=[Environment("repo", root=tmp_path)])
+    if accepted:
+        accept(tmp_path, [binding])
+    return Overlay(world, read_accepted(tmp_path), tmp_path, journal=tmp_path / "journal.jsonl",
+                   budget_ms=budget_ms, now=now, reader=reader)
+
+
+def _hit(subject, predicate, obj, session="s1", source=None, hid="h1"):
+    return {"id": hid, "subject": subject, "predicate": predicate, "object": obj, "session_id": session,
+            "source": source, "valid_from": 1, "valid_to": None}
+
+
+def test_overlay_replaces_what_a_fresh_reading_contradicts(tmp_path):
+    from openwiki.graph.journal import read_journal
+    fast = dataclasses.replace(TESTS, type="count", every=60)                 # a fast sensor, so the hook may read it
+    calls = []
+    ov = _overlay(tmp_path, binding=fast, calls=calls)
+    hits = [_hit("test suite", "has passing tests", "848", hid="a"), _hit("CI", "runs", "860 tests", hid="b"),
+            _hit("the parser", "is", "fast", hid="c")]
+    out = ov(hits)
+    assert calls == ["tests light", "tests"]                    # no cache yet: read now — light, then in full
+    assert [h["id"] for h in out] == ["obs:tests:860 tests", "b", "c"]
+    assert out[0]["object"] == "860 tests" and out[0]["overlay"] == "just now; pytest --collect-only"
+    assert fact_line(out[0]) == "- OpenWiki test suite collects 860 tests  (observed just now; pytest --collect-only)"
+    assert ov.report["replaced"][0]["was"] == "test suite | has passing tests | 848" and ov.report["queued"] == 1
+    assert [r["op"] for r in read_journal(tmp_path / "journal.jsonl")] == ["observe"]   # for the next writer
+    assert read_cache(tmp_path)["tests"]["rendered"] == "860"   # for the change: when and in which commit
+    assert read_cache(tmp_path)["tests"]["commit"] == "abc1234 Add tests"
+    again = _overlay(tmp_path, binding=fast, calls=calls)       # within `every`: the cached reading, no read
+    calls.clear()
+    assert again(hits)[0]["object"] == "860 tests" and calls == [] and again.report["queued"] == 0
+    later = _overlay(tmp_path, binding=fast, calls=calls, now=1_060)
+    assert later(hits)[0]["object"] == "860 tests" and calls == ["tests light"]   # due, unchanged: light only
+    assert later.report["queued"] == 0 and read_cache(tmp_path)["tests"]["commit"] == "abc1234 Add tests"
+    old_obs = _hit("OpenWiki", "test suite collects", "848 tests", session="sensor:tests", source="observed", hid="o")
+    out = again([old_obs, _hit("test suite", "has passing tests", "848", hid="a")])
+    assert [h["object"] for h in out] == ["860 tests"]          # an outdated observation too; the belief then goes
+
+
+def test_overlay_leaves_alone_what_it_must_not_touch(tmp_path):
+    belief = [_hit("test suite", "has passing tests", "848")]
+    assert _overlay(tmp_path / "a", accepted=False).active == []                  # not accepted: no overlay
+    (tmp_path / "b").mkdir()
+    calls = []
+    slow = _overlay(tmp_path / "b", calls=calls)              # pytest-collect is slow: never read by the hook
+    assert slow(belief) == belief and calls == []
+    (tmp_path / "c").mkdir()
+    broken = _overlay(tmp_path / "c", binding=dataclasses.replace(TESTS, type="count", every=60), quality="failed")
+    assert broken(belief) == belief                            # a failed reading changes nothing
+    (tmp_path / "d").mkdir()
+    ov = _overlay(tmp_path / "d", binding=dataclasses.replace(TESTS, type="count", every=60))
+    ov.reader = lambda *a, **k: 1 / 0
+    assert ov(belief) == belief                                # fail-soft
+
+
+def test_context_shows_the_correction_even_once_per_stretch(tmp_path):
+    g = _graph(tmp_path)
+    try:
+        g.remember("s1", [MemoryFact("test suite", "has passing tests", "848")], _Emb(),
+                   session_date=T("2025-01-10"), now=T("2025-01-10"))
+        query = "how many tests does the test suite have"
+        plain = g.context_for(query, _Emb(), k=5)
+        assert "has passing tests 848" in plain
+        belief_id = next(r["id"] for r in g._load_assertions() if r["object"] == "848")
+        (tmp_path / "w").mkdir()
+        ov = _overlay(tmp_path / "w", binding=dataclasses.replace(TESTS, type="count", every=60))
+        report = {}
+        text = g.context_for(query, _Emb(), k=5, exclude={"facts": [belief_id]}, overlay=ov, report=report)
+        assert "OpenWiki test suite collects 860 tests  (observed just now" in text and "848" not in text
+        assert report["overlay"]["replaced"] and "obs:tests:860 tests" in report["facts"]
+    finally:
+        g.close()
+
+
+def test_the_handoff_shows_the_observed_state():
+    from openwiki.handoff import _env_lines
+    from openwiki.world.observe import world_state
+    env = {"ollama": {"reachable": True, "host": "h", "models": {}}, "graph": "readable", "world": {
+        "bindings": [{"id": "tests", "value": "860", "read_at": 1_700_000_000, "acceptance": "accepted"},
+                     {"id": "tabs", "value": None, "read_at": None, "acceptance": "not accepted"}], "differs": 2}}
+    lines = "\n".join(_env_lines(env))
+    assert "- Observed state (1 of 2 sensor(s) accepted): tests 860 (" in lines
+    assert "2 remembered fact(s) differ from what the sensors read — `owiki world observe` closes them" in lines
+    assert world_state(None) is None
+
+
 def _git(cwd, *args):
     subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
 

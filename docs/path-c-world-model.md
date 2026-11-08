@@ -907,6 +907,18 @@ a recalled fact in a governed attribute whose fresh observation differs is repla
 observation — "OpenWiki current release is v0.120.0 (observed just now: pyproject.toml)" — and the observation is
 queued as an `observe` op for the next writer. The context is right at once; the graph catches up within minutes.
 
+**As built (v0.125, C1.6).** `GraphStore.context_for(…, overlay=)` hands the recalled facts to `world.observe.Overlay`
+before the budget. For the accepted bindings that govern one of them, a fast sensor whose cached reading is older than
+its period is read — *light*, the value without the git processes provenance costs — within 200 ms in all; the others
+come from the world cache (`.openwiki/world-cache.json`). A recalled fact that differs is replaced by the observation
+("… (observed just now; git tags)"), an outdated observation too, and a belief whose observation is already shown
+goes. A replacement has an id of its own (`obs:<binding>:<value>`), so the hook's "each fact once per stretch" (v0.107)
+never hides a correction. A value the cache didn't hold is read once more in full — when it changed and in which
+commit — and queued as an `observe` op. Slow sensors (`pytest-collect`) are never read by the hook; their reading comes
+from the last observe pass. Fail-soft: any error leaves the facts as recalled. The run log notes what the overlay did
+(`overlay_ms`, `overlaid`, `sensors_read`). Measured in §18.2: +56 ms (p50) where a sensor is due, +1 ms with a fresh
+cache.
+
 ### 6.6 Safety
 
 - **No shell.** Built-in types only; file paths confined to the project's sources and repository; HTTP to localhost
@@ -1213,6 +1225,12 @@ note per stage and in a measurements section (§18) created with C0's results.
 - **Landed (v0.124, 2026-11-07):** observed facts and the authority rule (§6.4, arc42 ADR-56), a person's acceptance
   before a binding writes, `owiki world observe` written on change and scheduled every 15 minutes, attribution to the
   commit that made a value. On a copy of openwiki-dev: 6 observations, 3 stale beliefs closed, 5 confirmed.
+- **Landed (v0.125, 2026-11-08): the exit holds** — the read-time overlay (§6.5) and the observed state in the session
+  handoff; on C0.5's replayed prompts stale governed facts fell from 15.1 % of the prompts (the tab series corrected)
+  to 0.5–1.2 %, a stale belief lives one sensor period (60 s; the slow test count until the next observe pass, in
+  practice the nightly `sleep`), the hook's overlay costs 56 ms (p50) where a sensor is due, the review list shrinks by
+  its governed share, the guards hold (§18.2). So the world model is on by default for a Second Brain with a code
+  source — nothing corrected before a person accepts a binding (decision 5). The handoff's other probes move to C2.
 
 ### C2 — Laws, drift and the world slice
 - **Goal:** rules and decisions become checkable, and the context is built around what a prompt touches.
@@ -1654,10 +1672,10 @@ the world no longer matched it then.
 
 **1 — Governed facts in the injected context.** 210 of the 6,328 injected facts (3.3 %) were governed, in 141 of the
 410 prompts (34 %). Of the 105 that could be judged, **68 were stale at the prompt's time (65 %)**, and **56 prompts
-(13.7 %) got at least one stale governed fact** — but they were few facts, injected again and again: 8 distinct stale
-facts among 16 judged. "web UI · is versioned · 0.6.0" was given to prompts for two weeks after v0.6.0, a three-tab
-"tab bar with Wiki · Hilfe · Tutorial" long after the UI had more, the four-stage build after `memory` became the
-fifth. Not judged: 41 running states (the port, "server running" — no history to compare with), 30 facts from before
+(13.7 %) got at least one stale governed fact** (62, 15.1 %, with the tab series corrected — §18.2) — but they were
+few facts, injected again and again: 8 distinct stale facts among 16 judged. "web UI · is versioned · 0.6.0" was given
+to prompts for two weeks after v0.6.0, a three-tab "tab bar with Wiki · Hilfe · Tutorial" long after the UI had more,
+the four-stage build after `memory` became the fifth. Not judged: 41 running states (the port, "server running" — no history to compare with), 30 facts from before
 the repository's first commit, 34 statements about history phrased as state ("owiki · has release · v0.6.0" said in
 September).
 
@@ -1677,9 +1695,9 @@ stale belief's lifetime is unbounded today exactly where nobody records the chan
 
 **3 — The testable share:** 43.5 % (C0.3).
 
-**What C1 has to beat:** stale governed facts in **13.7 % of prompts** (65 % of the governed facts injected); a stale
-belief about the test count living **4 days** (median, up to 58), about the UI or the build **weeks to months**. C1's
-exit asks for near zero and one sensor period.
+**What C1 has to beat:** stale governed facts in **13.7 % of prompts** (15.1 % corrected, §18.2; 65 % of the governed
+facts injected); a stale belief about the test count living **4 days** (median, up to 58), about the UI or the build
+**weeks to months**. C1's exit asks for near zero and one sensor period.
 
 **Caveats.** Ground truth comes from git, so running states are not judged; the test count is judged by its change, not
 its value; a fact's moment is uncertain by up to a day; the replay's memory is valid time as of 6 h before each prompt
@@ -1709,3 +1727,83 @@ defaults; the runtime-view headings, arc42's risk rows and the web UI's port aft
 with excludes, activated by an accepted dry run; observations outrank beliefs only in governed facts. The exit (§12)
 measured against C0.5: stale governed facts in the replayed prompts from 13.7 % to near zero; a stale belief's life in
 a governed attribute at most one sensor period; the inject hook's p95 at most 300 ms slower; the guards unmoved.
+
+### 18.2 C1 — Observe, don't remember (2026-11-08)
+
+**How.** C0.5's 410 replayed prompts again (§18.1), each injected fact in a governed attribute judged twice at the
+prompt's time: by C0.5's ground truth (git history) and by C1 as configured on openwiki-dev — its six bindings (the
+test count, the release from the latest tag, the tabs, the build stages, two defaults), all accepted — through the
+production code (`load_world`, `Binding.governs_text`, `compare`). A fact C1 judges *differs* is shown as the
+observation instead — the overlay (§6.5). The world's value at each prompt comes from the same git history; for the
+slow test count the replay assumes a reading at the prompt (best case) or none since the change (worst case). The
+classifier is §18.1's, rebuilt from the recovered scripts: on C0.5's own series it reproduces the 56 prompts exactly
+and the fact counts within three (213 governed facts, 102 judged, 69 stale against 210, 105 and 68).
+
+**A correction to C0.5.** C0.5's tab series counted `class="tab"` and so missed the active tab (`class="tab active"`):
+every tab count was one short. Counted with the sensor's pattern, the baseline is **62 prompts (15.1 %)** with a stale
+governed fact (not 56, 13.7 %), 80 of the 119 judged governed facts stale (67 %), 10 distinct stale facts among 18
+judged. §18.1's figures for the tabs came from that series. The comparison below is paired on the corrected series.
+
+**1 — Stale governed facts in the injected context.**
+
+| | prompts with a stale governed fact |
+|---|---|
+| C0.5's baseline, tab series corrected | 62 / 410 (15.1 %) |
+| with C1, the test count read at the prompt | **2 / 410 (0.5 %)** |
+| with C1, the test count not read since the change | 5 / 410 (1.2 %) |
+
+Of the 80 stale governed facts injected, C1 replaced 78 (74 without the test count). It left 2: "web UI · is versioned
+· 0.6.0" on 2026-08-01, when `pyproject.toml` had moved on but the latest tag was still v0.6.0 — C1 reads the release
+from the tag (v0.124), the ground truth from the version file. It replaced one fact the ground truth calls current —
+"OpenWiki · current release is · v0.120.0 (committed locally …, not pushed yet)", at a prompt 28 s before v0.119.0
+and v0.120.0 were tagged together, shown as v0.118.0. It replaced 51 more that the ground truth can't judge (20 said
+before the history begins, 14 outside C0.4's patterns, 17 already wrong when said); by hand, 47 are claims of an older
+release shown while a later one was out, 4 are beliefs ahead of the latest tag — the same lag. Where a tag follows a
+release late, the release binding shows the last tag, what has been published; C2's law *every release has a tag*
+(C0.6) is the check that reports the gap. A list counts as its length (v0.125, `bindings._listed`): "tab bar with
+Wiki · Hilfe · Tutorial" claims three tabs. Without that rule C1 left 19 prompts (4.6 %), 17 of them for this one
+fact, *unclear* to it.
+
+**2 — The lifetime of a stale belief.** By construction. On the hook path a fast sensor whose reading is older than its
+period — 60 s on openwiki-dev — is read at the prompt, so a governed belief is shown corrected from the first prompt
+after the change. The slow test count is corrected from the next observe pass: a session's end or compaction (the
+capture worker), `handoff prepare`, the nightly `sleep`, `owiki world observe`. On openwiki-dev that is mostly the
+nightly `sleep`: over the run log's two weeks the gaps between slow passes were 24 h (median), 47 h (90th
+percentile), 52 h at most. Against C0.5: a stale test count lived 4 days (median, up to 58), the UI and the build
+weeks to months.
+
+**3 — The hook's latency.** The overlay's own time on the facts each replayed prompt was shown, with openwiki-dev's
+bindings accepted in a scratch state directory and no journal. Prompts with no governed fact (305 of 410) pay
+nothing. On the other 105:
+
+| the world cache | p50 | p95 | max |
+|---|---|---|---|
+| fresh (read within the period) | 1 ms | 1 ms | — |
+| older than the period, values unchanged — the usual case | **56 ms** | **59 ms** | 63 ms |
+| no reading of the value yet (read again in full for its provenance) | 161 ms | 168 ms | 180 ms |
+
+The usual case reads light (`sensors.read(…, light=True)`: the value without the git processes provenance costs —
+the release's tag list, no `git blame` for the file sensors); with full reads it took 171 ms. The inject hook itself:
+p50 2.5 s, p95 7.2 s (41 runs in the run log). The exit allows +300 ms.
+
+**4 — The review list.** On the snapshot: 408 facts of kinds that go stale, 403 with the bindings accepted; 8 current
+facts are governed (the release 4; the test count, the stages, the tabs and a default one each). The list shrinks by
+its governed share (1.2 %); the rest are other things' versions (Kuzu, LadybugDB, milestones), plans and gaps — they
+stay with people and `wiki_remember`.
+
+**5 — The guards** (M.2) on the release code (261dfb7e0477): all five pass — temporal 13 / 13, poisoning 0 of 5
+payloads and 8 / 8 legitimate facts kept, the cue in the context 8 / 8 (answers 6 / 8, constraints respected 5 / 8 —
+informational, as in M.2's first run), cross-session 8 / 8; LoCoMo's 199 contexts unchanged, no merge check asked
+anew, J 65.1 % as recorded.
+
+**Decision.** The exit holds — near zero (0.5–1.2 %), within a sensor period, +56 ms, the governed share, the guards —
+so the world model is on by default for a Second Brain with a code source (`Project.world_enabled`: `[world] enabled`
+unset → on when `[memory] enabled` and a code source exist). Its sensors are there and `owiki world status` shows their
+dry run, but nothing is written or corrected until a person accepts a binding (decision 5); `owiki doctor` lists the
+sensors not accepted (info) and checks the `world-observe` task only once one is. Taking the handoff's other probes
+(git, Ollama, the wiki's freshness, the capture workers) from the world model moves to C2 (C2.14).
+
+**Caveats.** The replay's C1 reads the world from git at the prompt's time; the overlay's cache and budget are
+measured separately (3). The test count is judged by its change. The classifier is a reconstruction (within three
+facts of §18.1's). The 4 beliefs ahead of the tag and the one disputed replacement turn on what "the release" means —
+C1 chose the tag (v0.124).

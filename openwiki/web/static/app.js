@@ -1058,12 +1058,14 @@ const MEM_CHORE = { git: "eine Git-Routine (push, commit, tag …)", command: "e
 function memHookHtml(d) {
   const recalled = d.recalled || [];
   const shown = recalled.filter((f) => f.shown).length;
+  const replaced = recalled.filter((f) => !f.shown && f.replaced_by !== undefined).length;
   const len = (d.context || "").length;
   let banner = "";
   if (d.chore === "ack") banner = "Eine bloße Bestätigung bekommt nur als erste Eingabe einer Sitzung Gedächtnis — danach fügt der Hook nichts ein.";
   else if (d.chore) banner = `Der Hook fügt hier <b>nichts</b> ein: ${MEM_CHORE[d.chore] || d.chore} braucht kein Gedächtnis. So sähe der Kontext sonst aus:`;
   const counts = `${len}${d.budget ? " / " + d.budget : ""} Zeichen (≈ ${Math.round(len / 4)} Tokens) · ${recalled.length} Fakten abgerufen, ${shown} im Text`
-    + (recalled.length > shown ? `, ${recalled.length - shown} vom Budget gekürzt` : "")
+    + (replaced ? `, ${replaced} durch eine Beobachtung ersetzt` : "")
+    + (recalled.length > shown + replaced ? `, ${recalled.length - shown - replaced} vom Budget gekürzt` : "")
     + ` · ${(d.themes || []).length} Themen${d.identity_shown ? " · Identität" : ""}`;
   const head = d.hook
     ? `<div class="mem-ctx-h"><b>Was der Hook jetzt einfügt</b> <span class="muted">· ${counts}</span></div>
@@ -1072,7 +1074,9 @@ function memHookHtml(d) {
   const probes = (d.probes || []).length
     ? `<div class="mem-ctx-h muted">Hinweis-Sonden: ${d.probes.map((p) => `„${escapeHtml(p)}“`).join(" · ")}</div>` : "";
   const badge = (f) => (f.shown ? `<span class="mem-badge in" title="steht im eingefügten Text">im Text</span>`
-                                : `<span class="mem-badge cut" title="abgerufen, aber das Zeichenbudget war aufgebraucht">gekürzt</span>`)
+    : f.replaced_by !== undefined
+      ? `<span class="mem-badge obs" title="${f.replaced_by ? "im Text steht stattdessen, was ein Sensor gerade liest: " + escapeHtml(f.replaced_by) : "die Beobachtung, die ihm widerspricht, steht schon im Text"}">ersetzt</span>`
+      : `<span class="mem-badge cut" title="abgerufen, aber das Zeichenbudget war aufgebraucht">gekürzt</span>`)
     + (f.probe ? ` <span class="mem-badge probe" title="über die Hinweis-Sonde „${escapeHtml(f.probe)}“ geholt">Sonde</span>` : "");
   return (banner ? `<div class="mem-banner">${banner}</div>` : "") + head + probes
     + `<pre class="mem-context">${d.header ? `<span class="mem-hdr">${escapeHtml(d.header)}</span>` : ""}${escapeHtml(d.context || "(leer)")}</pre>`

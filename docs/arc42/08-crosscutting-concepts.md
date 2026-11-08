@@ -100,7 +100,7 @@ migration upgrades pre-existing graphs).
 
 Calls to Ollama go through stdlib `urllib`; a `URLError`/`HTTPError` is turned into a
 `RuntimeError` carrying a "is Ollama running / is the model pulled?" hint. It surfaces per
-entry point (detail in §6.12): CLI → stderr + non-zero exit; web API → HTTP **503**; editing
+entry point (detail in §6.13): CLI → stderr + non-zero exit; web API → HTTP **503**; editing
 agent → `WikiTools.dispatch` catches per-tool exceptions and returns an `ERROR: …` string the
 model can react to, keeping the loop alive. Table extraction and graph-hiccups during an
 agent write are caught and logged, never raised (a failed graph sync must not fail the edit).
@@ -387,7 +387,7 @@ no framework, no bundler, Markdown via one vendored `marked.min.js`.
   shows a hint, not an error (ADR-7).
 
 ---
-*Chapter complete. Cross-refs: runtime error paths → §6.12; the memory tier → §8.15 + ADR-14/15/16/18/27;
+*Chapter complete. Cross-refs: runtime error paths → §6.13; the memory tier → §8.15 + ADR-14/15/16/18/27;
 observability → §8.16 + ADR-20; retrieval → §8.17 + ADR-9/21 + `docs/RAG-vs-GraphRAG.md`; the semantic
 graph → §8.18 + ADR-12/22/23; world-model analysis → §8.19 + ADR-25; the web UI → §8.20 + ADR-26/28; the
 no-auth risk → §11 R1; the project concept → §5, ADR-10/11, §7; the boundaries these concepts rest on →

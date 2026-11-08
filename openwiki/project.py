@@ -265,9 +265,14 @@ class Project:
     # ----------------------------------------------------------- world model
     @property
     def world_enabled(self) -> bool:
-        """World-model mode (Path C, ``docs/path-c-world-model.md`` §2.3) — ``[world] enabled``, off by default.
+        """World-model mode (Path C, ``docs/path-c-world-model.md`` §2.3) — ``[world] enabled``. Unset, it is on for a
+        Second Brain with a code source and off otherwise (v0.125, after C1.10's measurement — WM §18.2): a
+        repository's sensors exist then, but none writes or corrects anything until a person accepts it (decision 5).
         Modes nest: it needs ``[memory] enabled``, since observations are memory-tier facts."""
-        return bool(self.setting("world", "enabled", False))
+        value = self.setting("world", "enabled", None)
+        if value is None:
+            return self.memory_enabled and any(s.type == "code" for s in self.doc_sources())
+        return bool(value)
 
     @property
     def environments(self) -> list:

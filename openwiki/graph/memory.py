@@ -440,7 +440,10 @@ def capture_session(chat, transcript: str, session_date: Optional[int] = None,
 
 
 def _provenance(f: dict) -> str:
-    """``(since 2026-09-01; s1)`` — the fact's validity (B7) + the session that taught it."""
+    """``(since 2026-09-01; s1)`` — the fact's validity (B7) + the session that taught it; an observation the read-time
+    overlay put in (Path C, C1.6) reads ``(observed just now; git tags)``."""
+    if f.get("overlay"):
+        return f"(observed {f['overlay']})"
     when = format_interval(f.get("valid_from"), f.get("valid_to"))
     sid = f.get("session_id", "?")
     if f.get("source") == "material":        # P0: a claim from discussed material, not a decision

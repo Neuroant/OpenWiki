@@ -321,7 +321,41 @@ can run for months). The hook brief is bounded (6,000 chars: header and Next alw
 other sections, files and memory as room allows) and notes the session that resumed it, so a later session reads
 "already resumed".
 
-## 6.12 Cross-cutting runtime aspects
+## 6.12 Scenario: The world corrects a stale belief (`owiki world`, the overlay — Path C)
+
+Memory holds what was said; a sensor reads what is (ADR-56). A binding writes nothing until a person has accepted its
+dry run; then the observe pass keeps the graph right and the read-time overlay keeps each prompt right before the
+graph has caught up (ADR-57).
+
+```mermaid
+sequenceDiagram
+  participant P as Person
+  participant W as owiki world status / accept
+  participant S as sensors (git, files, pytest)
+  participant C as world-cache.json
+  participant O as observe pass (15-min task, capture worker, sleep, handoff)
+  participant GS as GraphStore
+  participant H as inject hook (context_for + Overlay)
+  participant J as graph.journal.jsonl
+
+  P->>W: status — each reading, the fact it would write, the facts it governs (the dry run)
+  P->>W: accept ID — pinned to the binding's fingerprint
+  O->>S: read the accepted sensors that are due (fast ones only on the 15-min task)
+  O->>C: keep the readings
+  O->>GS: plan read-only; on change write the observation (source observed) and close the differing governed beliefs
+  H->>GS: recall the prompt's facts (read-only)
+  H->>S: due fast sensors that govern a recalled fact — light reads, 200 ms in all
+  H->>C: the cached readings for the rest
+  H->>H: show the observation in place of a fact that differs ("observed just now; git tags")
+  H->>J: a new value → an observe op for the next writer
+```
+
+Rules 1 – 5 (ADR-56) decide what an observation does to the beliefs in the graph; the overlay only changes what one
+prompt is shown, with the observation under an id of its own so "each fact once per stretch" never hides it. Slow
+sensors (`pytest-collect`) run only on the slow passes. On by default for a Second Brain with a code source — nothing
+happens until a person accepts a binding.
+
+## 6.13 Cross-cutting runtime aspects
 
 ### Error / timeout handling (Ollama unreachable)
 Any embed or chat call goes through `urllib` to Ollama; on failure `OllamaEmbedder` /
